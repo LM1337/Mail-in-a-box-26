@@ -4,7 +4,10 @@ if environment :matches "imap.mailbox" "*" {
   set "mailbox" "${1}";
 }
 
-if string "${mailbox}" "Trash" {
+# Do not learn ham when a message goes to Trash (22.04 antispam: "trash;Deleted *",
+# ignoring case) or to another spam folder (Spam->Junk would learn ham and spam at once).
+if anyof (string :comparator "i;ascii-casemap" "${mailbox}" ["Trash", "Spam", "Junk"],
+          string :comparator "i;ascii-casemap" :matches "${mailbox}" ["Deleted *", "Trash/*", "Trash.*"]) {
   stop;
 }
 
