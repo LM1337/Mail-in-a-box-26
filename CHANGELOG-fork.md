@@ -13,6 +13,9 @@ See CHANGELOG.md for upstream's own history.
 * Dovecot: `$STORAGE_ROOT` is expanded in `99-local-sieve.conf`.
 * DNS: SSHFP records keep the IANA algorithm numbers.
 * TLS: back to MIAB's `dh2048.pem`.
+* TLS: `ssl_certificates.py` uses the timezone-aware `not_valid_*_utc`
+  properties (cryptography >= 42) and an aware UTC "now". Separate commit
+  (`fix(ssl)`) so it can be reverted without touching the version bump.
 
 ### Setup and supply chain
 
@@ -26,7 +29,6 @@ See CHANGELOG.md for upstream's own history.
   php8.2, php8.2-*, php8.5-imap); its keyring is checked against key
   `15058500A0235D97F5D10063B188E2B695BD4743` and no longer trusted globally.
 * The management venv is recreated when the system Python version changes.
-* `ssl_certificates.py` uses the timezone-aware `not_valid_*_utc` properties.
 * The html5_notifier icon is resolved through `rcmail.assets_path()` so it
   works with Roundcube 1.7's `public_html` docroot.
 
@@ -75,3 +77,23 @@ Bootstrap 3.4.1 (final 3.x; 5.x needs an admin template rewrite),
 persistent_login 5.3.0, Z-Push 2.7.7, Roundcube 1.7.5, Nextcloud 27.1.11,
 28.0.14, 29.0.16, 30.0.17 and 31.0.14 (last patch of each major).
 Nextcloud stays on 34: user_external has no release for Nextcloud 35 yet.
+
+### Notes for review and testing
+
+* Scope exceptions of the version-update series (intended, not drift):
+  * `management/ssl_certificates.py` is outside the version-pin file set.
+    Its change was first part of the cryptography bump and now sits in its
+    own `fix(ssl)` commit. Not required by cryptography 50 (the naive
+    `not_valid_before`/`not_valid_after` still exist there and only warn).
+  * `setup/management.sh`: besides the pip/venv lines, the jQuery and
+    Bootstrap pin lines changed. Those pins are defined only there.
+  * `management/templates/login.html`: besides the asset pin, `$.trim(x)`
+    became `String(x || '').trim()` (same behaviour; `$.trim` is deprecated
+    in jQuery 3.5+).
+* The sury apt pin (`/etc/apt/preferences.d/mailinabox-sury-php`) only
+  affects future installs. A machine that ran setup before the pin keeps
+  sury's `php8.5-*` and `libgd3` builds; priority -1 does not downgrade
+  them. To validate the pin, use a freshly installed VM, or first move the
+  existing packages back to Ubuntu's versions with
+  `apt-get install --allow-downgrades <pkg>=<ubuntu version> ...`. The pin
+  has not yet been tested on a real VM.
