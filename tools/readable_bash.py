@@ -3,7 +3,7 @@
 # Generate documentation for how this machine works by
 # parsing our bash scripts!
 
-import cgi, re
+import html, re
 import markdown
 from modgrammar import *
 
@@ -17,8 +17,8 @@ def generate_documentation():
 
         <title>Build Your Own Mail Server From Scratch</title>
 
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.4.1/css/bootstrap.min.css" integrity="sha384-HSMxcRTRxnN+Bdg0JdbxYKrThecOKuH5zCYotlSAcp1+c8xmyTe9GYg1l9a69psu" crossorigin="anonymous" referrerpolicy="no-referrer">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.4.1/css/bootstrap-theme.min.css" integrity="sha384-6pzBo3FDv/PJ8r2KRkGHifhEocL+1X2rVCTTkUfGk7/0pbek5mMa1upzvWbrUbOZ" crossorigin="anonymous" referrerpolicy="no-referrer">
 
         <style>
 		    @import url(https://fonts.googleapis.com/css?family=Iceland);
@@ -139,8 +139,8 @@ def generate_documentation():
 		print(BashScript.parse(fn))
 
 	print("""
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.10.1/jquery.min.js"></script>
-        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.4.1/js/bootstrap.min.js" integrity="sha384-aJ21OjlMXNL5UyIl/XNwTMqvzeRMZH2w8c5cRVpzpU8Y5bApTppSuUkhZXN0VxHd" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
         <script>
         $(function() {
 			$('.terminal').each(function() {
@@ -194,7 +194,7 @@ class CatEOF(Grammar):
 		content = re.sub(r"\\([$])", r"\1", content) # un-escape bash-escaped characters
 		return "<div class='write-to'><div class='filename'>{} <span>({})</span></div><pre>{}</pre></div>\n".format(self[4].string,
 			   "overwrite" if ">>" not in self[2].string else "append to",
-			   cgi.escape(content))
+			   html.escape(content, quote=False))
 
 class HideOutput(Grammar):
 	grammar = (L("hide_output "), REF("BashElement"))
@@ -230,19 +230,19 @@ class EditConf(Grammar):
 			k, v = opt.split("=", 1)
 			v = re.sub(r"\n+", "", fixup_tokens(v)) # not sure why newlines are getting doubled
 			options.append(f"{k}{eq}{v}")
-		return "<div class='write-to'><div class='filename'>" + self[1].string + " <span>(change settings)</span></div><pre>" + "\n".join(cgi.escape(s) for s in options) + "</pre></div>\n"
+		return "<div class='write-to'><div class='filename'>" + self[1].string + " <span>(change settings)</span></div><pre>" + "\n".join(html.escape(s, quote=False) for s in options) + "</pre></div>\n"
 
 class CaptureOutput(Grammar):
 	grammar = OPTIONAL(SPACE), WORD("A-Za-z_"), L('=$('), REST_OF_LINE, L(")"), OPTIONAL(L(';')), EOL
 	def value(self):
 		cmd = self[3].string
 		cmd = cmd.replace("; ", "\n")
-		return "<div class='write-to'><div class='filename'>$" + self[1].string + "=</div><pre>" + cgi.escape(cmd) + "</pre></div>\n"
+		return "<div class='write-to'><div class='filename'>$" + self[1].string + "=</div><pre>" + html.escape(cmd, quote=False) + "</pre></div>\n"
 
 class SedReplace(Grammar):
 	grammar = OPTIONAL(SPACE), L('sed -i "s/'), OPTIONAL(L('^')), ONE_OR_MORE(WORD("-A-Za-z0-9 #=\\{};.*$_!()")), L('/'), ONE_OR_MORE(WORD("-A-Za-z0-9 #=\\{};.*$_!()")), L('/"'), SPACE, FILENAME, EOL
 	def value(self):
-		return "<div class='write-to'><div class='filename'>edit<br>" + self[8].string + "</div><p>replace</p><pre>" + cgi.escape(self[3].string.replace(".*", ". . .")) + "</pre><p>with</p><pre>" + cgi.escape(self[5].string.replace("\\n", "\n").replace("\\t", "\t")) + "</pre></div>\n"
+		return "<div class='write-to'><div class='filename'>edit<br>" + self[8].string + "</div><p>replace</p><pre>" + html.escape(self[3].string.replace(".*", ". . ."), quote=False) + "</pre><p>with</p><pre>" + html.escape(self[5].string.replace("\\n", "\n").replace("\\t", "\t"), quote=False) + "</pre></div>\n"
 
 class EchoPipe(Grammar):
 	grammar = OPTIONAL(SPACE), L("echo "), REST_OF_LINE, L(' | '), REST_OF_LINE, EOL
@@ -382,7 +382,7 @@ def recode_bash(s):
 		else:
 			tok = tok.replace("'", "\\'")
 		return tok
-	return cgi.escape(" ".join(requote(tok) for tok in s.split(" ")))
+	return html.escape(" ".join(requote(tok) for tok in s.split(" ")), quote=False)
 
 def fixup_tokens(s):
 	for c, enc in bash_special_characters1.items():

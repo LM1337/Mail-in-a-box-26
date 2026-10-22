@@ -1,1 +1,4 @@
-dnspython3
+# Developer test tooling only (not installed on the box), e.g. in a venv:
+# python3 -m venv /tmp/miab-tests && /tmp/miab-tests/bin/pip install -r tests/pip-requirements.txt
+# (dnspython3 was an obsolete alias, last released 2016.)
+dnspython>=2.9,<3
