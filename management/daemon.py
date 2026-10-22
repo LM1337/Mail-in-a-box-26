@@ -174,8 +174,8 @@ def logout():
 		app.logger.info("%s logged out", email)
 	except ValueError:
 		pass
-	finally:
-		return json_response({ "status": "ok" })
+	# No "return" in "finally" (SyntaxWarning since Python 3.14, PEP 765).
+	return json_response({ "status": "ok" })
 
 # MAIL
 
