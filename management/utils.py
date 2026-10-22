@@ -190,24 +190,33 @@ def get_ssh_port():
 
 def get_ssh_config_value(parameter_name):
 	# Returns ssh configuration value for the provided parameter
+	values = get_ssh_config_values(parameter_name)
+	if values:
+		return values[0] # space-delimited if there are multiple values
+
+	# Did not find the parameter!
+	return None
+
+def get_ssh_config_values(parameter_name):
+	# Returns all values of an ssh configuration parameter that `sshd -T`
+	# prints on several lines (e.g. one "hostkey" line per host key).
 	import subprocess
 	try:
 		output = shell('check_output', ['sshd', '-T'])
 	except FileNotFoundError:
 		# sshd is not installed. That's ok.
-		return None
+		return []
 	except subprocess.CalledProcessError:
 		# error while calling shell command
-		return None
+		return []
 
+	values = []
 	for line in output.split("\n"):
 		if " " not in line: continue # there's a blank line at the end
-		key, values = line.split(" ", 1)
+		key, value = line.split(" ", 1)
 		if key == parameter_name:
-			return values # space-delimited if there are multiple values
-
-	# Did not find the parameter!
-	return None
+			values.append(value)
+	return values
 
 if __name__ == "__main__":
 	from web_update import get_web_domains

@@ -9,7 +9,7 @@ import ipaddress
 import rtyaml
 import dns.resolver
 
-from utils import shell, load_env_vars_from_file, safe_domain_name, sort_domains, get_ssh_port
+from utils import shell, load_env_vars_from_file, safe_domain_name, sort_domains, get_ssh_port, get_ssh_config_values
 from ssl_certificates import get_ssl_certificates, check_certificate
 
 # From https://stackoverflow.com/questions/3026957/how-to-validate-a-domain-name-using-regex-php/16491074#16491074
@@ -443,44 +443,38 @@ def build_sshfp_records():
 		"ssh-ed25519": 4,
 	}
 
-	# Get our local fingerprints by running ssh-keyscan. The output looks
-	# like the known_hosts file: hostname, keytype, fingerprint. The order
-	# of the output is arbitrary, so sort it to prevent spurious updates
-	# to the zone file (that trigger bumping the serial number). However,
-	# if SSH has been configured to listen on a nonstandard port, we must
-	# specify that port to sshkeyscan.
+	# Read the public halves of the host keys sshd actually uses (the
+	# "hostkey" lines of `sshd -T`). We used to run ssh-keyscan against
+	# localhost, but OpenSSH 9.8+ (26.04 ships 10.x) penalizes sources that
+	# connect and leave without authenticating (PerSourcePenalties noauth),
+	# so repeated DNS updates and status checks got some of the keyscan
+	# connections refused and the SSHFP records came and went in the signed
+	# zone. Reading the files needs no connection and is deterministic.
 
-	port = get_ssh_port()
-
-	# If nothing returned, SSH is probably not installed.
-	if not port:
+	# If no port is configured, SSH is probably not installed.
+	if not get_ssh_port():
 		return
 
-	code, keys = shell("check_output", ["ssh-keyscan", "-4", "-t", "rsa,ecdsa,ed25519", "-p", str(port), "localhost"], trap=True)
-
-	# ssh-keyscan exits non-zero when sshd is not reachable on localhost, which
-	# happens when ListenAddress binds it to another interface. SSHFP records
-	# are optional, so skip them rather than let the error propagate: it would
-	# otherwise break the whole DNS update, and with it the creation of the
-	# first user, which returns HTTP 500 after inserting the user but before
-	# granting it admin privileges.
-	if code != 0:
-		return
-
-	keys = sorted(keys.split("\n"))
-
-	for key in keys:
-		if key.strip() == "" or key[0] == "#": continue
+	keys = []
+	for path in get_ssh_config_values("hostkey"):
 		try:
-			_host, keytype, pubkey = key.split(" ")
+			with open(path.strip() + ".pub", encoding="utf8") as f:
+				keys.append(f.read().strip())
+		except OSError:
+			continue
+
+	# Sort to prevent spurious zone updates (which bump the serial number).
+	for key in sorted(keys):
+		try:
+			keytype, pubkey = key.split(" ")[0:2]
 			yield "%d %d ( %s )" % (
 				algorithm_number[keytype],
 				2, # specifies we are using SHA-256 on next line
 				hashlib.sha256(base64.b64decode(pubkey)).hexdigest().upper(),
 				)
 		except:
-			# Lots of things can go wrong. Don't let it disturb the DNS
-			# zone.
+			# Lots of things can go wrong, e.g. a key type without an SSHFP
+			# algorithm number. Don't let it disturb the DNS zone.
 			pass
 
 ########################################################################
