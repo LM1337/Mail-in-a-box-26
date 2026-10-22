@@ -35,6 +35,9 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # Specify how the database is to be queried for user authentication (passdb)
 # and where user mailboxes are stored (userdb). The users.quota column
 # (0, bytes, or e.g. 500M/10G) maps directly to Dovecot's quota_storage_size.
+# On Dovecot 2.3 MIAB allowed deliveries to overshoot the quota by 10%; 2.4's
+# quota_storage_grace only takes a size, so the userdb computes 10% of each
+# user's quota (G and M are 2^30/2^20 bytes, divided by 10 and rounded down).
 cat > /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
@@ -44,7 +47,7 @@ passdb sql {
   default_password_scheme = SHA512-CRYPT
 }
 userdb sql {
-  query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, quota AS quota_storage_size FROM users WHERE email='%{user}';
+  query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, quota AS quota_storage_size, (CASE WHEN substr(quota, -1) = 'G' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 107374182 WHEN substr(quota, -1) = 'M' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 104857 ELSE CAST(quota AS INTEGER) / 10 END) || 'B' AS quota_storage_grace FROM users WHERE email='%{user}';
   iterate_query = SELECT email AS user FROM users;
 }
 EOF
