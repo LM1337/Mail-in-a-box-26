@@ -26,6 +26,11 @@ apt_install duplicity python3-gnupg python3-pip virtualenv python3-b2sdk python3
 inst_dir=/usr/local/lib/mailinabox
 mkdir -p $inst_dir
 venv=$inst_dir/env
+# A venv is bound to the interpreter it was made with. After a release upgrade
+# (e.g. Python 3.12 -> 3.14) recreate it instead of keeping a broken one.
+if [ -x $venv/bin/python3 ] && [ "$($venv/bin/python3 -c 'import sys; print(sys.version_info[:2])' 2>/dev/null)" != "$(python3 -c 'import sys; print(sys.version_info[:2])')" ]; then
+	rm -rf $venv
+fi
 if [ ! -d $venv ]; then
 	# A bug specific to Ubuntu 22.04 and Python 3.10 requires
 	# forcing a virtualenv directory layout option (see #2335
@@ -41,13 +46,24 @@ hide_output $venv/bin/pip install --upgrade pip
 
 # Install other Python 3 packages used by the management daemon.
 # The first line is the packages that Josh maintains himself!
-# NOTE: email_validator is repeated in setup/questions.sh, so please keep the versions synced.
+# NOTE: email_validator is repeated in setup/questions.sh (Ubuntu's python3-email-validator,
+# 2.2.x on 26.04), so keep both on the same major. mailconfig.py only uses
+# validate_email(email, allow_smtputf8=, check_deliverability=, allow_empty_local=).
+# Everything floats to the newest release, with these bounds:
+# * cryptography: newest 50.x. The code needs >= 42 (not_valid_*_utc); the upper bound keeps
+#   a new major (they remove APIs and tighten parsing) from arriving unreviewed. Bump it when
+#   the fork is updated. (It was pinned to 37.0.2 from 2022, with 22 known advisories.)
+# * b2sdk/boto3 floors: without them a resolver may satisfy "python-dateutil" (3.x) by
+#   backtracking to an ancient boto3; botocore requires python-dateutil<3, so 2.9.x is used.
+# * email_validator 2.x (positional-only email argument), idna >= 3.20.
+# Checked on Python 3.14 (2026-10-22): pip 26.2.2 resolves cryptography 50.0.2, b2sdk 2.13.2,
+# boto3 1.43.118, python-dateutil 2.9.0.post0, flask 3.1.3, gunicorn 26.2.0, pip check clean.
 hide_output $venv/bin/pip install --upgrade \
-	rtyaml "email_validator>=1.0.0" "exclusiveprocess" \
+	rtyaml "email_validator>=2.3.0,<3" "exclusiveprocess" \
 	flask dnspython python-dateutil expiringdict gunicorn \
-	qrcode[pil] pyotp \
-	"idna>=2.0.0" "cryptography==37.0.2" psutil postfix-mta-sts-resolver \
-	b2sdk boto3
+	"qrcode[pil]" pyotp \
+	"idna>=3.20" "cryptography>=50.0.2,<51" psutil postfix-mta-sts-resolver \
+	"b2sdk>=2.13" "boto3>=1.43"
 
 # CONFIGURATION
 
