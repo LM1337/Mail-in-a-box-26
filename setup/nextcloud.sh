@@ -19,33 +19,38 @@ echo "Installing Nextcloud (contacts/calendar)..."
 #   for whether it supports the version of PHP available on this machine.
 # * Since Nextcloud only supports upgrades from consecutive major versions,
 #   we automatically install intermediate versions as needed.
-# * The hash is the SHA1 hash of the ZIP package, which you can find by just running this script and
-#   copying it from the error message when it doesn't match what is below.
-nextcloud_ver=34.0.3
-nextcloud_hash=58445c436f1b182c43963d7b200e893c92b6b16a
+# * The hash is the SHA256 hash of the ZIP package. Nextcloud publishes it next to the download
+#   (https://download.nextcloud.com/server/releases/nextcloud-<ver>.zip.sha256; there is no .sha1).
+#   Check it against the hash this script prints when it doesn't match what is below.
+nextcloud_ver=34.0.5
+nextcloud_hash=d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a
 
 # Nextcloud apps
 # --------------
 # * Find the most recent tag that is compatible with the Nextcloud version above by:
 #   https://github.com/nextcloud-releases/contacts/tags
 #   https://github.com/nextcloud-releases/calendar/tags
-#   https://github.com/nextcloud/user_external/tags
+#   https://github.com/nextcloud-releases/user_external/tags
 #
-# * For these three packages, contact, calendar and user_external, the hash is the SHA1 hash of
-# the release tarball (from the releases/download URL, not the source archive), which you can
-# find by running: curl -sL <url> | sha1sum
+# * For these three packages, contact, calendar and user_external, the hash is the SHA256 hash of
+# the release tarball (from the releases/download URL, not the source archive). GitHub shows it as
+# the asset "digest" on https://github.com/nextcloud-releases/<app>/releases/expanded_assets/v<ver>
+# (the unauthenticated API is rate-limited). Cross-check with: curl -sL <url> | sha256sum
+# (wget_verify still accepts 40-char SHA1 hashes, but don't add new ones.)
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/contacts
-contacts_ver=8.8.0
-contacts_hash=7abcc5d9fe1f38dc3a8ac68b0d479255e99ef82a
+contacts_ver=8.9.2
+contacts_hash=92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/calendar
-calendar_ver=6.5.4
-calendar_hash=061f871029c2f735198443bef1bfbe4e8b2e7cba
+calendar_ver=6.6.3
+calendar_hash=bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/user_external
+# user_external 4.0.0 declares nextcloud min-version=31 max-version=34 and there is no release
+# for Nextcloud 35 yet (checked 2026-10-22), so Nextcloud 34 is the ceiling for now.
 user_external_ver=4.0.0
-user_external_hash=214497dd8691f279ba3740797c565310f0793054
+user_external_hash=f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 
 # Developer advice (test plan)
 # ----------------------------
@@ -140,7 +145,11 @@ InstallNextcloud() {
 		# that can be OK.
 		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^2[6789] || ${CURRENT_NEXTCLOUD_VER} =~ ^3[01] ]]; then
             #
-            # Upgrade using 8.2 for version up to 32. The install for 33 technically has the Nextcloud verion as 32, hence why we are ommitting it, so it switches to php8.5
+            # CURRENT_NEXTCLOUD_VER is still the version *before* this step, while occ runs the code
+            # of the version just unpacked. CURRENT 26..31 means we are installing 27..32, which need
+            # PHP 8.2 (lib/versioncheck.php: NC 27 < 8.3, NC 30 < 8.4, NC 31 and 32 < 8.5).
+            # CURRENT 32 and later means installing 33/34, which accept 8.2 to 8.5, so they use PHP 8.5.
+            # Older versions never get here (see the "not supported" branches below).
             #
             echo "Installing Legacy PHP version for Nextcloud upgrade..."
 
@@ -250,78 +259,68 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		elif [[ ${CURRENT_NEXTCLOUD_VER} =~ ^1[3456789] ]]; then
 			echo "Upgrades from Mail-in-a-Box prior to v60 with Nextcloud 19 or earlier are not supported. Upgrade to the latest Mail-in-a-Box version supported on your machine first. Setup will continue, but skip the Nextcloud migration."
 			return 0
+		elif [[ ${CURRENT_NEXTCLOUD_VER} =~ ^2[012345] ]]; then
+			# The upgrade chain starts at Nextcloud 26. Nextcloud 20-23 need PHP <= 8.0 and 24/25 need
+			# PHP <= 8.1 (lib/versioncheck.php); this release only provides PHP 8.5 and, for the chain, 8.2.
+			echo "Upgrades from Nextcloud 25 or earlier are not supported on this version of Mail-in-a-Box. Upgrade to Mail-in-a-Box v68 or later on Ubuntu 22.04 first (Nextcloud 26). Setup will continue, but skip the Nextcloud migration."
+			return 0
 		fi
 
 		# Hint: whenever you bump, remember this:
 		# - Run a server with the previous version
 		# - On a new if-else block, copy the versions/hashes from the previous version
 		# - Run sudo ./setup/start.sh on the new machine. Upon completion, test its basic functionalities.
+		# Each step uses the newest patch release of its major and the newest app releases whose
+		# appinfo/info.xml accepts that major (and the PHP version the step runs with). All hashes are SHA256.
 
-		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^20 ]]; then
-			InstallNextcloud 21.0.7 f5c7079c5b56ce1e301c6a27c0d975d608bb01c9 4.0.7 45e7cf4bfe99cd8d03625cf9e5a1bb2e90549136 3.0.4 d0284b68135777ec9ca713c307216165b294d0fe
-			CURRENT_NEXTCLOUD_VER="21.0.7"
-		fi
-		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^21 ]]; then
-			InstallNextcloud 22.2.6 9d39741f051a8da42ff7df46ceef2653a1dc70d9 4.1.0 697f6b4a664e928d72414ea2731cb2c9d1dc3077 3.2.2 ce4030ab57f523f33d5396c6a81396d440756f5f 3.0.0 0df781b261f55bbde73d8c92da3f99397000972f
-			CURRENT_NEXTCLOUD_VER="22.2.6"
-		fi
-		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^22 ]]; then
-			InstallNextcloud 23.0.12 d138641b8e7aabebe69bb3ec7c79a714d122f729 4.1.0 697f6b4a664e928d72414ea2731cb2c9d1dc3077 3.2.2 ce4030ab57f523f33d5396c6a81396d440756f5f 3.0.0 0df781b261f55bbde73d8c92da3f99397000972f
-			CURRENT_NEXTCLOUD_VER="23.0.12"
-		fi
-		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^23 ]]; then
-			InstallNextcloud 24.0.12 7aa5d61632c1ccf4ca3ff00fb6b295d318c05599 4.1.0 697f6b4a664e928d72414ea2731cb2c9d1dc3077 3.2.2 ce4030ab57f523f33d5396c6a81396d440756f5f 3.0.0 0df781b261f55bbde73d8c92da3f99397000972f
-			CURRENT_NEXTCLOUD_VER="24.0.12"
-		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^24 ]]; then
-			InstallNextcloud 25.0.7 a5a565c916355005c7b408dd41a1e53505e1a080 5.3.0 4b0a6666374e3b55cfd2ae9b72e1d458b87d4c8c 4.4.2 21a42e15806adc9b2618760ef94f1797ef399e2f 3.2.0 a494073dcdecbbbc79a9c77f72524ac9994d2eec
-			CURRENT_NEXTCLOUD_VER="25.0.7"
-		fi
-		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^25 ]]; then
-			InstallNextcloud 26.0.13 d5c10b650e5396d5045131c6d22c02a90572527c 5.5.3 b234ab410480a4106176a28f39c9b27f471d0473 4.7.6 cf8e68e7d945ee71933f5bb71a969faf152da55c 3.3.0 280d24eb2a6cb56b4590af8847f925c28d8d853e
-			CURRENT_NEXTCLOUD_VER="26.0.13"
-		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^26 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 27.1.11 9f30c01a021c2e5a9e7baff119955afb3c552ebc 5.5.4 c4e3f2183a0088b829f8aa1b3af1f87c9a4c46a2 4.7.20 12d876904e227156e39ca4335b18481b42a6d00f 3.4.0 7f9d8f4dd6adb85a0e3d7622d85eeb7bfe53f3b4
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^26 ]]; then
+			# runs with PHP 8.2 (NC 27: PHP 8.0-8.2)
+			InstallNextcloud 27.1.11 ffbfd9857bcaaacaea97d709063b7d81132feb41051063ab6c171c95c6daf142 5.5.4 178aa6ec0b06d6bd72ff8eb87ac32ff267e97ccd93246b1eae1b5bb5263a61b0 4.7.20 f62b43853dfc1fc971b4ffe5992cedc499e8ed7dc118265cfdfe8c1531d4a912 3.4.0 5a7fbed5da3cbe335f753027b662179c92c17fb37babc875e9e285d8a13d47f3
 			CURRENT_NEXTCLOUD_VER="27.1.11"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^27 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 28.0.14 8a9edcfd26d318eb7d1cfa44d69796f2d1098a80 5.5.4 c4e3f2183a0088b829f8aa1b3af1f87c9a4c46a2 4.7.20 12d876904e227156e39ca4335b18481b42a6d00f 3.4.0 7f9d8f4dd6adb85a0e3d7622d85eeb7bfe53f3b4
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^27 ]]; then
+			# runs with PHP 8.2
+			InstallNextcloud 28.0.14 593f174f5098c793fb0314fd5847d891ed4e4db908ceba0d4e571544ac855c2d 5.5.4 178aa6ec0b06d6bd72ff8eb87ac32ff267e97ccd93246b1eae1b5bb5263a61b0 4.7.20 f62b43853dfc1fc971b4ffe5992cedc499e8ed7dc118265cfdfe8c1531d4a912 3.4.0 5a7fbed5da3cbe335f753027b662179c92c17fb37babc875e9e285d8a13d47f3
 			CURRENT_NEXTCLOUD_VER="28.0.14"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^28 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 29.0.16 ceb3014aaddc70d3074d2c69bc6afc76eb1aeff0 6.0.7 babb779107b029c30ad20b81da33b4f95e1136ff 4.7.20 12d876904e227156e39ca4335b18481b42a6d00f 3.4.0 7f9d8f4dd6adb85a0e3d7622d85eeb7bfe53f3b4
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^28 ]]; then
+			# runs with PHP 8.2
+			InstallNextcloud 29.0.16 6221c764b63369be6122bc414ee26a25bd9ce466f7d9ab29cd5ddb0c124c8eeb 6.0.7 29b4942b9b224dcb7e7528fafb6a6094e45593e893dff61e519c34b19bed29a6 4.7.20 f62b43853dfc1fc971b4ffe5992cedc499e8ed7dc118265cfdfe8c1531d4a912 3.4.0 5a7fbed5da3cbe335f753027b662179c92c17fb37babc875e9e285d8a13d47f3
 			CURRENT_NEXTCLOUD_VER="29.0.16"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^29 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 30.0.17 0494197f1984ce8a2f83084c0759a24d48474017 7.3.19 bd680b3b96f09d013ff3a12eccb352b83f3bcd51 5.5.23 9ecfdf35f5de387d3a4db6e1f41920434173c20f 3.4.0 7f9d8f4dd6adb85a0e3d7622d85eeb7bfe53f3b4
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^29 ]]; then
+			# runs with PHP 8.2 (NC 30: PHP 8.1-8.3)
+			# No user_external release covers Nextcloud 30 (3.4.0 has max-version 29, 4.0.0 has
+			# min-version 31), so occ upgrade disables it on this step; the 31 step installs 4.0.0
+			# and the app:enable user_external further below turns it back on.
+			InstallNextcloud 30.0.17 da51e17762785a36c1cf3fe2dc96cb356870695e384485e5980395493c15caf9 7.3.19 568472420cf212ceeb1dccc044c0bdaa83504ef15251a2c6e39b22b6064a3ab8 5.5.24 9a4e1b869aa478317363cb0876a5d128aa584e427216d2cbfb808215f5c296a8 3.4.0 5a7fbed5da3cbe335f753027b662179c92c17fb37babc875e9e285d8a13d47f3
 			CURRENT_NEXTCLOUD_VER="30.0.17"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^30 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 31.0.14 a891fede2cd4cb3347a406da3fb4f99cd62c89ce 7.3.19 bd680b3b96f09d013ff3a12eccb352b83f3bcd51 5.5.23 9ecfdf35f5de387d3a4db6e1f41920434173c20f 4.0.0 214497dd8691f279ba3740797c565310f0793054
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^30 ]]; then
+			# runs with PHP 8.2
+			InstallNextcloud 31.0.14 6f34d623f7c24c5ecb3c165083ddb5d6a10186dbc2fa73a23efda26ec92091a7 7.3.19 568472420cf212ceeb1dccc044c0bdaa83504ef15251a2c6e39b22b6064a3ab8 5.5.24 9a4e1b869aa478317363cb0876a5d128aa584e427216d2cbfb808215f5c296a8 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 			CURRENT_NEXTCLOUD_VER="31.0.14"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^31 ]]; then
-            # this can use PHP 8.2
-			InstallNextcloud 32.0.10 7eec94a2310238858298ae9c0fee3e4cde4233e9 8.3.19 8ea88b7107d2d5855d918d34f60036ac92575a09 6.5.4 061f871029c2f735198443bef1bfbe4e8b2e7cba 4.0.0 214497dd8691f279ba3740797c565310f0793054
-			CURRENT_NEXTCLOUD_VER="32.0.10"
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^31 ]]; then
+			# runs with PHP 8.2 (NC 32: PHP 8.1-8.4)
+			InstallNextcloud 32.0.15 33e7adbe81c1ad0be61123a0fadc63ae2e392759f0c2557e008863eb69c6453d 8.3.21 45d12ff526515ce5efc52d8e0d42bd3446a66b9a423ee4eb92ebd44a6b5974c3 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+			CURRENT_NEXTCLOUD_VER="32.0.15"
 		fi
-        if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^32 ]]; then
-            # this can use PHP 8.5
-			InstallNextcloud 33.0.7 89a880ee00e95c661400528f18b06526fb494f3a 8.8.0 7abcc5d9fe1f38dc3a8ac68b0d479255e99ef82a 6.5.4 061f871029c2f735198443bef1bfbe4e8b2e7cba 4.0.0 214497dd8691f279ba3740797c565310f0793054
-			CURRENT_NEXTCLOUD_VER="33.0.7"
+		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^32 ]]; then
+			# runs with PHP 8.5 (NC 33: PHP 8.2-8.5)
+			InstallNextcloud 33.0.10 ff602a1f1ba202f2137f10eecd201d3e80c5d94fd17ab984c688fb1bcb290645 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+			CURRENT_NEXTCLOUD_VER="33.0.10"
 		fi
 		##
-		# Placholder for Nextcloud 35
-        # if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
-        #    # this can use PHP 8.5
-		#	InstallNextcloud 34.0.3 58445c436f1b182c43963d7b200e893c92b6b16a 8.8.0 7abcc5d9fe1f38dc3a8ac68b0d479255e99ef82a 6.5.4 061f871029c2f735198443bef1bfbe4e8b2e7cba 4.0.0 214497dd8691f279ba3740797c565310f0793054
-		#	CURRENT_NEXTCLOUD_VER="34.0.3"
+		# Placeholder for the move to Nextcloud 35. Not active: user_external (IMAP login) has no
+		# release for Nextcloud 35 yet (4.0.0 has max-version 34, checked 2026-10-22). Today the
+		# 33 -> 34 step is the final InstallNextcloud call below. Once user_external supports 35,
+		# enable this explicit 33 -> 34 step (same values as nextcloud_ver/contacts/calendar today)
+		# and move nextcloud_ver and the app pins at the top of this file to 35.
+		# if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
+		#	# runs with PHP 8.5
+		#	InstallNextcloud 34.0.5 d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+		#	CURRENT_NEXTCLOUD_VER="34.0.5"
 		# fi
 		##
 	fi
