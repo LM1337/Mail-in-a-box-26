@@ -23,7 +23,7 @@ phpenmod -v "$PHP_VER" imap
 
 # Copy Z-Push into place.
 VERSION=2.7.7
-TARGETHASH=b8ba5fdf5594a642c98f92c30683d19b5c6aae77
+TARGETHASH=7a8e0094adf216521ee491078f78e709cd68257d05a868b3992d5665c01d8790 # SHA256 of the GitHub tag archive (no upstream checksum published)
 needs_update=0 #NODOC
 if [ ! -f /usr/local/lib/z-push/version ]; then
 	needs_update=1 #NODOC

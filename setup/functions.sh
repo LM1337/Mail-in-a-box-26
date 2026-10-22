@@ -188,17 +188,54 @@ function input_menu {
 function wget_verify {
 	# Downloads a file from the web and checks that it matches
 	# a provided hash. If the comparison fails, exit immediately.
-	URL=$1
-	HASH=$2
-	DEST=$3
-	CHECKSUM="$HASH  $DEST"
+	#
+	# The algorithm follows from the length of the hex hash, so the pins
+	# can be compared with the checksums upstream publishes:
+	#   64 hex chars  = SHA256 (use this for all pins: download.nextcloud.com
+	#                   <file>.sha256, the GitHub release asset "digest",
+	#                   https://roundcube.net/download/)
+	#   128 hex chars = SHA512
+	#   40 hex chars  = SHA1 (legacy only, kept for compatibility; no upstream
+	#                   publishes SHA1 any more)
+	# An optional "sha256:" / "sha512:" / "sha1:" prefix is accepted, so a
+	# GitHub digest can be pasted as is. It must match the hash length.
+	local URL=$1
+	local HASH=${2,,}
+	local DEST=$3
+	local HASHCMD PREFIX=""
+	if [[ "$HASH" =~ ^(sha256|sha512|sha1): ]]; then
+		PREFIX=${BASH_REMATCH[1]}
+		HASH=${HASH#*:}
+	fi
+	if [[ ! "$HASH" =~ ^[0-9a-f]+$ ]]; then
+		echo "wget_verify: hash for $URL is not a hex string: '$2'"
+		exit 1
+	fi
+	case ${#HASH} in
+		64)  HASHCMD=sha256sum ;;
+		128) HASHCMD=sha512sum ;;
+		40)  HASHCMD=sha1sum ;;
+		*)
+			echo "wget_verify: hash for $URL has ${#HASH} hex chars, expected 64 (SHA256), 128 (SHA512) or 40 (SHA1)."
+			exit 1
+			;;
+	esac
+	if [ -n "$PREFIX" ] && [ "${PREFIX}sum" != "$HASHCMD" ]; then
+		echo "wget_verify: hash for $URL is prefixed '$PREFIX:' but has the length of a ${HASHCMD%sum} hash."
+		exit 1
+	fi
+	local CHECKSUM="$HASH  $DEST"
 	rm -f "$DEST"
 	hide_output wget -O "$DEST" "$URL"
-	if ! echo "$CHECKSUM" | sha1sum --check --strict > /dev/null; then
+	if ! echo "$CHECKSUM" | $HASHCMD --check --strict > /dev/null; then
 		echo "------------------------------------------------------------"
 		echo "Download of $URL did not match expected checksum."
-		echo "Found:"
-		sha1sum "$DEST"
+		echo "Found ($HASHCMD):"
+		$HASHCMD "$DEST"
+		if [ "$HASHCMD" != sha256sum ]; then
+			echo "SHA256 (for new pins):"
+			sha256sum "$DEST"
+		fi
 		echo
 		echo "Expected:"
 		echo "$CHECKSUM"
