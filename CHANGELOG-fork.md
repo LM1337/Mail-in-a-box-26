@@ -16,6 +16,21 @@ See CHANGELOG.md for upstream's own history.
 * TLS: `ssl_certificates.py` uses the timezone-aware `not_valid_*_utc`
   properties (cryptography >= 42) and an aware UTC "now". Separate commit
   (`fix(ssl)`) so it can be reverted without touching the version bump.
+* Dovecot: Sieve redirects use the recipient as envelope sender, spam/ham learning runs again (LF line endings, 120s pipe timeout, ham rules skip trash/spam moves).
+* Dovecot: ManageSieve port 2000 is closed, LMTP username format and sieve plugin are pinned in `99-local.conf`.
+* Spam: spampd local-only mode is really off (DNSBL/URIBL/Pyzor/Razor checks), SpamAssassin rule updates run via `spamassassin-maintenance.timer`, unused spamd is disabled.
+* fail2ban: the dovecot jail reads `mail.log` (backend = auto) and matches Dovecot 2.4 login failures, resistant to user-name IP injection.
+* nginx: Nextcloud `.mjs` ES modules are served as JavaScript.
+* nginx: Roundcube 1.7 `static.php/<path>` assets get a proper PATH_INFO split.
+* Nextcloud: `occ upgrade` failure handling works under `set -e`, opcache settings also apply to PHP-FPM.
+* Webmail: the CardDAV preset uses the carddav 5.x keys (`discovery_url`, `preemptive_basic_auth`).
+* Tools: `owncloud-restore.sh` works after the 26.04 upgrade chain.
+* System: sury-shadowed PHP packages move back to Ubuntu, unattended-upgrades covers sury and the duplicity PPA, timezone check uses `/etc/localtime`.
+* DNS: nsd logs to syslog only, the obsolete logrotate entry is removed.
+* Setup: `email_validator` is installed whenever it is missing for the address prompt.
+* Postfix: comment explains the harmless "no SASL support" warning on port 25.
+* Usage report: `mail_log.py` parses RFC 3339 rsyslog timestamps.
+* Daemon: no `return` inside `finally` in `/logout` (Python 3.14 SyntaxWarning).
 
 ### Setup and supply chain
 
