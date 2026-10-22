@@ -23,4 +23,10 @@ $specialLogUsers = array();
 
 // the backend data provider
 define('BACKEND_PROVIDER', 'BackendCombined');
+
+// Z-Push 2.7.7 reads DAV_SSL_VERIFY in its CalDAV/CardDAV client, but only the
+// main config.php defines it and autodiscover does not load that file, so every
+// autodiscover request ended in a fatal error. AUTO verifies certificates except
+// on loopback, which is where our CalDAV/CardDAV backends connect (127.0.0.1).
+if (!defined('DAV_SSL_VERIFY')) define('DAV_SSL_VERIFY', DAV_SSL_VERIFY_AUTO);
 ?>
