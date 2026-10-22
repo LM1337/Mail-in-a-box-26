@@ -160,17 +160,20 @@ cat > ${RCM_PLUGIN_DIR}/carddav/config.inc.php <<EOF;
 <?php
 /* Do not edit. Written by Mail-in-a-Box. Regenerated on updates. */
 \$prefs['_GLOBAL']['hide_preferences'] = true;
-\$prefs['_GLOBAL']['suppress_version_warning'] = true;
+/* carddav 5.x preset format: 'url' became 'discovery_url' and 'preemptive_auth' became
+   'preemptive_basic_auth'; unknown keys are silently dropped. discovery_url is fixed so
+   that accounts migrated from 4.x also get it on their next login. */
 \$prefs['ownCloud'] = array(
-	 'name'         =>  'ownCloud',
+	 'accountname'  =>  'ownCloud',
+	 'name'         =>  '%a (%N)', // account name and server-side addressbook name, as in 4.x
 	 'username'     =>  '%u', // login username
 	 'password'     =>  '%p', // login password
-	 'url'          =>  'https://${PRIMARY_HOSTNAME}/cloud/remote.php/dav/addressbooks/users/%u/contacts/',
+	 'discovery_url' => 'https://${PRIMARY_HOSTNAME}/cloud/remote.php/dav/addressbooks/users/%u/contacts/',
 	 'active'       =>  true,
 	 'readonly'     =>  false,
 	 'refresh_time' => '02:00:00',
-	 'fixed'        =>  array('username','password'),
-	 'preemptive_auth' => '1',
+	 'fixed'        =>  array('username','password','discovery_url','preemptive_basic_auth'),
+	 'preemptive_basic_auth' => true,
 	 'hide'        =>  false,
 );
 ?>
