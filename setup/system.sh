@@ -157,6 +157,40 @@ EOF
 
 echo "Updating system packages..."
 hide_output apt-get update --allow-releaseinfo-change
+
+# Boxes set up before the pin above got php8.5-*, libgd3 and some PECL modules
+# from sury, whose versions sort higher than Ubuntu's. A pin never downgrades
+# installed packages, so they would get updates from neither repository. Move
+# every installed sury build that is not on the allow-list back to the newest
+# version Ubuntu has (sury versions end in "+ubuntuXX.YY~N.gbpHASH").
+SURY_TO_UBUNTU=()
+for pkg in $(dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' \
+		| awk '$1 == "ii" && $3 ~ /\+0~[0-9]+\.[0-9]+\+ubuntu[0-9.]+~[0-9]+\.gbp[0-9a-f]+$/ {print $2}' \
+		| grep -Evx "php-common|php${PHP_LEGACY_VER/./\\.}(-.*)?|php${PHP_VER/./\\.}-imap"); do
+	ver=$(apt-cache madison "$pkg" | awk -F' [|] ' '$3 !~ /packages\.sury\.org/ && v == "" {v = $2} END {print v}')
+	if [ -n "$ver" ]; then SURY_TO_UBUNTU+=("$pkg=$ver"); fi
+done
+if [ ${#SURY_TO_UBUNTU[@]} -gt 0 ]; then
+	# Simulate first: a sury-only package the admin added that needs sury's
+	# exact php8.5-common version would otherwise be removed without asking.
+	# (Nothing Mail-in-a-Box installs is affected.)
+	SURY_SIM=$(apt-get -s install --allow-downgrades "${SURY_TO_UBUNTU[@]}")
+	if grep -q '^Remv ' <<< "$SURY_SIM"; then
+		echo "Not switching PHP packages from deb.sury.org back to Ubuntu's builds"
+		echo "because apt would remove other packages. To do it by hand, run:"
+		echo "  apt-get install --allow-downgrades ${SURY_TO_UBUNTU[*]}"
+	else
+		echo "Switching PHP packages from deb.sury.org back to Ubuntu's builds..."
+		# apt-get install marks the named packages as manually installed, so
+		# remember which were automatic (e.g. libgd3) and restore that.
+		SURY_AUTO=$(apt-mark showauto "${SURY_TO_UBUNTU[@]%%=*}")
+		apt_get_quiet install --allow-downgrades "${SURY_TO_UBUNTU[@]}"
+		if [ -n "$SURY_AUTO" ]; then
+			hide_output apt-mark auto $SURY_AUTO
+		fi
+	fi
+fi
+
 apt_get_quiet upgrade
 
 # Old kernels pile up over time and take up a lot of disk space, and because of Mail-in-a-Box
@@ -195,8 +229,8 @@ fi
 
 # ### Set the system timezone
 #
-# Some systems are missing /etc/timezone, which we cat into the configs for
-# Z-Push and ownCloud, so we need to set it to something. Daily cron tasks
+# On Ubuntu 26.04 tzdata keeps the system timezone only in the /etc/localtime
+# symlink; /etc/timezone is no longer written. Daily cron tasks
 # like the system backup are run at a time tied to the system timezone, so
 # letting the user choose will help us identify the right time to do those
 # things (i.e. late at night in whatever timezone the user actually lives
@@ -208,8 +242,8 @@ fi
 # not likely the user will want to change this, so we only ask on first
 # setup.
 if [ -z "${NONINTERACTIVE:-}" ]; then
-	if [ ! -f /etc/timezone ] || [ -n "${FIRST_TIME_SETUP:-}" ]; then
-		# If the file is missing or this is the user's first time running
+	if [ ! -e /etc/localtime ] || [ -n "${FIRST_TIME_SETUP:-}" ]; then
+		# If no timezone is set or this is the user's first time running
 		# Mail-in-a-Box setup, run the interactive timezone configuration
 		# tool.
 		dpkg-reconfigure tzdata
@@ -217,13 +251,16 @@ if [ -z "${NONINTERACTIVE:-}" ]; then
 	fi
 else
 	# This is a non-interactive setup so we can't ask the user.
-	# If /etc/timezone is missing, set it to UTC.
-	if [ ! -f /etc/timezone ]; then
+	# If no system timezone is configured, set it to UTC.
+	if [ ! -e /etc/localtime ]; then
 		echo "Setting timezone to UTC."
-		echo "Etc/UTC" > /etc/timezone
+		ln -nsf /usr/share/zoneinfo/Etc/UTC /etc/localtime
 		restart_service rsyslog
 	fi
 fi
+# Drop a stale /etc/timezone (earlier versions of this script wrote one, and
+# tzdata itself removes it on upgrade). It can disagree with /etc/localtime.
+rm -f /etc/timezone
 
 # ### Seed /dev/urandom
 #
@@ -296,6 +333,18 @@ APT::Periodic::MaxAge "7";
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::Verbose "0";
+EOF
+
+# The stock 50unattended-upgrades only allows the Ubuntu archive (and ESM).
+# Also allow the two third-party repos we add, so php-common, php8.2-*,
+# php8.5-imap (sury, see the pin above) and duplicity get security updates too.
+# ${distro_codename} is expanded by unattended-upgrades, not by the shell.
+cat > /etc/apt/apt.conf.d/51mailinabox-unattended-upgrades <<'EOF';
+// Managed by Mail-in-a-Box (setup/system.sh).
+Unattended-Upgrade::Origins-Pattern {
+	"origin=deb.sury.org,codename=${distro_codename}";
+	"origin=LP-PPA-duplicity-team-duplicity-release-git,codename=${distro_codename}";
+};
 EOF
 
 # ### Firewall
