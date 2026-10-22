@@ -22,7 +22,10 @@ cat > /etc/nsd/nsd.conf << EOF;
 # Do not edit. Overwritten by Mail-in-a-Box setup.
 server:
   hide-version: yes
-  logfile: "/var/log/nsd.log"
+
+  # Log to syslog/the journal only (the package default). The packaged
+  # nsd.service runs with ProtectSystem=strict, so nsd cannot write to /var/log.
+  log-only-syslog: yes
 
   # identify the server (CH TXT ID.SERVER entry).
   identity: ""
@@ -54,17 +57,8 @@ echo "include: /etc/nsd/nsd.conf.d/*.conf" >> /etc/nsd/nsd.conf;
 # now be stored in /etc/nsd/nsd.conf.d.
 rm -f /etc/nsd/zones.conf
 
-# Add log rotation
-cat > /etc/logrotate.d/nsd <<EOF;
-/var/log/nsd.log {
-  weekly
-  missingok
-  rotate 12
-  compress
-  delaycompress
-  notifempty
-}
-EOF
+# nsd logs to syslog, so remove the log rotation for the old /var/log/nsd.log.
+rm -f /etc/logrotate.d/nsd
 
 # Install the packages.
 #
