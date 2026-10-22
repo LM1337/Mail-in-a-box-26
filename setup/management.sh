@@ -66,18 +66,21 @@ rm -rf $assets_dir
 mkdir -p $assets_dir
 
 # jQuery CDN URL
-jquery_version=2.2.4
+jquery_version=3.7.1 # newest 3.x; Bootstrap 3 JS refuses jQuery >= 4
 jquery_url=https://code.jquery.com
 
 # Get jQuery
-wget_verify $jquery_url/jquery-$jquery_version.min.js 69bb69e25ca7d5ef0935317584e6153f3fd9a88c $assets_dir/jquery.min.js
+# SHA256; matches the official SRI sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=
+wget_verify $jquery_url/jquery-$jquery_version.min.js fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a $assets_dir/jquery.min.js
 
 # Bootstrap CDN URL
+# Bootstrap 3.4.1 is the final 3.x release (EOL since 2019). The admin templates depend on
+# Bootstrap 3 (glyphicons, panels, bootstrap-theme.css); 5.x would need a template rewrite.
 bootstrap_version=3.4.1
 bootstrap_url=https://github.com/twbs/bootstrap/releases/download/v$bootstrap_version/bootstrap-$bootstrap_version-dist.zip
 
 # Get Bootstrap
-wget_verify $bootstrap_url 0bb64c67c2552014d48ab4db81c2e8c01781f580 /tmp/bootstrap.zip
+wget_verify $bootstrap_url d49793cf773cbd393ac2cf340c3b4ddab5365fa7c292098ac07e12eab3efd92e /tmp/bootstrap.zip # SHA256 (no digest published for this asset)
 unzip -q /tmp/bootstrap.zip -d $assets_dir
 mv $assets_dir/bootstrap-$bootstrap_version-dist $assets_dir/bootstrap
 rm -f /tmp/bootstrap.zip
