@@ -34,14 +34,15 @@ apt_install \
 #   https://github.com/mfreiholz/persistent_login/commits/master
 #   https://github.com/stremlau/html5_notifier/commits/master
 #   https://github.com/mstilkerich/rcmcarddav/releases
-# The easiest way to get the package hashes is to run this script and get the hash from
-# the error message.
+# The package hashes are SHA256 (wget_verify still accepts legacy 40-char SHA1). Roundcube
+# publishes SHA256 on https://roundcube.net/download/ and as the GitHub release asset digest,
+# rcmcarddav as the GitHub asset digest. Check them against the hash in this script's error message.
 VERSION=1.7.5
-HASH=396b2fa0153bf6b4a8ab99f136b27e16d9f74e57
+HASH=93a66c94e3efff7db93187c1c9d7f35546647a3e1e7b9327cc87911564edf9d1
 PERSISTENT_LOGIN_VERSION=bde7b6840c7d91de627ea14e81cf4133cbb3c07a # version 5.3
-HTML5_NOTIFIER_VERSION=68d9ca194212e15b3c7225eb6085dbcf02fd13d7 # version 0.6.4+
-CARDDAV_VERSION=5.1.3
-CARDDAV_HASH=7cef0bde5b8cee2a33f8033a0c8c9ad888abccb3
+HTML5_NOTIFIER_VERSION=5d85947e16ea9cac4544c59666fe0ff13ba2a44a # master 2023-06-28 (0.6.4+, newest commit; last tag v0.6.4 is older)
+CARDDAV_VERSION=5.1.4
+CARDDAV_HASH=0ffa55ec6da5671d6c413a27d2511e903cd4e63de03c3e9480038844fa4625eb
 
 UPDATE_KEY=$VERSION:$PERSISTENT_LOGIN_VERSION:$HTML5_NOTIFIER_VERSION:$CARDDAV_VERSION
 
@@ -80,7 +81,12 @@ if [ $needs_update == 1 ]; then
 	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' ${RCM_PLUGIN_DIR}/persistent_login
 
 	# install roundcube html5_notifier plugin
-	git_clone https://github.com/kitist/html5_notifier.git $HTML5_NOTIFIER_VERSION '' ${RCM_PLUGIN_DIR}/html5_notifier
+	# (github.com/kitist/html5_notifier is a 301 redirect to stremlau/html5_notifier)
+	git_clone https://github.com/stremlau/html5_notifier.git $HTML5_NOTIFIER_VERSION '' ${RCM_PLUGIN_DIR}/html5_notifier
+	# Roundcube 1.7 is served from public_html/, plugin assets are only reachable via static.php/.
+	# Use rcmail.assets_path() for the notification icon (same as unmerged upstream PR #59).
+	sed -i "s#'./plugins/html5_notifier/images/new_mail.png'#rcmail.assets_path('plugins/html5_notifier/images/new_mail.png')#" \
+		${RCM_PLUGIN_DIR}/html5_notifier/html5_notifier.js
 
 	# download and verify the full release of the carddav plugin
 	wget_verify \
