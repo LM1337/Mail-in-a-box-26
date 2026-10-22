@@ -1654,6 +1654,14 @@ def f2b_prepare(ctx):
 def c_fail2ban(ctx, proto, jails, port):
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
+    # Attempts of the previous protocol that were still in flight can re-ban the
+    # source right after its unban (postfix-sasl covers 465 and 587), so start
+    # from a clean state: unban, let fail2ban process the backlog, unban again.
+    src = ctx.f2b.get("attack_src")
+    if src:
+        f2b_unban(ctx, src)
+        time.sleep(5)
+        f2b_unban(ctx, src)
     before = {j: f2b_banned(ctx, j) for j in jails}
     if all(v is None for v in before.values()):
         raise Fail("none of the jails %s exist" % jails)
@@ -1683,6 +1691,8 @@ def c_fail2ban(ctx, proto, jails, port):
         if ip == ctx.f2b.get("attack_src") or any(ip == x for _j, x in new):
             f2b_unban(ctx, ip)
     time.sleep(ctx.args.fail2ban_pause)
+    for _j, ip in new:
+        f2b_unban(ctx, ip) # late re-bans from attempts that were still in flight
     if not new:
         raise Fail("no ban after %d failed %s logins in %.0f s (%s); jail filter does not match the log "
                    "format?" % (ctx.args.fail2ban_count, proto, res["seconds"], res["summary"]))
