@@ -111,7 +111,7 @@ tools/editconf.py /etc/dovecot/conf.d/10-ssl.conf \
 	"ssl_server_key_file = $STORAGE_ROOT/ssl/ssl_private_key.pem" \
 	"ssl_cipher_list = ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384" \
 	"ssl_server_prefer_ciphers = client" \
-	"ssl_server_dh_file = $STORAGE_ROOT/ssl/dh4096.pem"
+	"ssl_server_dh_file = $STORAGE_ROOT/ssl/dh2048.pem"
 
 # Disable in-the-clear IMAP/POP because there is no reason for a user to transmit
 # login credentials outside of an encrypted connection. Only the over-TLS versions
