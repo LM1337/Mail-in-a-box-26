@@ -82,7 +82,10 @@ cp -f conf/dovecot-20-imap.conf /etc/dovecot/conf.d/20-imap.conf
 cp -f conf/dovecot-20-pop3.conf /etc/dovecot/conf.d/20-pop3.conf
 cp -f conf/dovecot-20-lmtp.conf /etc/dovecot/conf.d/20-lmtp.conf
 cp -f conf/dovecot-90-quota.conf /etc/dovecot/conf.d/90-quota.conf
-cp -f conf/dovecot-99-local-sieve.conf /etc/dovecot/conf.d/99-local-sieve.conf
+# The sieve config names paths under $STORAGE_ROOT, which a plain copy would
+# leave as literal text. Only that one variable is substituted, Dovecot's own
+# %{...} variables stay as they are.
+sed "s|\$STORAGE_ROOT|$STORAGE_ROOT|g" conf/dovecot-99-local-sieve.conf > /etc/dovecot/conf.d/99-local-sieve.conf
 
 # Set the location where we'll store user mailboxes. '%{user|domain}' is the domain name and '%{user|username}' is the
 # username part of the user's email address. We'll ensure that no bad domains or email addresses
