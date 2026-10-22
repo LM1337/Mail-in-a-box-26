@@ -7,12 +7,14 @@ if [ -z "${NONINTERACTIVE:-}" ]; then
 	# use a shell flag instead. Really suppress any output from installing dialog.
 	#
 	# Also install dependencies needed to validate the email address.
-	if [ ! -f /usr/bin/dialog ] || [ ! -f /usr/bin/python3 ] || [ ! -f /usr/bin/pip3 ]; then
+	# management/mailconfig.py (used below to validate the email address) runs with
+	# the system python3 and needs email_validator and idna.
+	if [ ! -f /usr/bin/dialog ] || ! python3 -I -c 'import email_validator, idna' 2>/dev/null; then
 		echo "Installing packages needed for setup..."
 		apt-get -q -q update
-		apt_get_quiet install dialog python3 python3-pip python3-email-validator python3-dnspython  || exit 1
+		apt_get_quiet install dialog python3 python3-email-validator python3-idna python3-dnspython || exit 1
 	fi
-    
+
 	message_box "Mail-in-a-Box Installation" \
 		"Hello and thanks for deploying a Mail-in-a-Box!
 		\n\nI'm going to ask you a few questions.
