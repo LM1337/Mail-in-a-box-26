@@ -33,7 +33,8 @@ sed -i "s/#*\(\!include auth-system.conf.ext\)/#\1/"  /etc/dovecot/conf.d/10-aut
 sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.conf
 
 # Specify how the database is to be queried for user authentication (passdb)
-# and where user mailboxes are stored (userdb), utilizing 
+# and where user mailboxes are stored (userdb). The users.quota column
+# (0, bytes, or e.g. 500M/10G) maps directly to Dovecot's quota_storage_size.
 cat > /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
@@ -43,7 +44,7 @@ passdb sql {
   default_password_scheme = SHA512-CRYPT
 }
 userdb sql {
-  query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, '*:bytes=' || quota AS quota_rule FROM users WHERE email='%{user}';
+  query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, quota AS quota_storage_size FROM users WHERE email='%{user}';
   iterate_query = SELECT email AS user FROM users;
 }
 EOF
