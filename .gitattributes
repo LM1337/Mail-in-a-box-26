@@ -1,0 +1,12 @@
+# Scripts and configs must keep LF line endings: a CRLF shebang made the
+# sa-learn wrappers unexecutable (bad interpreter) without any visible error.
+*.sh       text eol=lf
+*.py       text eol=lf
+*.sieve    text eol=lf
+*.conf     text eol=lf
+*.txt      text eol=lf
+*.html     text eol=lf
+*.php      text eol=lf
+
+# RFC 8461 requires CRLF in the MTA-STS policy file; keep it byte-for-byte.
+conf/mta-sts.txt -text
