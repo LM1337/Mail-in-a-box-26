@@ -432,13 +432,15 @@ def build_sshfp_records():
 	#
 	# See https://github.com/xelerance/sshfp for inspiriation.
 	#
-	# Removed support for dsa (not shipped with 26.04)
-	#
+	# OpenSSH on 26.04 no longer has DSA keys, so we no longer scan for them.
+	# The algorithm numbers are fixed by IANA (RFC 4255, 6594, 7479) and must
+	# not be renumbered when an algorithm goes away:
+	# https://www.iana.org/assignments/dns-sshfp-rr-parameters
 
 	algorithm_number = {
 		"ssh-rsa": 1,
-		"ecdsa-sha2-nistp256": 2,
-		"ssh-ed25519": 3,
+		"ecdsa-sha2-nistp256": 3,
+		"ssh-ed25519": 4,
 	}
 
 	# Get our local fingerprints by running ssh-keyscan. The output looks
