@@ -80,6 +80,57 @@ tools/editconf.py /etc/php/"$PHP_VER"/mods-available/apcu.ini -c ';' \
 	apc.enabled=1 \
 	apc.enable_cli=1
 
+# Called when a Nextcloud upgrade step fails. php-fpm was stopped before the upgrade chain
+# and also serves Roundcube and Z-Push, so start it again before bailing out.
+NextcloudUpgradeFailed() {
+	echo "Nextcloud upgrade failed. A copy of the installation, database and configuration from"
+	echo "before the upgrade is in ${BACKUP_DIRECTORY:-$STORAGE_ROOT/owncloud-backup}."
+	echo "See $STORAGE_ROOT/owncloud/nextcloud.log, fix the cause and run setup again."
+	service php"$PHP_VER"-fpm start &> /dev/null || /bin/true
+	exit 1
+}
+
+# Run "occ upgrade" with the given PHP binary (e.g. php8.2) and retry it if it fails.
+# The setup scripts run with "set -e", so the exit code must be caught explicitly.
+# occ upgrade exits with 0 on success and when no upgrade is needed, with 2 when no
+# upgrade is needed but maintenance mode is still on (e.g. left over from a failed
+# attempt), and with 5 when the upgrade failed. Three attempts are needed so that an
+# attempt that only turns off maintenance mode is checked once more. A failed attempt
+# leaves maintenance mode on, and an upgrade that starts in maintenance mode keeps it
+# on even when it succeeds, so it is turned off after a successful retry.
+NextcloudUpgrade() {
+	local php=$1 E attempt
+	for attempt in 1 2 3; do
+		E=0
+		sudo -u www-data "$php" /usr/local/lib/owncloud/occ upgrade || E=$?
+		case $E in
+			0)
+				if [ "$attempt" -gt 1 ]; then
+					sudo -u www-data "$php" /usr/local/lib/owncloud/occ maintenance:mode --off || /bin/true
+				fi
+				break ;;
+			2)
+				echo "Nextcloud is still in maintenance mode, turning it off and trying again..."
+				sudo -u www-data "$php" /usr/local/lib/owncloud/occ maintenance:mode --off || /bin/true ;;
+			*)
+				echo "Nextcloud upgrade failed (exit code $E, attempt $attempt of 3)." ;;
+		esac
+	done
+	if [ $E -ne 0 ]; then NextcloudUpgradeFailed; fi
+}
+
+# Database maintenance after each upgrade step, with the given PHP binary.
+NextcloudUpgradeDb() {
+	local php=$1
+
+	# Add missing indices. NextCloud didn't include this in the normal upgrade because it might take some time.
+	sudo -u www-data "$php" /usr/local/lib/owncloud/occ db:add-missing-indices || NextcloudUpgradeFailed
+	sudo -u www-data "$php" /usr/local/lib/owncloud/occ db:add-missing-primary-keys || NextcloudUpgradeFailed
+
+	# Run conversion to BigInt identifiers, this process may take some time on large tables.
+	sudo -u www-data "$php" /usr/local/lib/owncloud/occ db:convert-filecache-bigint --no-interaction || NextcloudUpgradeFailed
+}
+
 InstallNextcloud() {
 
 	version=$1
@@ -139,10 +190,9 @@ InstallNextcloud() {
 	chown -f -R www-data:www-data "$STORAGE_ROOT/owncloud" /usr/local/lib/owncloud || /bin/true
 
 	# If this isn't a new installation, immediately run the upgrade script.
-	# Then check for success (0=ok and 3=no upgrade needed, both are success).
+	# NextcloudUpgrade checks for success and retries (ownCloud 8.1.1 broke upgrades,
+	# it may fail on the first attempt, but that can be OK).
 	if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
-		# ownCloud 8.1.1 broke upgrades. It may fail on the first attempt, but
-		# that can be OK.
 		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^2[6789] || ${CURRENT_NEXTCLOUD_VER} =~ ^3[01] ]]; then
             #
             # CURRENT_NEXTCLOUD_VER is still the version *before* this step, while occ runs the code
@@ -162,45 +212,14 @@ InstallNextcloud() {
 	            apc.enabled=1 \
 	            apc.enable_cli=1
 
-            sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ upgrade
-    		E=$?
-    		if [ $E -ne 0 ] && [ $E -ne 3 ]; then
-    			echo "Trying ownCloud upgrade again to work around ownCloud upgrade bug..."
-    			sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ upgrade
-    			E=$?
-    			if [ $E -ne 0 ] && [ $E -ne 3 ]; then exit 1; fi
-    			sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ maintenance:mode --off
-    			echo "...which seemed to work."
-    		fi
-
-    		# Add missing indices. NextCloud didn't include this in the normal upgrade because it might take some time.
-    		sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ db:add-missing-indices
-    		sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ db:add-missing-primary-keys
-
-    		# Run conversion to BigInt identifiers, this process may take some time on large tables.
-    		sudo -u www-data php"$PHP_LEGACY_VER" /usr/local/lib/owncloud/occ db:convert-filecache-bigint --no-interaction
-
+            NextcloudUpgrade php"$PHP_LEGACY_VER"
+            NextcloudUpgradeDb php"$PHP_LEGACY_VER"
         else
             #
             # Upgrade using 8.5
             #
-            sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ upgrade
-    		E=$?
-    		if [ $E -ne 0 ] && [ $E -ne 3 ]; then
-    			echo "Trying ownCloud upgrade again to work around ownCloud upgrade bug..."
-    			sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ upgrade
-    			E=$?
-    			if [ $E -ne 0 ] && [ $E -ne 3 ]; then exit 1; fi
-    			sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ maintenance:mode --off
-    			echo "...which seemed to work."
-    		fi
-
-    		# Add missing indices. NextCloud didn't include this in the normal upgrade because it might take some time.
-    		sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ db:add-missing-indices
-    		sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ db:add-missing-primary-keys
-
-    		# Run conversion to BigInt identifiers, this process may take some time on large tables.
-    		sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ db:convert-filecache-bigint --no-interaction
+            NextcloudUpgrade php"$PHP_VER"
+            NextcloudUpgradeDb php"$PHP_VER"
         fi
 	fi
 }
@@ -455,10 +474,8 @@ hide_output sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/console.php a
 
 # When upgrading, run the upgrade script again now that apps are enabled. It seems like
 # the first upgrade at the top won't work because apps may be disabled during upgrade?
-# Check for success (0=ok, 3=no upgrade needed).
-sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ upgrade
-E=$?
-if [ $E -ne 0 ] && [ $E -ne 3 ]; then exit 1; fi
+# This also clears a maintenance mode left over from an earlier failed run (see NextcloudUpgrade).
+NextcloudUpgrade php"$PHP_VER"
 
 # Disable default apps that we don't support
 sudo -u www-data \
@@ -476,9 +493,18 @@ tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
 	short_open_tag=On
 
 # Set Nextcloud recommended opcache settings
+# PHP 8.5 has opcache built in, so there is no shared mods-available/opcache.ini that both
+# SAPIs read (as there was up to 8.4). Set the values in the CLI and the FPM php.ini.
 tools/editconf.py /etc/php/"$PHP_VER"/cli/php.ini -c ';' \
 	opcache.enable=1 \
 	opcache.enable_cli=1 \
+	opcache.interned_strings_buffer=8 \
+	opcache.max_accelerated_files=10000 \
+	opcache.memory_consumption=128 \
+	opcache.save_comments=1 \
+	opcache.revalidate_freq=1
+tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
+	opcache.enable=1 \
 	opcache.interned_strings_buffer=8 \
 	opcache.max_accelerated_files=10000 \
 	opcache.memory_consumption=128 \
