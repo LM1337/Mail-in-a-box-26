@@ -110,13 +110,44 @@ hide_output add-apt-repository -y universe
 # Install the duplicity PPA.
 hide_output add-apt-repository -y ppa:duplicity-team/duplicity-release-git
 
-# Stock PHP is now 8.5
+# Stock PHP is now 8.5 from Ubuntu. ppa:ondrej/php has no resolute dist, so we
+# add deb.sury.org (same maintainer) for the few packages Ubuntu lacks:
+#  * php8.2-*     PHP 8.2 for the Nextcloud upgrade chain (NC 26..32),
+#  * php8.5-imap  the PECL imap module (unbundled from php-src in PHP 8.4,
+#                 not packaged by Ubuntu 26.04; needed by Roundcube, Z-Push, NC),
+#  * php-common   Ubuntu's php-common "Breaks: php8.2-common".
+# Everything else (php8.5-*, libgd3, PECL modules ...) must keep coming from
+# Ubuntu, so the repo is pinned below.
 echo "Installing ppa prereqs..."
 hide_output apt-get update --allow-releaseinfo-change
-apt_install lsb-release ca-certificates curl
-hide_output curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb
-hide_output dpkg -i /tmp/debsuryorg-archive-keyring.deb
-hide_output sh -c 'echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list'
+apt_install lsb-release ca-certificates curl gnupg
+SURY_KEY_FPR=15058500A0235D97F5D10063B188E2B695BD4743 # DEB.SURY.ORG Automatic Signing Key
+SURY_TMP=$(mktemp -d)
+hide_output curl -fsSLo "$SURY_TMP/keyring.deb" https://packages.sury.org/debsuryorg-archive-keyring.deb
+dpkg-deb -x "$SURY_TMP/keyring.deb" "$SURY_TMP/x"
+if [ "$(GNUPGHOME="$SURY_TMP" gpg --show-keys --with-colons "$SURY_TMP/x/usr/share/keyrings/debsuryorg-archive-keyring.gpg" 2>/dev/null \
+	| awk -F: '$1=="pub"{p=1;next} p&&$1=="fpr"{print $10;p=0}')" != "$SURY_KEY_FPR" ]; then
+	echo "The deb.sury.org keyring package does not contain exactly the expected key $SURY_KEY_FPR."
+	exit 1
+fi
+hide_output dpkg -i "$SURY_TMP/keyring.deb"
+rm -rf "$SURY_TMP"
+# The keyring package also installs the key into /etc/apt/trusted.gpg.d/, which
+# makes APT trust it for every source (incl. the Ubuntu archive). We only use it
+# via signed-by=. dpkg does not restore a deleted conffile on reinstall.
+rm -f /etc/apt/trusted.gpg.d/debsuryorg-archive.gpg
+echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
+cat > /etc/apt/preferences.d/mailinabox-sury-php << EOF;
+# Managed by Mail-in-a-Box (setup/system.sh). Take only what Ubuntu lacks from
+# deb.sury.org; first matching record wins, so keep the allow-list on top.
+Package: php-common php${PHP_LEGACY_VER} php${PHP_LEGACY_VER}-* php${PHP_VER}-imap
+Pin: origin packages.sury.org
+Pin-Priority: 500
+
+Package: *
+Pin: origin packages.sury.org
+Pin-Priority: -1
+EOF
 
 # ### Update Packages
 
