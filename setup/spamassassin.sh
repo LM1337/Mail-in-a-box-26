@@ -22,9 +22,22 @@ source setup/functions.sh # load our functions
 echo "Installing SpamAssassin..."
 apt_install spampd razor pyzor libmail-dkim-perl
 
-# Allow spamassassin to download new rules.
-tools/editconf.py /etc/default/spamd \
-	CRON=1
+# Allow spamassassin to download new rules. Since SpamAssassin 4.0 (Ubuntu 26.04)
+# /etc/cron.daily/spamassassin does nothing by default and CRON=1 is no longer
+# read from /etc/default/spamd. The daily sa-update/sa-compile run from
+# spamassassin-maintenance.timer instead, which a fresh install leaves disabled.
+# After an update, spamassassin-maint runs /etc/spamassassin/sa-update-hooks.d/spampd,
+# which restarts spampd so that it loads the new rules.
+# A first update is started at the end of this script, once the SpamAssassin
+# configuration below has been written.
+hide_output systemctl enable --now spamassassin-maintenance.timer
+
+# spampd runs SpamAssassin in-process, so the spamd daemon is not used. On Ubuntu 26.04
+# it is a separate package (spamassassin Recommends spamc, which Recommends spamd) and
+# is enabled by default. Stop it to save its memory and its localhost:783 listener.
+if systemctl cat spamd.service &> /dev/null; then
+	hide_output systemctl disable --now spamd.service
+fi
 
 # Configure pyzor, which is a client to a live database of hashes of
 # spam emails. Set the pyzor configuration directory to something sane.
@@ -43,12 +56,28 @@ echo "public.pyzor.org:24441" > /etc/spamassassin/pyzor/servers
 # Configure spampd:
 # * Pass messages on to docevot on port 10026. This is actually the default setting but we don't
 #   want to lose track of it. (We've configured Dovecot to listen on this port elsewhere.)
-# * Increase the maximum message size of scanned messages from the default of 64KB to 500KB, which
-#   is Spamassassin (spamc)'s own default. Specified in KBytes.
+# * Increase the maximum message size of scanned messages from the default of 64KB to 2000KB.
+#   Specified in KBytes.
 # * Disable localmode so Pyzor, DKIM and DNS checks can be used.
-tools/editconf.py /etc/spampd.cfg \
-	maxsize=2000 \
-	local-only=0
+#
+# /etc/spampd.cfg holds "name value" lines. spampd 2.62 treats a value of 0 as "no value"
+# (`$v = $2 || ""`), so "local-only 0" or "local-only=0" turn local-only mode ON. Comment
+# out every local-only line and use the negated option instead. Also drop the "name=value"
+# lines that earlier versions of this script appended.
+#
+# The shipped file has no maxsize line, and anything after an uncommented "--" line is
+# passed to Net::Server instead of spampd. So our own lines are (re)inserted before the
+# "# End inserts from ADDOPTS" marker, or at the top of the file if the marker is gone.
+sed -i -E '/^(maxsize=2000|local-only=0)$/d' /etc/spampd.cfg
+sed -i -E 's/^[[:space:]]*-{0,2}(local-only|l)([[:space:]=].*)?$/#&/' /etc/spampd.cfg
+sed -i -E '/^[[:space:]]*-{0,2}(no-local-only|maxsize)([[:space:]=].*)?$/d' /etc/spampd.cfg
+if grep -q '^# End inserts from ADDOPTS' /etc/spampd.cfg; then
+	sed -i '/^# End inserts from ADDOPTS/i maxsize 2000\nno-local-only' /etc/spampd.cfg
+else
+	sed -i '1i maxsize 2000\nno-local-only' /etc/spampd.cfg
+fi
+tools/editconf.py /etc/spampd.cfg -s \
+	relayport=10026
 
 # Spamassassin normally wraps spam as an attachment inside a fresh
 # email with a report about the message. This also protects the user
@@ -124,9 +153,9 @@ EOF
 # These files must be:
 # * The imap-sieve Dovecot Plugin, when users move messages in or out of the Spam folder. (TBD)
 # * Readable by the spampd process ('spampd' user) during mail filtering.
-# * Writable by the debian-spamd user, which runs /etc/cron.daily/spamassassin.
+# * Writable by the Dovecot sa-learn wrappers (via the spampd group).
 #
-# We'll have these files owned by spampd and grant access to the other two processes.
+# We'll have these files owned by spampd and grant group access to Dovecot.
 #
 # Spamassassin will change the access rights back to the defaults, so we must also configure
 # the filemode in the config file.
@@ -167,3 +196,9 @@ chmod 770 "$STORAGE_ROOT/mail/spamassassin"
 # Kick services.
 restart_service spampd
 restart_service dovecot
+
+# Fetch current rules once now instead of waiting for the first 06:00 timer run
+# (Persistent=true does not catch up when the timer has never run). This runs
+# after the configuration above is final, so that its lint check sees it. Don't
+# block setup on the network for it.
+systemctl start --no-block spamassassin-maintenance.service || true
