@@ -326,7 +326,10 @@ def scan_mail_log(env):
 def scan_mail_log_line(line, collector):
     """ Scan a log line and extract interesting data """
 
-    m = re.match(r"(\w+[\s]+\d+ \d+:\d+:\d+) ([\w]+ )?([\w\-/]+)[^:]*: (.*)", line)
+    # rsyslog on Ubuntu >= 24.04 writes RFC 3339 timestamps
+    # ("2026-10-22T22:01:23.217307+00:00"), while Dovecot (log_path) still
+    # writes "Oct 22 22:01:23". Accept both.
+    m = re.match(r"(\w+[\s]+\d+ \d+:\d+:\d+|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?) ([\w]+ )?([\w\-/]+)[^:]*: (.*)", line)
 
     if not m:
         return True
@@ -343,12 +346,18 @@ def scan_mail_log_line(line, collector):
     # Replaced the dateutil parser for a less clever way of parser that is roughly 4 times faster.
     # date = dateutil.parser.parse(date)
 
-    # strptime fails on Feb 29 with ValueError: day is out of range for month if correct year is not provided.
-    # See https://bugs.python.org/issue26460
-    date = datetime.datetime.strptime(str(NOW.year) + ' ' + date, '%Y %b %d %H:%M:%S')
-    # if log date in future, step back a year
-    if date > NOW:
-      date = date.replace(year = NOW.year - 1)
+    if date[0].isdigit():
+        # RFC 3339: convert to naive local time like NOW/START_DATE/END_DATE.
+        date = datetime.datetime.fromisoformat(date)
+        if date.tzinfo is not None:
+            date = date.astimezone().replace(tzinfo=None)
+    else:
+        # strptime fails on Feb 29 with ValueError: day is out of range for month if correct year is not provided.
+        # See https://bugs.python.org/issue26460
+        date = datetime.datetime.strptime(str(NOW.year) + ' ' + date, '%Y %b %d %H:%M:%S')
+        # if log date in future, step back a year
+        if date > NOW:
+          date = date.replace(year = NOW.year - 1)
     #print("date:", date)
 
     # Check if the found date is within the time span we are scanning
