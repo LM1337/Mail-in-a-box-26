@@ -2,7 +2,9 @@
 #########################################################
 # This script is intended to be run like this:
 #
-#   curl https://mailinabox.email/setup.sh | sudo bash
+#   curl https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+#
+# This is the Ubuntu 26.04 fork of Mail-in-a-Box (see README-fork.md).
 #
 #########################################################
 
@@ -20,10 +22,15 @@ if [ -z "$TAG" ]; then
 	#
 	# Allow point-release versions of the major releases, e.g. 22.04.1 is OK.
 	UBUNTU_VERSION=$( lsb_release -d | sed 's/.*:\s*//' | sed 's/\([0-9]*\.[0-9]*\)\.[0-9]/\1/' )
-	if [ "$UBUNTU_VERSION" == "Ubuntu 22.04 LTS" ]; then
+	if [ "$UBUNTU_VERSION" == "Ubuntu 26.04 LTS" ]; then
+		# This machine is running Ubuntu 26.04, which is supported by
+		# this fork of Mail-in-a-Box.
+		TAG=v78-r2604.0-rc1
+	elif [ "$UBUNTU_VERSION" == "Ubuntu 22.04 LTS" ]; then
 		# This machine is running Ubuntu 22.04, which is supported by
 		# Mail-in-a-Box versions 60 and later.
 		TAG=v78
+		SOURCE=${SOURCE:-https://github.com/mail-in-a-box/mailinabox}
 	elif [ "$UBUNTU_VERSION" == "Ubuntu 18.04 LTS" ]; then
 		# This machine is running Ubuntu 18.04, which is supported by
 		# Mail-in-a-Box versions 0.40 through 5x.
@@ -39,7 +46,7 @@ if [ -z "$TAG" ]; then
 		echo "The last version of Mail-in-a-Box supporting Ubuntu 14.04 will be installed."
 		TAG=v0.30
 	else
-		echo "This script may be used only on a machine running Ubuntu 14.04, 18.04, or 22.04."
+		echo "This script may be used only on a machine running Ubuntu 14.04, 18.04, 22.04, or 26.04."
 		exit 1
 	fi
 fi
@@ -60,7 +67,7 @@ if [ ! -d "$HOME/mailinabox" ]; then
 	fi
 
 	if [ "$SOURCE" == "" ]; then
-		SOURCE=https://github.com/mail-in-a-box/mailinabox
+		SOURCE=https://github.com/LM1337/Mail-in-a-box-26
 	fi
 
 	echo "Downloading Mail-in-a-Box $TAG. . ."
