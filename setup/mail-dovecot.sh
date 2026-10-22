@@ -144,6 +144,24 @@ service imap-login {
     port = 143
   }
 }
+
+# The 26.04 package's 20-managesieve.conf also opens the deprecated ManageSieve
+# port 2000 on all interfaces. Mail-in-a-Box only uses (and monitors) 4190.
+service managesieve-login {
+  inet_listener sieve_deprecated {
+    port = 0
+  }
+}
+
+# Keep the LMTP settings Mail-in-a-Box depends on out of reach of the package's
+# ucf-managed 20-lmtp.conf: its version strips the domain from the user name
+# (every delivery would fail with "User doesn't exist") and has no sieve plugin.
+protocol lmtp {
+  auth_username_format = %{user | lower}
+  mail_plugins {
+    sieve = yes
+  }
+}
 EOF
 
 # Setting a `postmaster_address` is required or LMTP won't start. An alias
