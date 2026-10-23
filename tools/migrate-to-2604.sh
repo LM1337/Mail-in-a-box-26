@@ -2,8 +2,9 @@
 #########################################################
 # Move a Mail-in-a-Box to a new machine running Ubuntu 26.04.
 #
-# Run this as root on the NEW machine, a fresh Ubuntu 26.04 install,
-# inside tmux or screen. Check first, then migrate:
+# Run this as root on the NEW machine, a fresh Ubuntu 26.04 install. Check
+# first, then migrate (started from a terminal outside tmux or screen, it runs
+# itself in the tmux session migrate-2604, see run_in_multiplexer):
 #
 #   /root/mailinabox/tools/migrate-to-2604.sh --check --from root@old.example.com
 #   /root/mailinabox/tools/migrate-to-2604.sh --from root@old.example.com
@@ -66,6 +67,11 @@ PHP_VER=8.5 # keep in sync with setup/functions.sh
 QUIET_TIMEOUT=${MIGRATE_QUIET_TIMEOUT:-900}
 # Where --push-zones-to-old keeps the old box's own zone files (on the old box).
 OLD_NSD_SAVE=/root/migrate-to-2604-nsd-orig
+TMUX_SESSION=migrate-2604
+# The environment variables this script reads (passed into that session);
+# SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
+MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK)
+MUX_TERM=
 
 # Phases that are recorded in the state file, in order.
 PHASES_SSH=(sync_live stop_old sync_final prepare setup ownership extras verify)
@@ -134,8 +140,11 @@ Usage: migrate-to-2604.sh --check --from [USER@]OLD_HOST [options]    (start her
 
 Moves a Mail-in-a-Box (official v68 or later on Ubuntu 22.04, or a box
 release-upgraded in place to Ubuntu 24.04) to THIS machine, a fresh Ubuntu
-26.04 install. Run it as root on the new machine, inside tmux or screen (the
-copy and setup take hours; a dropped SSH connection would stop them halfway).
+26.04 install. Run it as root on the new machine. The copy and setup take
+hours, and a dropped SSH connection would stop them halfway: started from a
+terminal outside tmux or screen, it runs itself in the tmux session
+"migrate-2604" (it installs tmux if needed) and attaches to it. If the SSH
+connection drops, log in again and run "tmux attach -t migrate-2604".
 The old machine's data is never changed; only its services are stopped for
 the final copy, after you confirm. Running the command again continues an
 interrupted migration.
@@ -193,6 +202,7 @@ Control:
                           "--sync-only --yes" for unattended copying, and add
                           --switch-over only if the old box may be stopped
                           unattended right after the live copy.
+  --no-tmux               do not start a tmux session of its own (see above)
   --redo-from PHASE       run PHASE and the phases after it again:
                           sync-final, setup, extras or verify
   --status [--verbose]    show the state of the migration (--verbose: raw)
@@ -316,7 +326,8 @@ confirm() {
 	fi
 }
 
-# Long phases must survive a dropped SSH connection.
+# Long phases must survive a dropped SSH connection. Keep in sync with
+# tools/upgrade-in-place-to-2604.sh.
 in_multiplexer() {
 	[ -z "${TMUX:-}${STY:-}" ] || return 0
 	# sudo drops TMUX and STY, so look at the parent processes as well.
@@ -336,11 +347,231 @@ session_check() {
 	# Started with nohup (SIGHUP ignored) or without a terminal (nothing to hang up).
 	if trap -p HUP | grep -q "''"; then return 0; fi
 	if ! (: < /dev/tty) 2> /dev/null; then return 0; fi
+	if [ -n "$CHECK_ONLY" ] && [ -z "$NO_TMUX" ]; then
+		if [ -z "$SELF_FILE" ]; then
+			# Through curl | bash the run uses the copy of the release tag, which
+			# may be older than this feature.
+			say "Through curl | bash the command runs the copy of ${TAG:-$DEFAULT_TAG}. If that release does not"
+			say "start tmux by itself yet, start the command inside tmux: tmux new -s $TMUX_SESSION"
+			return 0
+		fi
+		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
+		say "(tmux is installed if needed; reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+		return 0
+	fi
 	warn "This does not run inside tmux or screen. If your SSH connection drops, the copy
 or setup stops halfway (a Nextcloud upgrade stopped in the middle stays in maintenance mode).
-Better: apt-get install tmux; tmux new -s migrate; run the command there
-(reattach after a disconnect with: tmux attach -t migrate)."
+Better: install tmux (apt-get install tmux) and run the command again without --no-tmux:
+it then runs itself in tmux (reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue without tmux or screen?"; fi
+}
+
+# A command that changes something, started from a terminal outside tmux and
+# screen, runs itself in a tmux session (or screen) of its own: a dropped SSH
+# connection then only ends the terminal that is attached to it. Not with
+# --no-tmux, --check or --resumed, not without a terminal (automation, nohup)
+# and not without a script file. Needs tmux 3.0 or later (a command with
+# arguments). Keep in sync with tools/upgrade-in-place-to-2604.sh.
+
+mux_has() { # TOOL: is there a session named $TMUX_SESSION?
+	case "$1" in
+		tmux) tmux has-session -t "=$TMUX_SESSION" 2> /dev/null ;;
+		# screen -ls exits with 1 even when it lists sessions (pipefail).
+		screen) { screen -ls 2> /dev/null || true; } | grep -qE "^[[:space:]]+[0-9]+\.${TMUX_SESSION}[[:space:]]" ;;
+	esac
+}
+
+# The process in the session's window: the shell of mux_start or of the
+# resume unit.
+mux_pane_pid() { # TOOL
+	local p
+	case "$1" in
+		tmux) tmux list-panes -t "=$TMUX_SESSION" -F '#{pane_pid}' 2> /dev/null | head -n 1 ;;
+		screen)
+			p=$({ screen -ls 2> /dev/null || true; } | sed -nE "s/^[[:space:]]+([0-9]+)\.${TMUX_SESSION}[[:space:]].*/\1/p" | head -n 1)
+			if [ -n "$p" ]; then pgrep -P "$p" | head -n 1; fi
+			;;
+	esac
+}
+
+# Is the session a window of this tool whose command has ended, so that it
+# only waits for Enter? Its shell has no child process then.
+mux_finished() { # TOOL
+	local p
+	p=$(mux_pane_pid "$1" || true)
+	[ -n "$p" ] || return 1
+	grep -qa 'Press Enter to close this window' "/proc/$p/cmdline" 2> /dev/null || return 1
+	[ -z "$(pgrep -P "$p" || true)" ]
+}
+
+mux_kill() { # TOOL
+	case "$1" in
+		tmux) tmux kill-session -t "=$TMUX_SESSION" ;;
+		screen) screen -S "$TMUX_SESSION" -X quit ;;
+	esac > /dev/null 2>&1 || true
+}
+
+# The terminal type to attach with. tmux and screen need its terminfo entry,
+# which a server often lacks (xterm-ghostty, xterm-kitty, ...). Prints
+# nothing for a terminal they cannot use.
+mux_term() {
+	local t
+	case "${TERM:-dumb}" in dumb | unknown) return 0 ;; esac
+	if ! command -v tput > /dev/null; then
+		echo "$TERM"
+		return 0
+	fi
+	for t in "$TERM" xterm-256color; do
+		if tput -T "$t" clear > /dev/null 2>&1 && tput -T "$t" cup 0 0 > /dev/null 2>&1; then
+			echo "$t"
+			return 0
+		fi
+	done
+}
+
+# Attach this terminal (also when stdin is the curl pipe). tmux refuses the
+# name /dev/tty, so the terminal's own device. screen -d -r: a client of a
+# dropped SSH connection may still count as attached.
+mux_attach() { # TOOL
+	local t
+	t=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
+	case "$t" in '' | '?') t=/dev/tty ;; *) t=/dev/$t ;; esac
+	# shellcheck disable=SC2094 # a terminal, not a file
+	case "$1" in
+		tmux) TERM=${MUX_TERM:-${TERM:-}} tmux attach-session -t "=$TMUX_SESSION" ;;
+		screen) TERM=${MUX_TERM:-${TERM:-}} screen -d -r "$TMUX_SESSION" ;;
+	esac < "$t" > "$t" 2>&1
+}
+
+# Start the session; the window stays open after the command until Enter is
+# pressed, and the exit code is kept in RC_FILE.
+mux_start() { # TOOL RC_FILE HINT ARGS...
+	local tool=$1 rc_file=$2 hint=$3 v scope=() env_file=$STATE_DIR/.multiplexer-env
+	shift 3
+	# A tmux server that runs already gives a new session its own environment,
+	# not this one: pass what the script reads, and unset what is not set here.
+	# In a file, not on the command line (ps shows that to every user, and
+	# SOURCE may hold a token).
+	rm -f "$rc_file" "$env_file"
+	(
+		umask 077
+		for v in PATH HOME LANG LC_ALL "${MUX_ENV[@]}"; do
+			if [ -n "${!v+x}" ]; then printf 'export %s=%q\n' "$v" "${!v}"; else printf 'unset %s\n' "$v"; fi
+		done > "$env_file"
+		echo 'export MIAB_2604_MUX=1' >> "$env_file"
+	) || return 1
+	# trap : INT: Ctrl-C stops the command, but not this shell (bash ends
+	# itself after a child that died of SIGINT), so the window stays open.
+	# shellcheck disable=SC2016 # expanded by that bash
+	local cmd=(bash -c '
+trap : INT QUIT
+rc_file=$1 hint=$2 env_file=$3
+shift 3
+if ! . "$env_file"; then
+	echo "Could not read $env_file. Press Enter to close this window."
+	read -r _
+	exit 1
+fi
+rm -f "$env_file"
+printf "%s\n\n" "$hint"
+"$@"
+rc=$?
+echo "$rc" > "$rc_file"
+echo
+echo "The command ended with exit code $rc. Press Enter to close this window."
+read -r _
+exit "$rc"' mux "$rc_file" "$hint" "$env_file" bash "$SELF_FILE" "$@")
+	case "$tool" in
+		tmux)
+			# In a scope of its own (like the resume unit): logind must not end the
+			# tmux server with the SSH session (KillUserProcesses=yes).
+			if command -v systemd-run > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
+				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$" --)
+				"${scope[@]}" tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			fi
+			tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			;;
+		screen) screen -dmS "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0 ;;
+	esac
+	rm -f "$env_file"
+	return 1
+}
+
+run_in_multiplexer() { # ARGS (the original arguments)
+	[ -z "$NO_TMUX$CHECK_ONLY${RESUMED:-}${MIAB_2604_MUX:-}" ] || return 0
+	[ -n "$SELF_FILE" ] || return 0
+	in_multiplexer && return 0
+	if trap -p HUP | grep -q "''"; then return 0; fi
+	(: < /dev/tty) 2> /dev/null || return 0
+	MUX_TERM=$(mux_term)
+	if [ -z "$MUX_TERM" ]; then
+		say "tmux cannot use this terminal (TERM=${TERM:-}); running without it."
+		return 0
+	fi
+	local tool='' again rc rc_file=$STATE_DIR/.multiplexer-exit-code pre=''
+	if command -v tmux > /dev/null; then
+		tool=tmux
+	else
+		say "Installing tmux, so that this run survives a dropped SSH connection..."
+		if install_tmux && command -v tmux > /dev/null; then
+			tool=tmux
+		elif command -v screen > /dev/null; then
+			warn "Could not install tmux; using screen."
+			tool=screen
+		else
+			warn "Could not install tmux."
+			return 0
+		fi
+	fi
+	if [ "$MUX_TERM" != "${TERM:-}" ]; then pre="TERM=$MUX_TERM "; fi
+	if [ -n "${SUDO_USER:-}" ]; then pre+="sudo "; fi
+	case "$tool" in
+		tmux) again="${pre}tmux attach -t $TMUX_SESSION" ;;
+		screen) again="${pre}screen -d -r $TMUX_SESSION" ;;
+	esac
+	if mux_has "$tool" && mux_finished "$tool"; then
+		say "The window of an earlier run in the $tool session $TMUX_SESSION only waits for Enter"
+		say "(its output is in $LOG_FILE). Closing it and starting this run."
+		mux_kill "$tool"
+		sleep 1
+	fi
+	if mux_has "$tool"; then
+		say "Something still runs in the $tool session $TMUX_SESSION (an earlier run?)."
+		say "This command is NOT started; attaching to that session instead."
+		sleep 3
+		mux_attach "$tool" || warn "Could not attach this terminal; attach with: $again"
+		trap - EXIT
+		say "This command was NOT run, because the $tool session $TMUX_SESSION was in use."
+		say "Run it again when the run there has ended."
+		exit 1
+	fi
+	local hint="This runs in the $tool session $TMUX_SESSION and goes on if the SSH connection drops.
+Then ssh in again and run: $again"
+	if [ "$tool" = tmux ]; then hint+="     (detach without stopping it: Ctrl-b d)"; else hint+="     (detach: Ctrl-a d)"; fi
+	if ! mux_start "$tool" "$rc_file" "$hint" "$@"; then
+		warn "Could not start a $tool session; continuing without it."
+		return 0
+	fi
+	say "$hint"
+	local attached=1
+	mux_attach "$tool" || attached=''
+	# The output stays in the session; this process ends here.
+	trap - EXIT
+	if mux_has "$tool"; then
+		if [ -n "$attached" ]; then
+			say "Detached. The run goes on in the $tool session $TMUX_SESSION; back to it with: $again"
+		else
+			warn "Could not attach this terminal. The run goes on in the $tool session $TMUX_SESSION; attach with: $again"
+		fi
+		exit 0
+	fi
+	rc=$(cat "$rc_file" 2> /dev/null || true)
+	if ! [[ $rc =~ ^[0-9]+$ ]]; then
+		say "The $tool session $TMUX_SESSION has ended (the output is in $LOG_FILE)."
+		exit 1
+	fi
+	say "The run in the $tool session ended with exit code $rc (the output is in $LOG_FILE)."
+	exit "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -945,6 +1176,15 @@ install_packages() {
 	DEBIAN_FRONTEND=noninteractive apt-get -q -q install -y "$@" < /dev/null || die "Could not install $*."
 }
 
+# For run_in_multiplexer. A failure only means: no tmux. Quickly or not at
+# all: short lock timeouts.
+install_tmux() {
+	(
+		apt-get -q -q -o DPkg::Lock::Timeout=30 update < /dev/null > /dev/null 2>&1 || exit 1
+		DEBIAN_FRONTEND=noninteractive apt-get -q -q -y -o DPkg::Lock::Timeout=30 install tmux < /dev/null > /dev/null 2>&1
+	)
+}
+
 preflight_local() {
 	[ "$(id -u)" = 0 ] || die "This must be run as root on the new machine. Did you leave out sudo?"
 	local id ver
@@ -1002,6 +1242,20 @@ checkout_dir() { # the checkout this script runs from, if any
 	echo "$d"
 }
 
+# A release tag older than run_in_multiplexer does not start tmux by itself:
+# say so before its copy runs (its own check only asks without --yes). Keep
+# in sync with tools/upgrade-in-place-to-2604.sh.
+warn_no_auto_tmux() { # FILE TAG
+	grep -q '^run_in_multiplexer()' "$1" 2> /dev/null && return 0
+	[ -z "$NO_TMUX$CHECK_ONLY" ] || return 0
+	in_multiplexer && return 0
+	(: < /dev/tty) 2> /dev/null || return 0
+	warn "The downloaded $2 does not start tmux by itself yet (TAG=main does). If your SSH
+connection drops outside tmux or screen, the run stops halfway. Better: stop now
+(Ctrl-C), run tmux new -s $TMUX_SESSION and start the command again in there."
+	sleep 5
+}
+
 resolve_miab_dir() {
 	local d
 	if d=$(checkout_dir); then
@@ -1033,6 +1287,7 @@ resolve_miab_dir() {
 		git -C "$d" checkout -q "$TAG" || die "Update failed. Did you modify something in $d?"
 	fi
 	[ -x "$d/tools/migrate-to-2604.sh" ] || die "$d has no tools/migrate-to-2604.sh. Is it this fork?"
+	warn_no_auto_tmux "$d/tools/migrate-to-2604.sh" "$tag"
 	MIGRATE_REEXEC=1 exec "$d/tools/migrate-to-2604.sh" "$@"
 }
 
@@ -2745,7 +3000,7 @@ check_summary() {
 	session_check
 	if [ ${#all[@]} -eq 0 ]; then
 		say "No blockers found. Nothing was changed on either machine."
-		say "Start the migration (inside tmux or screen) with:"
+		say "Start the migration with:"
 		say "  $SELF --from $FROM${SSH_KEY:+ --ssh-key $SSH_KEY}${SSH_PORT:+ --ssh-port $SSH_PORT}"
 		exit 0
 	fi
@@ -2760,6 +3015,7 @@ main() {
 	OPT_PUBLIC_IPV6='' OPT_PRIVATE_IP='' OPT_PRIVATE_IPV6='' OPT_STORAGE_ROOT='' KEEP_TIMEZONE=''
 	SYNC_ONLY='' BWLIMIT='' COMPRESS='' WITH_OWNCLOUD_BACKUP='' SKIP_LOCAL_BACKUPS='' NO_EXTRAS=''
 	ASSUME_YES='' REDO_FROM='' COMMAND=migrate REHEARSE='' SWITCH_OVER='' SKIP_NETWORK_CHECKS='' VERBOSE=''
+	NO_TMUX=''
 	local orig_args=("$@")
 
 	while [ $# -gt 0 ]; do
@@ -2794,6 +3050,7 @@ main() {
 			--skip-local-backups) SKIP_LOCAL_BACKUPS=1; shift ;;
 			--no-extras) NO_EXTRAS=1; shift ;;
 			--yes | -y) ASSUME_YES=1; shift ;;
+			--no-tmux) NO_TMUX=1; shift ;;
 			--check | --dry-run) CHECK_ONLY=1; shift ;;
 			--verbose) VERBOSE=1; shift ;;
 			--rollback) COMMAND=rollback; shift ;;
@@ -2838,6 +3095,8 @@ on this machine (also on later runs). To have no IPv6, remove it from the machin
 		fi
 		(umask 077 && mkdir -p "$STATE_DIR")
 		chmod 700 "$STATE_DIR"
+		# From the real file (after the clone); --check-old changes nothing.
+		if [ "$COMMAND" != check_old ]; then run_in_multiplexer "${orig_args[@]}"; fi
 		exec > >(tee -a "$LOG_FILE") 2>&1
 		LOG_READY=1
 		echo

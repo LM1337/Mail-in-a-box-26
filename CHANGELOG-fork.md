@@ -9,6 +9,24 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### Changed
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` and `tools/migrate-to-2604.sh`
+  run themselves in a tmux session (`upgrade-2604`, `migrate-2604`) when a
+  command that changes something is started from a terminal outside tmux or
+  screen, so a dropped SSH connection no longer stops a release upgrade, the
+  copy or setup halfway. They install tmux if it is missing (in place: not
+  in the middle of a release upgrade, and only if that upgrades or removes
+  no other package), fall back to screen, pass the arguments and the
+  environment variables they read into the session, attach the terminal
+  (also through `curl | bash`), keep the window open until Enter and exit
+  with the code of the run. An existing session of the same name is
+  attached instead of starting a second run. `--no-tmux` turns it off;
+  `--check`, `--status`, the resume unit and runs without a terminal are
+  unchanged.
+
 ## v78-r2604.0-rc3 (2026-10-23)
 
 In-place upgrade and full-text search. Tested in place on a copy of a

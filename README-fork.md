@@ -62,9 +62,16 @@ upgrade). Nextcloud must be 26 or later.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # inside tmux or screen, after reading the check:
+    # after reading the check:
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
+
+Started from a terminal outside tmux or screen, the tool runs itself in the
+tmux session `upgrade-2604` (it installs tmux if needed, or falls back to
+screen) and attaches your terminal to it. If the SSH connection drops, the
+upgrade goes on: log in again and run `sudo tmux attach -t upgrade-2604`.
+When the command has ended, the window stays open until you press Enter.
+`--no-tmux` turns this off.
 
 What it does, in phases that continue on their own after each reboot:
 
@@ -118,9 +125,16 @@ Version 26 haben.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # in tmux oder screen, nach Durchsicht der Prüfung:
+    # nach Durchsicht der Prüfung:
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
+
+Aus einem Terminal außerhalb von tmux oder screen gestartet, läuft das
+Werkzeug selbst in der tmux-Sitzung `upgrade-2604` (tmux wird bei Bedarf
+installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
+Reißt die SSH-Verbindung ab, läuft das Upgrade weiter: neu anmelden und
+`sudo tmux attach -t upgrade-2604` aufrufen. Nach dem Ende des Befehls bleibt
+das Fenster offen, bis Enter gedrückt wird. `--no-tmux` schaltet das ab.
 
 Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 
@@ -225,16 +239,19 @@ explains what to do when the old box is too old.
    what can be delivered (`postqueue -f`). The queue is not migrated.
 8. **Announce the maintenance window** to the users. `--check` estimates the
    downtime; afterwards the DNS change takes effect over 1 to 3 days.
-9. **tmux**: run the tool inside tmux or screen, see below.
+9. **tmux**: the tool runs itself in tmux, see below.
 10. Optional, for big boxes: **rehearse** first, see "Downtime and rehearsal".
 
 #### Quick start
 
-> **Run it in tmux or screen** (`apt-get install tmux`, then
-> `tmux new -s migrate`; reattach after a disconnect with
-> `tmux attach -t migrate`). The copy and setup take hours. If your SSH
-> connection drops outside tmux, they stop halfway, possibly while the old
-> box is already stopped and in the middle of a Nextcloud upgrade.
+> **tmux**: the copy and setup take hours. If your SSH connection dropped
+> outside tmux, they would stop halfway, possibly while the old box is
+> already stopped and in the middle of a Nextcloud upgrade. So the tool,
+> started from a terminal outside tmux or screen, runs itself in the tmux
+> session `migrate-2604` (it installs tmux if needed, or falls back to
+> screen) and attaches your terminal to it. After a disconnect, log in again
+> and run `tmux attach -t migrate-2604`. When the command has ended, the
+> window stays open until you press Enter. `--no-tmux` turns this off.
 
 On the new machine, as root (`sudo -i`):
 
@@ -591,18 +608,21 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
    nicht mit um.
 8. **Wartungsfenster ankündigen**. `--check` schätzt die Ausfallzeit;
    danach wirkt die DNS-Umstellung über 1 bis 3 Tage.
-9. **tmux**: das Werkzeug in tmux oder screen starten, siehe unten.
+9. **tmux**: das Werkzeug läuft selbst in tmux, siehe unten.
 10. Optional, bei großen Boxen: zuerst **proben**, siehe „Ausfallzeit und
     Probelauf“.
 
 #### Schnellstart
 
-> **In tmux oder screen starten** (`apt-get install tmux`, dann
-> `tmux new -s migrate`; nach einem Verbindungsabbruch mit
-> `tmux attach -t migrate` wieder verbinden). Kopie und Setup dauern
-> Stunden. Bricht die SSH-Verbindung außerhalb von tmux ab, enden sie
-> mittendrin, womöglich bei schon angehaltener alter Box und mitten in einem
-> Nextcloud-Upgrade.
+> **tmux**: Kopie und Setup dauern Stunden. Bräche die SSH-Verbindung
+> außerhalb von tmux ab, endeten sie mittendrin, womöglich bei schon
+> angehaltener alter Box und mitten in einem Nextcloud-Upgrade. Deshalb
+> läuft das Werkzeug, aus einem Terminal außerhalb von tmux oder screen
+> gestartet, selbst in der tmux-Sitzung `migrate-2604` (tmux wird bei Bedarf
+> installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
+> Nach einem Verbindungsabbruch neu anmelden und
+> `tmux attach -t migrate-2604` aufrufen. Nach dem Ende des Befehls bleibt
+> das Fenster offen, bis Enter gedrückt wird. `--no-tmux` schaltet das ab.
 
 Auf der neuen Maschine als root (`sudo -i`):
 

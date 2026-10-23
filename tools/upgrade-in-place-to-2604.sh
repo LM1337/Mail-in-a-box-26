@@ -2,8 +2,9 @@
 #########################################################
 # Upgrade a Mail-in-a-Box IN PLACE to Ubuntu 26.04 and this fork.
 #
-# Run this as root on the box itself, inside tmux or screen. Check first
-# (changes nothing), then upgrade:
+# Run this as root on the box itself. Check first (changes nothing), then
+# upgrade (started from a terminal outside tmux or screen, it runs itself in
+# the tmux session upgrade-2604, see run_in_multiplexer):
 #
 #   /root/mailinabox-fork/tools/upgrade-in-place-to-2604.sh --check
 #   /root/mailinabox-fork/tools/upgrade-in-place-to-2604.sh
@@ -97,6 +98,9 @@ RESUME_UNIT_FILE=/etc/systemd/system/$RESUME_UNIT
 RESUME_SCRIPT=$STATE_DIR/resume.sh
 RESUME_MAX=8
 TMUX_SESSION=upgrade-2604
+# The environment variables this script reads (passed into that session).
+MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_REEXEC TAG SOURCE)
+MUX_TERM=
 # Keep the old configuration files during the release upgrades (removed again in finish).
 APT_OVERRIDE=/etc/apt/apt.conf.d/99-upgrade-in-place-to-2604
 MOTD_FILE=/etc/motd
@@ -190,7 +194,10 @@ Usage: upgrade-in-place-to-2604.sh --check [options]     (start here)
 Upgrades THIS Mail-in-a-Box in place to Ubuntu 26.04 and this fork: Ubuntu
 22.04 (Mail-in-a-Box v60 or later) goes through 24.04 to 26.04 with two
 reboots, a box already release-upgraded to 24.04 (Mail-in-a-Box v7x) with one
-reboot. Nextcloud must be 26 or later. Run it as root, inside tmux or screen.
+reboot. Nextcloud must be 26 or later. Run it as root. Started from a
+terminal outside tmux or screen, it runs itself in the tmux session
+"upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
+connection drops, log in again and run "tmux attach -t upgrade-2604".
 Mail is offline from phase "quiesce" until setup has finished (typically 1-3
 hours). After each reboot the upgrade continues on its own; follow it with
 "tmux attach -t upgrade-2604" or "tail -f /root/upgrade-2604/upgrade.log".
@@ -229,6 +236,7 @@ Safety nets:
 Control:
   --yes                   do not ask for confirmation, and reboot without the
                           10-second countdown (unattended use)
+  --no-tmux               do not start a tmux session of its own (see above)
   --status [--verbose]    show the state of the upgrade (--verbose: raw)
   --rollback              only before the first release upgrade started: put
                           the apt sources and packages back, start the
@@ -387,12 +395,232 @@ session_check() {
 	# Started with nohup (SIGHUP ignored) or without a terminal (nothing to hang up).
 	if trap -p HUP | grep -q "''"; then return 0; fi
 	if ! (: < /dev/tty) 2> /dev/null; then return 0; fi
+	if [ -n "$CHECK_ONLY" ] && [ -z "$NO_TMUX" ]; then
+		if [ -z "$SELF_FILE" ]; then
+			# Through curl | bash the run uses the copy of the release tag, which
+			# may be older than this feature.
+			say "Through curl | bash the command runs the copy of ${TAG:-$DEFAULT_TAG}. If that release does not"
+			say "start tmux by itself yet, start the command inside tmux: tmux new -s $TMUX_SESSION"
+			return 0
+		fi
+		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
+		say "(tmux is installed if needed; reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+		return 0
+	fi
 	warn "This does not run inside tmux or screen. If your SSH connection drops, a release
 upgrade or setup stops halfway (a release upgrade stopped in the middle can leave the
 machine unbootable; a Nextcloud upgrade stopped in the middle stays in maintenance mode).
-Better: apt-get install tmux; tmux new -s upgrade; run the command there
-(reattach after a disconnect with: tmux attach -t upgrade)."
+Better: install tmux (apt-get install tmux) and run the command again without --no-tmux:
+it then runs itself in tmux (reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue without tmux or screen?"; fi
+}
+
+# A command that changes something, started from a terminal outside tmux and
+# screen, runs itself in a tmux session (or screen) of its own: a dropped SSH
+# connection then only ends the terminal that is attached to it. Not with
+# --no-tmux, --check or --resumed, not without a terminal (automation, nohup)
+# and not without a script file. Needs tmux 3.0 or later (a command with
+# arguments). Keep in sync with tools/migrate-to-2604.sh.
+
+mux_has() { # TOOL: is there a session named $TMUX_SESSION?
+	case "$1" in
+		tmux) tmux has-session -t "=$TMUX_SESSION" 2> /dev/null ;;
+		# screen -ls exits with 1 even when it lists sessions (pipefail).
+		screen) { screen -ls 2> /dev/null || true; } | grep -qE "^[[:space:]]+[0-9]+\.${TMUX_SESSION}[[:space:]]" ;;
+	esac
+}
+
+# The process in the session's window: the shell of mux_start or of the
+# resume unit.
+mux_pane_pid() { # TOOL
+	local p
+	case "$1" in
+		tmux) tmux list-panes -t "=$TMUX_SESSION" -F '#{pane_pid}' 2> /dev/null | head -n 1 ;;
+		screen)
+			p=$({ screen -ls 2> /dev/null || true; } | sed -nE "s/^[[:space:]]+([0-9]+)\.${TMUX_SESSION}[[:space:]].*/\1/p" | head -n 1)
+			if [ -n "$p" ]; then pgrep -P "$p" | head -n 1; fi
+			;;
+	esac
+}
+
+# Is the session a window of this tool whose command has ended, so that it
+# only waits for Enter? Its shell has no child process then.
+mux_finished() { # TOOL
+	local p
+	p=$(mux_pane_pid "$1" || true)
+	[ -n "$p" ] || return 1
+	grep -qa 'Press Enter to close this window' "/proc/$p/cmdline" 2> /dev/null || return 1
+	[ -z "$(pgrep -P "$p" || true)" ]
+}
+
+mux_kill() { # TOOL
+	case "$1" in
+		tmux) tmux kill-session -t "=$TMUX_SESSION" ;;
+		screen) screen -S "$TMUX_SESSION" -X quit ;;
+	esac > /dev/null 2>&1 || true
+}
+
+# The terminal type to attach with. tmux and screen need its terminfo entry,
+# which a server often lacks (xterm-ghostty, xterm-kitty, ...). Prints
+# nothing for a terminal they cannot use.
+mux_term() {
+	local t
+	case "${TERM:-dumb}" in dumb | unknown) return 0 ;; esac
+	if ! command -v tput > /dev/null; then
+		echo "$TERM"
+		return 0
+	fi
+	for t in "$TERM" xterm-256color; do
+		if tput -T "$t" clear > /dev/null 2>&1 && tput -T "$t" cup 0 0 > /dev/null 2>&1; then
+			echo "$t"
+			return 0
+		fi
+	done
+}
+
+# Attach this terminal (also when stdin is the curl pipe). tmux refuses the
+# name /dev/tty, so the terminal's own device. screen -d -r: a client of a
+# dropped SSH connection may still count as attached.
+mux_attach() { # TOOL
+	local t
+	t=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
+	case "$t" in '' | '?') t=/dev/tty ;; *) t=/dev/$t ;; esac
+	# shellcheck disable=SC2094 # a terminal, not a file
+	case "$1" in
+		tmux) TERM=${MUX_TERM:-${TERM:-}} tmux attach-session -t "=$TMUX_SESSION" ;;
+		screen) TERM=${MUX_TERM:-${TERM:-}} screen -d -r "$TMUX_SESSION" ;;
+	esac < "$t" > "$t" 2>&1
+}
+
+# Start the session; the window stays open after the command until Enter is
+# pressed, and the exit code is kept in RC_FILE.
+mux_start() { # TOOL RC_FILE HINT ARGS...
+	local tool=$1 rc_file=$2 hint=$3 v scope=() env_file=$STATE_DIR/.multiplexer-env
+	shift 3
+	# A tmux server that runs already gives a new session its own environment,
+	# not this one: pass what the script reads, and unset what is not set here.
+	# In a file, not on the command line (ps shows that to every user, and
+	# SOURCE may hold a token).
+	rm -f "$rc_file" "$env_file"
+	(
+		umask 077
+		for v in PATH HOME LANG LC_ALL "${MUX_ENV[@]}"; do
+			if [ -n "${!v+x}" ]; then printf 'export %s=%q\n' "$v" "${!v}"; else printf 'unset %s\n' "$v"; fi
+		done > "$env_file"
+		echo 'export MIAB_2604_MUX=1' >> "$env_file"
+	) || return 1
+	# trap : INT: Ctrl-C stops the command, but not this shell (bash ends
+	# itself after a child that died of SIGINT), so the window stays open.
+	# shellcheck disable=SC2016 # expanded by that bash
+	local cmd=(bash -c '
+trap : INT QUIT
+rc_file=$1 hint=$2 env_file=$3
+shift 3
+if ! . "$env_file"; then
+	echo "Could not read $env_file. Press Enter to close this window."
+	read -r _
+	exit 1
+fi
+rm -f "$env_file"
+printf "%s\n\n" "$hint"
+"$@"
+rc=$?
+echo "$rc" > "$rc_file"
+echo
+echo "The command ended with exit code $rc. Press Enter to close this window."
+read -r _
+exit "$rc"' mux "$rc_file" "$hint" "$env_file" bash "$SELF_FILE" "$@")
+	case "$tool" in
+		tmux)
+			# In a scope of its own (like the resume unit): logind must not end the
+			# tmux server with the SSH session (KillUserProcesses=yes).
+			if command -v systemd-run > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
+				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$" --)
+				"${scope[@]}" tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			fi
+			tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			;;
+		screen) screen -dmS "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0 ;;
+	esac
+	rm -f "$env_file"
+	return 1
+}
+
+run_in_multiplexer() { # ARGS (the original arguments)
+	[ -z "$NO_TMUX$CHECK_ONLY${RESUMED:-}${MIAB_2604_MUX:-}" ] || return 0
+	[ -n "$SELF_FILE" ] || return 0
+	in_multiplexer && return 0
+	if trap -p HUP | grep -q "''"; then return 0; fi
+	(: < /dev/tty) 2> /dev/null || return 0
+	MUX_TERM=$(mux_term)
+	if [ -z "$MUX_TERM" ]; then
+		say "tmux cannot use this terminal (TERM=${TERM:-}); running without it."
+		return 0
+	fi
+	local tool='' again rc rc_file=$STATE_DIR/.multiplexer-exit-code pre=''
+	if command -v tmux > /dev/null; then
+		tool=tmux
+	else
+		say "Installing tmux, so that this run survives a dropped SSH connection..."
+		if install_tmux && command -v tmux > /dev/null; then
+			tool=tmux
+		elif command -v screen > /dev/null; then
+			warn "Could not install tmux; using screen."
+			tool=screen
+		else
+			warn "Could not install tmux."
+			return 0
+		fi
+	fi
+	if [ "$MUX_TERM" != "${TERM:-}" ]; then pre="TERM=$MUX_TERM "; fi
+	if [ -n "${SUDO_USER:-}" ]; then pre+="sudo "; fi
+	case "$tool" in
+		tmux) again="${pre}tmux attach -t $TMUX_SESSION" ;;
+		screen) again="${pre}screen -d -r $TMUX_SESSION" ;;
+	esac
+	if mux_has "$tool" && mux_finished "$tool"; then
+		say "The window of an earlier run in the $tool session $TMUX_SESSION only waits for Enter"
+		say "(its output is in $LOG_FILE). Closing it and starting this run."
+		mux_kill "$tool"
+		sleep 1
+	fi
+	if mux_has "$tool"; then
+		say "Something still runs in the $tool session $TMUX_SESSION (an earlier run?)."
+		say "This command is NOT started; attaching to that session instead."
+		sleep 3
+		mux_attach "$tool" || warn "Could not attach this terminal; attach with: $again"
+		trap - EXIT
+		say "This command was NOT run, because the $tool session $TMUX_SESSION was in use."
+		say "Run it again when the run there has ended."
+		exit 1
+	fi
+	local hint="This runs in the $tool session $TMUX_SESSION and goes on if the SSH connection drops.
+Then ssh in again and run: $again"
+	if [ "$tool" = tmux ]; then hint+="     (detach without stopping it: Ctrl-b d)"; else hint+="     (detach: Ctrl-a d)"; fi
+	if ! mux_start "$tool" "$rc_file" "$hint" "$@"; then
+		warn "Could not start a $tool session; continuing without it."
+		return 0
+	fi
+	say "$hint"
+	local attached=1
+	mux_attach "$tool" || attached=''
+	# The output stays in the session; this process ends here.
+	trap - EXIT
+	if mux_has "$tool"; then
+		if [ -n "$attached" ]; then
+			say "Detached. The run goes on in the $tool session $TMUX_SESSION; back to it with: $again"
+		else
+			warn "Could not attach this terminal. The run goes on in the $tool session $TMUX_SESSION; attach with: $again"
+		fi
+		exit 0
+	fi
+	rc=$(cat "$rc_file" 2> /dev/null || true)
+	if ! [[ $rc =~ ^[0-9]+$ ]]; then
+		say "The $tool session $TMUX_SESSION has ended (the output is in $LOG_FILE)."
+		exit 1
+	fi
+	say "The run in the $tool session ended with exit code $rc (the output is in $LOG_FILE)."
+	exit "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -703,6 +931,21 @@ install_packages() {
 	apt_get -q install "$@" || die "Could not install $*."
 }
 
+# For run_in_multiplexer. Not while a release upgrade is half-way (packages
+# and sources between two releases), and only if nothing is upgraded or
+# removed for it. A failure only means: no tmux. Quickly or not at all, and
+# not with wait_apt_locks (its die would only end this function).
+install_tmux() {
+	if [ "$(state_get RELEASE_STARTED)" = 1 ] && ! phase_is_done release_2604; then return 1; fi
+	apt_locks_free || { sleep 15 && apt_locks_free; } || return 1
+	(
+		apt-get -q -q -o DPkg::Lock::Timeout=30 update < /dev/null > /dev/null 2>&1 || exit 1
+		if apt-get -s install tmux < /dev/null 2> /dev/null | grep -qE '^(Remv |Inst [^ ]+ \[)'; then exit 1; fi
+		DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=30 -o Dpkg::Options::=--force-confdef \
+			-o Dpkg::Options::=--force-confold install tmux < /dev/null > /dev/null 2>&1
+	)
+}
+
 # The packages "apt-get -s purge" would remove, one per line.
 purge_simulation() {
 	apt-get -s purge "$@" < /dev/null 2> /dev/null | sed -n 's/^Purg \([^ ]*\).*/\1/p'
@@ -782,6 +1025,20 @@ checkout_dir() { # the checkout this script runs from, if any
 # clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
 # in tools/migrate-to-2604.sh, with the script name and the directory as
 # parameters, and the branch main as the fallback when the tag lacks SCRIPT.)
+# A release tag older than run_in_multiplexer does not start tmux by itself:
+# say so before its copy runs (its own check only asks without --yes). Keep
+# in sync with tools/migrate-to-2604.sh.
+warn_no_auto_tmux() { # FILE TAG
+	grep -q '^run_in_multiplexer()' "$1" 2> /dev/null && return 0
+	[ -z "$NO_TMUX$CHECK_ONLY" ] || return 0
+	in_multiplexer && return 0
+	(: < /dev/tty) 2> /dev/null || return 0
+	warn "The downloaded $2 does not start tmux by itself yet (TAG=main does). If your SSH
+connection drops outside tmux or screen, the run stops halfway. Better: stop now
+(Ctrl-C), run tmux new -s $TMUX_SESSION and start the command again in there."
+	sleep 5
+}
+
 reexec_from_clone() { # SCRIPT DIR ARGS...
 	local script=$1 d=$2 source=${SOURCE:-$DEFAULT_SOURCE} tag=${TAG:-$DEFAULT_TAG}
 	shift 2
@@ -808,6 +1065,7 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 	[ -f "$d/tools/$script" ] || die "Could not download tools/$script from $source ($tag).
 Download the script to a file and run it from there:
   $how"
+	warn_no_auto_tmux "$d/tools/$script" "$tag"
 	UPGRADE_REEXEC=1 exec bash "$d/tools/$script" "$@"
 }
 
@@ -826,15 +1084,25 @@ install_self() {
 	fi
 }
 
-# Only one run at a time (the resume unit and an operator could both start one).
-take_lock() {
+# The PID of another run of this script that is active, if any.
+active_run_pid() {
 	local pid
 	pid=$(cat "$STATE_DIR/pid" 2> /dev/null || true)
 	if [ -n "$pid" ] && [ "$pid" != "$$" ] && kill -0 "$pid" 2> /dev/null \
 		&& grep -qa "$SCRIPT_NAME" "/proc/$pid/cmdline" 2> /dev/null; then
+		echo "$pid"
+	fi
+	return 0
+}
+
+# Only one run at a time (the resume unit and an operator could both start one).
+take_lock() {
+	local pid
+	pid=$(active_run_pid)
+	if [ -n "$pid" ]; then
 		IN_DIE=1
 		die "Another run of $SCRIPT_NAME is active (PID $pid). Follow it with:
-  tmux attach -t $TMUX_SESSION     (if it was started after a reboot)
+  tmux attach -t $TMUX_SESSION     (sudo tmux ... if you are not root)
   tail -f $LOG_FILE"
 	fi
 	echo $$ > "$STATE_DIR/pid"
@@ -1429,7 +1697,7 @@ check_summary() {
 	session_check
 	if [ ${#CHECK_BLOCKERS[@]} -eq 0 ]; then
 		say "No blockers found. Nothing was changed."
-		say "Start the upgrade (inside tmux or screen) with:"
+		say "Start the upgrade with:"
 		say "  $(start_command)"
 		exit 0
 	fi
@@ -2056,7 +2324,7 @@ if command -v systemd-run > /dev/null 2>&1; then SCOPE=(systemd-run --scope --qu
 if command -v tmux > /dev/null 2>&1; then
 	if tmux has-session -t "$SESSION" 2> /dev/null; then exit 0; fi
 	"${SCOPE[@]}" tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-		"$CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
+		"trap : INT QUIT; $CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
 	exit 0
 fi
 eval "exec ${SCOPE[*]} $CMD"
@@ -3218,7 +3486,7 @@ do_check() {
 
 main() {
 	ASSUME_YES='' REDO_FROM='' COMMAND=upgrade VERBOSE='' KEEP_LOCAL='' NO_BACKUP_CHECK=''
-	NO_OFFSITE='' SKIP_MIAB_BACKUP='' CLEANUP='' OLD_CHECKOUT='' RESUMED=''
+	NO_OFFSITE='' SKIP_MIAB_BACKUP='' CLEANUP='' OLD_CHECKOUT='' RESUMED='' NO_TMUX=''
 	local orig_args=("$@")
 
 	while [ $# -gt 0 ]; do
@@ -3235,6 +3503,7 @@ main() {
 			--cleanup) CLEANUP=1; shift ;;
 			--old-checkout) OLD_CHECKOUT=1; shift ;;
 			--yes | -y) ASSUME_YES=1; shift ;;
+			--no-tmux) NO_TMUX=1; shift ;;
 			--check | --dry-run) CHECK_ONLY=1; shift ;;
 			--verbose) VERBOSE=1; shift ;;
 			--cleanup-only) COMMAND=cleanup_only; shift ;;
@@ -3275,6 +3544,9 @@ main() {
 	if [ -z "$SELF_FILE" ]; then
 		reexec_from_clone "$SCRIPT_NAME" "$STATE_DIR/fork" "${orig_args[@]}"
 	fi
+	# From the real file (after the clone), before the lock: the run in the
+	# session takes it. If another run holds it, take_lock says where it is.
+	if [ -z "$(active_run_pid)" ]; then run_in_multiplexer "${orig_args[@]}"; fi
 	take_lock
 	exec > >(tee -a "$LOG_FILE") 2>&1
 	LOG_READY=1
