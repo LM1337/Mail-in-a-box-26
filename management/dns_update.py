@@ -440,16 +440,18 @@ def build_sshfp_records():
 	algorithm_number = {
 		"ssh-rsa": 1,
 		"ecdsa-sha2-nistp256": 3,
+		"ecdsa-sha2-nistp384": 3, # algorithm 3 is ECDSA on any curve (RFC 6594)
+		"ecdsa-sha2-nistp521": 3,
 		"ssh-ed25519": 4,
 	}
 
-	# Read the public halves of the host keys sshd actually uses (the
+	# Get the public halves of the host keys sshd actually uses (the
 	# "hostkey" lines of `sshd -T`). We used to run ssh-keyscan against
 	# localhost, but OpenSSH 9.8+ (26.04 ships 10.x) penalizes sources that
 	# connect and leave without authenticating (PerSourcePenalties noauth),
 	# so repeated DNS updates and status checks got some of the keyscan
 	# connections refused and the SSHFP records came and went in the signed
-	# zone. Reading the files needs no connection and is deterministic.
+	# zone. Reading the keys locally needs no connection and is deterministic.
 
 	# If no port is configured, SSH is probably not installed.
 	if not get_ssh_port():
@@ -457,11 +459,9 @@ def build_sshfp_records():
 
 	keys = []
 	for path in get_ssh_config_values("hostkey"):
-		try:
-			with open(path.strip() + ".pub", encoding="utf8") as f:
-				keys.append(f.read().strip())
-		except OSError:
-			continue
+		key = get_ssh_host_public_key(path.strip())
+		if key:
+			keys.append(key)
 
 	# Sort to prevent spurious zone updates (which bump the serial number).
 	for key in sorted(keys):
@@ -472,10 +472,46 @@ def build_sshfp_records():
 				2, # specifies we are using SHA-256 on next line
 				hashlib.sha256(base64.b64decode(pubkey)).hexdigest().upper(),
 				)
-		except:
+		except (KeyError, ValueError):
 			# Lots of things can go wrong, e.g. a key type without an SSHFP
-			# algorithm number. Don't let it disturb the DNS zone.
+			# algorithm number (KeyError) or a malformed key line (ValueError,
+			# which includes binascii.Error). Don't let it disturb the DNS zone.
 			pass
+
+def get_ssh_host_public_key(path):
+	# Returns the public key ("type base64 [comment]") that sshd serves for
+	# the HostKey at path, or None. Follow sshd's own precedence: sshd
+	# always derives the public key from the private key and ignores a
+	# missing or mismatching .pub file, so a .pub file left over from a
+	# fresh install next to copied-in private keys must not end up in DNS.
+	# With HostKeyAgent, HostKey names the .pub file itself.
+	if not path.endswith(".pub") and not os.path.exists(path):
+		# Without HostKeyAgent, sshd skips a HostKey whose private key is
+		# missing ("Unable to load host key"), so a leftover .pub file next
+		# to it is not served and must not get a record. Only when an agent
+		# holds the private key does sshd serve the key from the .pub alone.
+		agent = get_ssh_config_values("hostkeyagent")
+		if not agent or agent[0].strip().lower() == "none":
+			return None
+	elif not path.endswith(".pub"):
+		# The management daemon and setup run as root and can read the
+		# private key. Host keys are unencrypted; -P '' and an empty stdin
+		# keep ssh-keygen from ever waiting for a passphrase.
+		try:
+			code, out = shell("check_output", ["ssh-keygen", "-y", "-P", "", "-f", path],
+				input=b"", trap=True)
+		except OSError:
+			# ssh-keygen is not installed.
+			code, out = 1, ""
+		if code == 0 and out.strip():
+			return out.strip().split("\n")[0]
+
+	# Fall back to the public key file.
+	try:
+		with open(path if path.endswith(".pub") else path + ".pub", encoding="utf8") as f:
+			return f.read().strip() or None
+	except OSError:
+		return None
 
 ########################################################################
 
