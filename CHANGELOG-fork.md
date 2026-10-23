@@ -6,6 +6,10 @@ See CHANGELOG.md for upstream's own history.
 
 ## Unreleased
 
+### New
+
+* `tools/migrate-to-2604.sh` moves a box (upstream v68+ on Ubuntu 22.04, or a 24.04 in-place upgrade) to a fresh Ubuntu 26.04 machine in one command: `--check` dry run with downtime estimate and port 25/Spamhaus/PTR checks, live rsync, optional `--rehearse`, stop of the old box (services, sockets, cron and apt timers masked until reboot), wait for open files, final rsync, setup, user-ID mapping, checks and DNS next steps (`--push-zones-to-old` shortens the glue switch); resumable, backups paused until verified, with `--rollback`, `--status`, `--check-old`, `--finish` and `--from-backup` (see README-fork.md).
+
 ### Fixes
 
 * Bootstrap accepts Ubuntu 26.04 and installs from the fork.
