@@ -661,14 +661,15 @@ apt_get() {
 # Wait (at most 10 minutes) until nobody holds the dpkg or apt lists locks.
 # DPkg::Lock::Timeout does not cover the lists lock of "apt-get update", and
 # do-release-upgrade does not wait at all.
-wait_apt_locks() {
-	local i
-	for i in $(seq 60); do
-		if python3 -I - <<'PY' 2> /dev/null; then return 0; fi
-import fcntl, sys
+# Are the dpkg and apt locks free? (A test lock, released at once; no file is
+# created, so --check changes nothing. Not pgrep: unattended-upgrade-shutdown
+# --wait-for-signal runs on every Ubuntu server and holds no lock.)
+apt_locks_free() {
+	python3 -I - <<'PY' 2> /dev/null
+import fcntl, os, sys
 for f in ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lists/lock", "/var/cache/apt/archives/lock"):
 	try:
-		fd = open(f, "a")
+		fd = os.open(f, os.O_WRONLY)
 	except OSError:
 		continue
 	try:
@@ -676,11 +677,19 @@ for f in ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lis
 		fcntl.lockf(fd, fcntl.LOCK_UN)
 	except OSError:
 		sys.exit(1)
+	finally:
+		os.close(fd)
 PY
+}
+
+wait_apt_locks() {
+	local i
+	for i in $(seq 60); do
+		if apt_locks_free; then return 0; fi
 		if [ "$i" = 1 ]; then say "Waiting for apt/dpkg (another package run holds its lock)..."; fi
 		sleep 10
 	done
-	die "apt/dpkg stays locked for 10 minutes ($(pgrep -a -x 'apt|apt-get|dpkg|unattended-upgr' | tr '\n' ' ')). Run the command again when it is free."
+	die "apt/dpkg stays locked for 10 minutes ($(pgrep -a -x 'apt|apt-get|aptitude|dpkg' | tr '\n' ' ')). Run the command again when it is free."
 }
 
 apt_update() {
@@ -907,7 +916,7 @@ remove old kernels first (apt autoremove --purge)."
 
 # The package manager must be idle and consistent.
 check_apt_state() {
-	if pgrep -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' > /dev/null || [ "${F[APT_BUSY]:-0}" = 1 ]; then
+	if ! apt_locks_free || [ "${F[APT_BUSY]:-0}" = 1 ]; then
 		blocker "The package manager is busy (apt, dpkg or unattended-upgrades). Wait until it is finished."
 	fi
 	local audit
@@ -1015,9 +1024,24 @@ sury_packages() {
 }
 PHP_NAME_RE='(php|libapache2-mod-php|libphp)[0-9a-z.+-]*(:[a-z0-9]+)?'
 
+# Build tools that only exist for PHP (php8.0-dev from ppa:ondrej pulls in
+# pkg-php-tools): removed with it.
+PHP_TOOLING_RE='(pkg-php-tools|dh-php|dh-sequence-php|php-pear|composer|jsonlint)(:[a-z0-9]+)?'
+
+# The PHP packages of ppa:ondrej, dovecot-antispam, and the PHP packages and
+# tooling that apt would remove with them (named, so that their .deb files are
+# saved for --rollback).
 purge_set() {
-	sury_packages | grep -Ex "$PHP_NAME_RE" || true
-	if pkg_installed dovecot-antispam; then echo dovecot-antispam; fi
+	local base=()
+	mapfile -t base < <(
+		sury_packages | grep -Ex "$PHP_NAME_RE" || true
+		if pkg_installed dovecot-antispam; then echo dovecot-antispam; fi
+	)
+	[ ${#base[@]} -gt 0 ] || return 0
+	{
+		printf '%s\n' "${base[@]}"
+		purge_simulation "${base[@]}" | grep -Ex "$PHP_NAME_RE|$PHP_TOOLING_RE" || true
+	} | awk '!seen[$0]++'
 }
 downgrade_set() { sury_packages | grep -Evx "$PHP_NAME_RE" || true; }
 
@@ -1026,7 +1050,12 @@ check_purge() {
 	mapfile -t purge < <(purge_set)
 	[ ${#purge[@]} -gt 0 ] || return 0
 	say "Removed before the release upgrade (from ppa:ondrej or obsolete): ${purge[*]}"
-	extra=$(purge_simulation "${purge[@]}" | grep -Evx "$PHP_NAME_RE|dovecot-antispam" || true)
+	local tooling
+	tooling=$(printf '%s\n' "${purge[@]}" | grep -Ex "$PHP_TOOLING_RE" | tr '\n' ' ' || true)
+	if [ -n "$tooling" ]; then
+		warn "Also removed (PHP tooling that needs the PHP of ppa:ondrej): $tooling"
+	fi
+	extra=$(purge_simulation "${purge[@]}" | grep -Evx "$PHP_NAME_RE|$PHP_TOOLING_RE|dovecot-antispam" || true)
 	if [ -n "$extra" ]; then
 		blocker "Removing the PHP packages of ppa:ondrej would also remove:
 $(sed 's/^/  /' <<< "$extra")
@@ -1130,6 +1159,14 @@ load_dovecot_files() {
 		DPKG_OWNED[$f]=1
 		DPKG_MD5[$f]=$sum
 	done < <(dpkg-query -W -f='${Conffiles}\n' "${pkgs[@]}" 2> /dev/null | grep '^ /etc/dovecot/' || true)
+	# Ubuntu's Dovecot packages install dovecot.conf and most of conf.d with
+	# ucf, not as dpkg conffiles; the ucf registry names them. They count as
+	# the package's, unchanged: ucf's hash file holds the checksum of the newest
+	# packaged version, which differs from a file an earlier release upgrade
+	# kept, so it cannot tell changes by hand.
+	while read -r _ f; do
+		if [[ $f == /etc/dovecot/* ]]; then DPKG_OWNED[$f]=1; fi
+	done < <(cat /var/lib/ucf/registry 2> /dev/null || true)
 }
 
 # What is on this box that Mail-in-a-Box does not manage. Fills EXT_BLOCK
@@ -1942,6 +1979,11 @@ phase_prepare_release() {
 		done
 		state_add PURGED_PACKAGES "${purge[@]}"
 		state_add SWITCHED_PACKAGES "${down[@]}"
+		p=$(printf '%s\n' "${purge[@]}" | grep -Ex "$PHP_TOOLING_RE" | tr '\n' ' ' || true)
+		if [ -n "$p" ]; then
+			state_add PHP_TOOLING_REMOVED $p
+			warn "Also removed (PHP tooling): $p"
+		fi
 	fi
 
 	say "Disabling the third-party package sources (kept in $APT_DISABLED):"
@@ -1950,7 +1992,7 @@ phase_prepare_release() {
 
 	if [ ${#purge[@]} -gt 0 ]; then
 		say "Removing PHP from ppa:ondrej and obsolete packages: ${purge[*]}"
-		purge_only "$PHP_NAME_RE|dovecot-antispam" "${purge[@]}"
+		purge_only "$PHP_NAME_RE|$PHP_TOOLING_RE|dovecot-antispam" "${purge[@]}"
 	fi
 	if [ ${#down[@]} -gt 0 ]; then
 		for p in "${down[@]}"; do
