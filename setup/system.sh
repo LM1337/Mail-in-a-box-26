@@ -107,6 +107,19 @@ fi
 # come from there and minimal Ubuntu installs may have it turned off.
 hide_output add-apt-repository -y universe
 
+# A box upgraded in place still has the PPA sources of its earlier releases
+# (disabled by do-release-upgrade, also as *.distUpgrade copies) and their keys
+# in trusted.gpg.d, where APT trusts them for every source. ppa:ondrej/php is
+# replaced by deb.sury.org below, the duplicity PPA is added again for this
+# release (In-Place 6).
+CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-* /etc/apt/trusted.gpg.d/ondrej-ubuntu-php*.gpg*
+for f in /etc/apt/sources.list.d/duplicity-team-ubuntu-duplicity-release-git-*; do
+	[ -e "$f" ] || continue
+	case "$f" in *-"$CODENAME".list|*-"$CODENAME".sources) ;; *) rm -f "$f" ;; esac
+done
+rm -f /etc/apt/trusted.gpg.d/duplicity-team-ubuntu-duplicity-release-git*.gpg*
+
 # Install the duplicity PPA.
 hide_output add-apt-repository -y ppa:duplicity-team/duplicity-release-git
 
@@ -162,10 +175,11 @@ hide_output apt-get update --allow-releaseinfo-change
 # from sury, whose versions sort higher than Ubuntu's. A pin never downgrades
 # installed packages, so they would get updates from neither repository. Move
 # every installed sury build that is not on the allow-list back to the newest
-# version Ubuntu has (sury versions end in "+ubuntuXX.YY~N.gbpHASH").
+# version Ubuntu has (sury versions end in "+ubuntuXX.YY~N.gbpHASH", the
+# Launchpad builds of ppa:ondrej on older boxes in "+deb.sury.org+N").
 SURY_TO_UBUNTU=()
 for pkg in $(dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' \
-		| awk '$1 == "ii" && $3 ~ /\+0~[0-9]+\.[0-9]+\+ubuntu[0-9.]+~[0-9]+\.gbp[0-9a-f]+$/ {print $2}' \
+		| awk '$1 == "ii" && ($3 ~ /\+0~[0-9]+\.[0-9]+\+ubuntu[0-9.]+~[0-9]+\.gbp[0-9a-f]+$/ || $3 ~ /\+deb\.sury\.org\+[0-9]+$/) {print $2}' \
 		| grep -Evx "php-common|php${PHP_LEGACY_VER/./\\.}(-.*)?|php${PHP_VER/./\\.}-imap"); do
 	ver=$(apt-cache madison "$pkg" | awk -F' [|] ' '$3 !~ /packages\.sury\.org/ && v == "" {v = $2} END {print v}')
 	if [ -n "$ver" ]; then SURY_TO_UBUNTU+=("$pkg=$ver"); fi
