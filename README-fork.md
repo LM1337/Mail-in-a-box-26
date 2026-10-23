@@ -217,7 +217,9 @@ To know it better and to shorten it:
 * `--rehearse` runs setup once on the live copy while the old box keeps
   running. It installs the packages ahead of time and measures how long
   setup takes. Cron and the backups stay off on the new machine during the
-  rehearsal, and its services are stopped again afterwards. The switch-over
+  rehearsal, and its services are stopped and disabled again afterwards, so
+  that a reboot does not start them; every later copy pauses the backups
+  there again. The switch-over
   copies the data again and runs setup once more, now without the package
   installation.
 * Or rehearse the whole migration against a snapshot of the new VM, measure
@@ -363,10 +365,13 @@ filter (Bayes) and the greylisting database are taken over as they are.
 box. Use it when the new box does not work and you want the old one back,
 best before you change DNS.
 
-It stops and disables the Mail-in-a-Box services on the new machine (they
-are enabled again by the next attempt), pauses its backups, puts the old
-box's own zone files back if `--push-zones-to-old` ran, unmasks the services
-on the old box and starts them again.
+It pauses the backups on the new machine, stops and disables its
+Mail-in-a-Box services (they are enabled again by the next attempt) and ends
+a backup that still runs there after a minute. It puts the old box's own zone
+files back if `--push-zones-to-old` ran, sets `virtual_transport` on the old
+box back (to the Mail-in-a-Box default `lmtp:[127.0.0.1]:10025` if the saved
+value points to the new machine) and stops a Postfix started there by hand
+(the queue hint of the stop), unmasks the services on the old box and starts them again.
 
 * If DNS was changed already, change the glue or A/AAAA records back.
 * Mail that reached the new box after a DNS switch is **not** copied back
@@ -588,7 +593,9 @@ Um das genauer zu wissen und abzukürzen:
 * `--rehearse` führt das Setup einmal auf der Kopie aus, während die alte
   Box weiterläuft. Es installiert die Pakete vorab und misst, wie lange das
   Setup dauert. Cron und Sicherungen bleiben auf der neuen Maschine während
-  des Probelaufs aus, ihre Dienste werden danach wieder angehalten. Die
+  des Probelaufs aus, ihre Dienste werden danach wieder angehalten und
+  deaktiviert, damit ein Neustart sie nicht startet; jede spätere Kopie
+  pausiert die Sicherungen dort erneut. Die
   Umschaltung kopiert die Daten erneut und führt das Setup noch einmal aus,
   dann ohne Paketinstallation.
 * Oder den ganzen Umzug gegen einen Snapshot der neuen VM proben, die Zeit
@@ -746,11 +753,15 @@ neuen Schlüssel. Spamfilter (Bayes) und Greylisting-Datenbank werden so
 zurück. Gedacht ist es für den Fall, dass die neue Box nicht funktioniert und
 die alte wieder laufen soll, am besten vor der DNS-Umstellung.
 
-Es hält die Mail-in-a-Box-Dienste auf der neuen Maschine an und deaktiviert
-sie (der nächste Versuch aktiviert sie wieder), pausiert deren Sicherungen,
-legt die eigenen Zonendateien der alten Box zurück, falls
-`--push-zones-to-old` lief, hebt die Sperre der Dienste auf der alten Box auf
-und startet sie wieder.
+Es pausiert die Sicherungen auf der neuen Maschine, hält deren
+Mail-in-a-Box-Dienste an und deaktiviert sie (der nächste Versuch aktiviert
+sie wieder) und beendet nach einer Minute eine Sicherung, die dort noch
+läuft. Es legt die eigenen Zonendateien der alten Box zurück, falls
+`--push-zones-to-old` lief, setzt `virtual_transport` auf der alten Box
+zurück (auf den Mail-in-a-Box-Standard `lmtp:[127.0.0.1]:10025`, falls der
+gesicherte Wert auf die neue Maschine zeigt) und hält ein dort von Hand gestartetes Postfix an (der Hinweis zur
+Warteschlange beim Anhalten), hebt die Sperre der Dienste auf der alten Box
+auf und startet sie wieder.
 
 * Wurde DNS schon umgestellt, die Glue- oder A/AAAA-Einträge zurückändern.
 * Mails, die nach einer DNS-Umstellung auf der neuen Box angekommen sind,

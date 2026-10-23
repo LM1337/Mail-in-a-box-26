@@ -630,6 +630,21 @@ systemctl stop $UNITS || echo "STOPFAILED"
 EOF
 )
 
+# --rollback: set virtual_transport back to VT (if given) and stop a Postfix
+# that runs outside systemd (both from the queue hint in handle_old_queue).
+OLD_POSTFIX_RESET_SCRIPT=$(cat <<'EOF'
+if [ -n "$VT" ] && command -v postconf > /dev/null; then
+	cur=$(postconf -h virtual_transport 2> /dev/null || true)
+	if [ "$cur" != "$VT" ]; then postconf -e "virtual_transport = $VT" && echo "VTFIXED $cur"; fi
+fi
+if command -v postfix > /dev/null && postfix status > /dev/null 2>&1 \
+	&& ! systemctl is-active --quiet postfix@-.service && ! systemctl is-active --quiet postfix.service; then
+	postfix stop > /dev/null 2>&1 && echo "PFSTOPPED"
+fi
+true
+EOF
+)
+
 OLD_START_SCRIPT=$(cat <<'EOF'
 for u in $UNITS; do systemctl unmask --runtime --quiet "$u" 2> /dev/null || true; done
 systemctl start $START
@@ -668,7 +683,11 @@ echo "NC_ACCOUNTS=$(q "$nc" "SELECT count(*) FROM ${p}accounts;")"
 # Only the users' own address books: Nextcloud keeps a system address book of
 # all accounts (principals/system/system) that newer versions fill differently.
 echo "NC_CARDS=$(q "$nc" "SELECT count(*) FROM ${p}cards c JOIN ${p}addressbooks a ON c.addressbookid = a.id WHERE a.principaluri NOT LIKE 'principals/system/%';")"
-echo "NC_EVENTS=$(q "$nc" "SELECT count(*) FROM ${p}calendarobjects o JOIN ${p}calendars c ON o.calendarid = c.id WHERE c.uri <> 'contact_birthdays';")"
+# Only objects of real calendars that are not in the trash: the cached objects
+# of webcal subscriptions (calendartype 1, calendarid is a subscription id) and
+# the trash change with Nextcloud's background jobs (calendartype and the
+# deleted_at columns exist since Nextcloud 22; the old box runs 26 or later).
+echo "NC_EVENTS=$(q "$nc" "SELECT count(*) FROM ${p}calendarobjects o JOIN ${p}calendars c ON o.calendarid = c.id AND o.calendartype = 0 WHERE c.uri <> 'contact_birthdays' AND o.deleted_at IS NULL AND c.deleted_at IS NULL;")"
 EOF
 )
 
@@ -1431,9 +1450,12 @@ Then MX/NS records, the TLS certificate and all clients must be changed as well.
 # Making sure nothing writes to $STORAGE_ROOT while it is copied.
 
 # Wait until no process on the old box (old) or here (local) uses $STORAGE_ROOT.
+# "rollback" (local only): wait at most a minute, then end this machine's
+# backup jobs and only warn about the rest, so that the old box is not left down.
 wait_quiet() {
-	local where=$1 label out start now shown=0
+	local where=$1 mode=${2:-} label out start now shown=0 timeout=$QUIET_TIMEOUT
 	if [ "$where" = old ]; then label="on the old box"; else label="on this machine"; fi
+	if [ "$mode" = rollback ] && [ "$timeout" -gt 60 ]; then timeout=60; fi
 	start=$(date +%s)
 	while :; do
 		if [ "$where" = old ]; then
@@ -1447,14 +1469,33 @@ wait_quiet() {
 			return 0
 		fi
 		now=$(date +%s)
-		if [ $((now - start)) -ge "$QUIET_TIMEOUT" ]; then
-			die "These processes $label still use $STORAGE_ROOT after $(fmt_dur "$QUIET_TIMEOUT") (PID, why, command):
+		if [ "$mode" = rollback ] && [ $((now - start)) -ge "$timeout" ]; then
+			# The old box takes over the backup target again: a backup still running
+			# here must not write to it at the same time. Duplicity cleans up an
+			# interrupted backup on its next run.
+			if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
+				warn "Ending the backup that is still running on this machine."
+				pkill -TERM -f 'management/backup\.py|/usr/bin/duplicity' || true
+				sleep 10
+				pkill -KILL -f 'management/backup\.py|/usr/bin/duplicity' || true
+				sleep 2
+			fi
+			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' || true)
+			if [ -n "$out" ]; then
+				warn "These processes on this machine still use $STORAGE_ROOT (PID, why, command):
+$out
+The rollback copies nothing here, so it continues. End them before the next attempt."
+			fi
+			return 0
+		fi
+		if [ $((now - start)) -ge "$timeout" ]; then
+			die "These processes $label still use $STORAGE_ROOT after $(fmt_dur "$timeout") (PID, why, command):
 $out
 Copying now could take over half-written databases. Let them finish (or end them),
 then run the command again."
 		fi
 		if [ "$shown" = 0 ] || [ $(((now - start) % 120)) -lt 10 ]; then
-			say "Waiting until nothing $label uses $STORAGE_ROOT any more (at most $(fmt_dur "$QUIET_TIMEOUT")):"
+			say "Waiting until nothing $label uses $STORAGE_ROOT any more (at most $(fmt_dur "$timeout")):"
 			say "$out"
 			shown=1
 		fi
@@ -1469,30 +1510,48 @@ local_units() {
 	done
 }
 
+# Disable those of the given units that are enabled, and remember them for
+# local_unquiesce. A masked unit reports "masked-runtime", not "enabled": a
+# unit still masked in /run (by an older run of this script, without a reboot
+# since) is unmasked for the check and the disable, then masked again.
+local_disable() {
+	local u st en=() remask=()
+	for u in "$@"; do
+		st=$(systemctl is-enabled "$u" 2> /dev/null || true)
+		if [ "$st" = masked-runtime ]; then
+			systemctl unmask --runtime --quiet "$u" 2> /dev/null || true
+			remask+=("$u")
+			st=$(systemctl is-enabled "$u" 2> /dev/null || true)
+		fi
+		if [ "$st" = enabled ]; then en+=("$u"); fi
+	done
+	if [ ${#en[@]} -gt 0 ]; then
+		systemctl disable --quiet "${en[@]}" || warn "Could not disable ${en[*]} here."
+	fi
+	for u in "${remask[@]}"; do
+		systemctl mask --runtime --quiet "$u" 2> /dev/null || warn "Could not mask $u here."
+	done
+	[ ${#en[@]} -gt 0 ] || return 0
+	state_set LOCAL_DISABLED "$(echo "$(state_get LOCAL_DISABLED) ${en[*]}" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
+}
+
 # Once setup has run here, nothing here may run while rsync replaces
 # $STORAGE_ROOT: stop the Mail-in-a-Box units and mask them in /run.
-# "disable" also disables them, so that a reboot does not start them (rollback).
+# "disable" also disables them, so that a reboot does not start them; setup
+# (local_unquiesce) enables them again. "rollback" (with "disable") does not
+# stop at processes that still use $STORAGE_ROOT (see wait_quiet).
 local_quiesce() {
-	local units=() u en=()
+	local units=() u
 	mapfile -t units < <(local_units)
 	[ ${#units[@]} -gt 0 ] || return 0
 	say "Stopping the Mail-in-a-Box services on this machine (they are started again by setup)..."
-	if [ "${1:-}" = disable ]; then
-		# Before masking: a masked unit reports "masked-runtime", not "enabled".
-		for u in "${units[@]}"; do
-			if [ "$(systemctl is-enabled "$u" 2> /dev/null || true)" = enabled ]; then en+=("$u"); fi
-		done
-		if [ ${#en[@]} -gt 0 ]; then
-			systemctl disable --quiet "${en[@]}" || warn "Could not disable ${en[*]} here."
-			state_set LOCAL_DISABLED "$(echo "$(state_get LOCAL_DISABLED) ${en[*]}" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
-		fi
-	fi
+	if [ "${1:-}" = disable ]; then local_disable "${units[@]}"; fi
 	for u in "${units[@]}"; do
 		systemctl mask --runtime --quiet "$u" 2> /dev/null || warn "Could not mask $u here."
 	done
 	systemctl stop "${units[@]}" 2> /dev/null || warn "Not all services stopped here: ${units[*]}"
 	state_set LOCAL_MASKED 1
-	wait_quiet local
+	wait_quiet local "${2:-}"
 }
 
 local_unquiesce() {
@@ -1626,6 +1685,8 @@ run_rsync() { # live|final
 		esac
 		break
 	done
+	# Also after a failed copy: it may already have replaced the paused custom.yaml.
+	repause_backups
 
 	local n
 	n=$(sed -n 's/^Number of files: \([0-9,]*\) .*/\1/p' "$STATE_DIR/rsync-$mode.txt" 2> /dev/null | tr -d , | tail -n 1)
@@ -1657,7 +1718,8 @@ run_rsync() { # live|final
 
 phase_sync_live() {
 	section "Copying $STORAGE_ROOT while the old box is running"
-	if local_needs_quiesce; then local_quiesce; fi
+	# Disabled as well: a reboot before the switch-over must not start them on the copy.
+	if local_needs_quiesce; then local_quiesce disable; fi
 	say "This is the long part. It can be interrupted and resumed: just run the command again."
 	run_rsync live
 	phase_mark_done sync_live
@@ -1746,7 +1808,7 @@ phase_sync_final() {
 		stop_old_units "$(state_get OLD_SERVICES)"
 	fi
 	wait_quiet old
-	if local_needs_quiesce; then local_quiesce; fi
+	if local_needs_quiesce; then local_quiesce disable; fi
 
 	# The users and groups and /etc once more, now that nothing changes on the old box.
 	save_old_users
@@ -1808,6 +1870,19 @@ pause_backups() {
 	chmod 600 "$b/custom.yaml"
 	state_set BACKUPS_PAUSED 1
 	say "Backups are paused on this machine until the migration is finished (backup/custom.yaml)."
+}
+
+# A copy (rsync --delete) replaces the paused backup/custom.yaml with the old
+# box's real one and removes custom.yaml.migrate-saved/-none: pause again, with
+# the settings just copied as the saved ones.
+repause_backups() {
+	local b=$STORAGE_ROOT/backup
+	[ "$(state_get BACKUPS_PAUSED)" = 1 ] && [ -d "$b" ] || return 0
+	# Still the paused file (an interrupted copy may have removed only its
+	# marker; the next copy brings the real one).
+	if grep -qs '^# Backups paused by migrate-to-2604\.sh' "$b/custom.yaml"; then return 0; fi
+	rm -f "$b/custom.yaml.migrate-saved" "$b/custom.yaml.migrate-none"
+	pause_backups
 }
 
 resume_backups() {
@@ -1992,7 +2067,7 @@ phase_extras() {
 do_rehearsal() {
 	section "Rehearsal: running setup on the copy (the old box keeps running)"
 	say "Setup runs here on the data copied so far. Cron and the backups stay off here, and"
-	say "the Mail-in-a-Box services here are stopped again afterwards. Nothing on the old box"
+	say "the Mail-in-a-Box services here are stopped and disabled afterwards. Nothing on the old box"
 	say "changes. The switch-over later copies the data again and runs setup once more."
 	confirm "Run the rehearsal now?"
 	prepare_machine
@@ -2002,19 +2077,23 @@ do_rehearsal() {
 	say "Updating the installed packages..."
 	apt-get -q -q update < /dev/null || true
 	DEBIAN_FRONTEND=noninteractive apt-get -q -q -y upgrade < /dev/null || warn "apt-get upgrade failed; setup tries again."
+	# Disabled too, so that a reboot does not start it (local_unquiesce enables it again).
+	local_disable cron.service
 	systemctl mask --runtime --quiet cron.service 2> /dev/null || true
 	systemctl stop cron.service 2> /dev/null || true
 	state_set LOCAL_MASKED 1
 	local rc=0
 	run_setup || rc=$?
 	if [ "$rc" != 0 ]; then
-		local_quiesce
+		local_quiesce disable
 		die "Setup failed during the rehearsal (exit code $rc). Nothing on the old box was changed.
 Fix the cause (see the output above), then run --rehearse again, or continue as usual."
 	fi
 	section "Rehearsal: file owners"
 	map_owners
-	local_quiesce
+	# Disabled as well: the rehearsal upgraded the packages, and a reboot
+	# (new kernel) must not start cron and the services on the copy.
+	local_quiesce disable
 	state_set REHEARSAL_SETUP_SECONDS "$SETUP_SECONDS"
 	state_set REHEARSED_AT "$(date -u +%FT%TZ)"
 	section "Rehearsal done"
@@ -2339,9 +2418,20 @@ phase_verify() {
 	say
 	if [ -f /usr/local/lib/owncloud/occ ]; then
 		say "Nextcloud:"
-		if ! sudo -u www-data "php$PHP_VER" /usr/local/lib/owncloud/occ status 2> /dev/null | sed 's/^/  /'; then
-			VERIFY_PROBLEMS+=("'occ status' failed")
-		fi
+		# -e: exit code 1 in maintenance mode, 2 if 'occ upgrade' is needed (and
+		# without -v occ status would then print nothing).
+		local nc_rc=0 nc_out
+		nc_out=$(sudo -u www-data "php$PHP_VER" /usr/local/lib/owncloud/occ status -e -v 2> /dev/null) || nc_rc=$?
+		if [ -n "$nc_out" ]; then sed 's/^/  /' <<< "$nc_out"; fi
+		# Exit code 1 is also any other occ failure: check the output.
+		if [ "$nc_rc" = 1 ] && ! grep -q 'maintenance: true' <<< "$nc_out"; then nc_rc=failed; fi
+		case "$nc_rc" in
+			0) ;;
+			1) VERIFY_PROBLEMS+=("Nextcloud is in maintenance mode (find out why, then 'occ maintenance:mode --off')") ;;
+			2) VERIFY_PROBLEMS+=("Nextcloud needs 'occ upgrade'") ;;
+			failed) VERIFY_PROBLEMS+=("'occ status' failed (exit code 1)") ;;
+			*) VERIFY_PROBLEMS+=("'occ status' failed (exit code $nc_rc)") ;;
+		esac
 	fi
 
 	if [ -d "$STATE_DIR/old-etc/etc/nsd/zones" ]; then
@@ -2351,8 +2441,10 @@ phase_verify() {
 			# Only zones the old nsd actually served: a stale .ds file stays
 			# behind when e.g. the box's hostname moved into its parent zone.
 			z=$(basename "$f" .txt.ds)
+			# The name is compared literally (a dot in a regular expression matches any character).
 			if [ -f "$STATE_DIR/old-etc/etc/nsd/nsd.conf.d/zones.conf" ] \
-				&& ! grep -qE "^[[:space:]]*name:[[:space:]]*$z[[:space:]]*\$" "$STATE_DIR/old-etc/etc/nsd/nsd.conf.d/zones.conf"; then
+				&& ! sed -n 's/^[[:space:]]*name:[[:space:]]*//p' "$STATE_DIR/old-etc/etc/nsd/nsd.conf.d/zones.conf" \
+				| tr -d '"' | sed 's/[[:space:]]*$//' | grep -xF -- "$z" > /dev/null; then
 				continue
 			fi
 			n=$((n + 1))
@@ -2535,18 +2627,52 @@ keeps whatever its copy replaces here in $STORAGE_ROOT/$OVERWRITTEN/."
 	fi
 
 	# This machine first, so that the two boxes are never live at the same time.
-	if [ -f /etc/mailinabox.conf ]; then local_quiesce disable; fi
+	# Backups paused first, so that they stay paused here even if a later step fails.
 	pause_backups
+	if [ -f /etc/mailinabox.conf ]; then local_quiesce disable rollback; fi
 	if [ "$(state_get ZONES_PUSHED)" = 1 ]; then
+		# Restore and reload separately: once the restore removed $OLD_NSD_SAVE,
+		# only the reload is left to do by hand.
 		# shellcheck disable=SC2016 # expanded on the old box
-		remote_bash 'if [ -d "$SAVE" ]; then cp -a "$SAVE/." /etc/nsd/zones/ && rm -rf "$SAVE" && { systemctl reload nsd || nsd-control reload; }; fi' \
-			"SAVE=$OLD_NSD_SAVE" || warn "Could not put the old box's own zone files back from $OLD_NSD_SAVE."
-		state_set ZONES_PUSHED ""
+		if remote_bash 'if [ -d "$SAVE" ]; then cp -a "$SAVE/." /etc/nsd/zones/ && rm -rf "$SAVE"; fi' \
+			"SAVE=$OLD_NSD_SAVE"; then
+			state_set ZONES_PUSHED ""
+			remote "systemctl reload nsd || nsd-control reload" > /dev/null 2>&1 \
+				|| warn "Put the old box's own zone files back, but could not reload nsd there ('systemctl reload nsd' there)."
+		else
+			warn "Could not put the old box's own zone files back. On the old box, run:
+  cp -a $OLD_NSD_SAVE/. /etc/nsd/zones/ && rm -rf $OLD_NSD_SAVE   # if $OLD_NSD_SAVE still exists
+  systemctl reload nsd || nsd-control reload"
+		fi
+	fi
+	# The queue hint of the stop (handle_old_queue) may have pointed virtual_transport
+	# to this machine and started Postfix outside systemd on the old box: undo both,
+	# so that systemd starts Postfix with the old setting.
+	local vt out ip ip6
+	vt=$(sed -n 's/^virtual_transport = //p' "$STATE_DIR/old-postconf.txt" 2> /dev/null | head -n 1)
+	# A sync_final run after the queue hint was applied snapshots the redirected
+	# value: never "restore" a transport to this machine, use the Mail-in-a-Box default.
+	ip=$(state_get NEW_PUBLIC_IP)
+	ip6=$(state_get NEW_PUBLIC_IPV6)
+	if { [ -n "$ip" ] && [[ $vt == *"[$ip]"* ]]; } || { [ -n "$ip6" ] && [[ $vt == *"[$ip6]"* ]]; }; then
+		warn "The saved virtual_transport of the old box ($vt) points to this machine; using lmtp:[127.0.0.1]:10025."
+		vt="lmtp:[127.0.0.1]:10025"
+	fi
+	out=$(remote_bash "$OLD_POSTFIX_RESET_SCRIPT" "VT=$vt") || warn "Could not check Postfix on the old box."
+	if grep -q '^VTFIXED ' <<< "$out"; then
+		warn "virtual_transport on the old box was '$(sed -n 's/^VTFIXED //p' <<< "$out")', set back to '$vt'."
+	fi
+	if grep -q '^PFSTOPPED' <<< "$out"; then
+		warn "Postfix ran on the old box outside systemd (postfix start); stopped it, systemd starts it now."
 	fi
 	remote_bash "$OLD_START_SCRIPT" "UNITS=$list" "START=${rev[*]}" \
 		|| die "Could not start the services on the old box. On the old box, run:
+  postfix status && postfix stop  # if it was started by hand
+  postconf virtual_transport      # set it back if it points to this machine${vt:+ (old value: $vt)}
   systemctl unmask --runtime $list
   systemctl start ${rev[*]}"
+	# Mail that waited for this machine is delivered on the old box now.
+	if grep -q '^VTFIXED \|^PFSTOPPED' <<< "$out"; then remote "postqueue -f" > /dev/null 2>&1 || true; fi
 	# The data here is now behind the old box: start over from the live copy next time.
 	state_set PHASE_stop_old ""
 	phases_reset_from sync_final
