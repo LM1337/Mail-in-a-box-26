@@ -167,6 +167,14 @@ tools/editconf.py /etc/spamassassin/local.cf -s \
 mkdir -p "$STORAGE_ROOT/mail/spamassassin"
 chown -R spampd:spampd "$STORAGE_ROOT/mail/spamassassin"
 
+# Mail-in-a-Box before the Dovecot 2.4 port trained SpamAssassin with the
+# dovecot-antispam plugin. It does not exist for Dovecot 2.4, and its settings
+# would stop Dovecot from starting on a box upgraded in place (In-Place 2).
+rm -f /etc/dovecot/conf.d/99-local-spampd.conf /usr/local/bin/sa-learn-pipe.sh
+if dpkg-query -W -f='${db:Status-Abbrev}' dovecot-antispam 2>/dev/null | grep -q '^[ih]i'; then
+	hide_output apt-get -y purge dovecot-antispam
+fi
+
 # Install the IMAPSieve sieve scripts and sa-learn shell wrappers
 # original author: yeah
 #
