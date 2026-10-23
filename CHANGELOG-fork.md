@@ -9,6 +9,39 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## v78-r2604.0-rc3 (2026-10-23)
+
+In-place upgrade and full-text search. Tested in place on a copy of a
+production box (Ubuntu 24.04 release-upgraded from 22.04, Mail-in-a-Box v74,
+PHP 8.0 from ppa:ondrej, Dovecot 2.3 with fts_xapian and a Lua push plugin):
+"All checks passed", smoke test 53/55 (the two differences were a test mail
+of the preparation), about 50 minutes of mail downtime.
+
+### New
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` upgrades a box in place:
+  22.04 → 24.04 → 26.04 or a release-upgraded 24.04 box → 26.04, then setup of
+  this fork on the existing data. Detects local extensions, makes an encrypted
+  system archive next to the backups, keeps mail off across reboots, continues
+  on its own after each reboot, supports operator hooks
+  (`/etc/mailinabox/upgrade-2604.d`), compares counts and fingerprints before
+  and after, and removes leftovers of the old releases (`--cleanup-only`).
+  See README-fork.md.
+* Dovecot: full-text search with fts_xapian (`95-mailinabox-fts.conf`, on by
+  default, `FTS=off` in `/etc/mailinabox.conf`), a daily
+  `doveadm fts optimize -A`. Hand-made 2.3 FTS files are replaced; existing
+  Xapian indexes keep working.
+* Tests: smoke check `fts-search` (IMAP SEARCH BODY and `doveadm fts lookup`).
+
+### Fixes for boxes upgraded in place
+
+* Dovecot: Dovecot 2.3 setting names kept in 10-auth/10-ssl are commented out (B51).
+* Spam: leftovers of the dovecot-antispam setup of older versions are removed (B52).
+* Management: the Python venv is rebuilt when its interpreter no longer runs (B53).
+* Setup: bootstrap.sh explains an existing checkout of another origin (B54).
+* System/apt: PPA sources and keys of earlier releases are removed; Launchpad builds of ppa:ondrej are moved back to Ubuntu packages (B55).
+* System: a failing pollinate no longer stops setup (B56).
+
 ## v78-r2604.0-rc2 (2026-10-23)
 
 Fixes from the review before rc2. Certified from the tag without manual

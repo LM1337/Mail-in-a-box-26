@@ -28,18 +28,19 @@ reproduced on a box, the evidence line says so.
   * *audit*: five code auditors, each finding confirmed by a verifier.
   * *late review*: a review before rc2.
   * *test run*: the T1/T2 smoke tests on VMs.
+  * *in-place test*: T3, the in-place upgrade of a copy of a production box.
 
 ## Summary
 
-50 bugs: 1 critical, 9 high, 23 medium, 17 low.
+56 bugs: 1 critical, 11 high, 25 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3.
 
 | Origin | Count |
 |---|---|
-| Upstream | 13 |
-| PR #2603 | 24 |
+| Upstream | 14 |
+| PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 10 |
-| Fork | 2 |
+| 26.04 change | 12 |
+| Fork | 3 |
 
 13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -98,6 +99,12 @@ upstream pull requests, independent of the 26.04 port.
 | [B48](#b48) | low | Spam | Unused spamd daemon runs on 26.04 | 26.04 change | no | yes | rc1 |
 | [B49](#b49) | low | Tools | owncloud-restore.sh uses undefined $PHP_VER for occ | Upstream | partly | partly | rc1 |
 | [B50](#b50) | low | nginx | Roundcube 1.7 static.php assets rely on PHP-FPM cgi.fix_pathinfo (no PATH_INFO passed) | PR #2603 | no | yes | rc1 |
+| [B51](#b51) | high | Dovecot | Dovecot 2.3 setting names kept in 10-auth.conf/10-ssl.conf stop Dovecot 2.4 on boxes upgraded in place | 26.04 change | no | yes | rc3 |
+| [B52](#b52) | medium | Spam | dovecot-antispam leftovers (99-local-spampd.conf, package, sa-learn-pipe.sh) of older Mail-in-a-Box break Dovecot 2.4 | 26.04 change | no | yes | rc3 |
+| [B53](#b53) | high | Management | Broken management venv is kept after a release upgrade, pip fails | PR #2603 | no | yes | rc3 |
+| [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
+| [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
+| [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
 
 ## Details
 
@@ -700,6 +707,67 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** c6118db:conf/nginx-alldomains.conf has `location /mail/ { alias /usr/local/lib/roundcubemail/public_html/; ... location ~ \.php$ { fastcgi_split_path_info ^/mail(/.*)()$; ... } }` with no PATH_INFO param, plus the server-level `location ~ /mail/.*\.php` fallback. 17fad3e~1 is identical (unchanged through the d7044d6 merge). c6118db:setup/webmail.sh pins VERSION=1.7.4 (1.7.5 before 17fad3e). v78:conf/nginx-alldomains.conf instead has `location /mail/ { alias /usr/local/lib/roundcubemail/; }` and v78:setup/webmail.sh has VERSION=1.6.20, so on v78 static assets are served directly as files and do not go through static.php/PATH_INFO. Neither v78 nor 17fad3e sets cgi.fix_pathinfo anywhere (`git grep fix_pathinfo` finds only the new comment in 17fad3e), so the PHP default of 1 applies and the bug stays hidden. The fix_pathinfo=0 breakage comes from the commit message's analysis. It was not reproduced on a box as far as the repo shows.
 * **Report upstream:** PR #2603: the nested `\.php$` location without PATH_INFO and the leftover unanchored server-level `~ /mail/.*\.php` block come from the port's nginx config for Roundcube 1.7 public_html. MIAB main (v78, Roundcube 1.6 served from the install root) is not affected.
 * **Found by:** audit; **commit:** `17fad3e`; **fixed in:** v78-r2604.0-rc1
+
+### B51
+
+**Dovecot 2.3 setting names kept in 10-auth.conf/10-ssl.conf stop Dovecot 2.4 on boxes upgraded in place** (high, Dovecot)
+
+* **Symptom:** After a release upgrade from 22.04/24.04 (old configuration files kept), Dovecot 2.4 refuses to start and setup stops at the first Dovecot restart.
+* **Cause:** setup/mail-dovecot.sh edits 10-auth.conf and 10-ssl.conf with editconf.py, which only adds the 2.4 names (auth_allow_cleartext, ssl_server_*) and never removes the 2.3 names disable_plaintext_auth, ssl_cert, ssl_key, ssl_dh, ssl_dh_parameters_length, ssl_prefer_server_ciphers.
+* **Fix:** The 2.3 names are commented out with editconf.py -e. The in-place tool additionally starts from a pristine /etc/dovecot.
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `bef6145`; **fixed in:** v78-r2604.0-rc3
+
+### B52
+
+**dovecot-antispam leftovers (99-local-spampd.conf, package, sa-learn-pipe.sh) of older Mail-in-a-Box break Dovecot 2.4** (medium, Spam)
+
+* **Symptom:** On a box upgraded in place, Dovecot 2.4 rejects the plugin { antispam_* } settings of v74 and the dovecot-antispam 2.3 module.
+* **Cause:** Mail-in-a-Box before the port trained SpamAssassin with dovecot-antispam; the port switched to IMAPSieve but never removed the old file and package.
+* **Fix:** setup/spamassassin.sh removes the file, the pipe script and the package.
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `506d7a1`; **fixed in:** v78-r2604.0-rc3
+
+### B53
+
+**Broken management venv is kept after a release upgrade, pip fails** (high, Management)
+
+* **Symptom:** Setup stops in setup/management.sh at pip install with 'bad interpreter' on a release-upgraded box.
+* **Cause:** The version check tested `-x $venv/bin/python3`, which is false for the dangling link to the removed python3.10/3.12, so the old venv was neither deleted nor recreated.
+* **Fix:** The check runs the interpreter; when it fails or the version differs, the venv is rebuilt.
+* **Affects:** v78 no, PR #2603 yes. Origin: PR #2603.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `1371381`; **fixed in:** v78-r2604.0-rc3
+
+### B54
+
+**bootstrap.sh fails with 'Update failed' over an upstream checkout** (low, Setup)
+
+* **Symptom:** On a box with an upstream ~/mailinabox the curl installer stops with 'Update failed. Did you modify something?'.
+* **Cause:** The fork's tags do not exist in the upstream clone's origin.
+* **Fix:** bootstrap.sh names the foreign origin and points to tools/upgrade-in-place-to-2604.sh.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `898de3a`; **fixed in:** v78-r2604.0-rc3
+
+### B55
+
+**PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu** (medium, System/apt)
+
+* **Symptom:** After a release upgrade, ondrej and duplicity PPA files of jammy/noble (also *.distUpgrade) remain, their keys stay in trusted.gpg.d for every source, and php-common/libgd3 builds from ppa:ondrej get no updates.
+* **Cause:** setup/system.sh only knew the sury source and the new version format (+0~…gbpHASH), not the Launchpad format (+deb.sury.org+N).
+* **Fix:** Old PPA sources and keys are removed, the duplicity PPA is added again for the current release, the downgrade loop matches both formats.
+* **Affects:** v78 no, PR #2603 yes. Origin: PR #2603.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `e138393`; **fixed in:** v78-r2604.0-rc3
+
+### B56
+
+**pollinate cache owned by root makes setup fail on boxes upgraded in place** (low, System)
+
+* **Symptom:** Setup stops right after 'Initializing system random number generator...' with 'cannot create /var/cache/pollinate/log: Permission denied'.
+* **Cause:** A pollinate log created by root on an older release; setup runs pollinate as the pollinate user with set -e.
+* **Fix:** A failing pollinate is reported and does not stop setup (seeding is not required).
+* **Affects:** v78 partly, PR #2603 partly. Origin: Upstream.
+* **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `27251d9`; **fixed in:** v78-r2604.0-rc3
+
 ## Not counted above
 
 * Fixes to `tools/migrate-to-2604.sh` and `tests/fork/` made before they were

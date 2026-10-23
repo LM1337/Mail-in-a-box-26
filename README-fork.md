@@ -48,13 +48,133 @@ noch keinen Release-Tag gibt, den Zweig `main` nehmen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
 
 
+In-place upgrade to 26.04 / Upgrade an Ort und Stelle
+-----------------------------------------------------
+
+### English
+
+`tools/upgrade-in-place-to-2604.sh` upgrades **the same machine** to Ubuntu
+26.04 and this fork, when moving to a new machine is not an option (same IP
+address, no second server). Supported: Ubuntu 22.04 with Mail-in-a-Box v60 or
+later (22.04 → 24.04 → 26.04, two release upgrades) and boxes that were already
+release-upgraded to 24.04 and still run Mail-in-a-Box v7x (one release
+upgrade). Nextcloud must be 26 or later.
+
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash -s -- --check
+    # inside tmux or screen, after reading the check:
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash
+
+What it does, in phases that continue on their own after each reboot:
+
+1. **preflight**: release, Mail-in-a-Box and Nextcloud versions, disk space,
+   a backup younger than 24 hours, and a list of everything that is not
+   managed by Mail-in-a-Box (Dovecot plugins, systemd drop-ins, nginx files,
+   Docker, third-party apt sources). Local extensions block the upgrade until
+   you pass `--keep-local`.
+2. **snapshot**: counts and key fingerprints, a fresh Mail-in-a-Box backup and
+   a system archive (`/etc`, the code outside the data directory, package
+   lists). The archive is encrypted with the backup key and copied next to the
+   backups (for an rsync target: `<target>-system/`).
+3. **quiesce**: mail, web, cron and the update timers are stopped and masked,
+   so they stay off across reboots. **Mail is offline from here.**
+4. **prepare-release**, **release-2404**, **release-2604**: third-party sources
+   off, PHP from ppa:ondrej removed, `do-release-upgrade` (old configuration
+   files are kept), checks that the package system is clean, reboot.
+5. **cleanup-etc**: a pristine Dovecot 2.4 configuration, old PHP versions,
+   the old Python environment and ntp are removed (kept in
+   `/root/upgrade-2604/moved`).
+6. **setup** of this fork on the existing data (including the Nextcloud
+   upgrade chain). Mail is back.
+7. **local-ext**: your hooks in `/etc/mailinabox/upgrade-2604.d/*.sh` bring
+   local extensions back for Dovecot 2.4. They run as root with
+   `STORAGE_ROOT`, `PRIMARY_HOSTNAME`, `OLD_ETC` (the old `/etc`) and
+   `MOVED_DIR`; a non-zero exit stops the upgrade.
+8. **verify** and **finish**: counts and fingerprints compared with before,
+   services, Nextcloud, status checks, a report of configuration that changed;
+   backups and timers back on.
+
+Downtime on a test box was about 50 minutes; plan 1-3 hours. The release
+upgrades cannot be undone: `--rollback` only works before the first one.
+After that the way back is the backup. Have the provider's console at hand,
+SSH can be gone for a while during the release upgrade or after a reboot.
+`--status` shows where it stands; running the command again continues.
+`--cleanup-only` removes leftovers of the old releases afterwards.
+
+Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
+in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
+get it replaced by the fork's configuration; the existing indexes are used.
+
+### Deutsch
+
+`tools/upgrade-in-place-to-2604.sh` hebt **dieselbe Maschine** auf Ubuntu
+26.04 und diesen Fork, wenn ein Umzug auf eine neue Maschine nicht in Frage
+kommt (gleiche IP-Adresse, kein zweiter Server). Unterstützt werden Ubuntu
+22.04 mit Mail-in-a-Box ab v60 (22.04 → 24.04 → 26.04, zwei Release-Upgrades)
+und Boxen, die schon per Release-Upgrade auf 24.04 gehoben wurden und noch
+Mail-in-a-Box v7x fahren (ein Release-Upgrade). Nextcloud muss mindestens
+Version 26 haben.
+
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash -s -- --check
+    # in tmux oder screen, nach Durchsicht der Prüfung:
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash
+
+Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
+
+1. **preflight**: Release, Versionen von Mail-in-a-Box und Nextcloud,
+   Speicherplatz, eine Sicherung jünger als 24 Stunden und eine Liste von
+   allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
+   systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
+   Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.
+2. **snapshot**: Zählungen und Schlüssel-Fingerabdrücke, eine frische
+   Mail-in-a-Box-Sicherung und ein Systemarchiv (`/etc`, der Code außerhalb
+   des Datenverzeichnisses, Paketlisten). Das Archiv wird mit dem
+   Backup-Schlüssel verschlüsselt und neben die Sicherungen gelegt (bei einem
+   rsync-Ziel: `<ziel>-system/`).
+3. **quiesce**: Mail, Web, Cron und die Update-Timer werden angehalten und
+   maskiert, damit sie auch über Neustarts hinweg aus bleiben. **Ab hier ist
+   die Mail aus.**
+4. **prepare-release**, **release-2404**, **release-2604**: fremde Quellen aus,
+   PHP aus ppa:ondrej entfernt, `do-release-upgrade` (alte Konfigurationsdateien
+   bleiben), Prüfung, dass das Paketsystem sauber ist, Neustart.
+5. **cleanup-etc**: frische Dovecot-2.4-Konfiguration; alte PHP-Versionen, die
+   alte Python-Umgebung und ntp werden entfernt (aufbewahrt in
+   `/root/upgrade-2604/moved`).
+6. **setup** dieses Forks auf den vorhandenen Daten (samt
+   Nextcloud-Upgrade-Kette). Die Mail ist wieder da.
+7. **local-ext**: eigene Hooks in `/etc/mailinabox/upgrade-2604.d/*.sh`
+   holen lokale Erweiterungen für Dovecot 2.4 zurück. Sie laufen als root mit
+   `STORAGE_ROOT`, `PRIMARY_HOSTNAME`, `OLD_ETC` (das alte `/etc`) und
+   `MOVED_DIR`; ein Exit-Code ungleich 0 hält das Upgrade an.
+8. **verify** und **finish**: Zählungen und Fingerabdrücke gegen vorher,
+   Dienste, Nextcloud, Statusprüfungen, ein Bericht über geänderte
+   Konfiguration; Sicherungen und Timer wieder an.
+
+Die Ausfallzeit lag auf einer Testbox bei etwa 50 Minuten; einplanen sollte
+man 1 bis 3 Stunden. Die Release-Upgrades lassen sich nicht zurücknehmen:
+`--rollback` geht nur vor dem ersten. Danach führt der Weg zurück über die
+Sicherung. Die Konsole des Anbieters sollte bereitliegen, weil SSH während
+des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.
+`--status` zeigt den Stand; ein erneuter Aufruf setzt fort. `--cleanup-only`
+räumt danach die Reste der alten Releases weg.
+
+Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
+in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand
+eingerichtet haben, ersetzt sie die Konfiguration des Forks; die vorhandenen
+Indexe werden weiter genutzt.
+
+
 Migration from Mail-in-a-Box (22.04/24.04) / Umzug von Mail-in-a-Box
 -------------------------------------------------------------------
 
 ### English
 
-A box is never upgraded in place to Ubuntu 26.04. You move it to a **new
-machine** with a fresh Ubuntu 26.04 install. `tools/migrate-to-2604.sh` does
+The recommended way to Ubuntu 26.04 is a move to a **new machine** with a
+fresh Ubuntu 26.04 install: the old box stays untouched and is the way back.
+(To upgrade the same machine, see the in-place section above.) `tools/migrate-to-2604.sh` does
 that with one command, run as root on the new machine. It follows the path
 documented by upstream (["restore your backup on a new machine, then run
 setup"](https://mailinabox.email/maintenance.html#upgrade)), but copies the
@@ -413,8 +533,9 @@ environment. If that does not work, restore by hand and run setup:
 
 ### Deutsch
 
-Eine Box wird nie direkt auf Ubuntu 26.04 aktualisiert. Sie zieht auf eine
-**neue Maschine** mit frisch installiertem Ubuntu 26.04 um.
+Der empfohlene Weg zu Ubuntu 26.04 ist der Umzug auf eine **neue Maschine**
+mit frisch installiertem Ubuntu 26.04: Die alte Box bleibt unverändert und ist
+der Weg zurück. (Zum Upgrade derselben Maschine siehe den Abschnitt oben.)
 `tools/migrate-to-2604.sh` erledigt das mit einem Befehl, der als root auf der
 neuen Maschine läuft. Das Werkzeug folgt dem vom Upstream-Projekt
 beschriebenen Weg („Sicherung auf einer neuen Maschine einspielen, dann Setup
