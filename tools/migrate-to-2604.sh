@@ -60,7 +60,7 @@ PARTIAL_DIR=.rsync-partial
 # until setup has created the system users (see phase_prepare / phase_ownership).
 ID_OFFSET=2000000000
 DEFAULT_SOURCE=https://github.com/LM1337/Mail-in-a-box-26
-DEFAULT_TAG=v78-r2604.0-rc2 # keep in sync with setup/bootstrap.sh
+DEFAULT_TAG=v78-r2604.0-rc3 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5 # keep in sync with setup/functions.sh
 QUIET_TIMEOUT=${MIGRATE_QUIET_TIMEOUT:-900}

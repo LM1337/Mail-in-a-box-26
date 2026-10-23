@@ -25,7 +25,7 @@ if [ -z "$TAG" ]; then
 	if [ "$UBUNTU_VERSION" == "Ubuntu 26.04 LTS" ]; then
 		# This machine is running Ubuntu 26.04, which is supported by
 		# this fork of Mail-in-a-Box.
-		TAG=v78-r2604.0-rc2
+		TAG=v78-r2604.0-rc3
 	elif [ "$UBUNTU_VERSION" == "Ubuntu 22.04 LTS" ]; then
 		# This machine is running Ubuntu 22.04, which is supported by
 		# Mail-in-a-Box versions 60 and later.
