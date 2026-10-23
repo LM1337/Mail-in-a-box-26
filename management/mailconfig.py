@@ -432,7 +432,9 @@ def validate_quota(quota):
 	if re.search(r"[\s,.]", quota):
 		msg = "Quotas cannot contain spaces, commas, or decimal points."
 		raise ValueError(msg)
-	if not re.match(r'^[\d]+[GM]?$', quota):
+	# ASCII digits only: with a str pattern \d also matches other Unicode
+	# digits (e.g. fullwidth), which Dovecot can't parse as quota_storage_size.
+	if not re.fullmatch(r'[0-9]+[GM]?', quota, flags=re.ASCII):
 		msg = "Invalid quota."
 		raise ValueError(msg)
 
