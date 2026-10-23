@@ -1594,9 +1594,14 @@ def c_fts(ctx):
     finally:
         M.logout()
     # Make sure the hit came from the Xapian index and not from a slow scan.
-    rc, out, err = ctx.remote.run("doveadm fts lookup -u %s mailbox INBOX body %s" % (ctx.alice, word),
-                                  sudo=True, timeout=120)
-    if rc != 0 or not out.strip():
+    # Indexing runs asynchronously in the indexer, so give it a moment.
+    for _ in range(15):
+        rc, out, err = ctx.remote.run("doveadm fts lookup -u %s mailbox INBOX body %s" % (ctx.alice, word),
+                                      sudo=True, timeout=120)
+        if rc == 0 and re.search(r"INBOX: \d", out):
+            break
+        time.sleep(2)
+    if rc != 0 or not re.search(r"INBOX: \d", out):
         raise Fail("doveadm fts lookup rc=%d: %s" % (rc, (err or out).strip()[:300]))
     return "IMAP SEARCH found uid %s, fts index: %s" % (uids[-1].decode(), out.strip().splitlines()[0][:80])
 
