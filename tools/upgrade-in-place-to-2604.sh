@@ -75,6 +75,10 @@
 set -euo pipefail
 set -E # the ERR trap (see on_err) also fires inside functions
 
+# needrestart (run by apt) must not restart services while mail is offline,
+# nor the resume unit this may run in: only list what needs a restart.
+export NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
+
 STATE_DIR=${UPGRADE_STATE_DIR:-/root/upgrade-2604}
 STATE_FILE=$STATE_DIR/state
 LOG_FILE=$STATE_DIR/upgrade.log
@@ -261,12 +265,15 @@ state_set() {
 		return 0
 	fi
 	local tmp
-	tmp=$(mktemp "$STATE_DIR/.state.XXXXXX")
+	tmp=$(mktemp "$STATE_DIR/.state.XXXXXX") || die "Cannot write to $STATE_DIR (disk full?)."
 	{
 		if [ -f "$STATE_FILE" ]; then grep -v "^$1=" "$STATE_FILE" || true; fi
 		printf '%s=%s\n' "$1" "$2"
-	} > "$tmp"
-	mv "$tmp" "$STATE_FILE"
+	} > "$tmp" || {
+		rm -f "$tmp"
+		die "Could not write $STATE_FILE (disk full?)."
+	}
+	mv "$tmp" "$STATE_FILE" || die "Could not write $STATE_FILE."
 }
 
 # Add words to a space-separated list in the state (no duplicates, in order).
@@ -325,7 +332,11 @@ on_exit() {
 			echo "The full output is in $LOG_FILE."
 			echo "Fix the cause and run the command again; it continues where it stopped."
 		fi
-		if downtime_active; then
+		if downtime_active && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
+			echo
+			echo "Mail runs again (setup has finished), but the upgrade is not finished: cron jobs,"
+			echo "update timers and backups stay paused. Continue with: $SELF (or --finish)"
+		elif downtime_active; then
 			echo
 			echo "Mail is OFFLINE (since $(state_get QUIESCED_AT)). Continue with: $SELF"
 			if [ "$(state_get RELEASE_STARTED)" != 1 ]; then echo "or go back with: $SELF --rollback"; fi
@@ -469,6 +480,7 @@ fi
 # by this tool, the real settings are in custom.yaml.upgrade-saved.
 bf=$SR/backup/custom.yaml
 if [ -f "$bf.upgrade-saved" ]; then bf=$bf.upgrade-saved; fi
+if [ -e "$bf.upgrade-none" ]; then bf=/nonexistent; fi
 echo "BACKUP_TARGET=$(sed -n 's/^target:[[:space:]]*//p' "$bf" 2> /dev/null | head -n 1 | tr -d "\"'" | sed 's#//[^/@]*@#//***@#')"
 
 # Messages waiting in the Postfix queue live in /var/spool/postfix, not in $STORAGE_ROOT.
@@ -640,14 +652,45 @@ size_of() { if [ -e "$1" ]; then du -s -B1 "$1" 2> /dev/null | cut -f1; else ech
 pkg_installed() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2> /dev/null | grep -q '^.i'; }
 
 # apt-get without questions; keep the configuration files that are there.
+# Wait up to 10 minutes for the dpkg lock (unattended-upgrades, apt-daily).
 apt_get() {
-	DEBIAN_FRONTEND=noninteractive apt-get -q -y -o Dpkg::Options::=--force-confdef \
+	DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef \
 		-o Dpkg::Options::=--force-confold "$@" < /dev/null
+}
+
+# Wait (at most 10 minutes) until nobody holds the dpkg or apt lists locks.
+# DPkg::Lock::Timeout does not cover the lists lock of "apt-get update", and
+# do-release-upgrade does not wait at all.
+wait_apt_locks() {
+	local i
+	for i in $(seq 60); do
+		if python3 -I - <<'PY' 2> /dev/null; then return 0; fi
+import fcntl, sys
+for f in ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lists/lock", "/var/cache/apt/archives/lock"):
+	try:
+		fd = open(f, "a")
+	except OSError:
+		continue
+	try:
+		fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+		fcntl.lockf(fd, fcntl.LOCK_UN)
+	except OSError:
+		sys.exit(1)
+PY
+		if [ "$i" = 1 ]; then say "Waiting for apt/dpkg (another package run holds its lock)..."; fi
+		sleep 10
+	done
+	die "apt/dpkg stays locked for 10 minutes ($(pgrep -a -x 'apt|apt-get|dpkg|unattended-upgr' | tr '\n' ' ')). Run the command again when it is free."
+}
+
+apt_update() {
+	wait_apt_locks
+	apt-get -q -o DPkg::Lock::Timeout=600 update < /dev/null
 }
 
 install_packages() {
 	say "Installing $*..."
-	apt-get -q -q update < /dev/null || die "apt-get update failed."
+	apt_update > /dev/null || die "apt-get update failed."
 	apt_get -q install "$@" || die "Could not install $*."
 }
 
@@ -691,6 +734,11 @@ is_fork_dir() { [ -f "$1/setup/start.sh" ] && [ -f "$1/tools/migrate-to-2604.sh"
 # The backup target as Mail-in-a-Box reads it (unmasked; never printed).
 backup_target() {
 	local b=$STORAGE_ROOT/backup/custom.yaml t
+	# Paused by this tool: the real settings are kept aside (or there were none).
+	if [ -e "$b.upgrade-none" ]; then
+		echo local
+		return 0
+	fi
 	if [ -f "$b.upgrade-saved" ]; then b=$b.upgrade-saved; fi
 	t=$(sed -n 's/^target:[[:space:]]*//p' "$b" 2> /dev/null | head -n 1 | tr -d "\"'" || true)
 	echo "${t:-local}"
@@ -730,15 +778,23 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 	shift 2
 	[ -z "${UPGRADE_REEXEC:-}" ] || die "Could not find tools/$script in $d."
 	local how="curl -so $script $DEFAULT_SOURCE/raw/branch/main/tools/$script && sudo bash $script"
-	if [ ! -d "$d" ]; then
-		command -v git > /dev/null || install_packages git
+	command -v git > /dev/null || install_packages git
+	if [ -d "$d/.git" ]; then
+		# From an earlier run: bring it to the tag (it may be older).
+		say "Updating $d to $tag..."
+		git -C "$d" fetch -q --depth 1 --force origin "$tag" < /dev/null && git -C "$d" checkout -q --force FETCH_HEAD \
+			|| warn "Could not update $d to $tag."
+	else
 		say "Downloading Mail-in-a-Box $tag from $source..."
 		git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 	fi
 	if [ ! -f "$d/tools/$script" ] && [ -z "${TAG:-}" ]; then
 		# The release tag may not contain this tool yet.
-		rm -rf "$d"
-		git clone -q -b main --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
+		if [ -d "$d/.git" ]; then
+			git -C "$d" fetch -q --depth 1 --force origin main < /dev/null && git -C "$d" checkout -q --force FETCH_HEAD || true
+		else
+			git clone -q -b main --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
+		fi
 	fi
 	[ -f "$d/tools/$script" ] || die "Could not download tools/$script from $source ($tag).
 Download the script to a file and run it from there:
@@ -819,6 +875,16 @@ check_space() {
 		total=$((total + $(size_of "$p")))
 	done
 	add_need "$STATE_DIR" "$total" "system archive $(human "$total")"
+	# Its encrypted copy, the unpacked copy of /etc, the saved .deb files.
+	add_need "$STATE_DIR" "$total" "encrypted archive $(human "$total")"
+	p=$(size_of /etc)
+	add_need "$STATE_DIR" "$p" "copy of /etc $(human "$p")"
+	local saved=()
+	mapfile -t saved < <( (purge_set; downgrade_set) | sed 's/:.*//')
+	if [ ${#saved[@]} -gt 0 ]; then
+		p=$(($(dpkg-query -W -f='${Installed-Size}\n' "${saved[@]}" 2> /dev/null | awk '{s += $1} END {print s + 0}') * 1024))
+		add_need "$STATE_DIR" "$p" "saved packages $(human "$p")"
+	fi
 	# Setup keeps a copy of the Nextcloud code and database in owncloud-backup/
 	# for each step of the upgrade chain: twice that as the margin.
 	nc_dir=$(size_of /usr/local/lib/owncloud)
@@ -892,17 +958,25 @@ from one LTS to the next opens with the first point release of the new one."
 }
 
 # A recent backup must exist (by default): the release upgrades cannot be undone.
+# A backup problem only blocks the start: once mail is offline (an
+# interrupted quiesce), it no longer stops the run.
+backup_blocker() {
+	if [ -n "$NO_BACKUP_CHECK" ]; then
+		warn "$* Continuing (--no-backup-check)."
+	elif [ "$(state_get QUIESCED)" = 1 ]; then
+		warn "$* Continuing: mail is offline already."
+	else
+		blocker "$* Or use --no-backup-check."
+	fi
+}
+
 check_backup() {
 	local target last age
 	target=$(backup_target)
 	say "Backups:             ${F[BACKUP_TARGET]:-local}"
 	if [ "$target" = off ]; then
-		if [ -n "$NO_BACKUP_CHECK" ]; then
-			warn "Backups are turned off. Continuing (--no-backup-check)."
-		else
-			blocker "Backups are turned off (System > Backup Status). A release upgrade cannot be undone:
-make a backup first, or use --no-backup-check if you have your own."
-		fi
+		backup_blocker "Backups are turned off (System > Backup Status). A release upgrade cannot be undone:
+make a backup first."
 		return 0
 	fi
 	# duplicity keeps a copy of each manifest in its archive directory
@@ -910,23 +984,14 @@ make a backup first, or use --no-backup-check if you have your own."
 	last=$(find "$STORAGE_ROOT/backup/cache" "$STORAGE_ROOT/backup/encrypted" -name 'duplicity-*.manifest*' \
 		-printf '%T@\n' 2> /dev/null | sort -n | tail -n 1 | cut -d. -f1 || true)
 	if [ -z "$last" ]; then
-		if [ -n "$NO_BACKUP_CHECK" ]; then
-			warn "No Mail-in-a-Box backup found. Continuing (--no-backup-check)."
-		else
-			blocker "No Mail-in-a-Box backup found in $STORAGE_ROOT/backup. Make one first
-(System > Backup Status, or $(state_get OLD_MIAB_DIR)/management/backup.py), or use --no-backup-check."
-		fi
+		backup_blocker "No Mail-in-a-Box backup found in $STORAGE_ROOT/backup. Make one first
+(System > Backup Status, or $(state_get OLD_MIAB_DIR)/management/backup.py)."
 		return 0
 	fi
 	age=$(($(date +%s) - last))
 	say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
 	if [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
-		if [ -n "$NO_BACKUP_CHECK" ]; then
-			warn "The last backup is older than $(fmt_dur "$BACKUP_MAX_AGE"). Continuing (--no-backup-check)."
-		else
-			blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status,
-or use --no-backup-check."
-		fi
+		backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
 	fi
 	case "$target" in
 		local | file://"$STORAGE_ROOT"/*)
@@ -1342,6 +1407,11 @@ blockers_or_die() {
 	[ ${#CHECK_BLOCKERS[@]} -gt 0 ] || return 0
 	local b msg="These must be fixed first:"
 	for b in "${CHECK_BLOCKERS[@]}"; do msg+=$'\n'"  - $b"; done
+	if [ "$(state_get QUIESCED)" = 1 ]; then
+		die "$msg
+Mail is OFFLINE since $(state_get QUIESCED_AT) (an earlier run stopped it). Fix these and run
+the command again, or go back with: $SELF --rollback"
+	fi
 	die "$msg
 Nothing was changed. '$(start_command | sed 's/$/ --check/')' lists them again."
 }
@@ -1434,6 +1504,10 @@ run_miab_backup() {
 	if [ "$target" = off ]; then
 		say "Backups are turned off: no fresh Mail-in-a-Box backup."
 		return 0
+	fi
+	if [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-saved" ] || [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-none" ]; then
+		# backup.py would see "target: off" and do nothing.
+		die "The backups are paused by this tool; a backup now would not run. Use --skip-miab-backup."
 	fi
 	[ -x "$dir/management/backup.py" ] || die "$dir/management/backup.py is missing. Use --skip-miab-backup to go on without a fresh backup."
 	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
@@ -1553,12 +1627,19 @@ phase_snapshot() {
 	state_set SYSTEM_ARCHIVE "$arch"
 	say "System archive: $(human "$(stat -c %s "$arch")")"
 
-	rm -rf "$OLD_ETC"
-	mkdir -p "$OLD_ETC"
-	tar -C "$OLD_ETC" --numeric-owner --strip-components=1 -xzf "$arch" etc \
-		|| die "Could not unpack /etc from $arch."
-	state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
-	say "A copy of /etc as it is now: $OLD_ETC"
+	# Taken once per upgrade and never replaced (the hooks rely on it). One left
+	# by an earlier attempt (rolled back) is kept aside.
+	if [ -d "$OLD_ETC" ] && [ -n "$(state_get ETC_SAVED_AT)" ]; then
+		say "The copy of /etc from $(state_get ETC_SAVED_AT) stays: $OLD_ETC"
+	else
+		if [ -e "$OLD_ETC" ]; then mv "$OLD_ETC" "$OLD_ETC.$stamp"; fi
+		mkdir -p "$OLD_ETC.new"
+		tar -C "$OLD_ETC.new" --numeric-owner --strip-components=1 -xzf "$arch" etc \
+			|| die "Could not unpack /etc from $arch."
+		mv "$OLD_ETC.new" "$OLD_ETC"
+		state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
+		say "A copy of /etc as it is now: $OLD_ETC"
+	fi
 
 	offsite_copy "$arch"
 }
@@ -1588,6 +1669,14 @@ pause_backups() {
 
 resume_backups() {
 	local b=$STORAGE_ROOT/backup
+	if [ -f "$b/custom.yaml" ] && ! grep -qs "^# Backups paused by $SCRIPT_NAME" "$b/custom.yaml" \
+		&& { [ -e "$b/custom.yaml.upgrade-saved" ] || [ -e "$b/custom.yaml.upgrade-none" ]; }; then
+		warn "backup/custom.yaml was changed during the upgrade (System > Backup Status?). Kept it;
+the settings from before the upgrade are in backup/custom.yaml.upgrade-saved (if any)."
+		rm -f "$b/custom.yaml.upgrade-none"
+		state_set BACKUPS_PAUSED ""
+		return 0
+	fi
 	if [ -e "$b/custom.yaml.upgrade-saved" ]; then
 		mv "$b/custom.yaml.upgrade-saved" "$b/custom.yaml"
 		say "Backups resumed (backup/custom.yaml${F[BACKUP_TARGET]:+, target ${F[BACKUP_TARGET]}})."
@@ -1616,21 +1705,24 @@ quiesce_units() {
 # A unit with its own file in /etc/systemd/system (e.g. a link into the old
 # checkout) cannot be masked: it is disabled instead.
 mask_units() {
-	local u st masked=() disabled=()
+	local u st failed=()
+	# Recorded first: an interruption must not leave masks nobody removes.
+	state_add MASKED_UNITS "$@"
 	for u in "$@"; do
 		systemctl mask --quiet "$u" 2> /dev/null || true
 		st=$(systemctl is-enabled "$u" 2> /dev/null || true)
-		if [ "$st" = masked ]; then
-			masked+=("$u")
-			continue
-		fi
+		[ "$st" != masked ] || continue
+		failed+=("$u")
 		if [ "$st" = enabled ]; then
-			if systemctl disable --quiet "$u" 2> /dev/null; then disabled+=("$u"); else warn "Could not disable $u."; fi
+			state_add DISABLED_UNITS "$u"
+			systemctl disable --quiet "$u" 2> /dev/null || warn "Could not disable $u."
 		fi
 		warn "Could not mask $u (its unit file is in /etc/systemd/system); disabled it instead."
 	done
-	if [ ${#masked[@]} -gt 0 ]; then state_add MASKED_UNITS "${masked[@]}"; fi
-	if [ ${#disabled[@]} -gt 0 ]; then state_add DISABLED_UNITS "${disabled[@]}"; fi
+	if [ ${#failed[@]} -gt 0 ]; then
+		state_set MASKED_UNITS "$(for u in $(state_get MASKED_UNITS); do [[ " ${failed[*]} " == *" $u "* ]] || echo "$u"; done | tr '\n' ' ' | sed 's/ $//')"
+	fi
+	return 0
 }
 
 # During the downtime: make sure the units are still masked and stopped (after
@@ -1664,6 +1756,13 @@ unquiesce() { # [UNITS TO KEEP OFF]...
 		case "$keep" in *" $u "*) rest_d+=("$u") ;; *) d+=("$u") ;; esac
 	done
 	if [ ${#m[@]} -gt 0 ]; then systemctl unmask --quiet "${m[@]}" 2> /dev/null || warn "Could not unmask all of ${m[*]}."; fi
+	# Only what is still masked stays recorded (for the next attempt).
+	for u in "${m[@]}"; do
+		if [ "$(systemctl is-enabled "$u" 2> /dev/null || true)" = masked ]; then
+			warn "$u is still masked."
+			rest_m+=("$u")
+		fi
+	done
 	for u in "${d[@]}"; do
 		if systemctl cat "$u" > /dev/null 2>&1; then systemctl enable --quiet "$u" 2> /dev/null || warn "Could not enable $u again."; fi
 	done
@@ -1847,7 +1946,7 @@ phase_prepare_release() {
 
 	say "Disabling the third-party package sources (kept in $APT_DISABLED):"
 	disable_third_party_sources
-	apt-get -q update < /dev/null || die "apt-get update failed."
+	apt_update || die "apt-get update failed."
 
 	if [ ${#purge[@]} -gt 0 ]; then
 		say "Removing PHP from ppa:ondrej and obsolete packages: ${purge[*]}"
@@ -1907,14 +2006,18 @@ install_resume() {
 		if [ -n "${TAG:-}" ]; then printf 'export TAG=%q\n' "$TAG"; fi
 		if [ -n "${SOURCE:-}" ]; then printf 'export SOURCE=%q\n' "$SOURCE"; fi
 		cat <<'EOF'
-export HOME=/root TERM=xterm-256color LANG=C.UTF-8
+export HOME=/root TERM=xterm-256color LANG=C.UTF-8 NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
+# In a scope of its own, outside this unit's cgroup: restarting the unit
+# (needrestart, daemon-reexec) must not kill the upgrade.
+SCOPE=()
+if command -v systemd-run > /dev/null 2>&1; then SCOPE=(systemd-run --scope --quiet --collect "--unit=upgrade-2604-$(date +%s)" --); fi
 if command -v tmux > /dev/null 2>&1; then
 	if tmux has-session -t "$SESSION" 2> /dev/null; then exit 0; fi
-	tmux new-session -d -s "$SESSION" -x 200 -y 50 \
+	"${SCOPE[@]}" tmux new-session -d -s "$SESSION" -x 200 -y 50 \
 		"$CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
 	exit 0
 fi
-eval "exec $CMD"
+eval "exec ${SCOPE[*]} $CMD"
 EOF
 	} > "$RESUME_SCRIPT"
 	chmod 700 "$RESUME_SCRIPT"
@@ -1954,13 +2057,19 @@ remove_resume() {
 	motd_remove
 }
 
-motd_hint() {
+motd_hint() { # [offline|after-setup|verify-failed]
+	local how
+	case "${1:-offline}" in
+		after-setup) how="Mail runs again (setup has finished); the last checks are pending." ;;
+		verify-failed) how="Mail runs again, but the final checks FAILED: see --status, then run it again or --finish." ;;
+		*) how="Mail is offline. The upgrade continues on its own after each reboot." ;;
+	esac
 	motd_remove
 	if [ ! -e "$MOTD_FILE" ]; then state_set MOTD_CREATED 1; fi
 	cat >> "$MOTD_FILE" <<EOF
 $MOTD_BEGIN
 *** Mail-in-a-Box is being upgraded to Ubuntu 26.04 ($SCRIPT_NAME). ***
-Mail is offline. The upgrade continues on its own after each reboot.
+$how
 If SSH does not come back after a reboot, use the provider's console (VNC/KVM).
   follow it:  tmux attach -t $TMUX_SESSION      (detach: Ctrl-b d)
           or  tail -f $LOG_FILE
@@ -1999,20 +2108,20 @@ ensure_ssh() {
 	if [ -z "$u" ]; then
 		if systemctl cat ssh.socket > /dev/null 2>&1; then u=ssh.socket; else u=ssh.service; fi
 		systemctl unmask --quiet "$u" 2> /dev/null || true
-		if systemctl enable --quiet "$u" 2> /dev/null; then
+		systemctl enable --quiet "$u" 2> /dev/null || true
+		if systemctl is-enabled --quiet "$u" 2> /dev/null; then
 			warn "Neither ssh.socket nor ssh.service was enabled; enabled $u."
 		else
-			warn "Could not enable $u: SSH may not come back after the reboot. Use the provider's console."
+			die "Neither ssh.socket nor ssh.service is enabled, and $u could not be enabled: SSH would
+not come back after the reboot. Not rebooting. Fix it ('systemctl enable ssh.socket'), then run
+the command again."
 		fi
 	fi
 	out=$(sshd -t 2>&1) || rc=$?
-	if [ "$rc" = 0 ]; then
-		say "SSH:             ${u:-ssh} enabled, sshd -t ok${out:+ ($out)}"
-	else
-		warn "sshd -t fails (exit code $rc); SSH may not come back after the reboot:
+	[ "$rc" = 0 ] || die "sshd -t fails (exit code $rc); SSH would not come back after the reboot:
 $(sed 's/^/  /' <<< "$out")
-Fix /etc/ssh/sshd_config (the old one is in $OLD_ETC/ssh), or use the provider's console."
-	fi
+Not rebooting. Fix /etc/ssh/sshd_config (the old one is in $OLD_ETC/ssh), then run the command again."
+	say "SSH:             $u enabled, sshd -t ok${out:+ ($out)}"
 	return 0
 }
 
@@ -2054,27 +2163,80 @@ pending_reboot() {
 	state_set REBOOT_BOOT_ID ""
 }
 
-dpkg_settle() {
-	if [ -n "$(dpkg --audit 2> /dev/null || true)" ]; then
-		warn "Some packages are not fully configured; running dpkg --configure -a."
-		DEBIAN_FRONTEND=noninteractive dpkg --configure -a --force-confdef --force-confold < /dev/null || true
-		apt_get -f install || warn "apt-get -f install failed; see above."
-	fi
-	return 0
+codename_of() {
+	case "$1" in 22.04) echo jammy ;; 24.04) echo noble ;; 26.04) echo resolute ;; esac
+}
+
+# Do the active apt sources name this release (codename)?
+sources_name() {
+	grep -hsv '^[[:space:]]*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
+		2> /dev/null | grep -qw -- "$1"
+}
+
+# Nothing half-installed and nothing left to upgrade.
+packages_clean() {
+	local out
+	[ -z "$(dpkg --audit 2> /dev/null || true)" ] || return 1
+	# Not piped into grep -q: with pipefail, an early grep exit would look clean.
+	out=$(apt-get -s -q dist-upgrade < /dev/null 2> /dev/null) || return 1
+	! grep -qE '^(Inst|Remv|Conf) ' <<< "$out"
+}
+
+# After a release upgrade (also an interrupted one): finish what dpkg and apt
+# left. Dies if the packages stay inconsistent; /etc/os-release alone says
+# little (base-files is unpacked early).
+settle_release() { # TO
+	if packages_clean; then return 0; fi
+	warn "The packages are not consistent after the release upgrade; running dpkg --configure -a and apt-get dist-upgrade."
+	wait_apt_locks
+	DEBIAN_FRONTEND=noninteractive dpkg --configure -a --force-confdef --force-confold < /dev/null || true
+	apt_get -f install || true
+	apt_update || true
+	apt_get dist-upgrade || true
+	packages_clean || die "The packages are still not consistent after the release upgrade to Ubuntu $1:
+$(dpkg --audit 2> /dev/null | head -n 10 | sed 's/^/  /')
+$(apt-get -s -q dist-upgrade < /dev/null 2> /dev/null | grep -E '^(Inst|Remv|Conf) ' | head -n 10 | sed 's/^/  /')
+See /var/log/dist-upgrade/ and $LOG_FILE. Mail stays offline; not rebooting. Fix it
+(dpkg --configure -a, apt-get -f install, apt-get dist-upgrade), then run the command again."
+}
+
+# The release upgrade is in place: settle the packages, check SSH, mark the
+# phase and reboot.
+release_done() { # PHASE TO
+	settle_release "$2"
+	ensure_ssh
+	requiesce
+	state_set "END_$1" "$(date +%s)"
+	phase_mark_done "$1"
+	reboot_and_resume "Ubuntu $2 is installed"
 }
 
 release_upgrade() { # PHASE FROM TO
-	local phase=$1 from=$2 to=$3 cur rc=0
+	local phase=$1 from=$2 to=$3 cur rc=0 bid
 	cur=$(os_version)
+	bid=$(state_get "RELEASE_BOOT_ID_$phase")
 	if [ "$cur" = "$to" ] || [ "$cur" = 26.04 ]; then
-		say "Ubuntu $cur already; nothing to do for $(phase_label "$phase")."
+		if [ -z "$bid" ]; then
+			say "Ubuntu $cur already; nothing to do for $(phase_label "$phase")."
+			return 0
+		fi
+		# An earlier run of this phase was interrupted after the release changed.
+		say "Ubuntu $cur: checking what the interrupted release upgrade left..."
+		settle_release "$cur"
+		ensure_ssh
+		requiesce
+		state_set "END_$phase" "$(date +%s)"
+		phase_mark_done "$phase"
+		if [ -e /run/reboot-required ] || [ "$bid" = "$(boot_id)" ]; then
+			reboot_and_resume "Ubuntu $cur is installed"
+		fi
 		return 0
 	fi
 	[ "$cur" = "$from" ] || die "Expected Ubuntu $from here, found $cur."
 	# do-release-upgrade wants all updates of the current release installed
 	# (after the first release upgrade, 24.04 has its own).
 	say "Installing the updates of Ubuntu $from first..."
-	apt-get -q update < /dev/null || die "apt-get update failed."
+	apt_update || die "apt-get update failed."
 	apt_get dist-upgrade || die "apt-get dist-upgrade failed (see above)."
 	requiesce
 	if [ -e /run/reboot-required ]; then
@@ -2087,15 +2249,30 @@ release_upgrade() { # PHASE FROM TO
 	# No question here: the downtime has started, and the start of the upgrade
 	# was confirmed (the operator may not be watching any more).
 	state_set RELEASE_STARTED 1
+	state_set "RELEASE_BOOT_ID_$phase" "$(boot_id)"
 	set_prompt_lts
 	printf '%s\n' "// Written by $SCRIPT_NAME for the release upgrades; removed when it is finished." \
 		'Dpkg::Options { "--force-confdef"; "--force-confold"; };' > "$APT_OVERRIDE"
-	# No screen session of its own (this runs in tmux or in the resume unit);
-	# the non-interactive frontend answers its questions with the defaults.
-	RELEASE_UPGRADER_NO_SCREEN=1 DEBIAN_FRONTEND=noninteractive \
+	wait_apt_locks
+	# Without a screen session of its own only where nothing hangs up: in tmux
+	# or screen, or in the resume unit. The non-interactive frontend answers
+	# its questions with the defaults.
+	local noscreen=()
+	if [ -n "$RESUMED" ] || in_multiplexer; then noscreen=(RELEASE_UPGRADER_NO_SCREEN=1); fi
+	env "${noscreen[@]}" DEBIAN_FRONTEND=noninteractive \
 		do-release-upgrade -f DistUpgradeViewNonInteractive < /dev/null || rc=$?
 	FAILED_CMD=
 	cur=$(os_version)
+	if [ "$cur" = "$from" ] && sources_name "$(codename_of "$from")" && ! sources_name "$(codename_of "$to")"; then
+		# The upgrader refused before it changed anything.
+		state_set "RELEASE_BOOT_ID_$phase" ""
+		if [ -z "$(state_get RELEASE_BOOT_ID_release_2404)" ] && [ -z "$(state_get RELEASE_BOOT_ID_release_2604)" ]; then
+			state_set RELEASE_STARTED ""
+		fi
+		die "do-release-upgrade did not upgrade (exit code $rc); this is still Ubuntu $from with its
+package sources. See its messages above and /var/log/dist-upgrade/main.log. Mail stays offline.
+Fix the cause and run the command again$([ "$(state_get RELEASE_STARTED)" != 1 ] && echo ", or go back with: $SELF --rollback")."
+	fi
 	if [ "$cur" != "$to" ]; then
 		die "do-release-upgrade ended (exit code $rc) and this machine still runs Ubuntu $cur.
 See /var/log/dist-upgrade/main.log and apt.log. Mail stays offline. If it stopped halfway,
@@ -2103,13 +2280,8 @@ See /var/log/dist-upgrade/main.log and apt.log. Mail stays offline. If it stoppe
 run the command again (it starts do-release-upgrade again while this is Ubuntu $from),
 or restore from the backups."
 	fi
-	if [ "$rc" != 0 ]; then warn "do-release-upgrade ended with exit code $rc, but this is Ubuntu $to now. Checking the packages..."; fi
-	dpkg_settle
-	ensure_ssh
-	requiesce
-	state_set "END_$phase" "$(date +%s)"
-	phase_mark_done "$phase"
-	reboot_and_resume "Ubuntu $to is installed"
+	if [ "$rc" != 0 ]; then warn "do-release-upgrade ended with exit code $rc. Checking the packages..."; fi
+	release_done "$phase" "$to"
 }
 
 phase_release_2404() { release_upgrade release_2404 22.04 24.04; }
@@ -2240,7 +2412,7 @@ phase_cleanup_etc() {
 	[ "$(os_version)" = 26.04 ] || die "This needs Ubuntu 26.04, this is $(os_version)."
 	say "Everything removed here is kept in $MOVED_DIR; the /etc from before the upgrade is in $OLD_ETC."
 	requiesce
-	apt-get -q -q update < /dev/null || warn "apt-get update failed."
+	apt_update > /dev/null || warn "apt-get update failed."
 	cleanup_dovecot
 	cleanup_php
 	cleanup_misc
@@ -2353,6 +2525,7 @@ Fix the cause and run this command again; it continues with setup."
 	fi
 	state_set SETUP_SECONDS "$SETUP_SECONDS"
 	state_set SETUP_END_EPOCH "$(date +%s)"
+	if grep -qsF "$MOTD_BEGIN" "$MOTD_FILE"; then motd_hint after-setup; fi
 	if [ "$(state_get MODE)" != rerun ]; then
 		unquiesce apt-daily.timer apt-daily-upgrade.timer
 		say "Mail is back online (setup has started the services)."
@@ -2613,10 +2786,13 @@ cleanup_old() {
 		say "apt autoremove --purge would remove: ${auto:-nothing}"
 	fi
 
-	mapfile -t rc_pkgs < <(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 2> /dev/null | awk '$1 ~ /^rc/ {print $2}' | grep -Ev "$PROTECTED_RE" || true)
+	# Not the configuration of removed servers or databases (their data may be wanted).
+	mapfile -t rc_pkgs < <(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 2> /dev/null | awk '$1 ~ /^rc/ {print $2}' \
+		| grep -Ev "$PROTECTED_RE" | grep -Ev -- '-server|^postgresql-|^mysql|^mariadb' || true)
 	if [ ${#rc_pkgs[@]} -gt 0 ]; then
 		if [ "$mode" = apply ]; then
-			say "Removing the configuration files of removed packages: ${rc_pkgs[*]}"
+			say "The configuration files of these removed packages would be purged: ${rc_pkgs[*]}"
+			confirm "Purge them?"
 			apt_get purge "${rc_pkgs[@]}" || warn "Could not purge all of them."
 		else
 			say "Configuration files of removed packages would be purged: ${rc_pkgs[*]}"
@@ -2762,6 +2938,7 @@ print_result() {
 	say "  check again:          $SELF"
 	say "  accept the result:    $SELF --finish"
 	VERIFY_FAILED=1
+	if grep -qsF "$MOTD_BEGIN" "$MOTD_FILE"; then motd_hint verify-failed; fi
 	exit 2
 }
 
@@ -2824,7 +3001,7 @@ Usually it is better to fix the cause and continue: $SELF"
 	say "Prompt setting, unmasks and starts the services and resumes the backups."
 	confirm "Roll back?"
 	restore_apt_sources
-	apt-get -q update < /dev/null || warn "apt-get update failed."
+	apt_update || warn "apt-get update failed."
 	local debs=() v
 	if [ -d "$PURGED_DEBS" ]; then mapfile -t debs < <(find "$PURGED_DEBS" -maxdepth 1 -name '*.deb' | sort); fi
 	if [ ${#debs[@]} -gt 0 ]; then
@@ -2915,6 +3092,7 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 	if [ -n "$REDO_FROM" ]; then
 		case "$REDO_FROM" in
 			snapshot)
+				[ "$(state_get QUIESCED)" != 1 ] || die "--redo-from snapshot only works before mail was stopped (phase quiesce)."
 				[ "$(state_get RELEASE_STARTED)" != 1 ] || die "--redo-from snapshot only works before the first release upgrade."
 				phases_reset_from snapshot
 				;;
@@ -2931,7 +3109,7 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 	if phase_is_done finish && [ -z "$REDO_FROM" ]; then
 		say "This upgrade is finished ($(state_get FINISHED_AT)). '--redo-from verify' checks again,"
 		say "'--status' shows the state."
-		if [ -n "$CLEANUP" ] && [ -z "$(state_get CLEANUP_OLD_AT)" ]; then cleanup_old apply; fi
+		if [ -n "$CLEANUP" ] && [ -z "$RESUMED" ] && [ -z "$(state_get CLEANUP_OLD_AT)" ]; then cleanup_old apply; fi
 		return 0
 	fi
 
@@ -2973,7 +3151,11 @@ use the provider's console."
 	done
 	print_summary
 	print_result
-	if [ -n "$CLEANUP" ]; then cleanup_old apply; fi
+	if [ -n "$CLEANUP" ] && [ -n "$RESUMED" ]; then
+		say "Not cleaning up unattended (--cleanup after a reboot). Run: $SELF --cleanup-only"
+	elif [ -n "$CLEANUP" ]; then
+		cleanup_old apply
+	fi
 }
 
 do_check() {
