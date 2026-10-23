@@ -35,6 +35,11 @@ See CHANGELOG.md for upstream's own history.
 * Postfix: comment explains the harmless "no SASL support" warning on port 25.
 * Usage report: `mail_log.py` parses RFC 3339 rsyslog timestamps.
 * Daemon: no `return` inside `finally` in `/logout` (Python 3.14 SyntaxWarning).
+* DNS: SSHFP records are built from the host key files instead of `ssh-keyscan`, which OpenSSH 10's PerSourcePenalties throttled, so the records came and went.
+* Dovecot: deliveries may overshoot the quota by 10% of each user's quota again (userdb `quota_storage_grace`), as on 22.04.
+* Dovecot: `quota_status_toolarge` is set; 2.4.2 left it empty and Postfix accepted messages larger than the whole quota.
+* Z-Push: `DAV_SSL_VERIFY` is defined for autodiscover (Z-Push 2.7.7 crashed with HTTP 500; also affects upstream v78).
+* Repo: `.gitattributes` keeps scripts and configs on LF line endings (the CRLF sa-learn wrappers never ran).
 
 ### Setup and supply chain
 
