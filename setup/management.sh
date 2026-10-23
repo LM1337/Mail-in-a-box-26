@@ -28,7 +28,10 @@ mkdir -p $inst_dir
 venv=$inst_dir/env
 # A venv is bound to the interpreter it was made with. After a release upgrade
 # (e.g. Python 3.12 -> 3.14) recreate it instead of keeping a broken one.
-if [ -x $venv/bin/python3 ] && [ "$($venv/bin/python3 -c 'import sys; print(sys.version_info[:2])' 2>/dev/null)" != "$(python3 -c 'import sys; print(sys.version_info[:2])')" ]; then
+# The check runs the interpreter instead of testing for an executable: after a
+# release upgrade bin/python3 is a dangling link to the removed python3.X, and a
+# venv made with it would be kept and break pip below (In-Place 4).
+if [ -d $venv ] && [ "$($venv/bin/python3 -c 'import sys; print(sys.version_info[:2])' 2>/dev/null)" != "$(python3 -c 'import sys; print(sys.version_info[:2])')" ]; then
 	rm -rf $venv
 fi
 if [ ! -d $venv ]; then
