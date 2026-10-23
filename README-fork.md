@@ -4,7 +4,9 @@ Mail-in-a-Box for Ubuntu 26.04 (fork)
 This is a fork of [Mail-in-a-Box](https://github.com/mail-in-a-box/mailinabox)
 that runs on **Ubuntu 26.04 LTS**. It is upstream PR #2603 (the Ubuntu 26.04
 port) merged with upstream v78, plus the fixes listed in
-[CHANGELOG-fork.md](CHANGELOG-fork.md). Upstream's own history is in
+[CHANGELOG-fork.md](CHANGELOG-fork.md). Each fixed bug is documented with
+symptom, cause and affected versions in [BUGS-fork.md](BUGS-fork.md).
+Upstream's own history is in
 [CHANGELOG.md](CHANGELOG.md), its documentation in [README.md](README.md) and
 on <https://mailinabox.email>.
 
@@ -18,7 +20,7 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * Roundcube 1.7.5, Z-Push 2.7.7.
 
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
-Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md.
+Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md, die behobenen Fehler einzeln in BUGS-fork.md.
 
 Installation
 ------------
