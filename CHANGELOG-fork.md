@@ -40,6 +40,11 @@ See CHANGELOG.md for upstream's own history.
 * Dovecot: `quota_status_toolarge` is set; 2.4.2 left it empty and Postfix accepted messages larger than the whole quota.
 * Z-Push: `DAV_SSL_VERIFY` is defined for autodiscover (Z-Push 2.7.7 crashed with HTTP 500; also affects upstream v78).
 * Repo: `.gitattributes` keeps scripts and configs on LF line endings (the CRLF sa-learn wrappers never ran).
+* DNS: SSHFP records come from the public key sshd actually serves (derived from the private host key, `.pub` only as fallback), and ECDSA P-384/P-521 keys map to algorithm 3.
+* Mail: quota validation accepts ASCII digits only; Unicode digits such as fullwidth `１０G` broke the user's Dovecot userdb lookup (older upstream bug).
+* Z-Push: `MBSTRING_OVERLOAD` is defined for `z_RTF` on PHP 8 (CalDAV Sync requests with RTF bodies crashed with HTTP 500).
+* Tools: `migrate-to-2604.sh` keeps stopped units disabled across reboots, re-pauses backups after every rsync, rolls back safely (backups paused, leftover backup runs ended, `virtual_transport` restored, zone restore and nsd reload separated), and has more accurate Nextcloud event and `occ status` checks.
+* Tests: `prepare-testenv.sh` fails unless ufw is active and the production deny rules are loaded in the kernel, independent of the caller's locale.
 
 ### Setup and supply chain
 
