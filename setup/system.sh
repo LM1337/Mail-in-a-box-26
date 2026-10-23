@@ -328,10 +328,10 @@ dd if=/dev/random of=/dev/urandom bs=1 count=32 2> /dev/null
 # is really any good on virtualized systems, we'll also seed from Ubuntu's
 # pollinate servers, using the pollinate user:
 
-# Older releases left files in its cache owned by root, so pollinate cannot write
-# its log on a box upgraded in place. Seeding is a bonus, not a requirement
-# (In-Place 7).
-chown -R pollinate:daemon /var/cache/pollinate 2>/dev/null || true
+# Older releases can leave its log owned by root, so pollinate fails on a box
+# upgraded in place. Seeding is a bonus, not a requirement, so do not stop
+# setup for it (In-Place 7). The cache is not chowned by root on purpose: the
+# directory belongs to the pollinate user.
 sudo -u pollinate /usr/bin/pollinate -q -r || echo "pollinate could not seed the random number generator (not critical)."
 
 # Between these two, we really ought to be all set.
