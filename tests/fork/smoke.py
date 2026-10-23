@@ -1572,6 +1572,35 @@ def c_imapsieve(ctx):
     return "before %s, after spam-move %s, after ham-move %s" % (before, out.get("spam"), out.get("ham"))
 
 
+def c_fts(ctx):
+    """Full-text search: a body-only word must be found by IMAP SEARCH and by the fts_xapian index."""
+    word = "ftsprobe%s%d" % (ctx.tok.replace("-", ""), random.randint(1000, 9999))
+    sid = "smk-%s-fts" % ctx.tok
+    msg = mkmsg("sender-%s@%s" % (ctx.tok, ctx.seed2), ctx.alice, "smoke fts %s" % ctx.tok, sid,
+                body="The quick brown fox mentions %s only in the body.\r\n" % word)
+    M = imap_login(ctx, ctx.alice)
+    try:
+        typ, _ = M.append("INBOX", None, None, msg.encode())
+        if typ != "OK":
+            raise Fail("APPEND failed")
+        uids = []
+        for _ in range(15):
+            uids = uid_search(M, "INBOX", "BODY", word)
+            if uids:
+                break
+            time.sleep(2)
+        if not uids:
+            raise Fail("IMAP SEARCH BODY %s found nothing" % word)
+    finally:
+        M.logout()
+    # Make sure the hit came from the Xapian index and not from a slow scan.
+    rc, out, err = ctx.remote.run("doveadm fts lookup -u %s mailbox INBOX body %s" % (ctx.alice, word),
+                                  sudo=True, timeout=120)
+    if rc != 0 or not out.strip():
+        raise Fail("doveadm fts lookup rc=%d: %s" % (rc, (err or out).strip()[:300]))
+    return "IMAP SEARCH found uid %s, fts index: %s" % (uids[-1].decode(), out.strip().splitlines()[0][:80])
+
+
 def _poll_magic(ctx, cond, timeout=45):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -1866,6 +1895,7 @@ def main():
         run_check("imapsieve-move-run", c_imapsieve, ctx)
         run_check("imapsieve-spam-learn", c_imapsieve_result, ctx, "spam")
         run_check("imapsieve-ham-learn", c_imapsieve_result, ctx, "ham")
+        run_check("fts-search", c_fts, ctx)
     if not args.no_cleanup and (want("mail") or want("imapsieve")):
         run_check("cleanup-test-mail", c_cleanup, ctx)
     if want("fail2ban"):

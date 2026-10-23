@@ -169,6 +169,57 @@ EOF
 tools/editconf.py /etc/dovecot/conf.d/15-lda.conf \
 	"postmaster_address=postmaster@$PRIMARY_HOSTNAME"
 
+# ### Full-text search
+
+# Index message bodies and attachments with the fts_xapian plugin, so that
+# IMAP SEARCH (Roundcube, phones, desktop clients) does not have to read every
+# message of a large mailbox. The indexes live in each user's home, which is
+# the mailbox directory (userdb "home" in mail-users.sh), in xapian-indexes/.
+# Set FTS=off in /etc/mailinabox.conf to turn it off.
+# Boxes that added fts_xapian by hand for Dovecot 2.3 have it in these files,
+# whose 2.3 syntax Dovecot 2.4 refuses. Our own file below replaces them.
+rm -f /etc/dovecot/conf.d/05-local-fts-plugins.conf /etc/dovecot/conf.d/99-local-fts.conf
+if [ "${FTS:-xapian}" != "off" ]; then
+	apt_install dovecot-fts-xapian
+	cat > /etc/dovecot/conf.d/95-mailinabox-fts.conf << EOF;
+# Managed by Mail-in-a-Box (setup/mail-dovecot.sh). FTS=off in
+# /etc/mailinabox.conf turns full-text search off.
+mail_plugins {
+  fts = yes
+  fts_xapian = yes
+}
+
+# Index new mail on delivery and on save, not only on the first search.
+fts_autoindex = yes
+mailbox Trash {
+  fts_autoindex = no
+}
+
+# Dovecot 2.4 requires a language even though fts_xapian does not use it.
+language en {
+  default = yes
+}
+
+fts xapian {
+  # Shortest search term that still matches inside words.
+  partial = 3
+  verbose = 0
+}
+
+# Indexing a large mailbox for the first time needs more than the default.
+service indexer-worker {
+  vsz_limit = 2G
+}
+EOF
+	# The plugin's README recommends this once a day to compact the indexes.
+	cat > /etc/cron.d/mailinabox-fts << EOF;
+# Managed by Mail-in-a-Box (setup/mail-dovecot.sh).
+30 3 * * * root nice -n 19 ionice -c 3 /usr/bin/doveadm fts optimize -A >/dev/null 2>&1
+EOF
+else
+	rm -f /etc/dovecot/conf.d/95-mailinabox-fts.conf /etc/cron.d/mailinabox-fts
+fi
+
 # Copy the global sieve script into where we've told Dovecot to look for it. Then
 # compile it. Global scripts must be compiled now because Dovecot won't have
 # permission later.
