@@ -83,6 +83,17 @@ fi
 # Change directory to it.
 cd "$HOME/mailinabox" || exit
 
+# An existing checkout of upstream Mail-in-a-Box does not have this fork's tags
+# (In-Place 5). Say so instead of failing with "Update failed".
+if [ "$SOURCE" == "" ]; then SOURCE=https://github.com/LM1337/Mail-in-a-box-26; fi
+ORIGIN=$(git config --get remote.origin.url || true)
+if [ "${ORIGIN%.git}" != "${SOURCE%.git}" ]; then
+	echo "$HOME/mailinabox is a checkout of $ORIGIN, not of $SOURCE."
+	echo "To upgrade this box in place use tools/upgrade-in-place-to-2604.sh, see README-fork.md."
+	echo "To use this checkout anyway: git -C $HOME/mailinabox remote set-url origin $SOURCE"
+	exit 1
+fi
+
 # Update it.
 if [ "$TAG" != "$(git describe --always)" ]; then
 	echo "Updating Mail-in-a-Box to $TAG . . ."
