@@ -101,6 +101,13 @@ tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
 tools/editconf.py /etc/dovecot/conf.d/10-auth.conf \
 	auth_allow_cleartext=no \
 	"auth_mechanisms=plain login"
+# A box upgraded in place from Dovecot 2.3 can still have the old names of these
+# settings in the kept configuration files, and Dovecot 2.4 refuses to start
+# with them. Comment them out (In-Place 1).
+tools/editconf.py /etc/dovecot/conf.d/10-auth.conf -e disable_plaintext_auth=
+tools/editconf.py /etc/dovecot/conf.d/10-ssl.conf -e \
+	"ssl_cert=" "ssl_key=" "ssl_dh=" "ssl_dh_parameters_length=" "ssl_prefer_server_ciphers=" \
+	"ssl_protocols=" "ssl_ca="
 
 # Enable SSL, specify the location of the SSL certificate and private key files.
 # Use Mozilla's "Intermediate" recommendations at https://ssl-config.mozilla.org/#server=dovecot&server-version=2.2.33&config=intermediate&openssl-version=1.1.1,
