@@ -493,8 +493,13 @@ import json, os
 d = "/usr/local/lib/owncloud"
 with open(d + "/core/shipped.json", encoding="utf-8") as f:
 	s = json.load(f)
-known = set(s.get("shippedApps", [])) | set(s.get("alwaysEnabled", [])) | {"contacts", "calendar", "user_external"}
-print(" ".join(sorted(a for a in os.listdir(d + "/apps") if a not in known and os.path.isdir(os.path.join(d, "apps", a)))))
+miab = ("contacts", "calendar", "user_external")
+known = set(s.get("shippedApps", [])) | set(s.get("alwaysEnabled", [])) | set(miab)
+def is_miab(a):
+	# Older MIAB versions unpacked GitHub source archives next to the apps,
+	# leaving directories like contacts-5.5.3 or calendar-4.7.6 behind.
+	return any(a.startswith(m + "-") and a[len(m) + 1:][:1].isdigit() for m in miab)
+print(" ".join(sorted(a for a in os.listdir(d + "/apps") if a not in known and not is_miab(a) and os.path.isdir(os.path.join(d, "apps", a)))))
 PY
 )"
 fi
@@ -660,7 +665,9 @@ nc=$SR/owncloud/owncloud.db
 p=$(sed -n "s/^[[:space:]]*'dbtableprefix'[[:space:]]*=>[[:space:]]*'\([A-Za-z0-9_]*\)'.*/\1/p" "$SR/owncloud/config.php" 2> /dev/null | head -n 1)
 p=${p:-oc_}
 echo "NC_ACCOUNTS=$(q "$nc" "SELECT count(*) FROM ${p}accounts;")"
-echo "NC_CARDS=$(q "$nc" "SELECT count(*) FROM ${p}cards;")"
+# Only the users' own address books: Nextcloud keeps a system address book of
+# all accounts (principals/system/system) that newer versions fill differently.
+echo "NC_CARDS=$(q "$nc" "SELECT count(*) FROM ${p}cards c JOIN ${p}addressbooks a ON c.addressbookid = a.id WHERE a.principaluri NOT LIKE 'principals/system/%';")"
 echo "NC_EVENTS=$(q "$nc" "SELECT count(*) FROM ${p}calendarobjects o JOIN ${p}calendars c ON o.calendarid = c.id WHERE c.uri <> 'contact_birthdays';")"
 EOF
 )
@@ -2129,6 +2136,11 @@ compare_fingerprints() {
 			status=OK
 		elif [[ $k =~ ^(MESSAGES|BAYES_SPAM|BAYES_HAM)$ && $o =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] && [ "$n" -ge "$o" ]; then
 			status="OK (new mail since)"
+		elif [[ $k =~ ^(MAILBOXES)$ && $o =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] && [ "$n" -ge "$o" ]; then
+			# Mail-in-a-Box keeps the mail directory of a deleted user, so
+			# accounts added (or added and removed) since the switch-over
+			# only ever raise this number.
+			status="OK (new mailboxes since)"
 		else
 			status=DIFFERENT
 			VERIFY_PROBLEMS+=("$k differs: old box ${o:--}, new box ${n:--}")
@@ -2333,11 +2345,22 @@ phase_verify() {
 	fi
 
 	if [ -d "$STATE_DIR/old-etc/etc/nsd/zones" ]; then
-		local f n=0 same=0
+		local f z n=0 same=0
 		for f in "$STATE_DIR"/old-etc/etc/nsd/zones/*.ds; do
 			[ -f "$f" ] || continue
+			# Only zones the old nsd actually served: a stale .ds file stays
+			# behind when e.g. the box's hostname moved into its parent zone.
+			z=$(basename "$f" .txt.ds)
+			if [ -f "$STATE_DIR/old-etc/etc/nsd/nsd.conf.d/zones.conf" ] \
+				&& ! grep -qE "^[[:space:]]*name:[[:space:]]*$z[[:space:]]*\$" "$STATE_DIR/old-etc/etc/nsd/nsd.conf.d/zones.conf"; then
+				continue
+			fi
 			n=$((n + 1))
-			if cmp -s "$f" "/etc/nsd/zones/$(basename "$f")"; then same=$((same + 1)); fi
+			# Compare as sets: the order of the records in the file is not stable.
+			if [ -f "/etc/nsd/zones/$(basename "$f")" ] \
+				&& [ "$(sort "$f")" = "$(sort "/etc/nsd/zones/$(basename "$f")")" ]; then
+				same=$((same + 1))
+			fi
 		done
 		if [ "$n" -gt 0 ]; then say "DNSSEC DS records unchanged: $same of $n zones."; fi
 		if [ "$same" != "$n" ]; then VERIFY_PROBLEMS+=("DS records changed for $((n - same)) of $n zones (would break DNSSEC)"); fi
