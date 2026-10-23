@@ -22,10 +22,23 @@
 #
 # Usage: sudo bash tests/fork/prepare-testenv.sh
 set -euo pipefail
+# ufw translates its output via Python gettext, which reads LANGUAGE before
+# LC_ALL; force untranslated output so the "ufw status" parsing below works.
+export LC_ALL=C
+unset LANGUAGE
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
 JUMP_HOST=192.0.2.1
 PEERS="192.0.2.1 192.0.2.10 192.0.2.11"
+BLOCK_V4="198.51.100.5 198.51.100.240"
+BLOCK_V6="2001:db8::1"
+
+# An inactive ufw accepts new rules into user.rules without loading them, so
+# the outbound block below would silently not be enforced.
+case "$(ufw status)" in
+	"Status: active"*) ;;
+	*) echo "ufw is not active: the production block would not be enforced (run ufw --force enable)" >&2; exit 1 ;;
+esac
 
 if ! ufw status | grep -q "ALLOW IN.*$JUMP_HOST\|$JUMP_HOST.*ALLOW"; then
 	ufw insert 1 allow proto tcp from "$JUMP_HOST" to any port 22 comment 'test: jump host'
@@ -40,8 +53,16 @@ for f in /etc/hosts /etc/cloud/templates/hosts.debian.tmpl; do
 	[ -n "${PUBLIC_IPV6:-}" ] && echo "$PUBLIC_IPV6 $PRIMARY_HOSTNAME # miab-testenv" >> "$f"
 done
 
-for ip in 198.51.100.5 198.51.100.240 2001:db8::1; do
+for ip in $BLOCK_V4 $BLOCK_V6; do
 	ufw status | grep -q "DENY OUT.*$ip\|$ip.*DENY OUT" || ufw deny out to "$ip" comment 'test: never reach production' >/dev/null
+done
+# Verify that the DROP rules are actually loaded in the kernel (this also
+# catches IPV6=no in /etc/default/ufw).
+for ip in $BLOCK_V4; do
+	iptables -S ufw-user-output | grep -q -- "-d $ip/32 .*-j DROP" || { echo "outbound block for $ip not loaded" >&2; exit 1; }
+done
+for ip in $BLOCK_V6; do
+	ip6tables -S ufw6-user-output | grep -q -- "-d $ip/128 .*-j DROP" || { echo "outbound block for $ip not loaded" >&2; exit 1; }
 done
 
 WL=/etc/postgrey/whitelist_clients.local
