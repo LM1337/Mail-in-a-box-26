@@ -539,7 +539,8 @@ cat > /etc/cron.d/mailinabox-nextcloud << EOF;
 EOF
 if [ "${NEXTCLOUD_SHARE_SCOPE:-domain}" != all ]; then
 	# Puts new users, new domains and new admins into the domain groups (see below).
-	echo "17 * * * *	root	(cd $PWD && PHP_VER=$PHP_VER tools/nextcloud-share-scope.sh --cron)" >> /etc/cron.d/mailinabox-nextcloud
+	# Every 5 minutes, because the admins do not see a new domain until then.
+	echo "*/5 * * * *	root	(cd $PWD && PHP_VER=$PHP_VER tools/nextcloud-share-scope.sh --cron)" >> /etc/cron.d/mailinabox-nextcloud
 fi
 chmod +x /etc/cron.d/mailinabox-nextcloud
 

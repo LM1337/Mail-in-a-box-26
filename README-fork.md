@@ -77,13 +77,19 @@ Nextcloud lets users share only with members of their own groups
 rules with `circles search_from_collaborator`). user_external puts a new user
 into the group at the first login. `tools/nextcloud-share-scope.sh` sets the
 options and puts all existing users into their group; setup runs it and cron
-runs it every hour, so new domains, new users and new admins are picked up.
+runs it every 5 minutes, so new domains, new users and new admins are picked
+up. Setup sets these options again on every run; autocompletion in the share
+dialog (`shareapi_allow_share_dialog_user_enumeration`) is left as it is.
+Switching to `all` puts the options back to what they were before the fork
+first set them.
 Nextcloud cannot exempt admins from the rule, so the script puts the members
 of `admin` into every domain group. Mail-in-a-Box does not make anyone a
 Nextcloud admin; `tools/owncloud-unlockadmin.sh` does that for one account.
 
 Limits:
 
+* When the first user of a new mail domain logs in to Nextcloud, the admins
+  see that domain only after the next cron run (at most 5 minutes later).
 * Admins are members of every domain group. Every user therefore sees the
   admins in the share dialog, and admins receive what is shared with a whole
   domain group. Turn group sharing off if that is not wanted:
@@ -132,8 +138,12 @@ eigenen Gruppen (`shareapi_only_share_with_group_members`,
 `circles search_from_collaborator` nach denselben Regeln). user_external nimmt
 neue Benutzer bei der ersten Anmeldung in die Gruppe auf.
 `tools/nextcloud-share-scope.sh` setzt die Optionen und nimmt alle
-vorhandenen Benutzer in ihre Gruppe auf; Setup ruft es auf und Cron jede
-Stunde, damit neue Domains, neue Benutzer und neue Admins dazukommen.
+vorhandenen Benutzer in ihre Gruppe auf; Setup ruft es auf und Cron alle
+5 Minuten, damit neue Domains, neue Benutzer und neue Admins dazukommen.
+Setup setzt diese Optionen bei jedem Lauf neu; die Autovervollständigung im
+Teilen-Dialog (`shareapi_allow_share_dialog_user_enumeration`) bleibt, wie sie
+ist. Beim Umschalten auf `all` erhalten die Optionen wieder die Werte, die sie
+hatten, bevor der Fork sie zum ersten Mal gesetzt hat.
 Nextcloud kann Admins nicht von der Regel ausnehmen, deshalb nimmt das Skript
 die Mitglieder von `admin` in jede Domaingruppe auf. Mail-in-a-Box macht
 niemanden zum Nextcloud-Admin; `tools/owncloud-unlockadmin.sh` erledigt das
@@ -141,6 +151,9 @@ für ein Konto.
 
 Grenzen:
 
+* Meldet sich der erste Benutzer einer neuen Maildomain bei Nextcloud an,
+  sehen die Admins diese Domain erst nach dem nächsten Cron-Lauf (höchstens
+  5 Minuten später).
 * Admins sind Mitglied jeder Domaingruppe. Deshalb sieht jeder Benutzer die
   Admins im Teilen-Dialog, und Admins erhalten, was mit einer ganzen
   Domaingruppe geteilt wird. Wer das nicht will, schaltet das Teilen mit

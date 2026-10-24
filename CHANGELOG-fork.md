@@ -19,8 +19,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Each mail domain becomes a Nextcloud group (user_external `groupDomain`),
   `tools/nextcloud-share-scope.sh` sets the sharing options, puts existing
   users into their group and the admins into all of them; setup runs it, cron
-  every hour. `NEXTCLOUD_SHARE_SCOPE=all` in `/etc/mailinabox.conf` keeps
-  upstream's behaviour. See README-fork.md for the limits.
+  every 5 minutes. `NEXTCLOUD_SHARE_SCOPE=all` in `/etc/mailinabox.conf` keeps
+  upstream's behaviour and puts back the sharing options from before. See
+  README-fork.md for the limits.
 * Tests: smoke check `nextcloud-share-scope` (sharee search across domains,
   system address book, admin view).
 
