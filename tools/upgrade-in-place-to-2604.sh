@@ -2,8 +2,9 @@
 #########################################################
 # Upgrade a Mail-in-a-Box IN PLACE to Ubuntu 26.04 and this fork.
 #
-# Run this as root on the box itself, inside tmux or screen. Check first
-# (changes nothing), then upgrade:
+# Run this as root on the box itself. Check first (changes nothing), then
+# upgrade (started from a terminal outside tmux or screen, it runs itself in
+# the tmux session upgrade-2604, see run_in_multiplexer):
 #
 #   /root/mailinabox-fork/tools/upgrade-in-place-to-2604.sh --check
 #   /root/mailinabox-fork/tools/upgrade-in-place-to-2604.sh
@@ -29,11 +30,15 @@
 # reboot a systemd unit continues it on its own):
 #
 #   1. preflight        check everything (also alone, with --check)
-#   2. snapshot         fingerprint, archive of /etc and the code outside
-#                       $STORAGE_ROOT, a fresh Mail-in-a-Box backup, an
-#                       encrypted copy of the archive next to the backups
-#   3. quiesce          mail goes OFFLINE: backups paused, mail/web/cron/apt
-#                       timers stopped and masked (also across reboots)
+#   2. snapshot         archive of /etc and the code outside $STORAGE_ROOT,
+#                       an encrypted copy of it next to the backups; then
+#                       mail goes OFFLINE (mail/web/cron/apt timers stopped
+#                       and masked, also across reboots), so that the fresh
+#                       Mail-in-a-Box backup holds all mail; fingerprint
+#                       (with --skip-miab-backup or backups off, mail keeps
+#                       running until quiesce)
+#   3. quiesce          backups paused; mail goes OFFLINE here if it is not
+#                       yet
 #   4. prepare-release  third-party apt sources off, PHP from ppa:ondrej
 #                       removed, packages up to date, Prompt=lts
 #   5. release-2404     do-release-upgrade 22.04 -> 24.04, reboot (22.04 only)
@@ -55,16 +60,27 @@
 # 2.4 does not read 2.3 configuration, and /etc/dovecot is replaced by a
 # pristine copy before setup. To bring such extensions back, put hook scripts
 # into /etc/mailinabox/upgrade-2604.d/*.sh. They run in phase local-ext, after
-# setup and before verify, in the order of their names:
+# setup and before verify. Two more stages are for services of the operator
+# that use the mail (e.g. a docker compose stack that logs in by IMAP):
+#   /etc/mailinabox/upgrade-2604.d/before/*.sh  right before mail goes offline
+#       (stop_mail; on a box that only runs setup again: before setup);
+#   /etc/mailinabox/upgrade-2604.d/after/*.sh   in phase finish, after mail
+#       and the backups are back (and at the end of --rollback); if the final
+#       check fails, right after it (mail runs again), and not again in finish.
+# All hooks run in the order of their names:
 #   * as root, with bash, in /, stdin from /dev/null;
-#   * with the environment variables STORAGE_ROOT, PRIMARY_HOSTNAME, MIAB_DIR
-#     (this fork's checkout), OLD_ETC (/root/upgrade-2604/old-etc, a copy of
-#     /etc as it was before the upgrade), MOVED_DIR (/root/upgrade-2604/moved,
-#     everything this tool moved out of the way, at its original path) and
-#     UPGRADE_STATE_DIR;
-#   * a non-zero exit code makes the phase fail (fix the hook, run again;
-#     all hooks run again, so write them so that they can run twice).
-# After the hooks, "doveconf -n" must succeed without warnings.
+#   * with the environment variables HOOK_STAGE (before, local-ext, after),
+#     STORAGE_ROOT, PRIMARY_HOSTNAME, MIAB_DIR (this fork's checkout; in
+#     stage before and after --rollback the old one), OLD_ETC
+#     (/root/upgrade-2604/old-etc, a copy of /etc as it was before the
+#     upgrade; missing on a box that only runs setup again),
+#     MOVED_DIR (/root/upgrade-2604/moved, everything this tool moved out of
+#     the way, at its original path) and UPGRADE_STATE_DIR;
+#   * a non-zero exit code makes the phase fail in stages before and
+#     local-ext (fix the hook, run again; all hooks of the stage run again, so
+#     write them so that they can run twice); in stage after it is only a
+#     warning (the upgrade is not undone).
+# After the hooks of local-ext, "doveconf -n" must succeed without warnings.
 #
 # See --help.
 #########################################################
@@ -91,12 +107,18 @@ APT_DISABLED=$STATE_DIR/apt-disabled
 # .deb files of the packages purged before the release upgrade (for --rollback).
 PURGED_DEBS=$STATE_DIR/purged-debs
 HOOK_DIR=/etc/mailinabox/upgrade-2604.d
+# Hook stages before (mail goes offline) and after (finish); see the header.
+HOOK_BEFORE_DIR=$HOOK_DIR/before
+HOOK_AFTER_DIR=$HOOK_DIR/after
 SCRIPT_NAME=upgrade-in-place-to-2604.sh
 RESUME_UNIT=mailinabox-upgrade-2604-resume.service
 RESUME_UNIT_FILE=/etc/systemd/system/$RESUME_UNIT
 RESUME_SCRIPT=$STATE_DIR/resume.sh
 RESUME_MAX=8
 TMUX_SESSION=upgrade-2604
+# The environment variables this script reads (passed into that session).
+MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE)
+MUX_TERM=
 # Keep the old configuration files during the release upgrades (removed again in finish).
 APT_OVERRIDE=/etc/apt/apt.conf.d/99-upgrade-in-place-to-2604
 MOTD_FILE=/etc/motd
@@ -109,6 +131,8 @@ PHP_VER=8.5        # keep in sync with setup/functions.sh
 PHP_LEGACY_VER=8.2 # keep in sync with setup/system.sh
 QUIET_TIMEOUT=${UPGRADE_QUIET_TIMEOUT:-900}
 BACKUP_MAX_AGE=${UPGRADE_BACKUP_MAX_AGE:-86400}
+# How long to wait for a Mail-in-a-Box backup that is running (wait_backup_done).
+BACKUP_WAIT=${UPGRADE_BACKUP_WAIT:-7200}
 GIB=$((1024 * 1024 * 1024))
 
 # Phases that are recorded in the state file, in order.
@@ -138,6 +162,7 @@ EXT_BLOCK=()
 EXT_INFO=()
 EXT_FTS=()
 CHECK_ONLY=
+BACKUP_WAITED=
 LOG_READY=
 LOCKED=
 IN_DIE=
@@ -190,10 +215,15 @@ Usage: upgrade-in-place-to-2604.sh --check [options]     (start here)
 Upgrades THIS Mail-in-a-Box in place to Ubuntu 26.04 and this fork: Ubuntu
 22.04 (Mail-in-a-Box v60 or later) goes through 24.04 to 26.04 with two
 reboots, a box already release-upgraded to 24.04 (Mail-in-a-Box v7x) with one
-reboot. Nextcloud must be 26 or later. Run it as root, inside tmux or screen.
-Mail is offline from phase "quiesce" until setup has finished (typically 1-3
-hours). After each reboot the upgrade continues on its own; follow it with
-"tmux attach -t upgrade-2604" or "tail -f /root/upgrade-2604/upgrade.log".
+reboot. Nextcloud must be 26 or later. Run it as root. Started from a
+terminal outside tmux or screen, it runs itself in the tmux session
+"upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
+connection drops, log in again and run "tmux attach -t upgrade-2604".
+Mail is offline from phase "snapshot" on (after the system archive, before
+the fresh backup; with --skip-miab-backup or backups turned off from phase
+"quiesce") until setup has finished (typically 1-3 hours). After each reboot the upgrade continues on its own;
+follow it with "tmux attach -t upgrade-2604" or
+"tail -f /root/upgrade-2604/upgrade.log".
 Running the command again continues an interrupted upgrade.
 
 Have the provider's console (VNC, KVM or serial) at hand: if the network
@@ -217,18 +247,24 @@ Safety nets:
   --no-backup-check       start even though backups are off or the last one is
                           older than 24 hours
   --skip-miab-backup      do not run a fresh Mail-in-a-Box backup in the
-                          snapshot phase
+                          snapshot phase (mail then keeps running until
+                          phase quiesce)
   --no-offsite            keep the system archive only in /root/upgrade-2604
                           (default: an encrypted copy goes next to the backups)
   --keep-local            local extensions (see the header of the script) do
                           not block the upgrade; they are only reported, and
                           the old /etc/dovecot is moved aside before setup.
                           Hooks in /etc/mailinabox/upgrade-2604.d/*.sh can
-                          bring them back for Dovecot 2.4.
+                          bring them back for Dovecot 2.4; hooks in its
+                          before/ and after/ run right before mail goes
+                          offline and when the upgrade is finished or its
+                          final check failed (e.g. to stop and start
+                          services that use the mail).
 
 Control:
   --yes                   do not ask for confirmation, and reboot without the
                           10-second countdown (unattended use)
+  --no-tmux               do not start a tmux session of its own (see above)
   --status [--verbose]    show the state of the upgrade (--verbose: raw)
   --rollback              only before the first release upgrade started: put
                           the apt sources and packages back, start the
@@ -242,7 +278,9 @@ setup runs from (default: the release tag). UPGRADE_STATE_DIR (default
 /root/upgrade-2604) holds the state, the log, the system archive and the copy
 of the old /etc. UPGRADE_QUIET_TIMEOUT (default 900) is how many seconds to
 wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
-86400) the age in seconds the last backup may have.
+86400) the age in seconds the last backup may have, UPGRADE_BACKUP_WAIT
+(default 7200) how many seconds to wait for a Mail-in-a-Box backup that is
+running (e.g. the nightly one) before anything is stopped.
 EOF
 }
 
@@ -387,12 +425,235 @@ session_check() {
 	# Started with nohup (SIGHUP ignored) or without a terminal (nothing to hang up).
 	if trap -p HUP | grep -q "''"; then return 0; fi
 	if ! (: < /dev/tty) 2> /dev/null; then return 0; fi
+	if [ -n "$CHECK_ONLY" ] && [ -z "$NO_TMUX" ]; then
+		if [ -z "$SELF_FILE" ]; then
+			# Through curl | bash the run uses the copy of the release tag, which
+			# may be older than this feature.
+			say "Through curl | bash the command runs the copy of ${TAG:-$DEFAULT_TAG}. If that release does not"
+			say "start tmux by itself yet, start the command inside tmux: tmux new -s $TMUX_SESSION"
+			return 0
+		fi
+		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
+		say "(tmux is installed if needed; reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+		return 0
+	fi
 	warn "This does not run inside tmux or screen. If your SSH connection drops, a release
 upgrade or setup stops halfway (a release upgrade stopped in the middle can leave the
 machine unbootable; a Nextcloud upgrade stopped in the middle stays in maintenance mode).
-Better: apt-get install tmux; tmux new -s upgrade; run the command there
-(reattach after a disconnect with: tmux attach -t upgrade)."
+Better: install tmux (apt-get install tmux) and run the command again without --no-tmux:
+it then runs itself in tmux (reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue without tmux or screen?"; fi
+}
+
+# A command that changes something, started from a terminal outside tmux and
+# screen, runs itself in a tmux session (or screen) of its own: a dropped SSH
+# connection then only ends the terminal that is attached to it. Not with
+# --no-tmux, --check or --resumed, not without a terminal (automation, nohup)
+# and not without a script file. Needs tmux 3.0 or later (a command with
+# arguments). Keep in sync with tools/migrate-to-2604.sh.
+
+mux_has() { # TOOL: is there a session named $TMUX_SESSION?
+	case "$1" in
+		tmux) tmux has-session -t "=$TMUX_SESSION" 2> /dev/null ;;
+		# screen -ls exits with 1 even when it lists sessions (pipefail).
+		screen) { screen -ls 2> /dev/null || true; } | grep -qE "^[[:space:]]+[0-9]+\.${TMUX_SESSION}[[:space:]]" ;;
+	esac
+}
+
+# The process in the session's window: the shell of mux_start or of the
+# resume unit.
+mux_pane_pid() { # TOOL
+	local p
+	case "$1" in
+		tmux) tmux list-panes -t "=$TMUX_SESSION" -F '#{pane_pid}' 2> /dev/null | head -n 1 ;;
+		screen)
+			p=$({ screen -ls 2> /dev/null || true; } | sed -nE "s/^[[:space:]]+([0-9]+)\.${TMUX_SESSION}[[:space:]].*/\1/p" | head -n 1)
+			if [ -n "$p" ]; then pgrep -P "$p" | head -n 1; fi
+			;;
+	esac
+}
+
+# Is the session a window of this tool whose command has ended, so that it
+# only waits for Enter? Its shell has no child process then.
+mux_finished() { # TOOL
+	local p
+	p=$(mux_pane_pid "$1" || true)
+	[ -n "$p" ] || return 1
+	grep -qa 'Press Enter to close this window' "/proc/$p/cmdline" 2> /dev/null || return 1
+	[ -z "$(pgrep -P "$p" || true)" ]
+}
+
+mux_kill() { # TOOL
+	case "$1" in
+		tmux) tmux kill-session -t "=$TMUX_SESSION" ;;
+		screen) screen -S "$TMUX_SESSION" -X quit ;;
+	esac > /dev/null 2>&1 || true
+}
+
+# The terminal type to attach with. tmux and screen need its terminfo entry,
+# which a server often lacks (xterm-ghostty, xterm-kitty, ...). Prints
+# nothing for a terminal they cannot use.
+mux_term() {
+	local t
+	case "${TERM:-dumb}" in dumb | unknown) return 0 ;; esac
+	if ! command -v tput > /dev/null; then
+		echo "$TERM"
+		return 0
+	fi
+	for t in "$TERM" xterm-256color; do
+		if tput -T "$t" clear > /dev/null 2>&1 && tput -T "$t" cup 0 0 > /dev/null 2>&1; then
+			echo "$t"
+			return 0
+		fi
+	done
+}
+
+# Attach this terminal (also when stdin is the curl pipe). tmux refuses the
+# name /dev/tty, so the terminal's own device. screen -d -r: a client of a
+# dropped SSH connection may still count as attached.
+mux_attach() { # TOOL
+	local t
+	t=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
+	case "$t" in '' | '?') t=/dev/tty ;; *) t=/dev/$t ;; esac
+	# shellcheck disable=SC2094 # a terminal, not a file
+	case "$1" in
+		tmux) TERM=${MUX_TERM:-${TERM:-}} tmux attach-session -t "=$TMUX_SESSION" ;;
+		screen) TERM=${MUX_TERM:-${TERM:-}} screen -d -r "$TMUX_SESSION" ;;
+	esac < "$t" > "$t" 2>&1
+}
+
+# Start the session; the window stays open after the command until Enter is
+# pressed (with --yes at most 10 minutes: a caller such as "ssh -t ... --yes"
+# must not wait for someone to press it), and the exit code is kept in RC_FILE.
+mux_start() { # TOOL RC_FILE HINT ARGS...
+	local tool=$1 rc_file=$2 hint=$3 v scope=() env_file=$STATE_DIR/.multiplexer-env close=
+	shift 3
+	if [ -n "$ASSUME_YES" ]; then close=600; fi
+	# A tmux server that runs already gives a new session its own environment,
+	# not this one: pass what the script reads, and unset what is not set here.
+	# In a file, not on the command line (ps shows that to every user, and
+	# SOURCE may hold a token).
+	rm -f "$rc_file" "$env_file"
+	(
+		umask 077
+		for v in PATH HOME LANG LC_ALL "${MUX_ENV[@]}"; do
+			if [ -n "${!v+x}" ]; then printf 'export %s=%q\n' "$v" "${!v}"; else printf 'unset %s\n' "$v"; fi
+		done > "$env_file"
+		echo 'export MIAB_2604_MUX=1' >> "$env_file"
+	) || return 1
+	# trap : INT: Ctrl-C stops the command, but not this shell (bash ends
+	# itself after a child that died of SIGINT), so the window stays open.
+	# shellcheck disable=SC2016 # expanded by that bash
+	local cmd=(bash -c '
+trap : INT QUIT
+rc_file=$1 hint=$2 env_file=$3 close=$4
+shift 4
+wait_enter() { if [ -n "$close" ]; then read -r -t "$close" _; else read -r _; fi; }
+if ! . "$env_file"; then
+	echo "Could not read $env_file. Press Enter to close this window."
+	wait_enter
+	exit 1
+fi
+rm -f "$env_file"
+printf "%s\n\n" "$hint"
+"$@"
+rc=$?
+echo "$rc" > "$rc_file"
+echo
+echo "The command ended with exit code $rc. Press Enter to close this window${close:+ (it closes by itself after $close seconds, --yes)}."
+wait_enter
+exit "$rc"' mux "$rc_file" "$hint" "$env_file" "$close" bash "$SELF_FILE" "$@")
+	case "$tool" in
+		tmux)
+			# In a scope of its own (like the resume unit): logind must not end the
+			# tmux server with the SSH session (KillUserProcesses=yes).
+			if command -v systemd-run > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
+				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$" --)
+				"${scope[@]}" tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			fi
+			tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
+			;;
+		screen) screen -dmS "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0 ;;
+	esac
+	rm -f "$env_file"
+	return 1
+}
+
+run_in_multiplexer() { # ARGS (the original arguments)
+	[ -z "$NO_TMUX$CHECK_ONLY${RESUMED:-}${MIAB_2604_MUX:-}" ] || return 0
+	[ -n "$SELF_FILE" ] || return 0
+	in_multiplexer && return 0
+	if trap -p HUP | grep -q "''"; then return 0; fi
+	(: < /dev/tty) 2> /dev/null || return 0
+	MUX_TERM=$(mux_term)
+	if [ -z "$MUX_TERM" ]; then
+		say "tmux cannot use this terminal (TERM=${TERM:-}); running without it."
+		return 0
+	fi
+	local tool='' again rc rc_file=$STATE_DIR/.multiplexer-exit-code pre=''
+	if command -v tmux > /dev/null; then
+		tool=tmux
+	else
+		say "Installing tmux, so that this run survives a dropped SSH connection..."
+		if install_tmux && command -v tmux > /dev/null; then
+			tool=tmux
+		elif command -v screen > /dev/null; then
+			warn "Could not install tmux; using screen."
+			tool=screen
+		else
+			warn "Could not install tmux."
+			return 0
+		fi
+	fi
+	if [ "$MUX_TERM" != "${TERM:-}" ]; then pre="TERM=$MUX_TERM "; fi
+	if [ -n "${SUDO_USER:-}" ]; then pre+="sudo "; fi
+	case "$tool" in
+		tmux) again="${pre}tmux attach -t $TMUX_SESSION" ;;
+		screen) again="${pre}screen -d -r $TMUX_SESSION" ;;
+	esac
+	if mux_has "$tool" && mux_finished "$tool"; then
+		say "The window of an earlier run in the $tool session $TMUX_SESSION only waits for Enter"
+		say "(its output is in $LOG_FILE). Closing it and starting this run."
+		mux_kill "$tool"
+		sleep 1
+	fi
+	if mux_has "$tool"; then
+		say "Something still runs in the $tool session $TMUX_SESSION (an earlier run?)."
+		say "This command is NOT started; attaching to that session instead."
+		sleep 3
+		mux_attach "$tool" || warn "Could not attach this terminal; attach with: $again"
+		trap - EXIT
+		say "This command was NOT run, because the $tool session $TMUX_SESSION was in use."
+		say "Run it again when the run there has ended."
+		exit 1
+	fi
+	local hint="This runs in the $tool session $TMUX_SESSION and goes on if the SSH connection drops.
+Then ssh in again and run: $again"
+	if [ "$tool" = tmux ]; then hint+="     (detach without stopping it: Ctrl-b d)"; else hint+="     (detach: Ctrl-a d)"; fi
+	if ! mux_start "$tool" "$rc_file" "$hint" "$@"; then
+		warn "Could not start a $tool session; continuing without it."
+		return 0
+	fi
+	say "$hint"
+	local attached=1
+	mux_attach "$tool" || attached=''
+	# The output stays in the session; this process ends here.
+	trap - EXIT
+	if mux_has "$tool"; then
+		if [ -n "$attached" ]; then
+			say "Detached. The run goes on in the $tool session $TMUX_SESSION; back to it with: $again"
+		else
+			warn "Could not attach this terminal. The run goes on in the $tool session $TMUX_SESSION; attach with: $again"
+		fi
+		exit 0
+	fi
+	rc=$(cat "$rc_file" 2> /dev/null || true)
+	if ! [[ $rc =~ ^[0-9]+$ ]]; then
+		say "The $tool session $TMUX_SESSION has ended (the output is in $LOG_FILE)."
+		exit 1
+	fi
+	say "The run in the $tool session ended with exit code $rc (the output is in $LOG_FILE)."
+	exit "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -422,10 +683,35 @@ load_kv() {
 	done
 }
 
+# The PIDs of a running Mail-in-a-Box backup: a python running
+# management/backup.py, or duplicity. From /proc and not with pgrep -f, which
+# also matches any command line that only names them (the checking shell, a
+# grep, an editor). Keep in sync with tools/migrate-to-2604.sh.
+BACKUP_PIDS_SCRIPT=$(cat <<'EOF'
+for f in /proc/[0-9]*/cmdline; do
+	a=()
+	mapfile -d '' -t -n 3 a 2> /dev/null < "$f" || continue
+	case "${a[0]:-}" in python* | */python* | duplicity | */duplicity) ;; *) continue ;; esac
+	for x in "${a[@]}"; do
+		case "$x" in
+			management/backup.py | */management/backup.py | duplicity | */duplicity)
+				f=${f#/proc/}
+				echo "${f%/cmdline}"
+				break
+				;;
+		esac
+	done
+done
+EOF
+)
+
 # Facts about this box. Cheap, runs on every start. Keep in sync with
 # FACTS_SCRIPT in tools/migrate-to-2604.sh; differs: OS_CODENAME, PROMPT,
 # MIAB_IS_FORK, the backup target also from a paused custom.yaml, no unit list.
-FACTS_SCRIPT=$(cat <<'EOF'
+FACTS_SCRIPT="backup_pids() {
+$BACKUP_PIDS_SCRIPT
+}
+$(cat <<'EOF'
 . /etc/os-release 2> /dev/null || true
 echo "OS_ID=${ID:-unknown}"
 echo "OS_VERSION=${VERSION_ID:-unknown}"
@@ -485,7 +771,7 @@ echo "BACKUP_TARGET=$(sed -n 's/^target:[[:space:]]*//p' "$bf" 2> /dev/null | he
 
 # Messages waiting in the Postfix queue live in /var/spool/postfix, not in $STORAGE_ROOT.
 echo "POSTQUEUE=$(find /var/spool/postfix/deferred /var/spool/postfix/active /var/spool/postfix/incoming /var/spool/postfix/hold /var/spool/postfix/maildrop -type f 2> /dev/null | wc -l)"
-if pgrep -f 'management/backup.py|/usr/bin/duplicity' > /dev/null; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
+if [ -n "$(backup_pids)" ]; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
 if systemctl is-active --quiet apt-daily.service 2> /dev/null || systemctl is-active --quiet apt-daily-upgrade.service 2> /dev/null \
 	|| pgrep -f 'bin/unattended-upgrade( |$)' > /dev/null; then
 	echo "APT_BUSY=1"
@@ -494,7 +780,7 @@ if [ -f /root/.ssh/id_rsa_miab ]; then echo "HAS_BACKUP_SSH_KEY=1"; fi
 if [ -d /var/lib/z-push ]; then echo "HAS_ZPUSH=1"; fi
 if [ -d /var/lib/munin ]; then echo "HAS_MUNIN=1"; fi
 EOF
-)
+)"
 
 # Size and number of files of $STORAGE_ROOT. Slow on big boxes. Keep in sync
 # with tools/migrate-to-2604.sh.
@@ -703,6 +989,21 @@ install_packages() {
 	apt_get -q install "$@" || die "Could not install $*."
 }
 
+# For run_in_multiplexer. Not while a release upgrade is half-way (packages
+# and sources between two releases), and only if nothing is upgraded or
+# removed for it. A failure only means: no tmux. Quickly or not at all, and
+# not with wait_apt_locks (its die would only end this function).
+install_tmux() {
+	if [ "$(state_get RELEASE_STARTED)" = 1 ] && ! phase_is_done release_2604; then return 1; fi
+	apt_locks_free || { sleep 15 && apt_locks_free; } || return 1
+	(
+		apt-get -q -q -o DPkg::Lock::Timeout=30 update < /dev/null > /dev/null 2>&1 || exit 1
+		if apt-get -s install tmux < /dev/null 2> /dev/null | grep -qE '^(Remv |Inst [^ ]+ \[)'; then exit 1; fi
+		DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=30 -o Dpkg::Options::=--force-confdef \
+			-o Dpkg::Options::=--force-confold install tmux < /dev/null > /dev/null 2>&1
+	)
+}
+
 # The packages "apt-get -s purge" would remove, one per line.
 purge_simulation() {
 	apt-get -s purge "$@" < /dev/null 2> /dev/null | sed -n 's/^Purg \([^ ]*\).*/\1/p'
@@ -753,6 +1054,56 @@ backup_target() {
 	echo "${t:-local}"
 }
 
+# When the last Mail-in-a-Box backup finished (epoch), if any. duplicity keeps
+# a copy of each manifest in its archive directory (backup/cache), whatever
+# the target; local targets have them in encrypted/.
+last_backup_epoch() {
+	find "$STORAGE_ROOT/backup/cache" "$STORAGE_ROOT/backup/encrypted" -name 'duplicity-*.manifest*' \
+		-printf '%T@\n' 2> /dev/null | sort -n | tail -n 1 | cut -d. -f1 || true
+}
+
+backup_pids() { local_bash "$BACKUP_PIDS_SCRIPT"; }
+
+# A Mail-in-a-Box backup that is running (the nightly one starts at 01:04,
+# /etc/cron.d/mailinabox-nightly): wait until it has finished, at most
+# BACKUP_WAIT seconds. Only before anything is stopped, so Ctrl-C is safe.
+# Sets BACKUP_WAITED. Keep in sync with tools/migrate-to-2604.sh (there on
+# the old box, LABEL " on the old box").
+wait_backup_done() { # [LABEL]
+	local label=${1:-} pids start fails=0
+	BACKUP_WAITED=
+	pids=$(backup_pids | paste -sd ' ')
+	[ -n "$pids" ] || return 0
+	BACKUP_WAITED=1
+	start=$(date +%s)
+	say "A Mail-in-a-Box backup is running$label (PID $pids). Waiting until it has finished"
+	say "(at most $(fmt_dur "$BACKUP_WAIT"); nothing was stopped yet, so Ctrl-C is safe here)..."
+	while :; do
+		# errexit does not apply in a command substitution: a failed check
+		# (e.g. ssh) must not count as "finished".
+		if ! pids=$(backup_pids); then
+			fails=$((fails + 1))
+			echo
+			[ "$fails" -lt 3 ] || die "Could not check $fails times in a row whether the backup$label still runs.
+Nothing was stopped yet. Run the command again."
+			warn "Could not check whether the backup$label still runs; trying again."
+			sleep 30
+			continue
+		fi
+		fails=0
+		[ -n "$pids" ] || break
+		if [ $(($(date +%s) - start)) -ge "$BACKUP_WAIT" ]; then
+			echo
+			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(paste -sd ' ' <<< "$pids")).
+Nothing was stopped yet. Run the command again when it has finished."
+		fi
+		printf '.'
+		sleep 30
+	done
+	echo
+	say "The backup$label has finished (waited $(fmt_dur $(($(date +%s) - start))))."
+}
+
 # ---------------------------------------------------------------------------
 # This fork's checkout. Keep in sync with tools/migrate-to-2604.sh.
 
@@ -776,6 +1127,20 @@ checkout_dir() { # the checkout this script runs from, if any
 	d=$(dirname "$(dirname "$SELF_FILE")")
 	[ -f "$d/setup/start.sh" ] || return 1
 	echo "$d"
+}
+
+# A release tag older than run_in_multiplexer does not start tmux by itself:
+# say so before its copy runs (its own check only asks without --yes). Keep
+# in sync with tools/migrate-to-2604.sh.
+warn_no_auto_tmux() { # FILE TAG
+	grep -q '^run_in_multiplexer()' "$1" 2> /dev/null && return 0
+	[ -z "$NO_TMUX$CHECK_ONLY" ] || return 0
+	in_multiplexer && return 0
+	(: < /dev/tty) 2> /dev/null || return 0
+	warn "The downloaded $2 does not start tmux by itself yet (TAG=main does). If your SSH
+connection drops outside tmux or screen, the run stops halfway. Better: stop now
+(Ctrl-C), run tmux new -s $TMUX_SESSION and start the command again in there."
+	sleep 5
 }
 
 # Through curl | bash there is no file to continue from after a reboot:
@@ -808,6 +1173,7 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 	[ -f "$d/tools/$script" ] || die "Could not download tools/$script from $source ($tag).
 Download the script to a file and run it from there:
   $how"
+	warn_no_auto_tmux "$d/tools/$script" "$tag"
 	UPGRADE_REEXEC=1 exec bash "$d/tools/$script" "$@"
 }
 
@@ -826,15 +1192,25 @@ install_self() {
 	fi
 }
 
-# Only one run at a time (the resume unit and an operator could both start one).
-take_lock() {
+# The PID of another run of this script that is active, if any.
+active_run_pid() {
 	local pid
 	pid=$(cat "$STATE_DIR/pid" 2> /dev/null || true)
 	if [ -n "$pid" ] && [ "$pid" != "$$" ] && kill -0 "$pid" 2> /dev/null \
 		&& grep -qa "$SCRIPT_NAME" "/proc/$pid/cmdline" 2> /dev/null; then
+		echo "$pid"
+	fi
+	return 0
+}
+
+# Only one run at a time (the resume unit and an operator could both start one).
+take_lock() {
+	local pid
+	pid=$(active_run_pid)
+	if [ -n "$pid" ]; then
 		IN_DIE=1
 		die "Another run of $SCRIPT_NAME is active (PID $pid). Follow it with:
-  tmux attach -t $TMUX_SESSION     (if it was started after a reboot)
+  tmux attach -t $TMUX_SESSION     (sudo tmux ... if you are not root)
   tail -f $LOG_FILE"
 	fi
 	echo $$ > "$STATE_DIR/pid"
@@ -980,27 +1356,41 @@ backup_blocker() {
 }
 
 check_backup() {
-	local target last age
+	local target last age running=
 	target=$(backup_target)
+	# Set below when the age check waits for the running backup: stop_mail
+	# checks then even if that backup has finished by itself meanwhile.
+	state_set BACKUP_CHECK_DEFERRED ""
 	say "Backups:             ${F[BACKUP_TARGET]:-local}"
 	if [ "$target" = off ]; then
 		backup_blocker "Backups are turned off (System > Backup Status). A release upgrade cannot be undone:
 make a backup first."
 		return 0
 	fi
-	# duplicity keeps a copy of each manifest in its archive directory
-	# (backup/cache), whatever the target; local targets have them in encrypted/.
-	last=$(find "$STORAGE_ROOT/backup/cache" "$STORAGE_ROOT/backup/encrypted" -name 'duplicity-*.manifest*' \
-		-printf '%T@\n' 2> /dev/null | sort -n | tail -n 1 | cut -d. -f1 || true)
-	if [ -z "$last" ]; then
+	# Not a blocker: the upgrade waits for it (wait_backup_done) and then
+	# checks the age again (backup_check_after_wait).
+	if [ "${F[BACKUP_RUNNING]:-0}" = 1 ]; then
+		running=1
+		say "Backup running:      yes; the upgrade waits until it has finished (at most $(fmt_dur "$BACKUP_WAIT"))"
+		say "                     before it stops anything"
+	fi
+	last=$(last_backup_epoch)
+	if [ -z "$last" ] && [ -n "$running" ]; then
+		say "Last backup:         none yet; checked again when the running one has finished"
+		state_set BACKUP_CHECK_DEFERRED 1
+	elif [ -z "$last" ]; then
 		backup_blocker "No Mail-in-a-Box backup found in $STORAGE_ROOT/backup. Make one first
 (System > Backup Status, or $(state_get OLD_MIAB_DIR)/management/backup.py)."
 		return 0
-	fi
-	age=$(($(date +%s) - last))
-	say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
-	if [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
-		backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
+	else
+		age=$(($(date +%s) - last))
+		say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
+		if [ "$age" -gt "$BACKUP_MAX_AGE" ] && [ -n "$running" ]; then
+			say "                     older than $(fmt_dur "$BACKUP_MAX_AGE"); checked again when the running one has finished"
+			state_set BACKUP_CHECK_DEFERRED 1
+		elif [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
+			backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
+		fi
 	fi
 	case "$target" in
 		local | file://"$STORAGE_ROOT"/*)
@@ -1246,11 +1636,15 @@ detect_extensions() {
 		dpkg -S "$f" > /dev/null 2>&1 && continue
 		EXT_INFO+=("$f (cron job; kept, cron is stopped during the upgrade)")
 	done
-	if [ -d "$HOOK_DIR" ]; then
-		for f in "$HOOK_DIR"/*.sh; do
-			if [ -f "$f" ]; then EXT_INFO+=("hook $f (runs in phase local-ext)"); fi
-		done
-	fi
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs right before mail goes offline)"); fi
+	done < <(hook_files "$HOOK_BEFORE_DIR")
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs in phase local-ext)"); fi
+	done < <(hook_files "$HOOK_DIR")
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs in phase finish, after mail is back)"); fi
+	done < <(hook_files "$HOOK_AFTER_DIR")
 }
 
 report_extensions() {
@@ -1391,9 +1785,6 @@ afterwards if they support Nextcloud 34 (setup keeps the app store off, see 'app
 		say "Data:                $(human "$(state_get SIZE_TOTAL)") in $(state_get FILES_TOTAL) files and directories (stays in place)"
 		check_space
 		check_apt_state
-		if [ "${F[BACKUP_RUNNING]:-0}" = 1 ]; then
-			blocker "A backup is running right now. Wait until it is finished."
-		fi
 		check_release_offer
 		check_backup
 		check_purge
@@ -1429,7 +1820,7 @@ check_summary() {
 	session_check
 	if [ ${#CHECK_BLOCKERS[@]} -eq 0 ]; then
 		say "No blockers found. Nothing was changed."
-		say "Start the upgrade (inside tmux or screen) with:"
+		say "Start the upgrade with:"
 		say "  $(start_command)"
 		exit 0
 	fi
@@ -1470,12 +1861,23 @@ show_plan() {
 	oc=$(state_get FILES_OWNCLOUD)
 	oc=${oc:-0}
 	if [[ $nc =~ ^([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -lt 34 ]; then steps=$((34 - BASH_REMATCH[1])); fi
-	say "$n. Snapshot: fingerprint, system archive (/etc, the code outside $STORAGE_ROOT),"
-	say "   $([ -n "$SKIP_MIAB_BACKUP" ] && echo "no fresh backup (--skip-miab-backup)" || echo "a fresh Mail-in-a-Box backup (it stops mail for its run)"),"
-	say "   $([ -n "$NO_OFFSITE" ] && echo "the archive stays here (--no-offsite)" || echo "an encrypted copy of the archive next to the backups"). Mail keeps running."
-	n=$((n + 1))
-	say "$n. MAIL GOES OFFLINE: backups paused; mail, web, cron and the update timers stopped"
-	say "   and masked (they stay off across reboots until setup)."
+	local offsite="an encrypted copy of the archive next to the backups"
+	if [ -n "$NO_OFFSITE" ]; then offsite="the archive stays here (--no-offsite)"; fi
+	if fresh_backup_planned; then
+		say "$n. Snapshot: system archive (/etc, the code outside $STORAGE_ROOT), $offsite."
+		say "   Then MAIL GOES OFFLINE: mail, web, cron and the update timers stopped and masked"
+		say "   (they stay off across reboots until setup), a fresh Mail-in-a-Box backup (so it"
+		say "   holds all mail), fingerprint."
+		n=$((n + 1))
+		say "$n. Backups paused until the end."
+	else
+		say "$n. Snapshot: fingerprint, system archive (/etc, the code outside $STORAGE_ROOT),"
+		say "   no fresh backup ($([ -n "$SKIP_MIAB_BACKUP" ] && echo "--skip-miab-backup" || echo "backups are off")),"
+		say "   $offsite. Mail keeps running."
+		n=$((n + 1))
+		say "$n. MAIL GOES OFFLINE: backups paused; mail, web, cron and the update timers stopped"
+		say "   and masked (they stay off across reboots until setup)."
+	fi
 	n=$((n + 1))
 	say "$n. Third-party apt sources off, PHP from ppa:ondrej removed, packages updated."
 	if [ "$v" = 22.04 ]; then
@@ -1493,13 +1895,27 @@ show_plan() {
 	say "$n. Setup of this fork (${TAG:-$DEFAULT_TAG}) on the existing data (Nextcloud ${nc:-} -> 34). Mail is back."
 	n=$((n + 1))
 	say "$n. Hooks ($HOOK_DIR), checks, services and backups back on."
+	if [ -n "$(hook_files "$HOOK_BEFORE_DIR")" ]; then
+		say "The hooks in $HOOK_BEFORE_DIR run right before mail goes offline."
+	fi
+	if [ -n "$(hook_files "$HOOK_AFTER_DIR")" ]; then
+		say "The hooks in $HOOK_AFTER_DIR run at the end, when mail and the backups are back"
+		say "(or right after a final check that failed, as mail runs again then)."
+	fi
 	say
-	local rel=0
+	local rel=0 bk_lo=0 bk_hi=0 bk=
 	if [ "$v" = 22.04 ]; then rel=2; elif [ "$v" = 24.04 ]; then rel=1; fi
-	local lo=$((rel * 1500 + 600 + 900 + steps * 120 + steps * oc / 50000)) hi=$((rel * 4200 + 1200 + 1800 + steps * 600 + steps * oc / 10000))
+	# An incremental backup; a full one is not foreseeable (see below).
+	if fresh_backup_planned; then bk_lo=120 bk_hi=900 bk=", the fresh backup"; fi
+	local lo=$((rel * 1500 + 600 + 900 + steps * 120 + steps * oc / 50000 + bk_lo)) hi=$((rel * 4200 + 1200 + 1800 + steps * 600 + steps * oc / 10000 + bk_hi))
 	say "Expected downtime, roughly: $(fmt_dur "$lo") - $(fmt_dur "$hi")"
 	say "  ($rel release upgrade(s) of 20-60 minutes each, reboots, setup 15-30 minutes plus"
-	say "  $steps Nextcloud upgrade steps over $oc files)."
+	say "  $steps Nextcloud upgrade steps over $oc files$bk)."
+	if [ -n "$bk" ]; then
+		say "The fresh backup runs with mail offline: a few minutes when it is incremental, much longer"
+		say "when backup.py makes a full backup of the $(human "$(state_get SIZE_TOTAL)") (when there is none yet, or on a"
+		say "Saturday or Sunday after many changes or about a month since the last full one)."
+	fi
 	say "The release upgrades cannot be undone; '--rollback' only works before the first one."
 }
 
@@ -1530,35 +1946,62 @@ save_meta() {
 	} > "$m/miab-version.txt"
 }
 
-run_miab_backup() {
-	local dir target
+# Does the snapshot run a fresh Mail-in-a-Box backup? (Without output.)
+fresh_backup_planned() { [ -z "$SKIP_MIAB_BACKUP" ] && [ "$(backup_target)" != off ]; }
+
+# The same, with the reason when not, and the checks that would only fail
+# later (before mail is stopped for the backup).
+miab_backup_wanted() {
+	local dir
 	dir=$(state_get OLD_MIAB_DIR)
-	target=$(backup_target)
 	if [ -n "$SKIP_MIAB_BACKUP" ]; then
-		say "No fresh Mail-in-a-Box backup (--skip-miab-backup)."
-		return 0
+		say "No fresh Mail-in-a-Box backup (--skip-miab-backup); mail keeps running until phase quiesce."
+		return 1
 	fi
-	if [ "$target" = off ]; then
-		say "Backups are turned off: no fresh Mail-in-a-Box backup."
-		return 0
+	if [ "$(backup_target)" = off ]; then
+		say "Backups are turned off: no fresh Mail-in-a-Box backup; mail keeps running until phase quiesce."
+		return 1
 	fi
 	if [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-saved" ] || [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-none" ]; then
 		# backup.py would see "target: off" and do nothing.
 		die "The backups are paused by this tool; a backup now would not run. Use --skip-miab-backup."
 	fi
 	[ -x "$dir/management/backup.py" ] || die "$dir/management/backup.py is missing. Use --skip-miab-backup to go on without a fresh backup."
-	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
+	return 0
+}
+
+# After waiting for a running backup (or when the preflight saw one running):
+# it must have left a backup that is recent enough (like check_backup), or the
+# next one would likely fail too.
+backup_check_after_wait() {
+	local last
+	[ -z "$NO_BACKUP_CHECK" ] && [ "$(backup_target)" != off ] || return 0
+	last=$(last_backup_epoch)
+	if [ -z "$last" ] || [ $(($(date +%s) - last)) -gt "$BACKUP_MAX_AGE" ]; then
+		die "The backup that ran has not left a backup younger than $(fmt_dur "$BACKUP_MAX_AGE") (see System >
+Backup Status and the mail to the administrator). Nothing was stopped yet. Fix it and run
+the command again, or use --no-backup-check."
+	fi
+}
+
+# With mail stopped (stop_mail): the backup is the last state of the mail.
+run_miab_backup() {
+	local dir
+	dir=$(state_get OLD_MIAB_DIR)
+	if [ -n "$(backup_pids)" ]; then
 		die "A backup is running already. Wait until it is finished and run the command again."
 	fi
 	say "Running a Mail-in-a-Box backup now ($dir/management/backup.py, target ${F[BACKUP_TARGET]:-local})."
-	say "Mail-in-a-Box stops Postfix, Dovecot and PHP for the run and starts them again. That is"
-	say "fine here: mail goes offline for the upgrade right after this anyway."
+	say "backup.py stops Postfix, Dovecot, postgrey and PHP for its run and starts them again"
+	say "afterwards. They are masked now, so that start fails ('Unit ... is masked'), as it should:"
+	say "mail stays offline until setup."
 	local rc=0 started
 	started=$(date +%s)
 	(cd "$dir" && management/backup.py) < /dev/null || rc=$?
 	FAILED_CMD=
 	[ "$rc" = 0 ] || die "The backup failed (exit code $rc, see above). Fix it (System > Backup Status), or
-use --skip-miab-backup if a recent backup exists."
+use --skip-miab-backup if a recent backup exists. Mail stays offline until then; --rollback
+brings it back."
 	state_set MIAB_BACKUP_AT "$(date -u +%FT%TZ)"
 	say "Backup done ($(fmt_dur $(($(date +%s) - started))))."
 }
@@ -1638,47 +2081,82 @@ targets. Copy $enc off this machine yourself (it is encrypted with backup/secret
 }
 
 phase_snapshot() {
-	section "Snapshot (mail keeps running)"
-	local stamp arch rc=0 p paths=() miab
-	stamp=$(date -u +%Y%m%dT%H%M%SZ)
-	state_set SNAPSHOT_STAMP "$stamp"
+	section "Snapshot"
+	local stamp arch rc=0 p paths=() miab excl=() b q
 	miab=$(state_get OLD_MIAB_DIR)
+	arch=$(state_get SYSTEM_ARCHIVE)
+	# The package lists, the system archive and the copy of /etc record the box
+	# as it was, so they are taken while mail still runs: stop_mail masks and
+	# disables units in /etc. A run interrupted after stop_mail keeps them.
+	if [ "$(state_get QUIESCED)" = 1 ] && [ -f "$arch" ] && [ -d "$OLD_ETC" ] \
+		&& [ "$(stat -c %Y "$arch")" -le "$(state_get QUIESCED_EPOCH)" ]; then
+		say "Mail is offline since $(state_get QUIESCED_AT). The system archive from before stays: $arch"
+	else
+		stamp=$(date -u +%Y%m%dT%H%M%SZ)
+		state_set SNAPSHOT_STAMP "$stamp"
+		if [ "$(state_get QUIESCED)" = 1 ]; then
+			# Only when the archive is gone, or an older version of this tool
+			# stopped mail first: leave out the masks.
+			for p in $(state_get MASKED_UNITS); do excl+=("--exclude=etc/systemd/system/$p"); done
+			if [ ${#excl[@]} -gt 0 ]; then
+				warn "Mail is offline already, so the system archive and the copy of /etc leave out the
+masks of: $(state_get MASKED_UNITS)"
+			fi
+			if [ -n "$(state_get DISABLED_UNITS)" ]; then
+				warn "These units are disabled in them (they were enabled): $(state_get DISABLED_UNITS)"
+			fi
+			if [ ! -d "$STATE_DIR/meta" ]; then save_meta; fi
+		else
+			save_meta
+		fi
 
-	run_miab_backup
+		for p in etc "${miab#/}" var/lib/z-push var/lib/munin usr/local/lib/owncloud var/spool/cron usr/local/bin; do
+			if [ -n "$p" ] && [ -e "/$p" ]; then paths+=("$p"); fi
+		done
+		arch=$STATE_DIR/system-$stamp.tar.gz
+		say "Saving $(printf '/%s ' "${paths[@]}")and the package lists to $arch..."
+		rc=0
+		tar --numeric-owner "${excl[@]}" -czf "$arch.new" -C / "${paths[@]}" -C "$STATE_DIR" meta 2> "$STATE_DIR/tar-errors.txt" || rc=$?
+		# tar exits with 1 when a file changed while it was read.
+		[ "$rc" -le 1 ] || die "Could not write the system archive (exit code $rc, see $STATE_DIR/tar-errors.txt)."
+		mv "$arch.new" "$arch"
+		chmod 600 "$arch"
+		state_set SYSTEM_ARCHIVE "$arch"
+		say "System archive: $(human "$(stat -c %s "$arch")")"
+
+		# Taken once per upgrade and never replaced (the hooks rely on it). One left
+		# by an earlier attempt (rolled back) is kept aside.
+		if [ -d "$OLD_ETC" ] && [ -n "$(state_get ETC_SAVED_AT)" ]; then
+			say "The copy of /etc from $(state_get ETC_SAVED_AT) stays: $OLD_ETC"
+		else
+			if [ -e "$OLD_ETC" ]; then mv "$OLD_ETC" "$OLD_ETC.$stamp"; fi
+			mkdir -p "$OLD_ETC.new"
+			tar -C "$OLD_ETC.new" --numeric-owner --strip-components=1 -xzf "$arch" etc \
+				|| die "Could not unpack /etc from $arch."
+			mv "$OLD_ETC.new" "$OLD_ETC"
+			state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
+			say "A copy of /etc as it is now: $OLD_ETC"
+		fi
+
+		offsite_copy "$arch"
+	fi
+
+	# Mail goes offline before the backup: mail that arrived after it would
+	# not be in it (backup.py starts Postfix and Dovecot again after its run).
+	if miab_backup_wanted; then
+		stop_mail
+		b=$(state_get MIAB_BACKUP_AT)
+		q=$(state_get QUIESCED_AT)
+		if [ -n "$b" ] && [ -n "$q" ] && [[ $b > $q ]]; then
+			say "The backup of $b ran with mail offline already, so it holds all mail. Not again."
+		else
+			run_miab_backup
+		fi
+	fi
 
 	say "Recording counts and key fingerprints (before the upgrade)..."
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
-	save_meta
-
-	for p in etc "${miab#/}" var/lib/z-push var/lib/munin usr/local/lib/owncloud var/spool/cron usr/local/bin; do
-		if [ -n "$p" ] && [ -e "/$p" ]; then paths+=("$p"); fi
-	done
-	arch=$STATE_DIR/system-$stamp.tar.gz
-	say "Saving $(printf '/%s ' "${paths[@]}")and the package lists to $arch..."
-	tar --numeric-owner -czf "$arch.new" -C / "${paths[@]}" -C "$STATE_DIR" meta 2> "$STATE_DIR/tar-errors.txt" || rc=$?
-	# tar exits with 1 when a file changed while it was read.
-	[ "$rc" -le 1 ] || die "Could not write the system archive (exit code $rc, see $STATE_DIR/tar-errors.txt)."
-	mv "$arch.new" "$arch"
-	chmod 600 "$arch"
-	state_set SYSTEM_ARCHIVE "$arch"
-	say "System archive: $(human "$(stat -c %s "$arch")")"
-
-	# Taken once per upgrade and never replaced (the hooks rely on it). One left
-	# by an earlier attempt (rolled back) is kept aside.
-	if [ -d "$OLD_ETC" ] && [ -n "$(state_get ETC_SAVED_AT)" ]; then
-		say "The copy of /etc from $(state_get ETC_SAVED_AT) stays: $OLD_ETC"
-	else
-		if [ -e "$OLD_ETC" ]; then mv "$OLD_ETC" "$OLD_ETC.$stamp"; fi
-		mkdir -p "$OLD_ETC.new"
-		tar -C "$OLD_ETC.new" --numeric-owner --strip-components=1 -xzf "$arch" etc \
-			|| die "Could not unpack /etc from $arch."
-		mv "$OLD_ETC.new" "$OLD_ETC"
-		state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
-		say "A copy of /etc as it is now: $OLD_ETC"
-	fi
-
-	offsite_copy "$arch"
 }
 
 # ---------------------------------------------------------------------------
@@ -1835,29 +2313,56 @@ Let them finish (or end them), then run the command again. Mail stays offline."
 	done
 }
 
-phase_quiesce() {
-	section "Stopping mail (the downtime starts)"
-	read_facts
-	if [ "${F[APT_BUSY]:-0}" = 1 ]; then
-		die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
-and run the command again. Nothing was stopped yet."
-	fi
-	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
-		die "A backup is running. Wait until it is finished and run the command again. Nothing was stopped yet."
-	fi
+# Mail goes offline: remember what runs, mask and stop the units (masked,
+# they stay off across reboots), wait until nothing uses $STORAGE_ROOT. In
+# phase snapshot before the fresh backup, otherwise in phase quiesce. The
+# first call starts the downtime (QUIESCED_AT); later calls (an interrupted
+# run, phase quiesce after snapshot) only make sure everything is off.
+stop_mail() {
 	local units=() u active=()
 	mapfile -t units < <(quiesce_units)
-	for u in "${units[@]}"; do
-		if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
-	done
-	state_add ACTIVE_BEFORE "${active[@]}"
-	state_set QUIESCED 1
-	state_set QUIESCED_AT "$(date -u +%FT%TZ)"
-	state_set QUIESCED_EPOCH "$(date +%s)"
-	pause_backups
+	if [ "$(state_get QUIESCED)" != 1 ]; then
+		read_facts
+		if [ "${F[APT_BUSY]:-0}" = 1 ]; then
+			die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
+and run the command again. Nothing was stopped yet."
+		fi
+		wait_backup_done
+		if [ -n "$BACKUP_WAITED" ] || [ "$(state_get BACKUP_CHECK_DEFERRED)" = 1 ]; then
+			backup_check_after_wait
+			# The facts (apt) may have changed meanwhile.
+			read_facts
+			if [ "${F[APT_BUSY]:-0}" = 1 ]; then
+				die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
+and run the command again. Nothing was stopped yet."
+			fi
+		fi
+		run_hooks before "$HOOK_BEFORE_DIR"
+		for u in "${units[@]}"; do
+			if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
+		done
+		state_add ACTIVE_BEFORE "${active[@]}"
+		state_set QUIESCED 1
+		state_set QUIESCED_AT "$(date -u +%FT%TZ)"
+		state_set QUIESCED_EPOCH "$(date +%s)"
+		say "Mail goes OFFLINE now (the downtime starts)."
+	fi
 	say "Stopping and masking: ${units[*]}"
 	mask_units "${units[@]}"
 	systemctl stop "${units[@]}" 2> /dev/null || warn "Not all services stopped: ${units[*]}"
+	wait_quiet
+}
+
+phase_quiesce() {
+	if [ "$(state_get QUIESCED)" = 1 ]; then
+		section "Pausing the backups (mail is offline since $(state_get QUIESCED_AT))"
+	else
+		section "Stopping mail (the downtime starts)"
+	fi
+	stop_mail
+	# After the fresh backup of phase snapshot (backup.py would see "off");
+	# cron is masked, so no nightly backup runs in between.
+	pause_backups
 	local q
 	q=$(local_bash "$QUEUE_SCRIPT" "SR=$STORAGE_ROOT" 2> /dev/null || true)
 	local -A Q=()
@@ -1866,12 +2371,12 @@ and run the command again. Nothing was stopped yet."
 		warn "${Q[QUEUE_TOTAL]} messages are in the Postfix queue${Q[QUEUE_LOCAL]:+ (${Q[QUEUE_LOCAL]} for mailboxes of this box)}.
 They stay in /var/spool/postfix and are delivered when Postfix runs again after setup."
 	fi
-	wait_quiet
 	say "Recording counts and key fingerprints again, now that nothing changes..."
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
 	if command -v docker > /dev/null && [ "$(docker ps -q 2> /dev/null | wc -l)" -gt 0 ]; then
-		warn "Docker containers are running and were NOT stopped: $(docker ps --format '{{.Names}}' 2> /dev/null | tr '\n' ' ')"
+		warn "Docker containers are running and were NOT stopped: $(docker ps --format '{{.Names}}' 2> /dev/null | tr '\n' ' ')
+If they use the mail, stop them with a hook in $HOOK_BEFORE_DIR next time (see the header)."
 	fi
 	say
 	say "MAIL IS OFFLINE NOW (since $(state_get QUIESCED_AT)). Senders queue their mail and retry;"
@@ -2056,7 +2561,7 @@ if command -v systemd-run > /dev/null 2>&1; then SCOPE=(systemd-run --scope --qu
 if command -v tmux > /dev/null 2>&1; then
 	if tmux has-session -t "$SESSION" 2> /dev/null; then exit 0; fi
 	"${SCOPE[@]}" tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-		"$CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
+		"trap : INT QUIT; $CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
 	exit 0
 fi
 eval "exec ${SCOPE[*]} $CMD"
@@ -2559,6 +3064,8 @@ phase_setup() {
 		# update timers stay off until it has finished.
 		unquiesce cron.service apt-daily.timer apt-daily-upgrade.timer
 	fi
+	# Nothing goes offline before (no quiesce): the before stage runs here.
+	if [ "$(state_get MODE)" = rerun ]; then run_hooks before "$HOOK_BEFORE_DIR"; fi
 	local rc=0
 	run_setup || rc=$?
 	if [ "$rc" != 0 ]; then
@@ -2579,27 +3086,52 @@ Fix the cause and run this command again; it continues with setup."
 # ---------------------------------------------------------------------------
 # Hooks, checks, finish.
 
-phase_local_ext() {
-	section "Local extensions (hooks in $HOOK_DIR)"
-	resolve_fork_dir
-	local hooks=() h rc out warnings
-	if [ -d "$HOOK_DIR" ]; then
-		mapfile -t hooks < <(find "$HOOK_DIR" -maxdepth 1 -type f -name '*.sh' 2> /dev/null | LC_ALL=C sort)
-	fi
+# The operator's hook scripts in DIR (*.sh, not in subdirectories), in the
+# order of their names.
+hook_files() { # DIR
+	[ -d "$1" ] || return 0
+	find "$1" -maxdepth 1 -type f -name '*.sh' 2> /dev/null | LC_ALL=C sort
+}
+
+# Run the hooks of a stage (see the header of this script). A failing hook
+# stops the run, in stage "after" it only warns: mail runs again, and the
+# upgrade is not undone for it.
+run_hooks() { # STAGE DIR
+	local stage=$1 dir=$2 hooks=() h rc host miab=${MIAB_DIR:-$(state_get FORK_DIR)}
+	miab=${miab:-$(state_get OLD_MIAB_DIR)}
+	# What the before hooks stop, the after hooks start again (once).
+	if [ "$stage" = before ]; then state_set HOOKS_after_AT ""; fi
+	mapfile -t hooks < <(hook_files "$dir")
 	if [ ${#hooks[@]} -eq 0 ]; then
-		say "No hooks."
+		if [ "$stage" = local-ext ]; then say "No hooks."; fi
+		return 0
 	fi
-	local host
-	host=$(sed -n 's/^PRIMARY_HOSTNAME=//p' /etc/mailinabox.conf)
+	if [ "$stage" != local-ext ]; then say "Hooks of stage $stage ($dir):"; fi
+	host=$(sed -n 's/^PRIMARY_HOSTNAME=//p' /etc/mailinabox.conf 2> /dev/null || true)
 	for h in "${hooks[@]}"; do
 		say "Running $h..."
 		rc=0
-		(cd / && env STORAGE_ROOT="$STORAGE_ROOT" PRIMARY_HOSTNAME="$host" MIAB_DIR="$MIAB_DIR" \
+		(cd / && env HOOK_STAGE="$stage" STORAGE_ROOT="$STORAGE_ROOT" PRIMARY_HOSTNAME="$host" MIAB_DIR="$miab" \
 			OLD_ETC="$OLD_ETC" MOVED_DIR="$MOVED_DIR" UPGRADE_STATE_DIR="$STATE_DIR" bash "$h") < /dev/null || rc=$?
 		FAILED_CMD=
-		[ "$rc" = 0 ] || die "The hook $h failed (exit code $rc). Fix it and run the command again;
-all hooks run again."
+		[ "$rc" != 0 ] || continue
+		case "$stage" in
+			after) warn "The hook $h failed (exit code $rc). The upgrade is not undone for it; run the hook
+again by hand when you have fixed it." ;;
+			before) die "The hook $h failed (exit code $rc). Mail was not stopped yet. Fix it and run the
+command again; all hooks of $dir run again." ;;
+			*) die "The hook $h failed (exit code $rc). Fix it and run the command again;
+all hooks run again." ;;
+		esac
 	done
+	state_set "HOOKS_${stage//-/_}_AT" "$(date -u +%FT%TZ)"
+}
+
+phase_local_ext() {
+	section "Local extensions (hooks in $HOOK_DIR)"
+	resolve_fork_dir
+	local rc out warnings
+	run_hooks local-ext "$HOOK_DIR"
 	if command -v doveconf > /dev/null; then
 		rc=0
 		out=$(doveconf -n 2>&1 > /dev/null) || rc=$?
@@ -2636,15 +3168,43 @@ compare_fingerprints() {
 	done
 }
 
+# The items (split at commas) of the smtpd_*_restrictions in BEFORE (output of
+# "postconf -n") that are gone now, as "parameter: item". Setup rewrites these
+# parameters and drops what an administrator added (e.g. a check_sender_access
+# before greylisting). A DNS list that only got return codes (upstream v68:
+# zen.spamhaus.org -> zen.spamhaus.org=127.0.0.[2..11]) is not gone. Keep in
+# sync with tools/migrate-to-2604.sh.
+postfix_restrictions_gone() { # BEFORE
+	local ref=$1 p old now item
+	[ -s "$ref" ] || return 0
+	for p in smtpd_client_restrictions smtpd_helo_restrictions smtpd_sender_restrictions smtpd_relay_restrictions \
+		smtpd_recipient_restrictions smtpd_data_restrictions smtpd_end_of_data_restrictions; do
+		old=$(sed -n "s/^${p}[[:space:]]*=[[:space:]]*//p" "$ref")
+		[ -n "$old" ] || continue
+		now=$(postconf -h "$p" 2> /dev/null | restriction_items | sed 's/=.*//')
+		while IFS= read -r item; do
+			grep -qxF -- "${item%%=*}" <<< "$now" || echo "$p: $item"
+		done < <(restriction_items <<< "$old")
+	done
+}
+
+restriction_items() {
+	tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g; /^$/d'
+}
+
 # Customized files from before the upgrade that are different or gone now.
 # Like etc_report in tools/migrate-to-2604.sh, for one machine.
 etc_report() {
-	local out=$STATE_DIR/etc-report.txt f d rel
+	local out=$STATE_DIR/etc-report.txt f d rel gone line
 	[ -d "$OLD_ETC" ] || return 0
+	gone=$(postfix_restrictions_gone "$STATE_DIR/meta/postconf-n.txt")
 	{
 		echo "Configuration from before the upgrade that is different or gone now."
 		echo "The old /etc (as of $(state_get ETC_SAVED_AT)) is in $OLD_ETC,"
 		echo "what this tool moved away in $MOVED_DIR."
+		echo
+		echo "== Postfix restrictions from before that are gone now (redo them in main.cf)"
+		if [ -n "$gone" ]; then sed 's/^/  /' <<< "$gone"; fi
 		echo
 		echo "== Postfix settings (postconf -n) from before that differ now"
 		if [ -s "$STATE_DIR/meta/postconf-n.txt" ]; then
@@ -2679,6 +3239,14 @@ etc_report() {
 	} > "$out"
 	say "Configuration from before that is different or gone now: $out"
 	sed -n '1,80p' "$out"
+	# Restrictions decide which mail is accepted: a lost one is a failed check
+	# (redo it, or accept with --finish), not only a line in the report.
+	if [ -n "$gone" ]; then
+		while IFS= read -r line; do
+			warn "Postfix restriction from before is gone: $line"
+			VERIFY_PROBLEMS+=("Postfix restriction from before is gone: $line (see $out)")
+		done <<< "$gone"
+	fi
 }
 
 phase_verify() {
@@ -2800,6 +3368,11 @@ phase_finish() {
 	remove_resume
 	state_set FINISHED_AT "$(date -u +%FT%TZ)"
 	state_set FINISHED_EPOCH "$(date +%s)"
+	if [ -n "$(state_get HOOKS_after_AT)" ]; then
+		say "The hooks in $HOOK_AFTER_DIR ran already ($(state_get HOOKS_after_AT))."
+	else
+		run_hooks after "$HOOK_AFTER_DIR"
+	fi
 	local held
 	held=$(state_get HELD_PACKAGES)
 	if [ -n "$held" ]; then say "These packages were held before the upgrade and are not held again: $held"; fi
@@ -2974,6 +3547,12 @@ print_result() {
 	local p
 	say "These checks FAILED:"
 	for p in "${VERIFY_PROBLEMS[@]}"; do say "  - $p"; done
+	# The services the before hooks stopped must not wait for --finish.
+	if [ -z "$(state_get HOOKS_after_AT)" ] && [ -n "$(hook_files "$HOOK_AFTER_DIR")" ]; then
+		say
+		say "Mail runs again, so the hooks of stage after run now (not again in finish)."
+		run_hooks after "$HOOK_AFTER_DIR"
+	fi
 	say
 	say "Mail is running again, but cron jobs other than setup's, the update timers and the backups"
 	say "stay paused until the checks pass."
@@ -3080,6 +3659,7 @@ mail_plugins (/etc/dovecot/conf.d/20-imap.conf, 20-pop3.conf): install it, or re
 		systemctl start "${start[@]}" || warn "Not all of them started; see 'systemctl --failed'."
 	fi
 	if [ "$(state_get BACKUPS_PAUSED)" = 1 ]; then resume_backups; fi
+	run_hooks after "$HOOK_AFTER_DIR"
 	local saved
 	saved=$STATE_DIR/state.rolled-back-$(date -u +%Y%m%dT%H%M%SZ)
 	mv "$STATE_FILE" "$saved"
@@ -3170,6 +3750,16 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 		[ -n "$RESUMED" ] || session_check
 		if [ "$(state_get MODE)" = rerun ]; then
 			phase_is_done setup || confirm "Run setup again now?"
+		elif [ "$(state_get QUIESCED)" = 1 ]; then
+			confirm "Mail is OFFLINE since $(state_get QUIESCED_AT). Continue the upgrade ($(upgrade_steps_text))?
+Mail stays offline until setup has finished. Nothing asks again. If SSH does not come
+back after a reboot, use the provider's console."
+		elif ! phase_is_done snapshot && fresh_backup_planned; then
+			confirm "Start the upgrade now? The system archive is written first; then mail goes OFFLINE,
+before the fresh backup (so that it holds all mail), and stays offline until setup has
+finished, with $(upgrade_steps_text). From the first release upgrade on there is no way
+back except the backups. Nothing asks again. If SSH does not come back after a reboot,
+use the provider's console."
 		elif ! phase_is_done snapshot; then
 			confirm "Start the upgrade now? The snapshot runs first (mail keeps running), then mail goes
 OFFLINE until setup has finished, with $(upgrade_steps_text). From the first
@@ -3218,7 +3808,7 @@ do_check() {
 
 main() {
 	ASSUME_YES='' REDO_FROM='' COMMAND=upgrade VERBOSE='' KEEP_LOCAL='' NO_BACKUP_CHECK=''
-	NO_OFFSITE='' SKIP_MIAB_BACKUP='' CLEANUP='' OLD_CHECKOUT='' RESUMED=''
+	NO_OFFSITE='' SKIP_MIAB_BACKUP='' CLEANUP='' OLD_CHECKOUT='' RESUMED='' NO_TMUX=''
 	local orig_args=("$@")
 
 	while [ $# -gt 0 ]; do
@@ -3235,6 +3825,7 @@ main() {
 			--cleanup) CLEANUP=1; shift ;;
 			--old-checkout) OLD_CHECKOUT=1; shift ;;
 			--yes | -y) ASSUME_YES=1; shift ;;
+			--no-tmux) NO_TMUX=1; shift ;;
 			--check | --dry-run) CHECK_ONLY=1; shift ;;
 			--verbose) VERBOSE=1; shift ;;
 			--cleanup-only) COMMAND=cleanup_only; shift ;;
@@ -3275,6 +3866,9 @@ main() {
 	if [ -z "$SELF_FILE" ]; then
 		reexec_from_clone "$SCRIPT_NAME" "$STATE_DIR/fork" "${orig_args[@]}"
 	fi
+	# From the real file (after the clone), before the lock: the run in the
+	# session takes it. If another run holds it, take_lock says where it is.
+	if [ -z "$(active_run_pid)" ]; then run_in_multiplexer "${orig_args[@]}"; fi
 	take_lock
 	exec > >(tee -a "$LOG_FILE") 2>&1
 	LOG_READY=1

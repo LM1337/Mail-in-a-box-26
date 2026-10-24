@@ -140,6 +140,11 @@ restart_service fail2ban
 # If there aren't any mail users yet, create one.
 source setup/firstuser.sh
 
+# Write the automatic aliases (hostmaster@, postmaster@, root@PRIMARY_HOSTNAME, ...)
+# again. The management daemon only does this when users or aliases change, so an
+# alias that an update makes required would otherwise not exist yet.
+management/mailconfig.py update-auto-aliases
+
 # Register with Let's Encrypt, including agreeing to the Terms of Service.
 # We'd let certbot ask the user interactively, but when this script is
 # run in the recommended curl-pipe-to-bash method there is no TTY and

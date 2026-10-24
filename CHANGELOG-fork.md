@@ -9,6 +9,105 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### New
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` has two more hook stages for
+  services of the operator that use the mail (e.g. a docker compose stack
+  with IMAP logins): `/etc/mailinabox/upgrade-2604.d/before/*.sh` run right
+  before mail goes offline (a failure stops the upgrade before anything is
+  stopped), `/etc/mailinabox/upgrade-2604.d/after/*.sh` in phase finish
+  after mail and the backups are back, and at the end of `--rollback` (a
+  failure only warns). If the final check fails, the after hooks run right
+  after it, as mail runs again, and not again in finish: services stopped
+  by a before hook do not wait for `--finish`. All hooks get `HOOK_STAGE`; the hooks in the
+  directory itself still run only in phase local-ext. `--check` lists all
+  three stages.
+* Postfix: senders listed in `/etc/postfix/greylist_bypass_senders` (an
+  access(5) file of the administrator, e.g. `newsletter@example.com OK`)
+  skip greylisting. If the file exists, setup runs postmap on it and puts
+  `check_sender_access hash:/etc/postfix/greylist_bypass_senders` right before
+  postgrey, with the quota check in front of both; without it the
+  restrictions stay as upstream. Before, setup dropped such a rule added by
+  hand on every run. To turn it off, delete the file and run setup (keep the
+  `.db` until then). `tools/migrate-to-2604.sh` takes the file over from the
+  old box before setup (not from a backup, which does not contain it).
+
+### Fixed
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` stops mail (and masks the units)
+  before the fresh Mail-in-a-Box backup of phase snapshot, not after it, so
+  the backup holds all mail. Before, backup.py started Postfix and Dovecot
+  again after its run, and mail accepted while the system archive was written
+  and copied was missing from the backup (B57). The downtime starts there;
+  with `--skip-miab-backup` or backups off, mail keeps running until quiesce
+  as before. `--rollback` brings it back as before. The system archive, the
+  copy of `/etc` and the package lists are still taken before the stop, so
+  they hold `/etc` without the masks; a run interrupted after the stop keeps
+  them and does not repeat a backup that already ran with mail offline.
+  The downtime estimate of the plan (`--check`) includes the fresh backup and
+  says that a full one can take much longer.
+* Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
+  ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
+  "Login:" (B58).
+* Postfix: setup no longer sets `smtpd_tls_dh1024_param_file` and removes it
+  from an existing main.cf. Postfix 3.10 warned on every `postconf` call that
+  its support will be removed; the default uses the RFC 7919 FFDHE groups
+  (B59).
+* System: mail of cron jobs and root reaches the administrator. Setup writes
+  PRIMARY_HOSTNAME to `/etc/mailname` (Postfix's myorigin; a provider's image
+  could leave its own name there, and such mail bounced daily), comments out
+  a 127.0.1.1 line in `/etc/hosts` with another machine's name, makes
+  root@PRIMARY_HOSTNAME an automatic alias to administrator@ and writes the
+  automatic aliases at the end of every setup run. The Nextcloud cron jobs
+  send their output to root instead of www-data (B60).
+
+### Changed
+
+* Tools: phase verify of `tools/upgrade-in-place-to-2604.sh` and
+  `tools/migrate-to-2604.sh` reports each item of an `smtpd_*_restrictions`
+  parameter from before (of the old box) that is gone now ("Postfix
+  restriction ... is gone: ...") as a failed check and at the top of
+  `etc-report.txt`, not only as a changed line of `postconf -n`. A DNS list
+  that only got return codes (upstream v68, `zen.spamhaus.org=127.0.0.[2..11]`)
+  does not count as gone.
+* Tools: a Mail-in-a-Box backup that is running (e.g. the nightly one at
+  01:04) no longer stops the start. `tools/upgrade-in-place-to-2604.sh`
+  reports it in the preflight (also with `--check`) without a blocker, then
+  waits for it with progress dots before anything is stopped (at most 2
+  hours, `UPGRADE_BACKUP_WAIT`; Ctrl-C is safe) and checks the age of the
+  last backup again, also when that backup has finished by itself before the
+  stop; `tools/migrate-to-2604.sh` waits the same way on the old box before
+  stop-old (`MIGRATE_BACKUP_WAIT`). A check that fails while waiting (e.g.
+  ssh) is not taken for "finished": it is retried, and three failures in a
+  row stop the run before anything is stopped. A running backup is found in
+  `/proc` (a python running `management/backup.py`, or duplicity), no longer
+  with `pgrep -f`, which also matched command lines that only name them; the
+  `--rollback` of the migration ends a backup still running by these PIDs,
+  no longer with `pkill -f`.
+* Tools: `tools/upgrade-in-place-to-2604.sh` and `tools/migrate-to-2604.sh`
+  run themselves in a tmux session (`upgrade-2604`, `migrate-2604`) when a
+  command that changes something is started from a terminal outside tmux or
+  screen, so a dropped SSH connection no longer stops a release upgrade, the
+  copy or setup halfway. They install tmux if it is missing (in place: not
+  in the middle of a release upgrade, and only if that upgrades or removes
+  no other package), fall back to screen, pass the arguments and the
+  environment variables they read into the session, attach the terminal
+  (also through `curl | bash`), keep the window open until Enter (also
+  after Ctrl-C; with `--yes` at most 10 minutes, so that `ssh -t ... --yes`
+  returns) and exit with the code of the run. The environment goes
+  through a file readable only by root, not the command line. A terminal
+  type without a terminfo entry on the box (xterm-ghostty, xterm-kitty, ...)
+  attaches as xterm-256color; screen reattaches with `screen -d -r`. A
+  window of an earlier run that only waits for Enter is closed; if something
+  still runs in a session of the same name, the command is NOT started (the
+  terminal is attached to that session and the tool says so). Installing
+  tmux waits for the apt locks only briefly. Through `curl | bash`, the copy
+  of an older release tag that does not start tmux itself gets a warning
+  first. `--no-tmux` turns it off; `--check`, `--status`, the resume unit and
+  runs without a terminal are unchanged.
+
 ## v78-r2604.0-rc3 (2026-10-23)
 
 In-place upgrade and full-text search. Tested in place on a copy of a

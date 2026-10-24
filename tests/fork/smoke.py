@@ -835,6 +835,24 @@ def c_sieve_login(ctx):
     return "login ok, scripts: %s" % (", ".join("%s%s" % (n, "*" if a else "") for n, a in scripts) or "none")
 
 
+def c_mail_log_logins(ctx):
+    # The usage report (management/mail_log.py, run weekly by daily_tasks.sh) must
+    # count the IMAP and POP3 logins just made (Dovecot 2.4 logs "Logged in:").
+    rc, miab, _err = ctx.remote.run("awk '$1 == \"cd\" { print $2; exit }' /usr/local/bin/mailinabox")
+    miab = miab.strip()
+    if rc != 0 or not miab:
+        raise Skip("Mail-in-a-Box checkout not found in /usr/local/bin/mailinabox")
+    cmd = "cd %s && management/mail_log.py -l -v -t hour -u %s" % (shlex.quote(miab), shlex.quote(ctx.alice))
+    rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=300)
+    if rc != 0:
+        raise Fail("mail_log.py rc=%d: %s" % (rc, (err or out).strip()[-200:]))
+    counts = {p: sum(int(n) for n in re.findall(r"\b%s \S+: (\d+) times" % p, out)) for p in ("imap", "pop3")}
+    missing = [p for p, n in counts.items() if not n]
+    if missing:
+        raise Fail("no %s logins of %s in the last hour counted" % ("/".join(missing), ctx.alice))
+    return "logins of the last hour: imap %d, pop3 %d" % (counts["imap"], counts["pop3"])
+
+
 # ---------------------------------------------------------------------------
 # provisioning (fresh box): users, aliases, sieve scripts
 # ---------------------------------------------------------------------------
@@ -1521,6 +1539,55 @@ def c_quotaroot(ctx):
     return "bob STORAGE %d / %d KiB" % (used, limit)
 
 
+GREYLIST_BYPASS = "/etc/postfix/greylist_bypass_senders"
+
+
+def c_greylist_bypass(ctx):
+    # prepare-testenv.sh whitelists the peers in postgrey, so greylisting cannot
+    # be watched on port 25 here: check what setup/mail-postfix.sh configured.
+    has_file = ctx.remote.run("test -f %s" % GREYLIST_BYPASS)[0] == 0
+    rc, out, err = ctx.remote.run("postconf -h smtpd_recipient_restrictions", timeout=60)
+    items = [i.strip() for i in out.strip().split(",")]
+    bypass = "check_sender_access hash:" + GREYLIST_BYPASS
+    grey = "check_policy_service inet:127.0.0.1:10023"
+    quota = "check_policy_service inet:127.0.0.1:12340"
+    if not has_file:
+        # The test boxes have no such file: then the restrictions end as upstream's.
+        if bypass in items:
+            raise Fail("%r is set, but %s is missing: %s" % (bypass, GREYLIST_BYPASS, out.strip()[:200]))
+        if items[-2:] != [grey, quota]:
+            raise Fail("without %s the restrictions should end with postgrey, then the quota check: %s"
+                       % (GREYLIST_BYPASS, out.strip()[:200]))
+        return "no %s: postgrey, then the quota check (as upstream)" % GREYLIST_BYPASS
+    for item in (bypass, grey, quota):
+        if item not in items:
+            raise Fail("%r missing in smtpd_recipient_restrictions: %s" % (item, out.strip()[:200]))
+    if not items.index(quota) < items.index(bypass) == items.index(grey) - 1:
+        raise Fail("order should be quota check, sender bypass, postgrey: %s" % out.strip()[:200])
+    rc, key, _err = ctx.remote.run("sed -n 's/^\\([^#[:space:]][^[:space:]]*\\).*/\\1/p' %s" % GREYLIST_BYPASS)
+    key = (key.split() or [""])[0]
+    if not key:
+        return ("PASS", "restrictions ok; the file has no entries")
+    rc, val, err = ctx.remote.run("postmap -q %s hash:%s" % (shlex.quote(key), GREYLIST_BYPASS), sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("postmap -q %s gives nothing (is the .db older than the file?) %s" % (key, err.strip()[:150]))
+    return "quota check, then %s (%s -> %s), then postgrey" % (bypass, key, val.strip()[:20])
+
+
+def c_root_mail(ctx):
+    # Mail of cron and root goes to root@ + /etc/mailname (myorigin); setup sets
+    # /etc/mailname to PRIMARY_HOSTNAME and makes root@ an automatic alias.
+    rc, out, err = ctx.remote.run("cat /etc/mailname")
+    if rc != 0 or out.strip() != ctx.hostname:
+        raise Fail("/etc/mailname is %r, expected %s" % (out.strip()[:80], ctx.hostname))
+    root = "root@" + ctx.hostname
+    rc, out, err = ctx.remote.run("postmap -q %s sqlite:/etc/postfix/virtual-alias-maps.cf" % shlex.quote(root),
+                                  sudo=True, timeout=60)
+    if rc != 0 or not out.strip():
+        raise Fail("%s is no alias, system mail would bounce (rc=%d %s)" % (root, rc, err.strip()[:120]))
+    return "/etc/mailname ok, %s -> %s" % (root, out.strip()[:60])
+
+
 def c_vacation(ctx):
     f = _flow(ctx)
     if f["smtp"]["vacation"][0] != 250:
@@ -1845,6 +1912,7 @@ def main():
         run_check("submission-465-login", c_sub465, ctx)
         run_check("submission-587-login", c_sub587, ctx)
         run_check("managesieve-4190-login", c_sieve_login, ctx)
+        run_check("mail-log-logins", c_mail_log_logins, ctx)
     if want("migrated"):
         print("== migrated (manifest comparison, before new mail)")
         run_check("mig-users-aliases", c_mig_users_aliases, ctx)
@@ -1889,6 +1957,8 @@ def main():
         run_check("no-quota-reject-for-aliases", c_no_quota_reject_alias, ctx)
         run_check("overquota-reject-bob", c_overquota, ctx)
         run_check("imap-getquotaroot-bob", c_quotaroot, ctx)
+        run_check("greylist-bypass-config", c_greylist_bypass, ctx)
+        run_check("root-mail-alias", c_root_mail, ctx)
         run_check("sieve-filter-filtered", c_delivery, ctx, "filtered", "Filtered", "[filtered] mail")
         run_check("sieve-vacation-reply", c_vacation, ctx)
         run_check("submission-465-delivery", c_submission_delivery, ctx, "s465", "465 submission")

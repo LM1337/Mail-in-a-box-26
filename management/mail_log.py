@@ -376,7 +376,8 @@ def scan_mail_log_line(line, collector):
             scan_postfix_lmtp_line(date, log, collector)
     elif service.endswith("-login"):
         if SCAN_DOVECOT_LOGIN:
-            scan_dovecot_login_line(date, log, collector, service[:4])
+            # imap-login -> imap, pop3-login -> pop3, managesieve-login -> managesieve
+            scan_dovecot_login_line(date, log, collector, service[:-len("-login")])
     elif service == "postgrey":
         if SCAN_GREY:
             scan_postgrey_line(date, log, collector)
@@ -476,7 +477,10 @@ def scan_postfix_smtpd_line(date, log, collector):
 def scan_dovecot_login_line(date, log, collector, protocol_name):
     """ Scan a dovecot login log line and extract interesting data """
 
-    m = re.match(r"Info: Login: user=<(.*?)>, method=PLAIN, rip=(.*?),", log)
+    # Dovecot 2.3 logs "Info: Login: user=<...>, method=PLAIN, rip=...", Dovecot 2.4
+    # (Ubuntu 26.04) "Info: Logged in: user=<...>, method=PLAIN, rip=...". Both
+    # mechanisms of auth_mechanisms (PLAIN, LOGIN) count.
+    m = re.match(r"Info: (?:Login|Logged in): user=<(.*?)>, method=[A-Z0-9-]+, rip=(.*?),", log)
 
     if m:
         # TODO: CHECK DIT

@@ -521,9 +521,12 @@ sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backe
 # Set up a general cron job for Nextcloud.
 # Also add another job for Calendar updates, per advice in the Nextcloud docs
 # https://docs.nextcloud.com/server/24/admin_manual/groupware/calendar.html#background-jobs
+# Output of the jobs goes to root (the administrator, see setup/system.sh), not to
+# www-data, which has no mailbox.
 cat > /etc/cron.d/mailinabox-nextcloud << EOF;
 #!/bin/bash
 # Mail-in-a-Box
+MAILTO=root
 */5 * * * *	www-data	php$PHP_VER -f /usr/local/lib/owncloud/cron.php
 */5 * * * *	www-data	php$PHP_VER -f /usr/local/lib/owncloud/occ dav:send-event-reminders
 EOF

@@ -128,7 +128,9 @@ sed -i "s/PUBLIC_IP/$PUBLIC_IP/" /etc/postfix/outgoing_mail_header_filters
 # encryption. On ports 465 and 587 it is mandatory (see above). Shared and non-shared settings are
 # given here. Shared settings include:
 # * Require TLS before a user is allowed to authenticate.
-# * Set the path to the server TLS certificate and 2048-bit DH parameters for old DH ciphers.
+# * Set the path to the server TLS certificate. The DH parameters for the DHE ciphers are
+#   Postfix's default (FFDHE groups, RFC 7919): Postfix 3.10 warns that support for
+#   smtpd_tls_dh1024_param_file will be removed, so an existing setting is removed below.
 # For port 25 only:
 # * Disable extremely old versions of TLS and extremely unsafe ciphers, but some mail servers out in
 #   the world are very far behind and if we disable too much, they may not be able to use TLS and
@@ -140,13 +142,14 @@ tools/editconf.py /etc/postfix/main.cf \
 	smtpd_tls_auth_only=yes \
 	smtpd_tls_cert_file="$STORAGE_ROOT/ssl/ssl_certificate.pem" \
 	smtpd_tls_key_file="$STORAGE_ROOT/ssl/ssl_private_key.pem" \
-	smtpd_tls_dh1024_param_file="$STORAGE_ROOT/ssl/dh2048.pem" \
 	smtpd_tls_protocols="!SSLv2,!SSLv3" \
 	smtpd_tls_ciphers=medium \
 	tls_medium_cipherlist=ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA256:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA \
 	smtpd_tls_exclude_ciphers=aNULL,RC4 \
 	tls_preempt_cipherlist=no \
 	smtpd_tls_received_header=yes
+tools/editconf.py /etc/postfix/main.cf -e \
+	smtpd_tls_dh1024_param_file=
 
 # For ports 465/587 (via the 'mandatory' settings):
 # * Use Mozilla's "Intermediate" TLS recommendations from https://ssl-config.mozilla.org/#server=postfix&server-version=3.3.0&config=intermediate&openssl-version=1.1.1
@@ -239,9 +242,28 @@ tools/editconf.py /etc/postfix/main.cf  -e lmtp_destination_recipient_limit=
 # reject_authenticated_sender_login_mismatch only acts where SASL is enabled (ports 465/587). On port 25 Postfix #NODOC
 # logs "restriction `reject_authenticated_sender_login_mismatch' ignored: no SASL support" for incoming mail; that is #NODOC
 # expected and harmless (same in upstream Mail-in-a-Box on 22.04, the smtpd_check.c code is unchanged up to 3.10). #NODOC
+#
+# Senders that skip greylisting (fork feature): if the administrator keeps the file
+# /etc/postfix/greylist_bypass_senders (Postfix access(5) format: one sender address or
+# domain per line followed by OK), mail from those senders is not greylisted. The file
+# is the administrator's, setup only runs postmap on it (run it yourself after editing).
+# The entries are meant for single senders, not for whole provider pools. OK ends
+# smtpd_recipient_restrictions, so the quota check (port 12340) moves in front of the
+# sender check; without the file the restrictions are those of upstream Mail-in-a-Box.
+# To turn it off, delete the file and run setup: until then main.cf still names the
+# table, so keep its .db (without it Postfix defers all incoming mail, 451 4.3.5).
+GREYLIST_BYPASS=/etc/postfix/greylist_bypass_senders
+POLICY_CHECKS="check_policy_service inet:127.0.0.1:10023,check_policy_service inet:127.0.0.1:12340"
+if [ -f "$GREYLIST_BYPASS" ]; then
+	if postmap "hash:$GREYLIST_BYPASS"; then
+		POLICY_CHECKS="check_policy_service inet:127.0.0.1:12340,check_sender_access hash:$GREYLIST_BYPASS,check_policy_service inet:127.0.0.1:10023"
+	else
+		echo "WARNING: postmap failed on $GREYLIST_BYPASS, its senders are greylisted like all others."
+	fi
+fi
 tools/editconf.py /etc/postfix/main.cf \
 	smtpd_sender_restrictions="reject_non_fqdn_sender,reject_unknown_sender_domain,reject_authenticated_sender_login_mismatch,reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99]" \
-	smtpd_recipient_restrictions="permit_sasl_authenticated,permit_mynetworks,reject_rbl_client zen.spamhaus.org=127.0.0.[2..11],reject_unlisted_recipient,check_policy_service inet:127.0.0.1:10023,check_policy_service inet:127.0.0.1:12340"
+	smtpd_recipient_restrictions="permit_sasl_authenticated,permit_mynetworks,reject_rbl_client zen.spamhaus.org=127.0.0.[2..11],reject_unlisted_recipient,$POLICY_CHECKS"
 
 # Postfix connects to Postgrey on the 127.0.0.1 interface specifically. Ensure that
 # Postgrey listens on the same interface (and not IPv6, for instance).

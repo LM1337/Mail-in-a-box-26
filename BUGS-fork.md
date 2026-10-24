@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 in rc3.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -29,20 +29,22 @@ reproduced on a box, the evidence line says so.
   * *late review*: a review before rc2.
   * *test run*: the T1/T2 smoke tests on VMs.
   * *in-place test*: T3, the in-place upgrade of a copy of a production box.
+  * *production upgrade*: the in-place upgrade of a production box with rc3.
 
 ## Summary
 
-56 bugs: 1 critical, 11 high, 25 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3.
+60 bugs: 1 critical, 11 high, 28 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3.
 
 | Origin | Count |
 |---|---|
-| Upstream | 14 |
+| Upstream | 15 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 12 |
-| Fork | 3 |
+| 26.04 change | 14 |
+| Fork | 4 |
 
-13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
+15 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B60). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -105,6 +107,10 @@ upstream pull requests, independent of the 26.04 port.
 | [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
+| [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
+| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
+| [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | unreleased |
+| [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | unreleased |
 
 ## Details
 
@@ -767,6 +773,50 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** A failing pollinate is reported and does not stop setup (seeding is not required).
 * **Affects:** v78 partly, PR #2603 partly. Origin: Upstream.
 * **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `27251d9`; **fixed in:** v78-r2604.0-rc3
+
+### B57
+
+**In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it** (medium, Tools)
+
+* **Symptom:** The Mail-in-a-Box backup that `tools/upgrade-in-place-to-2604.sh` makes before the upgrade lacks the mail (and other changes) of the minutes between its end and the start of the downtime. If the upgrade fails and the box is restored from that backup, that mail is lost.
+* **Cause:** Phase snapshot ran management/backup.py while mail was running. backup.py stops Postfix, Dovecot, postgrey and PHP for its run and starts them again afterwards; then the system archive was written, encrypted and copied (several minutes on a production box), and only phase quiesce stopped mail.
+* **Fix:** Mail, web, cron and the update timers are stopped and masked before the fresh backup (stop_mail, recorded in the state like quiesce, so the downtime and `--rollback` start there); backup.py cannot start the masked units again. Phase quiesce then only pauses the backups. With `--skip-miab-backup` or backups off, mail keeps running until quiesce as before. The system archive, the copy of `/etc` and the package lists are taken before the stop, so they do not record the masks (restoring `/etc` from them must not leave Postfix and Dovecot masked); a run interrupted after the stop keeps them and skips a backup that already ran with mail offline.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3).
+* **Found by:** production upgrade; **commit:** see `git log --grep B57`; **fixed in:** unreleased
+
+### B58
+
+**mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:")** (medium, Management)
+
+* **Symptom:** On Ubuntu 26.04 the "User logins per hour" part of the weekly "Mail-in-a-Box Usage Report" (and of `management/mail_log.py -l`) lists no IMAP, POP3 or ManageSieve logins at all, only the SMTP logins taken from Postfix. Nothing reports an error.
+* **Cause:** Dovecot 2.4 logs a successful login as `imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=...`; Dovecot 2.3 logged `Info: Login: user=<...>`. scan_dovecot_login_line() only matched `Info: Login: user=<(.*?)>, method=PLAIN, rip=(.*?),`, so no 2.4 line matched. The regex also counted only method=PLAIN, while auth_mechanisms allows LOGIN too.
+* **Fix:** The regex accepts `Login:` and `Logged in:` and any mechanism name. The protocol is named after the service without "-login" (managesieve instead of "mana").
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Evidence:** /var/log/mail.log of the 26.04 test box (Dovecot 2.4.2, log_path=/var/log/mail.log): `Oct 23 02:16:29 imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=192.0.2.10, lip=192.0.2.11, mpid=53945, TLS, session=<...>`, likewise for pop3-login and managesieve-login; no "Info: Login:" line. The code before the fix counted none of 108 sample lines as an IMAP/POP3 login (only 3 SMTP logins), the fixed code 24 IMAP, 2 POP3 and 2 ManageSieve logins for alice. The fail2ban filter dovecotimap.conf already matches the 2.4 "Login aborted: ... (auth failed, ...)" lines (fail2ban-regex on the same box), the Postfix lines of mail_log.py are unchanged in 3.10.
+* **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** unreleased
+
+### B59
+
+**Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file** (low, Postfix)
+
+* **Symptom:** Every `postconf` call (in setup, the status checks, the tools and by hand) and every Postfix start prints `postconf: warning: /etc/postfix/main.cf: support for parameter "smtpd_tls_dh1024_param_file" will be removed; instead, do not specify (leave at default)`.
+* **Cause:** setup/mail-postfix.sh set smtpd_tls_dh1024_param_file=$STORAGE_ROOT/ssl/dh2048.pem, as upstream did for the DHE ciphers of old clients. Postfix 3.10 deprecates the parameter; its default (empty) uses the FFDHE groups of tls_ffdhe_auto_groups (ffdhe2048 ffdhe3072, RFC 7919) with OpenSSL 3.
+* **Fix:** Setup no longer sets the parameter and comments out an existing line with editconf.py -e. dh2048.pem stays: nginx (ssl_dhparam) and Dovecot (ssl_server_dh_file) still use it.
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Evidence:** On the 26.04 test box (Postfix 3.10.6, OpenSSL 3.5.5) `postconf -h smtpd_recipient_restrictions` prints the warning on stderr; `postconf -d` gives `smtpd_tls_dh1024_param_file =` and `tls_ffdhe_auto_groups = ffdhe2048 ffdhe3072`. v78 (Postfix 3.6 on 22.04) sets the same parameter without a warning. Nothing else in the repo references the parameter.
+* **Found by:** production upgrade; **commit:** see `git log --grep B59`; **fixed in:** unreleased
+
+### B60
+
+**Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist** (medium, System)
+
+* **Symptom:** Output of cron jobs and other mail to local accounts (root, www-data) never reaches the administrator. On a box installed on a hosting provider's image it bounces every day with "mail for <the hosting provider's default host name> loops back to myself" (3 to 7 bounces a day on the production box, before and after the upgrade); on other boxes it bounces as unknown user.
+* **Cause:** Postfix takes the domain of unqualified local addresses from myorigin=/etc/mailname. Setup set /etc/hostname but never /etc/mailname, which kept the name the machine had when Postfix was first installed (the provider's name, also on the 127.0.1.1 line of /etc/hosts). And even with /etc/mailname = PRIMARY_HOSTNAME, root@PRIMARY_HOSTNAME is neither a user nor an alias: PRIMARY_HOSTNAME is a virtual mailbox domain, where /etc/aliases does not apply. www-data, the owner of the Nextcloud cron jobs, has no address either.
+* **Fix:** setup/system.sh writes PRIMARY_HOSTNAME to /etc/mailname and comments out a 127.0.1.1 line in /etc/hosts that names neither PRIMARY_HOSTNAME nor its first label. root@PRIMARY_HOSTNAME is a required alias, so it becomes an automatic alias to administrator@PRIMARY_HOSTNAME (a manual alias or user of that name wins). Setup writes the automatic aliases at the end (`mailconfig.py update-auto-aliases`), so existing boxes get it without a change of users or aliases. The Nextcloud cron file sends its output to root (MAILTO=root).
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04). The wrong /etc/mailname only where the machine had another name when Postfix was installed; the missing root@ alias everywhere.
+* **Evidence:** Production box (from the upgrade report): /etc/mailname was the hosting provider's default host name of the machine, /etc/hosts had the same name on the 127.0.1.1 line, and mail.log showed the daily "loops back to myself" bounces since at least 2026-10-18. 26.04 test box: `postconf -h myorigin` is /etc/mailname, `postmap -q root@<PRIMARY_HOSTNAME> sqlite:/etc/postfix/virtual-alias-maps.cf` finds nothing (hostmaster@ and postmaster@ resolve to administrator@), /etc/hosts still has the cloud-init line `127.0.1.1 testvm.example.net testvm`. v78:setup/system.sh only writes /etc/hostname, v78:management/mailconfig.py get_required_aliases() has administrator@, hostmaster@, postmaster@, admin@ and abuse@ but no root@. The bounce of root@PRIMARY_HOSTNAME as unknown user is derived from the Postfix configuration, it was not reproduced (no mail was sent on the test box).
+* **Report upstream:** MIAB main: the missing /etc/mailname and root@ handling are the same in v78.
+* **Found by:** production upgrade; **commit:** see `git log --grep B60`; **fixed in:** unreleased
 
 ## Not counted above
 

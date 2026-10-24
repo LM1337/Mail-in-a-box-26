@@ -48,6 +48,61 @@ noch keinen Release-Tag gibt, den Zweig `main` nehmen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
 
 
+Greylisting exceptions / Ausnahmen vom Greylisting
+--------------------------------------------------
+
+### English
+
+Postgrey delays mail from unknown senders by a few minutes. Single senders
+can skip that delay: list them in `/etc/postfix/greylist_bypass_senders`
+(Postfix access(5) format, one envelope sender address or domain per line,
+followed by `OK`) and run setup (`sudo mailinabox`):
+
+    newsletter@example.com  OK
+    example.org             OK
+
+Setup runs `postmap` on the file and adds
+`check_sender_access hash:/etc/postfix/greylist_bypass_senders` to
+`smtpd_recipient_restrictions` right before greylisting; the quota check
+moves in front of it, so a full mailbox is still refused. The file is yours:
+setup never writes it and keeps the rule on every run. After later changes,
+`postmap /etc/postfix/greylist_bypass_senders` is enough. Without the file the
+restrictions are those of upstream Mail-in-a-Box. To turn the exceptions off,
+delete the file and run setup; until setup has run, `main.cf` still names the
+table, so leave `greylist_bypass_senders.db` in place (without it Postfix
+defers all incoming mail with "451 4.3.5"). The envelope sender is easy
+to forge, so list single senders, not the domains of whole mail providers.
+Servers known by their IP address go into postgrey's own
+`/etc/postgrey/whitelist_clients.local` instead.
+
+### Deutsch
+
+Postgrey hält Mail von unbekannten Absendern einige Minuten zurück. Einzelne
+Absender können diese Verzögerung überspringen: Sie kommen in
+`/etc/postfix/greylist_bypass_senders` (Format von Postfix access(5), je Zeile
+eine Absenderadresse des Umschlags oder eine Domain, dahinter `OK`), danach
+setup aufrufen (`sudo mailinabox`):
+
+    newsletter@example.com  OK
+    example.org             OK
+
+Setup führt `postmap` auf der Datei aus und setzt
+`check_sender_access hash:/etc/postfix/greylist_bypass_senders` in
+`smtpd_recipient_restrictions` unmittelbar vor das Greylisting; die
+Quota-Prüfung rückt davor, ein volles Postfach wird also weiter abgewiesen.
+Die Datei gehört dem Administrator: setup schreibt sie nie und behält die
+Regel bei jedem Lauf bei. Nach späteren Änderungen genügt
+`postmap /etc/postfix/greylist_bypass_senders`. Ohne die Datei bleiben die
+Regeln die von upstream Mail-in-a-Box. Zum Abschalten der Ausnahmen die Datei
+löschen und setup aufrufen; bis setup gelaufen ist, nennt `main.cf` die
+Tabelle noch, deshalb `greylist_bypass_senders.db` so lange liegen lassen
+(ohne sie stellt Postfix alle eingehenden Mails mit „451 4.3.5“ zurück). Der
+Absender des Umschlags lässt sich leicht fälschen, deshalb einzelne Absender
+eintragen, nicht die Domains ganzer Mail-Anbieter. Server, die man an ihrer
+IP-Adresse erkennt, gehören stattdessen in die Liste von postgrey selbst,
+`/etc/postgrey/whitelist_clients.local`.
+
+
 In-place upgrade to 26.04 / Upgrade an Ort und Stelle
 -----------------------------------------------------
 
@@ -62,23 +117,43 @@ upgrade). Nextcloud must be 26 or later.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # inside tmux or screen, after reading the check:
+    # after reading the check (with v78-r2604.0-rc3: inside tmux or screen, see below):
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
+
+Started from a terminal outside tmux or screen, the tool runs itself in the
+tmux session `upgrade-2604` (it installs tmux if needed, or falls back to
+screen) and attaches your terminal to it. If the SSH connection drops, the
+upgrade goes on: log in again and run `sudo tmux attach -t upgrade-2604`.
+When the command has ended, the window stays open until you press Enter
+(with `--yes` at most 10 minutes, so that a script calling it through
+`ssh -t` gets its exit code). `--no-tmux` turns this off.
+
+Through `curl | bash`, the tool runs the copy of the release tag (`TAG`,
+default: the latest release). Releases up to v78-r2604.0-rc3 do not start
+tmux by themselves: with those, start the command inside tmux yourself
+(`tmux new -s upgrade-2604`), or take the branch `main` with
+`... | sudo TAG=main bash`. The tool warns before it runs such a copy.
 
 What it does, in phases that continue on their own after each reboot:
 
 1. **preflight**: release, Mail-in-a-Box and Nextcloud versions, disk space,
-   a backup younger than 24 hours, and a list of everything that is not
-   managed by Mail-in-a-Box (Dovecot plugins, systemd drop-ins, nginx files,
-   Docker, third-party apt sources). Local extensions block the upgrade until
-   you pass `--keep-local`.
-2. **snapshot**: counts and key fingerprints, a fresh Mail-in-a-Box backup and
-   a system archive (`/etc`, the code outside the data directory, package
-   lists). The archive is encrypted with the backup key and copied next to the
-   backups (for an rsync target: `<target>-system/`).
-3. **quiesce**: mail, web, cron and the update timers are stopped and masked,
-   so they stay off across reboots. **Mail is offline from here.**
+   a backup younger than 24 hours (a backup that is running, e.g. the nightly
+   one, does not block: the upgrade waits for it, at most 2 hours,
+   `UPGRADE_BACKUP_WAIT`, before it stops anything), and a list of
+   everything that is not managed by Mail-in-a-Box (Dovecot plugins, systemd
+   drop-ins, nginx files, Docker, third-party apt sources). Local extensions
+   block the upgrade until you pass `--keep-local`.
+2. **snapshot**: a system archive (`/etc` as it was, the code outside the
+   data directory, package lists), encrypted with the backup key and copied
+   next to the backups (for an rsync target: `<target>-system/`). Then mail,
+   web, cron and the update timers are stopped and masked, so they stay off
+   across reboots. **Mail is offline from here.** Then a fresh Mail-in-a-Box
+   backup (so it holds all mail) and counts and key fingerprints. With
+   `--skip-miab-backup` (or backups turned off) there is no fresh backup, and
+   mail keeps running until quiesce.
+3. **quiesce**: the backups are paused until the end, and mail goes offline
+   here if it is not yet.
 4. **prepare-release**, **release-2404**, **release-2604**: third-party sources
    off, PHP from ppa:ondrej removed, `do-release-upgrade` (old configuration
    files are kept), checks that the package system is clean, reboot.
@@ -93,12 +168,36 @@ What it does, in phases that continue on their own after each reboot:
    `MOVED_DIR`; a non-zero exit stops the upgrade.
 8. **verify** and **finish**: counts and fingerprints compared with before,
    services, Nextcloud, status checks, a report of configuration that changed;
-   backups and timers back on.
+   backups and timers back on. A Postfix restriction from before that setup
+   dropped (an item of `smtpd_*_restrictions`) is a failed check: redo it in
+   `main.cf` or accept the result with `--finish`. The greylisting exceptions
+   (see above) are kept by setup.
 
-Downtime on a test box was about 50 minutes; plan 1-3 hours. The release
-upgrades cannot be undone: `--rollback` only works before the first one.
-After that the way back is the backup. Have the provider's console at hand,
-SSH can be gone for a while during the release upgrade or after a reboot.
+Services of your own that use the mail (e.g. a docker compose stack that logs
+in by IMAP or receives Dovecot push calls) can be stopped and started with
+hooks in two more directories: `/etc/mailinabox/upgrade-2604.d/before/*.sh`
+run right before mail goes offline, `/etc/mailinabox/upgrade-2604.d/after/*.sh`
+in phase finish, after mail and the backups are back (and at the end of
+`--rollback`). They get the same variables, and `HOOK_STAGE` (`before`,
+`local-ext`, `after`). A failing before hook stops the upgrade before mail is
+stopped; a failing after hook only warns. If the final check fails, the after
+hooks run right after it (mail runs again, the backups stay paused) and not
+again in finish. Write hooks so that they can run twice. For example:
+
+    # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
+    cd /opt/myapp && docker compose stop
+
+    # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
+    cd /opt/myapp && docker compose up -d
+
+Downtime on a test box was about 50 minutes; plan 1-3 hours. The fresh
+backup is part of it: a few minutes when it is incremental, much longer when
+backup.py makes a full backup (when there is none yet, or on a Saturday or
+Sunday after many changes or about a month since the last full one);
+`--check` shows the estimate. The release upgrades cannot be undone:
+`--rollback` only works before the first one. After that the way back is the
+backup. Have the provider's console at hand, SSH can be gone for a while
+during the release upgrade or after a reboot.
 `--status` shows where it stands; running the command again continues.
 `--cleanup-only` removes leftovers of the old releases afterwards.
 
@@ -118,25 +217,46 @@ Version 26 haben.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # in tmux oder screen, nach Durchsicht der Prüfung:
+    # nach Durchsicht der Prüfung (mit v78-r2604.0-rc3: in tmux oder screen, siehe unten):
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
+
+Aus einem Terminal außerhalb von tmux oder screen gestartet, läuft das
+Werkzeug selbst in der tmux-Sitzung `upgrade-2604` (tmux wird bei Bedarf
+installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
+Reißt die SSH-Verbindung ab, läuft das Upgrade weiter: neu anmelden und
+`sudo tmux attach -t upgrade-2604` aufrufen. Nach dem Ende des Befehls bleibt
+das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10 Minuten,
+damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen Exit-Code
+bekommt). `--no-tmux` schaltet das ab.
+
+Über `curl | bash` führt das Werkzeug die Fassung des Release-Tags aus (`TAG`,
+vorgegeben: das neueste Release). Releases bis v78-r2604.0-rc3 starten tmux
+noch nicht selbst: mit ihnen den Befehl selbst in tmux starten
+(`tmux new -s upgrade-2604`) oder mit `... | sudo TAG=main bash` den Zweig
+`main` nehmen. Das Werkzeug warnt, bevor es eine solche Fassung ausführt.
 
 Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 
 1. **preflight**: Release, Versionen von Mail-in-a-Box und Nextcloud,
-   Speicherplatz, eine Sicherung jünger als 24 Stunden und eine Liste von
-   allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
+   Speicherplatz, eine Sicherung jünger als 24 Stunden (eine laufende
+   Sicherung, etwa die nächtliche, hält nichts an: das Upgrade wartet auf sie,
+   höchstens 2 Stunden, `UPGRADE_BACKUP_WAIT`, bevor es etwas anhält) und
+   eine Liste von allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.
-2. **snapshot**: Zählungen und Schlüssel-Fingerabdrücke, eine frische
-   Mail-in-a-Box-Sicherung und ein Systemarchiv (`/etc`, der Code außerhalb
-   des Datenverzeichnisses, Paketlisten). Das Archiv wird mit dem
-   Backup-Schlüssel verschlüsselt und neben die Sicherungen gelegt (bei einem
-   rsync-Ziel: `<ziel>-system/`).
-3. **quiesce**: Mail, Web, Cron und die Update-Timer werden angehalten und
-   maskiert, damit sie auch über Neustarts hinweg aus bleiben. **Ab hier ist
-   die Mail aus.**
+2. **snapshot**: ein Systemarchiv (`/etc` im alten Zustand, der Code
+   außerhalb des Datenverzeichnisses, Paketlisten), mit dem Backup-Schlüssel
+   verschlüsselt und neben die Sicherungen gelegt (bei einem rsync-Ziel:
+   `<ziel>-system/`). Danach werden Mail, Web, Cron und die Update-Timer
+   angehalten und maskiert, damit sie auch über Neustarts hinweg aus bleiben.
+   **Ab hier ist die Mail aus.** Dann eine frische Mail-in-a-Box-Sicherung
+   (damit sie alle Mails enthält) sowie Zählungen und
+   Schlüssel-Fingerabdrücke. Mit `--skip-miab-backup` (oder abgeschalteten
+   Sicherungen) gibt es keine frische Sicherung, und die Mail läuft bis
+   quiesce weiter.
+3. **quiesce**: Die Sicherungen werden bis zum Ende ausgesetzt; ist die Mail
+   noch an, geht sie hier aus.
 4. **prepare-release**, **release-2404**, **release-2604**: fremde Quellen aus,
    PHP aus ppa:ondrej entfernt, `do-release-upgrade` (alte Konfigurationsdateien
    bleiben), Prüfung, dass das Paketsystem sauber ist, Neustart.
@@ -151,10 +271,37 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
    `MOVED_DIR`; ein Exit-Code ungleich 0 hält das Upgrade an.
 8. **verify** und **finish**: Zählungen und Fingerabdrücke gegen vorher,
    Dienste, Nextcloud, Statusprüfungen, ein Bericht über geänderte
-   Konfiguration; Sicherungen und Timer wieder an.
+   Konfiguration; Sicherungen und Timer wieder an. Eine Postfix-Regel von
+   vorher, die setup verworfen hat (ein Eintrag in `smtpd_*_restrictions`),
+   gilt als fehlgeschlagene Prüfung: in `main.cf` wieder eintragen oder das
+   Ergebnis mit `--finish` annehmen. Die Ausnahmen vom Greylisting (siehe oben)
+   behält setup bei.
+
+Eigene Dienste, die die Mail nutzen (etwa ein docker-compose-Stack, der sich
+per IMAP anmeldet oder Push-Aufrufe von Dovecot empfängt), lassen sich mit
+Hooks in zwei weiteren Verzeichnissen anhalten und starten:
+`/etc/mailinabox/upgrade-2604.d/before/*.sh` laufen unmittelbar bevor die Mail
+ausgeht, `/etc/mailinabox/upgrade-2604.d/after/*.sh` in der Phase finish,
+nachdem Mail und Sicherungen wieder laufen (und am Ende von `--rollback`).
+Sie bekommen dieselben Variablen und dazu `HOOK_STAGE` (`before`,
+`local-ext`, `after`). Ein fehlschlagender before-Hook hält das Upgrade an,
+bevor die Mail angehalten wird; ein fehlschlagender after-Hook warnt nur.
+Schlägt die Schlussprüfung fehl, laufen die after-Hooks gleich danach (die
+Mail läuft wieder, die Sicherungen bleiben ausgesetzt) und in finish nicht
+noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
+
+    # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
+    cd /opt/myapp && docker compose stop
+
+    # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
+    cd /opt/myapp && docker compose up -d
 
 Die Ausfallzeit lag auf einer Testbox bei etwa 50 Minuten; einplanen sollte
-man 1 bis 3 Stunden. Die Release-Upgrades lassen sich nicht zurücknehmen:
+man 1 bis 3 Stunden. Die frische Sicherung zählt dazu: einige Minuten, wenn
+sie inkrementell ist, viel länger, wenn backup.py eine Vollsicherung macht
+(wenn es noch keine gibt, oder an einem Samstag oder Sonntag nach vielen
+Änderungen oder etwa einem Monat seit der letzten Vollsicherung); `--check`
+zeigt die Schätzung. Die Release-Upgrades lassen sich nicht zurücknehmen:
 `--rollback` geht nur vor dem ersten. Danach führt der Weg zurück über die
 Sicherung. Die Konsole des Anbieters sollte bereitliegen, weil SSH während
 des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.
@@ -225,16 +372,21 @@ explains what to do when the old box is too old.
    what can be delivered (`postqueue -f`). The queue is not migrated.
 8. **Announce the maintenance window** to the users. `--check` estimates the
    downtime; afterwards the DNS change takes effect over 1 to 3 days.
-9. **tmux**: run the tool inside tmux or screen, see below.
+9. **tmux**: the tool runs itself in tmux, see below.
 10. Optional, for big boxes: **rehearse** first, see "Downtime and rehearsal".
 
 #### Quick start
 
-> **Run it in tmux or screen** (`apt-get install tmux`, then
-> `tmux new -s migrate`; reattach after a disconnect with
-> `tmux attach -t migrate`). The copy and setup take hours. If your SSH
-> connection drops outside tmux, they stop halfway, possibly while the old
-> box is already stopped and in the middle of a Nextcloud upgrade.
+> **tmux**: the copy and setup take hours. If your SSH connection dropped
+> outside tmux, they would stop halfway, possibly while the old box is
+> already stopped and in the middle of a Nextcloud upgrade. So the tool,
+> started from a terminal outside tmux or screen, runs itself in the tmux
+> session `migrate-2604` (it installs tmux if needed, or falls back to
+> screen) and attaches your terminal to it. After a disconnect, log in again
+> and run `tmux attach -t migrate-2604`. When the command has ended, the
+> window stays open until you press Enter (with `--yes` at most 10 minutes,
+> so that a script calling it through `ssh -t` gets its exit code).
+> `--no-tmux` turns this off.
 
 On the new machine, as root (`sudo -i`):
 
@@ -287,7 +439,9 @@ setup always uses it; to have no IPv6, remove it from the machine.
 2. **sync-live**: `rsync -aHAXS --numeric-ids --delete` of `$STORAGE_ROOT`
    while the old box keeps running. Resumable, retried automatically after
    connection problems; repeat it with `--sync-only`.
-3. **stop-old** (asks first): stops cron, the apt timers (package updates
+3. **stop-old** (asks first): waits for a Mail-in-a-Box backup that runs on
+   the old box (e.g. the nightly one; at most 2 hours, `MIGRATE_BACKUP_WAIT`),
+   then stops cron, the apt timers (package updates
    would restart services), the management daemon, nginx, PHP-FPM, Postfix,
    spampd, postgrey, OpenDKIM/OpenDMARC, Dovecot and the socket units that
    would start one of them again (e.g. `dovecot.socket`). They are masked
@@ -396,13 +550,17 @@ containers do not, the tool checks).
 
 #### Not migrated
 
-* Changes to `/etc` (e.g. extra Postfix maps such as a
-  `greylist_bypass_senders` table, postgrey whitelists, SpamAssassin rules,
-  fail2ban jails, cron jobs, firewall rules). The old `/etc`, as of the
-  final copy, is kept in `/root/migration/old-etc.tar.gz` (unpacked in
-  `/root/migration/old-etc`), and `/root/migration/etc-report.txt` lists
-  Postfix settings that differ, files named in them and files that exist
-  only on the old box.
+* Changes to `/etc` (e.g. extra Postfix maps, postgrey whitelists,
+  SpamAssassin rules, fail2ban jails, cron jobs, firewall rules). The old
+  `/etc`, as of the final copy, is kept in `/root/migration/old-etc.tar.gz`
+  (unpacked in `/root/migration/old-etc`), and
+  `/root/migration/etc-report.txt` lists Postfix settings that differ, files
+  named in them and files that exist only on the old box. An item of
+  `smtpd_*_restrictions` of the old box that is gone here is a failed check
+  (redo it in `main.cf`, or accept the result with `--finish`). Only the
+  greylisting exceptions (`/etc/postfix/greylist_bypass_senders`, see above)
+  are taken over, before setup. A backup (`--from-backup`) does not contain
+  them: copy the file over yourself and run setup again.
 * Nextcloud apps installed by hand (they live in `/usr/local/lib/owncloud/apps`,
   outside the data). The tool lists them. Setup keeps the app store disabled
   (`'appstoreenabled' => false`).
@@ -591,18 +749,23 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
    nicht mit um.
 8. **Wartungsfenster ankündigen**. `--check` schätzt die Ausfallzeit;
    danach wirkt die DNS-Umstellung über 1 bis 3 Tage.
-9. **tmux**: das Werkzeug in tmux oder screen starten, siehe unten.
+9. **tmux**: das Werkzeug läuft selbst in tmux, siehe unten.
 10. Optional, bei großen Boxen: zuerst **proben**, siehe „Ausfallzeit und
     Probelauf“.
 
 #### Schnellstart
 
-> **In tmux oder screen starten** (`apt-get install tmux`, dann
-> `tmux new -s migrate`; nach einem Verbindungsabbruch mit
-> `tmux attach -t migrate` wieder verbinden). Kopie und Setup dauern
-> Stunden. Bricht die SSH-Verbindung außerhalb von tmux ab, enden sie
-> mittendrin, womöglich bei schon angehaltener alter Box und mitten in einem
-> Nextcloud-Upgrade.
+> **tmux**: Kopie und Setup dauern Stunden. Bräche die SSH-Verbindung
+> außerhalb von tmux ab, endeten sie mittendrin, womöglich bei schon
+> angehaltener alter Box und mitten in einem Nextcloud-Upgrade. Deshalb
+> läuft das Werkzeug, aus einem Terminal außerhalb von tmux oder screen
+> gestartet, selbst in der tmux-Sitzung `migrate-2604` (tmux wird bei Bedarf
+> installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
+> Nach einem Verbindungsabbruch neu anmelden und
+> `tmux attach -t migrate-2604` aufrufen. Nach dem Ende des Befehls bleibt
+> das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10
+> Minuten, damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen
+> Exit-Code bekommt). `--no-tmux` schaltet das ab.
 
 Auf der neuen Maschine als root (`sudo -i`):
 
@@ -658,7 +821,9 @@ von der Maschine.
 2. **sync-live**: `rsync -aHAXS --numeric-ids --delete` von `$STORAGE_ROOT`,
    während die alte Box weiterläuft. Fortsetzbar, nach Verbindungsproblemen
    automatisch wiederholt; mit `--sync-only` wiederholbar.
-3. **stop-old** (mit Rückfrage): hält auf der alten Box cron, die apt-Timer
+3. **stop-old** (mit Rückfrage): wartet auf eine Mail-in-a-Box-Sicherung, die
+   auf der alten Box läuft (etwa die nächtliche; höchstens 2 Stunden,
+   `MIGRATE_BACKUP_WAIT`), und hält dann auf der alten Box cron, die apt-Timer
    (Paketaktualisierungen würden Dienste neu starten), den Verwaltungsdienst,
    nginx, PHP-FPM, Postfix, spampd, postgrey, OpenDKIM/OpenDMARC, Dovecot und
    die Socket-Units an, die einen davon wieder starten würden (z. B.
@@ -778,13 +943,18 @@ das, manche Container nicht; das Werkzeug prüft es).
 
 #### Nicht übernommen
 
-* Änderungen in `/etc` (z. B. zusätzliche Postfix-Tabellen wie
-  `greylist_bypass_senders`, postgrey-Ausnahmelisten, SpamAssassin-Regeln,
-  fail2ban-Jails, Cron-Jobs, Firewall-Regeln). Das alte `/etc` mit dem Stand
-  der letzten Kopie liegt in `/root/migration/old-etc.tar.gz` (entpackt in
-  `/root/migration/old-etc`), und `/root/migration/etc-report.txt` listet
-  abweichende Postfix-Einstellungen, darin genannte Dateien und Dateien, die
-  es nur auf der alten Box gibt.
+* Änderungen in `/etc` (z. B. zusätzliche Postfix-Tabellen,
+  postgrey-Ausnahmelisten, SpamAssassin-Regeln, fail2ban-Jails, Cron-Jobs,
+  Firewall-Regeln). Das alte `/etc` mit dem Stand der letzten Kopie liegt in
+  `/root/migration/old-etc.tar.gz` (entpackt in `/root/migration/old-etc`),
+  und `/root/migration/etc-report.txt` listet abweichende
+  Postfix-Einstellungen, darin genannte Dateien und Dateien, die es nur auf
+  der alten Box gibt. Ein Eintrag in `smtpd_*_restrictions` der alten Box,
+  der hier fehlt, gilt als fehlgeschlagene Prüfung (in `main.cf` wieder
+  eintragen oder das Ergebnis mit `--finish` annehmen). Nur die Ausnahmen vom
+  Greylisting (`/etc/postfix/greylist_bypass_senders`, siehe oben) werden vor
+  setup übernommen. Eine Sicherung (`--from-backup`) enthält sie nicht: die
+  Datei selbst hinüberkopieren und setup erneut aufrufen.
 * Von Hand installierte Nextcloud-Apps (sie liegen in
   `/usr/local/lib/owncloud/apps`, außerhalb der Daten). Das Werkzeug listet
   sie auf. Das Setup lässt den App-Store abgeschaltet

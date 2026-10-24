@@ -637,6 +637,10 @@ def get_required_aliases(env):
 	# The hostmaster alias is exposed in the DNS SOA for each zone.
 	aliases.add("hostmaster@" + env['PRIMARY_HOSTNAME'])
 
+	# Mail of the system's own accounts (cron, MAILTO=root) goes to root@ and the
+	# domain in /etc/mailname, which setup/system.sh sets to PRIMARY_HOSTNAME.
+	aliases.add("root@" + env['PRIMARY_HOSTNAME'])
+
 	# Get a list of domains we serve mail for, except ones for which the only
 	# email on that domain are the required aliases or a catch-all/domain-forwarder.
 	real_mail_domains = get_mail_domains(env,
@@ -667,25 +671,7 @@ def kick(env, mail_result=None):
 	if mail_result is not None:
 		results.append(mail_result + "\n")
 
-	auto_aliases = { }
-
-	# Map required aliases to the administrator alias (which should be created manually).
-	administrator = get_system_administrator(env)
-	required_aliases = get_required_aliases(env)
-	for alias in required_aliases:
-		if alias == administrator: continue # don't make an alias from the administrator to itself --- this alias must be created manually
-		auto_aliases[alias] = administrator
-
-	# Add domain maps from Unicode forms of IDNA domains to the ASCII forms stored in the alias table.
-	for domain in get_mail_domains(env):
-		try:
-			domain_unicode = idna.decode(domain.encode("ascii"))
-			if domain == domain_unicode: continue # not an IDNA/Unicode domain
-			auto_aliases["@" + domain_unicode] = "@" + domain
-		except (ValueError, UnicodeError, idna.IDNAError):
-			continue
-
-	add_auto_aliases(auto_aliases, env)
+	required_aliases = update_auto_aliases(env)
 
 	# Remove auto-generated postmaster/admin/abuse alises from the main aliases table.
 	# They are now stored in the auto_aliases table.
@@ -708,6 +694,31 @@ def kick(env, mail_result=None):
 
 	return "".join(s for s in results if s != "")
 
+def update_auto_aliases(env):
+	# Rewrites the auto_aliases table and returns the required aliases. Also run by
+	# setup ("mailconfig.py update-auto-aliases"), so that a required alias added by
+	# an update reaches existing boxes without a change of users or aliases.
+	auto_aliases = { }
+
+	# Map required aliases to the administrator alias (which should be created manually).
+	administrator = get_system_administrator(env)
+	required_aliases = get_required_aliases(env)
+	for alias in required_aliases:
+		if alias == administrator: continue # don't make an alias from the administrator to itself --- this alias must be created manually
+		auto_aliases[alias] = administrator
+
+	# Add domain maps from Unicode forms of IDNA domains to the ASCII forms stored in the alias table.
+	for domain in get_mail_domains(env):
+		try:
+			domain_unicode = idna.decode(domain.encode("ascii"))
+			if domain == domain_unicode: continue # not an IDNA/Unicode domain
+			auto_aliases["@" + domain_unicode] = "@" + domain
+		except (ValueError, UnicodeError, idna.IDNAError):
+			continue
+
+	add_auto_aliases(auto_aliases, env)
+	return required_aliases
+
 def validate_password(pw):
 	# validate password
 	if pw.strip() == "":
@@ -729,3 +740,7 @@ if __name__ == "__main__":
 	if len(sys.argv) > 1 and sys.argv[1] == "update":
 		from utils import load_environment
 		print(kick(load_environment()))
+
+	if len(sys.argv) > 1 and sys.argv[1] == "update-auto-aliases":
+		from utils import load_environment
+		update_auto_aliases(load_environment())
