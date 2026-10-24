@@ -133,10 +133,7 @@ export PYTHONPATH=$PWD/management
 exec gunicorn -b 127.0.0.1:10222 -w 1 --timeout 630 wsgi:app
 EOF
 chmod +x $inst_dir/start
-cp --remove-destination conf/mailinabox.service /lib/systemd/system/mailinabox.service # target was previously a symlink so remove it first
-## hide_output systemctl link -f /lib/systemd/system/mailinabox.service
-hide_output systemctl enable /lib/systemd/system/mailinabox.service
-hide_output systemctl daemon-reload
+install_unit mailinabox.service
 
 # Perform nightly tasks at 3am in system time: take a backup, run
 # status checks and email the administrator any changes.

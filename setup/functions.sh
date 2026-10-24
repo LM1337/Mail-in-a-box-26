@@ -165,6 +165,23 @@ function enable_service {
 	fi
 }
 
+function install_unit {
+	# Install the systemd unit conf/$1 of Mail-in-a-Box and enable it by name.
+	# Upstream linked /etc/systemd/system/$1 to /lib/systemd/system/$1, and
+	# enabling the unit by that path does the same; but /lib is a link to
+	# usr/lib, so the link points to the unit's own file, and systemd 259 reports
+	# "Too many levels of symbolic links" (is-enabled: bad). Such a link (any
+	# link there, except a mask) is removed, and reenable replaces the
+	# .wants links that go through /lib (B69).
+	local unit=/lib/systemd/system/$1 link=/etc/systemd/system/$1
+	cp --remove-destination "conf/$1" "$unit" # the target was a symlink into the checkout once
+	if [ -L "$link" ] && [ "$(readlink "$link")" != /dev/null ]; then
+		rm -f "$link"
+	fi
+	hide_output systemctl daemon-reload
+	hide_output systemctl reenable "$1"
+}
+
 function restart_service {
 	enable_service "$1"
 	hide_output service "$1" restart

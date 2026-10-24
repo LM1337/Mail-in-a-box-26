@@ -43,6 +43,11 @@ and following).
   (`/etc/cloud/templates/hosts.debian.tmpl`) and the same line into
   `/etc/hosts`. When an update of cloud-init changes the template, dpkg
   asks about it: keep the local version (B68).
+* Setup: `systemctl is-enabled mailinabox` and `munin` no longer fail
+  with "Too many levels of symbolic links". Setup enabled the units by
+  their path under `/lib`, which left a link in `/etc/systemd/system` to the
+  same file; it now removes such a link and enables the units by name
+  (B69).
 
 ## v78-r2604.0-rc4 (2026-10-24)
 

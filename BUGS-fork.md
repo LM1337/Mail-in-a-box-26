@@ -34,13 +34,13 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-68 bugs: 1 critical, 13 high, 32 medium, 22 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B68 in the update test of rc4.
+69 bugs: 1 critical, 13 high, 32 medium, 23 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
-| PR #2603 | 26 |
+| PR #2603 | 27 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
 | Fork | 6 |
@@ -120,6 +120,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | unreleased |
 | [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | unreleased |
 | [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | unreleased |
+| [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | unreleased |
 
 ## Details
 
@@ -919,6 +920,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (it does not touch /etc/hosts), PR #2603 no. Origin: Fork (B60's fix in rc4).
 * **Evidence:** Fresh rc4 test box (Proxmox cloud-init, `manage_etc_hosts: true` and `fqdn` in the user data; a copy of a production box has the same template and setting): the template has `127.0.1.1 {{fqdn}} {{hostname}}`; re-running the module (`cloud-init single --name update_etc_hosts --frequency always`, as at boot) writes `127.0.1.1 <cloud-init fqdn> <hostname>` back. With the fix: the template and `/etc/hosts` have `127.0.1.1 PRIMARY_HOSTNAME <first label>`, the module writes the same line, and a second setup run changes nothing.
 * **Found by:** update test; **commit:** see `git log --grep B68`; **fixed in:** unreleased
+
+### B69
+
+**systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links"** (low, Setup)
+
+* **Symptom:** `systemctl is-enabled mailinabox` and `systemctl is-enabled munin` print `Failed to get unit file state for mailinabox.service: Too many levels of symbolic links`, and `systemctl list-unit-files` shows them as `bad`. The services still run and start at boot, but tools that check the enablement (such as phase verify, B67) cannot tell whether they are enabled.
+* **Cause:** setup/management.sh and setup/munin.sh copy the unit to `/lib/systemd/system/` and then run `systemctl enable /lib/systemd/system/<unit>` (PR #2603; v78 ran `systemctl link -f` with the same path, then enabled the unit by name). Enabling by path creates the link `/etc/systemd/system/<unit> -> /lib/systemd/system/<unit>`. Since `/lib` is a link to `usr/lib`, that link points to the unit's own file in the search path, and systemd 259 treats it as a loop. systemd 249 (22.04) accepted the same link.
+* **Fix:** A new function `install_unit` in setup/functions.sh copies the unit, removes a link `/etc/systemd/system/<unit>` (unless it is a mask), reloads systemd and enables the unit by name with `systemctl reenable`, which also replaces the `.wants` links that go through `/lib`. Existing boxes are repaired on the next setup run.
+* **Affects:** v78 no (systemd 249), PR #2603 yes. Origin: PR #2603 (with systemd 259 of 26.04). A box upgraded in place from v78 also has the link from `systemctl link -f`.
+* **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `ls -l /etc/systemd/system/mailinabox.service` gives `-> /lib/systemd/system/mailinabox.service`, `/lib -> usr/lib`, and is-enabled fails as above for mailinabox.service and munin.service (systemd 259.9). After removing the link and `systemctl reenable`, both are `enabled`, the `.wants` links point to `/usr/lib/systemd/system/`, and the management daemon keeps running.
+* **Report upstream:** PR #2603: enable the units by name.
+* **Found by:** update test; **commit:** see `git log --grep B69`; **fixed in:** unreleased
 
 ## Not counted above
 
