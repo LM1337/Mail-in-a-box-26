@@ -91,7 +91,7 @@ the box that holds your mail.
 
 All changes are in [CHANGELOG-fork.md](CHANGELOG-fork.md), every fixed bug
 with cause and affected versions in [BUGS-fork.md](BUGS-fork.md). The full
-documentation of the fork (English and German) is
+documentation of the fork (English, with German sections) is
 [README-fork.md](README-fork.md).
 
 ### Supported paths
@@ -160,113 +160,4 @@ project and is used here only to say what this fork is based on.
 installs (Nextcloud, Roundcube, Z-Push, the Roundcube plugins, Ubuntu and
 sury.org packages) keep their own licenses.
 
----
-
-### Deutsch (Kurzfassung)
-
-Eine inoffizielle Abspaltung (Fork) von
-[Mail-in-a-Box](https://github.com/mail-in-a-box/mailinabox) v78, die auf
-**Ubuntu 26.04 LTS** mit aktuellen Versionen ihrer Software läuft.
-
-#### Warum dieser Fork
-
-Mail-in-a-Box v78, die neueste Upstream-Version, lässt sich nur auf **Ubuntu
-22.04 LTS** installieren. Die normale Sicherheitsunterstützung für Ubuntu 22.04
-endet im **Mai 2027** (danach nur noch mit Ubuntu Pro ESM bis Mai 2032).
-Mehrere Teile von v78 werden von ihren Projekten nicht mehr oder nur noch mit
-Sicherheitskorrekturen unterstützt:
-
-* **PHP 8.0** aus dem Fremd-PPA `ppa:ondrej/php`. php.net hat die
-  Sicherheitsunterstützung für PHP 8.0 am 26. November 2023 beendet. v78
-  bleibt wegen Nextcloud bei 8.0.
-* **Nextcloud 27.1.11**. Nextcloud 27 ist seit Juni 2024 am Ende seiner
-  Lebensdauer.
-* **Roundcube 1.6**, ein LTS-Zweig, der nur noch wichtige Sicherheitskorrekturen
-  bekommt; die aktive Unterstützung endete am 10. Mai 2026.
-* **Dovecot 2.3** bekommt von seinem Projekt seit dem Erscheinen von
-  Dovecot 2.4 (Januar 2025) nur noch kritische Sicherheitskorrekturen, und
-  **OpenSSL 3.0** wird vom OpenSSL-Projekt nicht mehr unterstützt. Ubuntu
-  22.04 portiert Sicherheitskorrekturen bis Mai 2027 in seine Pakete zurück
-  (Dovecot 2.3.16, OpenSSL 3.0.2).
-
-Eine Portierung auf Ubuntu 26.04 ist upstream in
-[PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603) von
-[@writeDavid](https://github.com/writeDavid) vorgeschlagen (offen, noch nicht
-übernommen). Dieser Fork baut auf dieser Portierung auf. Ziele:
-
-* Betrieb auf **Ubuntu 26.04 LTS** (normale Unterstützung bis Mai 2031, ESM
-  bis Mai 2036) mit aktuellen Versionen von PHP, Nextcloud, Roundcube und
-  Dovecot.
-* Wo möglich Ubuntus eigene Pakete: PHP 8.5 kommt aus dem Ubuntu-Archiv.
-  packages.sury.org dient nur als Notlösung und ist per apt-Pin auf das
-  beschränkt, was Ubuntu fehlt (`php8.5-imap`, `php-common` und PHP 8.2 für
-  die Nextcloud-Upgrade-Kette).
-* Das Konzept von Mail-in-a-Box bleibt: ein Setup-Befehl, keine vom Benutzer
-  wählbaren Setup-Optionen (einziger neuer Schalter ist `FTS=off` in
-  `/etc/mailinabox.conf`).
-* Ein Weg für bestehende Boxen: Umzug auf eine neue 26.04-Maschine oder
-  Upgrade an Ort und Stelle von Ubuntu 22.04 oder 24.04.
-
-#### Hauptkomponenten
-
-| Komponente | Mail-in-a-Box v78 (Ubuntu 22.04) | Dieser Fork (Ubuntu 26.04) |
-|---|---|---|
-| Ubuntu | 22.04 LTS (normale Unterstützung bis Mai 2027) | 26.04 LTS (normale Unterstützung bis Mai 2031) |
-| PHP | 8.0 aus `ppa:ondrej/php` (keine Sicherheitsunterstützung seit 26.11.2023) | 8.5 aus dem Ubuntu-Archiv (Sicherheitsunterstützung bis 31.12.2029) |
-| Nextcloud ¹ | 27.1.11 (Ende der Lebensdauer Juni 2024) | 34.0.5 (unterstützt bis Juni 2027) ³ |
-| Nextcloud-Apps contacts / calendar / user_external ¹ | 5.5.4 / 4.7.20 / 3.4.0 | 8.9.2 / 6.6.3 / 4.0.0 |
-| Roundcube ¹ | 1.6.20 (LTS, nur Sicherheitskorrekturen), CardDAV-Plugin 4.4.3 | 1.7.5 (aktuelle stabile Version), CardDAV-Plugin 5.1.4 |
-| Z-Push ¹ | 2.7.7 | 2.7.7 (unverändert) |
-| Dovecot | 2.3.16 | 2.4.2 |
-| Volltextsuche (Dovecot) | keine | **neu:** fts_xapian 1.9.3, standardmäßig an (`FTS=off` schaltet sie ab) |
-| Postfix | 3.6.4 | 3.10.6 |
-| SpamAssassin (über spampd) | 3.4.6 (spampd 2.53), Lernen über dovecot-antispam | 4.0.2 (spampd 2.62), **neu:** Lernen über IMAPSieve |
-| nginx | 1.18.0 | 1.28.3 |
-| OpenSSL | 3.0.2 | 3.5.5 (LTS, unterstützt bis April 2030) |
-| Python (Verwaltungsdienst) | 3.10.12 | 3.14.4 |
-| duplicity (Sicherungen) ² | 3.2.2 | 3.2.2 (unverändert) |
-
-Stand: `v78-r2604.0-rc3` (Oktober 2026). Für v78 steht in der Tabelle die in
-den Setup-Skripten von v78 festgelegte Version oder das aktuelle Paket von
-Ubuntu 22.04.
-
-¹ Von den Setup-Skripten fest vorgegeben (Download mit Prüfsumme). Diese
-Versionen ändern sich nur mit einer neuen Version von Mail-in-a-Box oder
-dieses Forks.
-
-² Aus `ppa:duplicity-team/duplicity-release-git`, in v78 wie im Fork.
-
-³ Nextcloud 35 ist im September 2026 erschienen; dieser Fork ist noch bei 34.
-
-Zeilen ohne Markierung kommen aus dem Ubuntu-Archiv (außer PHP in v78, das
-aus `ppa:ondrej/php` stammt) und werden mit den Paketaktualisierungen von
-Ubuntu aktualisiert; angegeben ist die Upstream-Version, die Ubuntu
-ausliefert. Die meisten liegen in Ubuntus Komponente main, die während der
-normalen Unterstützung Sicherheitsaktualisierungen bekommt;
-`dovecot-fts-xapian` und `spampd` liegen in universe.
-
-#### Hinweis und Stand
-
-Dies ist eine **inoffizielle Abspaltung**. Sie wird nicht vom
-Mail-in-a-Box-Projekt betreut oder unterstützt; Fragen bitte nicht im
-Upstream-Forum stellen, sondern hier als
-[Issue](https://github.com/LM1337/Mail-in-a-box-26/issues).
-
-**Stand: Release Candidate (`v78-r2604.0-rc3`).** Vor dem Einsatz eine
-Sicherung anlegen und zuerst auf einer Kopie oder einer Ersatzmaschine
-ausprobieren.
-
-Unterstützte Wege: Neuinstallation auf Ubuntu 26.04 (`setup/bootstrap.sh`),
-Umzug einer bestehenden Box (Ubuntu 22.04 oder per Release-Upgrade auf 24.04
-gehoben) auf eine neue 26.04-Maschine (`tools/migrate-to-2604.sh`, empfohlen)
-und Upgrade an Ort und Stelle derselben Maschine
-(`tools/upgrade-in-place-to-2604.sh`). Einzelheiten stehen auf Deutsch in
-[README-fork.md](README-fork.md).
-
-Sicherheitslücken bitte nicht öffentlich melden, sondern über die private
-Meldefunktion von GitHub oder per Mail an
-[LM1337@networkx.eu](mailto:LM1337@networkx.eu) (siehe [SECURITY.md](.github/SECURITY.md)).
-
-Dank an Joshua Tauberer und alle, die an Mail-in-a-Box mitgearbeitet haben,
-sowie an David Blythe (writeDavid) für die 26.04-Portierung. Lizenz: CC0 1.0
-(gemeinfrei), wie das Original.
+A German version of the fork documentation is in [README-fork.md](README-fork.md).
