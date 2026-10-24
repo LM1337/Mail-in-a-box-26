@@ -133,6 +133,12 @@ done
 tools/dns_update
 tools/web_update
 
+# Write the adaptive fail2ban configuration (repeat offenders get longer bans,
+# slow jails, allowlist) from the "fail2ban" settings in settings.yaml. It is
+# written here and not in system.sh because it needs the management venv and
+# the log files of the slow jails.
+management/fail2ban_admin.py --setup
+
 # Give fail2ban another restart. The log files may not all have been present when
 # fail2ban was first configured, but they should exist now.
 restart_service fail2ban
