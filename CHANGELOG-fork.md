@@ -21,11 +21,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   in the middle of a release upgrade, and only if that upgrades or removes
   no other package), fall back to screen, pass the arguments and the
   environment variables they read into the session, attach the terminal
-  (also through `curl | bash`), keep the window open until Enter and exit
-  with the code of the run. An existing session of the same name is
-  attached instead of starting a second run. `--no-tmux` turns it off;
-  `--check`, `--status`, the resume unit and runs without a terminal are
-  unchanged.
+  (also through `curl | bash`), keep the window open until Enter (also
+  after Ctrl-C) and exit with the code of the run. The environment goes
+  through a file readable only by root, not the command line. A terminal
+  type without a terminfo entry on the box (xterm-ghostty, xterm-kitty, ...)
+  attaches as xterm-256color; screen reattaches with `screen -d -r`. A
+  window of an earlier run that only waits for Enter is closed; if something
+  still runs in a session of the same name, the command is NOT started (the
+  terminal is attached to that session and the tool says so). Installing
+  tmux waits for the apt locks only briefly. Through `curl | bash`, the copy
+  of an older release tag that does not start tmux itself gets a warning
+  first. `--no-tmux` turns it off; `--check`, `--status`, the resume unit and
+  runs without a terminal are unchanged.
 
 ## v78-r2604.0-rc3 (2026-10-23)
 

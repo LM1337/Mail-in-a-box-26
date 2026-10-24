@@ -62,7 +62,7 @@ upgrade). Nextcloud must be 26 or later.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # after reading the check:
+    # after reading the check (with v78-r2604.0-rc3: inside tmux or screen, see below):
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
 
@@ -72,6 +72,12 @@ screen) and attaches your terminal to it. If the SSH connection drops, the
 upgrade goes on: log in again and run `sudo tmux attach -t upgrade-2604`.
 When the command has ended, the window stays open until you press Enter.
 `--no-tmux` turns this off.
+
+Through `curl | bash`, the tool runs the copy of the release tag (`TAG`,
+default: the latest release). Releases up to v78-r2604.0-rc3 do not start
+tmux by themselves: with those, start the command inside tmux yourself
+(`tmux new -s upgrade-2604`), or take the branch `main` with
+`... | sudo TAG=main bash`. The tool warns before it runs such a copy.
 
 What it does, in phases that continue on their own after each reboot:
 
@@ -125,7 +131,7 @@ Version 26 haben.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # nach Durchsicht der Prüfung:
+    # nach Durchsicht der Prüfung (mit v78-r2604.0-rc3: in tmux oder screen, siehe unten):
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
 
@@ -135,6 +141,12 @@ installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
 Reißt die SSH-Verbindung ab, läuft das Upgrade weiter: neu anmelden und
 `sudo tmux attach -t upgrade-2604` aufrufen. Nach dem Ende des Befehls bleibt
 das Fenster offen, bis Enter gedrückt wird. `--no-tmux` schaltet das ab.
+
+Über `curl | bash` führt das Werkzeug die Fassung des Release-Tags aus (`TAG`,
+vorgegeben: das neueste Release). Releases bis v78-r2604.0-rc3 starten tmux
+noch nicht selbst: mit ihnen den Befehl selbst in tmux starten
+(`tmux new -s upgrade-2604`) oder mit `... | sudo TAG=main bash` den Zweig
+`main` nehmen. Das Werkzeug warnt, bevor es eine solche Fassung ausführt.
 
 Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 
