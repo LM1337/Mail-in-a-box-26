@@ -1151,6 +1151,61 @@ def c_backup_status(ctx):
     return "target=%s, %d backups, latest %s" % (cfg.get("target"), len(b), last)
 
 
+def c_fail2ban_api(ctx):
+    # Read-only: status of the adaptive fail2ban (intrusion protection).
+    r = admin_api(ctx, "GET", "system/fail2ban")
+    if r.status != 200:
+        raise Fail("HTTP %d %s" % (r.status, r.text()[:200]))
+    j = r.json()
+    if not j.get("running"):
+        raise Fail("fail2ban not running: %s" % j.get("error"))
+    names = {x["name"] for x in j["jails"]}
+    s = j["settings"]
+    want = {"dovecot", "miab-postfix587", "recidive"}
+    if s.get("slow_jails"):
+        want |= {"miab-slow-smtp", "miab-slow-dovecot"}
+    if want - names:
+        raise Fail("jails missing: %s" % sorted(want - names))
+    if not j.get("config_current"):
+        raise Fail("rendered jail file does not match the settings")
+    return "%d jails, %d bans; adaptive=%s slow_jails=%s allowlist=%d" % (
+        len(names), j.get("banned_entries", 0), s.get("adaptive"), s.get("slow_jails"), len(s.get("allowlist") or []))
+
+
+def c_fail2ban_settings_roundtrip(ctx):
+    # Changes only spray_min_ips (not part of the jail files, so no reload),
+    # then restores it; an invalid allowlist must be refused without a change.
+    cur = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+    orig = cur["spray_min_ips"]
+    new = orig + 1 if orig < 100000 else orig - 1
+    try:
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"spray_min_ips": str(new)})
+        if r.status != 200 or r.json()["settings"]["spray_min_ips"] != new:
+            raise Fail("set: HTTP %d %s" % (r.status, r.text()[:200]))
+        if r.json().get("changed"):
+            raise Fail("spray_min_ips changed the jail files")
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"allowlist": "0.0.0.0/0"})
+        if r.status != 400:
+            raise Fail("allowlist 0.0.0.0/0 accepted: HTTP %d" % r.status)
+        after = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+        if after["allowlist"] != cur["allowlist"]:
+            raise Fail("refused allowlist changed the settings")
+    finally:
+        admin_api(ctx, "POST", "system/fail2ban/settings", form={"spray_min_ips": str(orig)})
+    if admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["spray_min_ips"] != orig:
+        raise Fail("spray_min_ips not restored")
+    return "set/restore ok, invalid allowlist refused (400)"
+
+
+def c_fail2ban_report(ctx):
+    r = admin_api(ctx, "GET", "system/fail2ban/report")
+    if r.status != 200:
+        raise Fail("HTTP %d %s" % (r.status, r.text()[:200]))
+    j = r.json()
+    return "%d failed logins from %d IPs in %d h, %d flagged accounts, %d persistent IPs (%.1f s)" % (
+        j["failures"], j["distinct_ips"], j["scan_hours"], len(j["flagged_accounts"]), j["persistent_total"], j["seconds"])
+
+
 # ---------------------------------------------------------------------------
 # checks: DNS
 # ---------------------------------------------------------------------------
@@ -1861,6 +1916,9 @@ def main():
     if want("admin"):
         run_check("admin-api-tmp-user-alias", c_admin_tmp_user_alias, ctx)
         run_check("admin-backup-status", c_backup_status, ctx)
+        run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
+        run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
+        run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
     if want("dns"):
         print("== dns")
         for zone in (ctx.domain, ctx.seed2, ctx.seed3):
