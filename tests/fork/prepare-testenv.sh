@@ -120,5 +120,10 @@ F2B_ADMIN="$(cd "$(dirname "$0")/../.." && pwd)/management/fail2ban_admin.py"
 if [ -x "$F2B_ADMIN" ] && [ -x /usr/local/lib/mailinabox/env/bin/python3 ]; then
 	"$F2B_ADMIN" --allow "$JUMP_HOST" > /dev/null
 	fail2ban-client unban "$JUMP_HOST" > /dev/null || true
+elif [ -f /etc/fail2ban/jail.d/mailinabox_adaptive.conf ]; then
+	# Run from a copy outside the checkout: the allowlist step needs the box's
+	# management/fail2ban_admin.py next to this script.
+	echo "WARNING: $F2B_ADMIN not found, $JUMP_HOST is NOT on the fail2ban allowlist;" >&2
+	echo "run the copy in the box's checkout (e.g. /root/mailinabox/tests/fork/prepare-testenv.sh)." >&2
 fi
 echo "test environment prepared on $(hostname -f)"
