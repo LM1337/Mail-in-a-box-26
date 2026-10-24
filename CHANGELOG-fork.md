@@ -30,7 +30,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `check_sender_access hash:/etc/postfix/greylist_bypass_senders` right before
   postgrey, with the quota check in front of both; without it the
   restrictions stay as upstream. Before, setup dropped such a rule added by
-  hand on every run.
+  hand on every run. To turn it off, delete the file and run setup (keep the
+  `.db` until then). `tools/migrate-to-2604.sh` takes the file over from the
+  old box before setup (not from a backup, which does not contain it).
 
 ### Fixed
 
@@ -63,10 +65,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
-* Tools: phase verify of `tools/upgrade-in-place-to-2604.sh` reports each
-  item of an `smtpd_*_restrictions` parameter from before that is gone now
-  ("Postfix restriction from before is gone: ...") as a failed check and at
-  the top of `etc-report.txt`, not only as a changed line of `postconf -n`.
+* Tools: phase verify of `tools/upgrade-in-place-to-2604.sh` and
+  `tools/migrate-to-2604.sh` reports each item of an `smtpd_*_restrictions`
+  parameter from before (of the old box) that is gone now ("Postfix
+  restriction ... is gone: ...") as a failed check and at the top of
+  `etc-report.txt`, not only as a changed line of `postconf -n`. A DNS list
+  that only got return codes (upstream v68, `zen.spamhaus.org=127.0.0.[2..11]`)
+  does not count as gone.
 * Tools: a Mail-in-a-Box backup that is running (e.g. the nightly one at
   01:04) no longer stops the start. `tools/upgrade-in-place-to-2604.sh`
   reports it in the preflight (also with `--check`) without a blocker, then

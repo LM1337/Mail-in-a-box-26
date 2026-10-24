@@ -250,6 +250,8 @@ tools/editconf.py /etc/postfix/main.cf  -e lmtp_destination_recipient_limit=
 # The entries are meant for single senders, not for whole provider pools. OK ends
 # smtpd_recipient_restrictions, so the quota check (port 12340) moves in front of the
 # sender check; without the file the restrictions are those of upstream Mail-in-a-Box.
+# To turn it off, delete the file and run setup: until then main.cf still names the
+# table, so keep its .db (without it Postfix defers all incoming mail, 451 4.3.5).
 GREYLIST_BYPASS=/etc/postfix/greylist_bypass_senders
 POLICY_CHECKS="check_policy_service inet:127.0.0.1:10023,check_policy_service inet:127.0.0.1:12340"
 if [ -f "$GREYLIST_BYPASS" ]; then

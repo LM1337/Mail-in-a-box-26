@@ -2263,6 +2263,14 @@ prepare_machine() {
 		fi
 	fi
 
+	# The greylisting exceptions are a fork feature that lives in /etc
+	# (setup/mail-postfix.sh reads the file). Not in a backup: only over SSH.
+	local gb=/etc/postfix/greylist_bypass_senders
+	if [ -f "$STATE_DIR/old-etc$gb" ] && [ ! -e "$gb" ]; then
+		say "Taking over the greylisting exceptions $gb from the old box."
+		install -D -m 644 "$STATE_DIR/old-etc$gb" "$gb"
+	fi
+
 	if [ "$(state_get SOURCE_MODE)" = ssh ]; then
 		pause_backups
 		# rsync copied numeric IDs. The system users (opendkim, spampd, postgrey,
@@ -2570,13 +2578,41 @@ compare_fingerprints() {
 	done
 }
 
+# The items (split at commas) of the smtpd_*_restrictions in BEFORE (output of
+# "postconf -n") that are gone now, as "parameter: item". Setup rewrites these
+# parameters and drops what an administrator added (e.g. a check_sender_access
+# before greylisting). A DNS list that only got return codes (upstream v68:
+# zen.spamhaus.org -> zen.spamhaus.org=127.0.0.[2..11]) is not gone. Keep in
+# sync with tools/upgrade-in-place-to-2604.sh.
+postfix_restrictions_gone() { # BEFORE
+	local ref=$1 p old now item
+	[ -s "$ref" ] || return 0
+	for p in smtpd_client_restrictions smtpd_helo_restrictions smtpd_sender_restrictions smtpd_relay_restrictions \
+		smtpd_recipient_restrictions smtpd_data_restrictions smtpd_end_of_data_restrictions; do
+		old=$(sed -n "s/^${p}[[:space:]]*=[[:space:]]*//p" "$ref")
+		[ -n "$old" ] || continue
+		now=$(postconf -h "$p" 2> /dev/null | restriction_items | sed 's/=.*//')
+		while IFS= read -r item; do
+			grep -qxF -- "${item%%=*}" <<< "$now" || echo "$p: $item"
+		done < <(restriction_items <<< "$old")
+	done
+}
+
+restriction_items() {
+	tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g; /^$/d'
+}
+
 etc_report() {
-	local out=$STATE_DIR/etc-report.txt old=$STATE_DIR/old-etc
+	local out=$STATE_DIR/etc-report.txt old=$STATE_DIR/old-etc gone line
 	[ -d "$old/etc" ] || return 0
+	gone=$(postfix_restrictions_gone "$STATE_DIR/old-postconf.txt")
 	{
 		echo "Customizations of the old box that are NOT migrated (they live in /etc,"
 		echo "not in $STORAGE_ROOT). The old /etc (as of $(state_get ETC_SAVED_AT)) is in"
 		echo "$STATE_DIR/old-etc.tar.gz and unpacked in $old."
+		echo
+		echo "== Postfix restrictions of the old box that are gone here (redo them in main.cf)"
+		if [ -n "$gone" ]; then sed 's/^/  /' <<< "$gone"; fi
 		echo
 		echo "== Postfix settings of the old box (postconf -n) that differ here"
 		if [ -s "$STATE_DIR/old-postconf.txt" ]; then
@@ -2614,6 +2650,14 @@ etc_report() {
 	} > "$out"
 	say "Customizations of the old /etc that were not migrated: $out"
 	sed -n '1,80p' "$out"
+	# Restrictions decide which mail is accepted: a lost one is a failed check
+	# (redo it, or accept with --finish), not only a line in the report.
+	if [ -n "$gone" ]; then
+		while IFS= read -r line; do
+			warn "Postfix restriction of the old box is gone: $line"
+			VERIFY_PROBLEMS+=("Postfix restriction of the old box is gone: $line (see $out)")
+		done <<< "$gone"
+	fi
 }
 
 dns_next_steps() {

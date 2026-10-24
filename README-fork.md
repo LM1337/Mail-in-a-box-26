@@ -67,7 +67,10 @@ Setup runs `postmap` on the file and adds
 moves in front of it, so a full mailbox is still refused. The file is yours:
 setup never writes it and keeps the rule on every run. After later changes,
 `postmap /etc/postfix/greylist_bypass_senders` is enough. Without the file the
-restrictions are those of upstream Mail-in-a-Box. The envelope sender is easy
+restrictions are those of upstream Mail-in-a-Box. To turn the exceptions off,
+delete the file and run setup; until setup has run, `main.cf` still names the
+table, so leave `greylist_bypass_senders.db` in place (without it Postfix
+defers all incoming mail with "451 4.3.5"). The envelope sender is easy
 to forge, so list single senders, not the domains of whole mail providers.
 Servers known by their IP address go into postgrey's own
 `/etc/postgrey/whitelist_clients.local` instead.
@@ -90,10 +93,14 @@ Quota-Prüfung rückt davor, ein volles Postfach wird also weiter abgewiesen.
 Die Datei gehört dem Administrator: setup schreibt sie nie und behält die
 Regel bei jedem Lauf bei. Nach späteren Änderungen genügt
 `postmap /etc/postfix/greylist_bypass_senders`. Ohne die Datei bleiben die
-Regeln die von upstream Mail-in-a-Box. Der Absender des Umschlags lässt sich
-leicht fälschen, deshalb einzelne Absender eintragen, nicht die Domains ganzer
-Mail-Anbieter. Server, die man an ihrer IP-Adresse erkennt, gehören stattdessen
-in die Liste von postgrey selbst, `/etc/postgrey/whitelist_clients.local`.
+Regeln die von upstream Mail-in-a-Box. Zum Abschalten der Ausnahmen die Datei
+löschen und setup aufrufen; bis setup gelaufen ist, nennt `main.cf` die
+Tabelle noch, deshalb `greylist_bypass_senders.db` so lange liegen lassen
+(ohne sie stellt Postfix alle eingehenden Mails mit „451 4.3.5“ zurück). Der
+Absender des Umschlags lässt sich leicht fälschen, deshalb einzelne Absender
+eintragen, nicht die Domains ganzer Mail-Anbieter. Server, die man an ihrer
+IP-Adresse erkennt, gehören stattdessen in die Liste von postgrey selbst,
+`/etc/postgrey/whitelist_clients.local`.
 
 
 In-place upgrade to 26.04 / Upgrade an Ort und Stelle
@@ -543,13 +550,17 @@ containers do not, the tool checks).
 
 #### Not migrated
 
-* Changes to `/etc` (e.g. extra Postfix maps such as a
-  `greylist_bypass_senders` table, postgrey whitelists, SpamAssassin rules,
-  fail2ban jails, cron jobs, firewall rules). The old `/etc`, as of the
-  final copy, is kept in `/root/migration/old-etc.tar.gz` (unpacked in
-  `/root/migration/old-etc`), and `/root/migration/etc-report.txt` lists
-  Postfix settings that differ, files named in them and files that exist
-  only on the old box.
+* Changes to `/etc` (e.g. extra Postfix maps, postgrey whitelists,
+  SpamAssassin rules, fail2ban jails, cron jobs, firewall rules). The old
+  `/etc`, as of the final copy, is kept in `/root/migration/old-etc.tar.gz`
+  (unpacked in `/root/migration/old-etc`), and
+  `/root/migration/etc-report.txt` lists Postfix settings that differ, files
+  named in them and files that exist only on the old box. An item of
+  `smtpd_*_restrictions` of the old box that is gone here is a failed check
+  (redo it in `main.cf`, or accept the result with `--finish`). Only the
+  greylisting exceptions (`/etc/postfix/greylist_bypass_senders`, see above)
+  are taken over, before setup. A backup (`--from-backup`) does not contain
+  them: copy the file over yourself and run setup again.
 * Nextcloud apps installed by hand (they live in `/usr/local/lib/owncloud/apps`,
   outside the data). The tool lists them. Setup keeps the app store disabled
   (`'appstoreenabled' => false`).
@@ -932,13 +943,18 @@ das, manche Container nicht; das Werkzeug prüft es).
 
 #### Nicht übernommen
 
-* Änderungen in `/etc` (z. B. zusätzliche Postfix-Tabellen wie
-  `greylist_bypass_senders`, postgrey-Ausnahmelisten, SpamAssassin-Regeln,
-  fail2ban-Jails, Cron-Jobs, Firewall-Regeln). Das alte `/etc` mit dem Stand
-  der letzten Kopie liegt in `/root/migration/old-etc.tar.gz` (entpackt in
-  `/root/migration/old-etc`), und `/root/migration/etc-report.txt` listet
-  abweichende Postfix-Einstellungen, darin genannte Dateien und Dateien, die
-  es nur auf der alten Box gibt.
+* Änderungen in `/etc` (z. B. zusätzliche Postfix-Tabellen,
+  postgrey-Ausnahmelisten, SpamAssassin-Regeln, fail2ban-Jails, Cron-Jobs,
+  Firewall-Regeln). Das alte `/etc` mit dem Stand der letzten Kopie liegt in
+  `/root/migration/old-etc.tar.gz` (entpackt in `/root/migration/old-etc`),
+  und `/root/migration/etc-report.txt` listet abweichende
+  Postfix-Einstellungen, darin genannte Dateien und Dateien, die es nur auf
+  der alten Box gibt. Ein Eintrag in `smtpd_*_restrictions` der alten Box,
+  der hier fehlt, gilt als fehlgeschlagene Prüfung (in `main.cf` wieder
+  eintragen oder das Ergebnis mit `--finish` annehmen). Nur die Ausnahmen vom
+  Greylisting (`/etc/postfix/greylist_bypass_senders`, siehe oben) werden vor
+  setup übernommen. Eine Sicherung (`--from-backup`) enthält sie nicht: die
+  Datei selbst hinüberkopieren und setup erneut aufrufen.
 * Von Hand installierte Nextcloud-Apps (sie liegen in
   `/usr/local/lib/owncloud/apps`, außerhalb der Daten). Das Werkzeug listet
   sie auf. Das Setup lässt den App-Store abgeschaltet

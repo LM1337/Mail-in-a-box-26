@@ -1545,14 +1545,20 @@ GREYLIST_BYPASS = "/etc/postfix/greylist_bypass_senders"
 def c_greylist_bypass(ctx):
     # prepare-testenv.sh whitelists the peers in postgrey, so greylisting cannot
     # be watched on port 25 here: check what setup/mail-postfix.sh configured.
-    rc, _out, _err = ctx.remote.run("test -f %s" % GREYLIST_BYPASS)
-    if rc != 0:
-        raise Skip("no %s on the box" % GREYLIST_BYPASS)
+    has_file = ctx.remote.run("test -f %s" % GREYLIST_BYPASS)[0] == 0
     rc, out, err = ctx.remote.run("postconf -h smtpd_recipient_restrictions", timeout=60)
     items = [i.strip() for i in out.strip().split(",")]
     bypass = "check_sender_access hash:" + GREYLIST_BYPASS
     grey = "check_policy_service inet:127.0.0.1:10023"
     quota = "check_policy_service inet:127.0.0.1:12340"
+    if not has_file:
+        # The test boxes have no such file: then the restrictions end as upstream's.
+        if bypass in items:
+            raise Fail("%r is set, but %s is missing: %s" % (bypass, GREYLIST_BYPASS, out.strip()[:200]))
+        if items[-2:] != [grey, quota]:
+            raise Fail("without %s the restrictions should end with postgrey, then the quota check: %s"
+                       % (GREYLIST_BYPASS, out.strip()[:200]))
+        return "no %s: postgrey, then the quota check (as upstream)" % GREYLIST_BYPASS
     for item in (bypass, grey, quota):
         if item not in items:
             raise Fail("%r missing in smtpd_recipient_restrictions: %s" % (item, out.strip()[:200]))

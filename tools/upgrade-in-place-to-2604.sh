@@ -3168,20 +3168,22 @@ compare_fingerprints() {
 	done
 }
 
-# The items (split at commas) of the smtpd_*_restrictions from before that are
-# gone now, as "parameter: item". Setup rewrites these parameters and drops
-# what an administrator added (e.g. a check_sender_access before greylisting);
-# upstream Mail-in-a-Box set the same items from v68 to v78.
-postfix_restrictions_gone() {
-	local before=$STATE_DIR/meta/postconf-n.txt p old now item
-	[ -s "$before" ] || return 0
+# The items (split at commas) of the smtpd_*_restrictions in BEFORE (output of
+# "postconf -n") that are gone now, as "parameter: item". Setup rewrites these
+# parameters and drops what an administrator added (e.g. a check_sender_access
+# before greylisting). A DNS list that only got return codes (upstream v68:
+# zen.spamhaus.org -> zen.spamhaus.org=127.0.0.[2..11]) is not gone. Keep in
+# sync with tools/migrate-to-2604.sh.
+postfix_restrictions_gone() { # BEFORE
+	local ref=$1 p old now item
+	[ -s "$ref" ] || return 0
 	for p in smtpd_client_restrictions smtpd_helo_restrictions smtpd_sender_restrictions smtpd_relay_restrictions \
 		smtpd_recipient_restrictions smtpd_data_restrictions smtpd_end_of_data_restrictions; do
-		old=$(sed -n "s/^${p}[[:space:]]*=[[:space:]]*//p" "$before")
+		old=$(sed -n "s/^${p}[[:space:]]*=[[:space:]]*//p" "$ref")
 		[ -n "$old" ] || continue
-		now=$(postconf -h "$p" 2> /dev/null | restriction_items)
+		now=$(postconf -h "$p" 2> /dev/null | restriction_items | sed 's/=.*//')
 		while IFS= read -r item; do
-			grep -qxF -- "$item" <<< "$now" || echo "$p: $item"
+			grep -qxF -- "${item%%=*}" <<< "$now" || echo "$p: $item"
 		done < <(restriction_items <<< "$old")
 	done
 }
@@ -3195,7 +3197,7 @@ restriction_items() {
 etc_report() {
 	local out=$STATE_DIR/etc-report.txt f d rel gone line
 	[ -d "$OLD_ETC" ] || return 0
-	gone=$(postfix_restrictions_gone)
+	gone=$(postfix_restrictions_gone "$STATE_DIR/meta/postconf-n.txt")
 	{
 		echo "Configuration from before the upgrade that is different or gone now."
 		echo "The old /etc (as of $(state_get ETC_SAVED_AT)) is in $OLD_ETC,"
