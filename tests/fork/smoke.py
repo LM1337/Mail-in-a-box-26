@@ -1455,10 +1455,19 @@ def nc_share_scope_sync(ctx):
     line = out.strip().splitlines()[0] if rc == 0 and out.strip() else ""
     if not line:
         return False
-    ctx.remote.run("bash -c " + shlex.quote(line), sudo=True, timeout=300, check=True)
     m = re.search(r"PHP_VER=(\S+)", line)
-    ctx.remote.run("sudo -n -u www-data php%s /usr/local/lib/owncloud/occ dav:sync-system-addressbook"
-                   % (m.group(1) if m else ""), timeout=300, check=True)
+    for cmd, sudo in (("bash -c " + shlex.quote(line), True),
+                      ("sudo -n -u www-data php%s /usr/local/lib/owncloud/occ dav:sync-system-addressbook"
+                       % (m.group(1) if m else ""), False)):
+        # Nextcloud on SQLite: its own cron.php (every 5 minutes) can hold the
+        # database for a while, and occ then fails with "database is locked".
+        for attempt in range(3):
+            rc, out, err = ctx.remote.run(cmd, sudo=sudo, timeout=300)
+            if rc == 0:
+                break
+            if "database is locked" not in out + err or attempt == 2:
+                raise Fail("remote command failed (%d): %s %s" % (rc, cmd, (err or out).strip()[-300:]))
+            time.sleep(15)
     return True
 
 
