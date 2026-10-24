@@ -67,6 +67,9 @@ rm -f /etc/logrotate.d/nsd
 # * openssh-client: SSH tools (SSHFP records are built from the host key files).
 echo "Installing nsd (DNS server)..."
 apt_install nsd ldnsutils openssh-client
+# The management daemon restarts nsd (dns_update), setup does not: make sure
+# it is enabled here, like the services that setup restarts (B67).
+enable_service nsd
 
 # Create DNSSEC signing keys.
 

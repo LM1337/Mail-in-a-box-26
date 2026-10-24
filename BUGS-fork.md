@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 in rc3.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -34,8 +34,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-66 bugs: 1 critical, 12 high, 32 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66 in the update test of rc4.
+67 bugs: 1 critical, 13 high, 32 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66 and B67 in the update test of rc4.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
-| Fork | 4 |
+| Fork | 5 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -118,6 +118,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B64](#b64) | medium | Management | A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail | 26.04 change | no | yes | rc4 |
 | [B65](#b65) | high | Setup | 'curl ... \| sudo bash' hangs at setup's first dialog box: sudo-rs stops it | 26.04 change | no | yes | rc4 |
 | [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | unreleased |
+| [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | unreleased |
 
 ## Details
 
@@ -895,6 +896,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `doveadm mailbox list -u` of the user with the vacation reply listed `dovecot`, `dovecot.lda-dupes` and `dovecot.lda-dupes.locks`; the directory `.dovecot.lda-dupes.locks` in the Maildir had `cur/`, `new/`, `tmp/` and `dovecot-uidlist`, and xapian-indexes had a database for it; the box copy logged the LMTP error above. Dovecot 2.4.2 source: `mail_duplicate_db_init()` puts the database at `<home>/.dovecot.<name>` and the lock directory at `<mail_volatile_path or home>/.dovecot.<name>.locks`. With the fix on the fresh box: setup removed the folders of the existing user (folder list, subscriptions and its full-text index clean), and for a new user with a vacation script two mails from the same sender gave one reply ("discarded duplicate vacation response" for the second), the lock directory was in `/run/dovecot-volatile/<domain>/<user>/` and no folder appeared.
 * **Report upstream:** MIAB main: relevant once upstream moves to Dovecot 2.4 (PR #2603).
 * **Found by:** update test; **commit:** see `git log --grep B66`; **fixed in:** unreleased
+
+### B67
+
+**In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot** (high, Tools)
+
+* **Symptom:** After `tools/upgrade-in-place-to-2604.sh` (rc3) everything works, "All checks passed", and the status checks are green, but `systemctl is-enabled dovecot` says `disabled`. The next reboot leaves Dovecot off: no IMAP, POP3 or ManageSieve, and Postfix cannot deliver to the mailboxes (LMTP), so incoming mail waits in the queue. Updating to rc4 does not change it.
+* **Cause:** cleanup_dovecot purges the Dovecot 2.3 packages, which removes their enablement links, and installs Dovecot 2.4 while the units are masked (so that it does not start with a configuration setup has not written yet). The package's `deb-systemd-helper` cannot enable a masked unit (`Failed to preset unit: Unit /etc/systemd/system/dovecot.service is masked`). unquiesce removed the masks but only enabled again the units it had disabled itself, and setup's `restart_service` starts a service without enabling it. phase verify and the status checks only look at running services.
+* **Fix:** mask_units records which units are enabled before it masks them, and unquiesce enables those again that are disabled after the masks are gone ("Enabled again ..."). phase verify of both tools shows whether each service is enabled, enables a disabled one and counts any other state (e.g. masked) as a failed check; `tools/upgrade-in-place-to-2604.sh` also lists in `etc-report.txt` and as a warning the units that `meta/unit-files.txt` (before the upgrade) has as enabled and that are disabled now. Setup's `restart_service` enables a disabled unit before restarting it (an alias such as bind9 by its real name, named), and setup/dns.sh does the same for nsd, so the next setup run (`sudo mailinabox`, or the update to the next release) heals a box upgraded with rc3.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3, `tools/upgrade-in-place-to-2604.sh`). `tools/migrate-to-2604.sh` installs Dovecot with setup on a fresh machine and is not affected; it gets the same check in phase verify.
+* **Evidence:** Copy of a production box upgraded in place with rc3: `meta/unit-files.txt` of the tool has `dovecot.service enabled`, the upgrade log has `Failed to preset unit: Unit /etc/systemd/system/dovecot.service is masked` and `deb-systemd-helper: error: systemctl preset failed` when dovecot-core 2.4 was set up, and after the upgrade and after the update to rc4 `dovecot.service` is `disabled`; after a reboot Dovecot was inactive and the status checks had three more errors (IMAP, LMTP, Sieve). It was the only Mail-in-a-Box service that went from enabled to disabled. The production box upgraded with rc3 has the same state. A fresh rc4 box has it `enabled`.
+* **Found by:** update test; **commit:** see `git log --grep B67`; **fixed in:** unreleased
 
 ## Not counted above
 

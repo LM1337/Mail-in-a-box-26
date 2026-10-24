@@ -2848,6 +2848,27 @@ next_steps() {
 	fi
 }
 
+# The services of Mail-in-a-Box: running, and enabled so that they start
+# after a reboot. A disabled one is enabled: the in-place upgrade of rc3 left
+# Dovecot disabled (B67). Keep in sync with tools/upgrade-in-place-to-2604.sh.
+verify_services() {
+	local s st en
+	for s in postfix dovecot opendkim spampd postgrey nsd nginx "php$PHP_VER-fpm" mailinabox fail2ban cron; do
+		st=$(systemctl is-active "$s" 2> /dev/null || true)
+		en=$(systemctl is-enabled "$s" 2> /dev/null || true)
+		if [ "$en" = disabled ] && systemctl enable --quiet "$s" 2> /dev/null; then
+			warn "$s was disabled, so it would not have started after a reboot. Enabled it."
+			en=enabled
+		fi
+		printf '  %-16s %-10s %s\n' "$s" "$st" "${en:-unknown}"
+		if [ "$st" != active ]; then VERIFY_PROBLEMS+=("service $s is $st"); fi
+		case "$en" in
+			enabled | static | indirect | generated | alias) ;;
+			*) VERIFY_PROBLEMS+=("service $s is not enabled (${en:-unknown}), it would not start after a reboot") ;;
+		esac
+	done
+}
+
 phase_verify() {
 	section "Checking the new box"
 	VERIFY_PROBLEMS=()
@@ -2865,12 +2886,7 @@ phase_verify() {
 	fi
 
 	say
-	local s st
-	for s in postfix dovecot opendkim spampd postgrey nsd nginx "php$PHP_VER-fpm" mailinabox fail2ban cron; do
-		st=$(systemctl is-active "$s" 2> /dev/null || true)
-		printf '  %-16s %s\n' "$s" "$st"
-		if [ "$st" != active ]; then VERIFY_PROBLEMS+=("service $s is $st"); fi
-	done
+	verify_services
 
 	say
 	if [ -f /usr/local/lib/owncloud/occ ]; then

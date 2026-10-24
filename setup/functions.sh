@@ -150,7 +150,23 @@ function ufw_limit {
 	fi
 }
 
+function enable_service {
+	# The services of Mail-in-a-Box must also start after a reboot. A package
+	# installed while its unit was masked (the release upgrade of
+	# tools/upgrade-in-place-to-2604.sh up to rc3) stays disabled, and a restart
+	# does not change that (B67). Only a disabled unit is enabled; an alias
+	# (bind9 is named) is enabled by its real name.
+	local unit state
+	unit=$(systemctl show -P Id "$1" 2> /dev/null || true)
+	[ -n "$unit" ] || return 0
+	state=$(systemctl is-enabled "$unit" 2> /dev/null || true)
+	if [ "$state" = disabled ]; then
+		hide_output systemctl enable "$unit"
+	fi
+}
+
 function restart_service {
+	enable_service "$1"
 	hide_output service "$1" restart
 }
 

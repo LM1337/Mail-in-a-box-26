@@ -2277,6 +2277,14 @@ quiesce_units() {
 # checkout) cannot be masked: it is disabled instead.
 mask_units() {
 	local u st failed=()
+	# What is enabled now is enabled again by unquiesce: a package that is
+	# purged, or installed while its unit is masked (the release upgrade,
+	# cleanup_dovecot), leaves the unit disabled ("Failed to preset unit: ...
+	# is masked"), and unmasking does not enable it (B67). A unit masked by an
+	# earlier call reports "masked" and is not recorded again.
+	for u in "$@"; do
+		if [ "$(systemctl is-enabled "$u" 2> /dev/null || true)" = enabled ]; then state_add ENABLED_BEFORE "$u"; fi
+	done
 	# Recorded first: an interruption must not leave masks nobody removes.
 	state_add MASKED_UNITS "$@"
 	for u in "$@"; do
@@ -2339,6 +2347,19 @@ unquiesce() { # [UNITS TO KEEP OFF]...
 	done
 	state_set MASKED_UNITS "${rest_m[*]}"
 	state_set DISABLED_UNITS "${rest_d[*]}"
+	# Enable again what was enabled before the masks (see mask_units).
+	local again=() rest_e=()
+	for u in $(state_get ENABLED_BEFORE); do
+		if [[ " ${m[*]} " != *" $u "* ]] || [[ " ${rest_m[*]} " == *" $u "* ]]; then
+			rest_e+=("$u")
+		elif [ "$(systemctl is-enabled "$u" 2> /dev/null || true)" = disabled ]; then
+			if systemctl enable --quiet "$u" 2> /dev/null; then again+=("$u"); else warn "Could not enable $u again."; fi
+		fi
+	done
+	if [ ${#again[@]} -gt 0 ]; then
+		say "Enabled again (the upgrade had left them disabled, so they would not start after a reboot): ${again[*]}"
+	fi
+	state_set ENABLED_BEFORE "${rest_e[*]}"
 }
 
 # Wait until no process here uses $STORAGE_ROOT (for the fingerprint, and so
@@ -3268,12 +3289,24 @@ restriction_items() {
 	tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g; /^$/d'
 }
 
+# The units that were enabled before the upgrade (meta/unit-files.txt of
+# phase snapshot, taken before the masks) and are disabled now. The services
+# of Mail-in-a-Box are enabled again by unquiesce and verify_services (B67);
+# for the others a release upgrade can have had its reasons.
+units_disabled_now() {
+	local ref=$STATE_DIR/meta/unit-files.txt
+	[ -s "$ref" ] || return 0
+	LC_ALL=C join <(awk '$2 == "enabled" {print $1}' "$ref" | LC_ALL=C sort -u) \
+		<(systemctl list-unit-files --no-legend --no-pager 2> /dev/null | awk '$2 == "disabled" {print $1}' | LC_ALL=C sort -u) || true
+}
+
 # Customized files from before the upgrade that are different or gone now.
 # Like etc_report in tools/migrate-to-2604.sh, for one machine.
 etc_report() {
-	local out=$STATE_DIR/etc-report.txt f d rel gone line
+	local out=$STATE_DIR/etc-report.txt f d rel gone line units
 	[ -d "$OLD_ETC" ] || return 0
 	gone=$(postfix_restrictions_gone "$STATE_DIR/meta/postconf-n.txt")
+	units=$(units_disabled_now)
 	{
 		echo "Configuration from before the upgrade that is different or gone now."
 		echo "The old /etc (as of $(state_get ETC_SAVED_AT)) is in $OLD_ETC,"
@@ -3281,6 +3314,9 @@ etc_report() {
 		echo
 		echo "== Postfix restrictions from before that are gone now (redo them in main.cf)"
 		if [ -n "$gone" ]; then sed 's/^/  /' <<< "$gone"; fi
+		echo
+		echo "== Units enabled before the upgrade that are disabled now (systemctl enable UNIT, if still wanted)"
+		if [ -n "$units" ]; then sed 's/^/  /' <<< "$units"; fi
 		echo
 		echo "== Postfix settings (postconf -n) from before that differ now"
 		if [ -s "$STATE_DIR/meta/postconf-n.txt" ]; then
@@ -3315,6 +3351,10 @@ etc_report() {
 	} > "$out"
 	say "Configuration from before that is different or gone now: $out"
 	sed -n '1,80p' "$out"
+	if [ -n "$units" ]; then
+		warn "Enabled before the upgrade, disabled now (they do not start after a reboot): $(tr '\n' ' ' <<< "$units")
+If they are still wanted: systemctl enable UNIT (see $out)."
+	fi
 	# Restrictions decide which mail is accepted: a lost one is a failed check
 	# (redo it, or accept with --finish), not only a line in the report.
 	if [ -n "$gone" ]; then
@@ -3323,6 +3363,27 @@ etc_report() {
 			VERIFY_PROBLEMS+=("Postfix restriction from before is gone: $line (see $out)")
 		done <<< "$gone"
 	fi
+}
+
+# The services of Mail-in-a-Box: running, and enabled so that they start
+# after a reboot. A disabled one is enabled: the in-place upgrade of rc3 left
+# Dovecot disabled (B67). Keep in sync with tools/migrate-to-2604.sh.
+verify_services() {
+	local s st en
+	for s in postfix dovecot opendkim spampd postgrey nsd nginx "php$PHP_VER-fpm" mailinabox fail2ban cron; do
+		st=$(systemctl is-active "$s" 2> /dev/null || true)
+		en=$(systemctl is-enabled "$s" 2> /dev/null || true)
+		if [ "$en" = disabled ] && systemctl enable --quiet "$s" 2> /dev/null; then
+			warn "$s was disabled, so it would not have started after a reboot. Enabled it."
+			en=enabled
+		fi
+		printf '  %-16s %-10s %s\n' "$s" "$st" "${en:-unknown}"
+		if [ "$st" != active ]; then VERIFY_PROBLEMS+=("service $s is $st"); fi
+		case "$en" in
+			enabled | static | indirect | generated | alias) ;;
+			*) VERIFY_PROBLEMS+=("service $s is not enabled (${en:-unknown}), it would not start after a reboot") ;;
+		esac
+	done
 }
 
 phase_verify() {
@@ -3343,12 +3404,7 @@ phase_verify() {
 	fi
 
 	say
-	local s st
-	for s in postfix dovecot opendkim spampd postgrey nsd nginx "php$PHP_VER-fpm" mailinabox fail2ban cron; do
-		st=$(systemctl is-active "$s" 2> /dev/null || true)
-		printf '  %-16s %s\n' "$s" "$st"
-		if [ "$st" != active ]; then VERIFY_PROBLEMS+=("service $s is $st"); fi
-	done
+	verify_services
 	say "  Ubuntu           $(os_version)"
 	if [ "$(os_version)" != 26.04 ]; then VERIFY_PROBLEMS+=("this is Ubuntu $(os_version), not 26.04"); fi
 

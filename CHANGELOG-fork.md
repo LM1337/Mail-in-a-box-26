@@ -25,6 +25,16 @@ and following).
   `maildir_stat_dirs = yes`. On existing boxes setup deletes these folders
   (through doveadm, with their subscriptions and full-text index) unless
   one holds messages (B66).
+* Tools: `tools/upgrade-in-place-to-2604.sh` left Dovecot disabled: it
+  installs Dovecot 2.4 while the unit is masked, which the package cannot
+  enable, and after the next reboot there was no IMAP, POP3 or delivery to
+  the mailboxes. The tool now records which units are enabled before it
+  masks them and enables them again when it unmasks them. Phase verify of
+  both tools shows whether each service is enabled, enables a disabled one
+  and fails on any other state; the in-place tool also reports units that
+  were enabled before the upgrade and are disabled now (warning and
+  `etc-report.txt`). Setup enables a disabled service before it restarts it
+  (and nsd), so the next setup run heals a box upgraded with rc3 (B67).
 
 ## v78-r2604.0-rc4 (2026-10-24)
 
