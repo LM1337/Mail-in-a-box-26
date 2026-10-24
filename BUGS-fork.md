@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3, B68 in rc4.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -34,8 +34,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-67 bugs: 1 critical, 13 high, 32 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66 and B67 in the update test of rc4.
+68 bugs: 1 critical, 13 high, 32 medium, 22 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B68 in the update test of rc4.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
-| Fork | 5 |
+| Fork | 6 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -119,6 +119,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B65](#b65) | high | Setup | 'curl ... \| sudo bash' hangs at setup's first dialog box: sudo-rs stops it | 26.04 change | no | yes | rc4 |
 | [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | unreleased |
 | [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | unreleased |
+| [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | unreleased |
 
 ## Details
 
@@ -907,6 +908,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3, `tools/upgrade-in-place-to-2604.sh`). `tools/migrate-to-2604.sh` installs Dovecot with setup on a fresh machine and is not affected; it gets the same check in phase verify.
 * **Evidence:** Copy of a production box upgraded in place with rc3: `meta/unit-files.txt` of the tool has `dovecot.service enabled`, the upgrade log has `Failed to preset unit: Unit /etc/systemd/system/dovecot.service is masked` and `deb-systemd-helper: error: systemctl preset failed` when dovecot-core 2.4 was set up, and after the upgrade and after the update to rc4 `dovecot.service` is `disabled`; after a reboot Dovecot was inactive and the status checks had three more errors (IMAP, LMTP, Sieve). It was the only Mail-in-a-Box service that went from enabled to disabled. The production box upgraded with rc3 has the same state. A fresh rc4 box has it `enabled`.
 * **Found by:** update test; **commit:** see `git log --grep B67`; **fixed in:** unreleased
+
+### B68
+
+**cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot** (low, System)
+
+* **Symptom:** Setup prints "Commenting out the 127.0.1.1 line of /etc/hosts with another machine's name..." on every run: after each reboot `/etc/hosts` has the line `127.0.1.1 <the provider's or the template's name of the machine> <short name>` again. /etc/mailname keeps the box's name, so mail of root and cron still reaches the administrator; the provider's name resolves to the box itself again.
+* **Cause:** The fix of B60 (rc4) edits `/etc/hosts` only. On machines whose cloud-init has `manage_etc_hosts: true` (in the image's `/etc/cloud/cloud.cfg` or, as with Proxmox, in the machine's user data), cloud-init's module update_etc_hosts writes `/etc/hosts` on every boot from `/etc/cloud/templates/hosts.debian.tmpl`, whose line is `127.0.1.1 {{fqdn}} {{hostname}}` with cloud-init's names of the machine, not PRIMARY_HOSTNAME. A drop-in in `/etc/cloud/cloud.cfg.d` cannot turn that off, because the user data overrides it.
+* **Fix:** When setup has commented out such a line and cloud-init manages `/etc/hosts` (`manage_etc_hosts` true or template in `cloud-init query combined_cloud_config`, or cloud-init's header in `/etc/hosts`), setup/system.sh changes the template's 127.0.1.1 line to `127.0.1.1 PRIMARY_HOSTNAME <first label>`, as the header that cloud-init writes into `/etc/hosts` suggests, and writes the same line into `/etc/hosts` instead of the commented-out one, so the file stays the same after the next boot. A template that already gives the box's name is left alone, and so is a box where cloud-init's name of the machine is PRIMARY_HOSTNAME. The template is a configuration file of the package cloud-init-base: when an update changes it, dpkg asks, and the local version should be kept. With `manage_etc_hosts: localhost` cloud-init does not use the template; setup then says that the setting can only be changed in the user data.
+* **Affects:** v78 no (it does not touch /etc/hosts), PR #2603 no. Origin: Fork (B60's fix in rc4).
+* **Evidence:** Fresh rc4 test box (Proxmox cloud-init, `manage_etc_hosts: true` and `fqdn` in the user data; a copy of a production box has the same template and setting): the template has `127.0.1.1 {{fqdn}} {{hostname}}`; re-running the module (`cloud-init single --name update_etc_hosts --frequency always`, as at boot) writes `127.0.1.1 <cloud-init fqdn> <hostname>` back. With the fix: the template and `/etc/hosts` have `127.0.1.1 PRIMARY_HOSTNAME <first label>`, the module writes the same line, and a second setup run changes nothing.
+* **Found by:** update test; **commit:** see `git log --grep B68`; **fixed in:** unreleased
 
 ## Not counted above
 

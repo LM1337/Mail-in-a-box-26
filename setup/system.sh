@@ -20,8 +20,8 @@ hostname "$PRIMARY_HOSTNAME"
 # 127.0.1.1 line of /etc/hosts: mail to root then goes
 # to that name and bounces. Use the box's name; mail to root@PRIMARY_HOSTNAME goes to
 # the administrator (an automatic alias, see management/mailconfig.py). A 127.0.1.1
-# line that names neither PRIMARY_HOSTNAME nor its first label is commented out. (On a
-# machine where cloud-init manages /etc/hosts, the next boot may write it again.)
+# line that names neither PRIMARY_HOSTNAME nor its first label is commented out (for
+# cloud-init, which may write it again on the next boot, see below).
 echo "$PRIMARY_HOSTNAME" > /etc/mailname
 if awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
 	'$1 == "127.0.1.1" { for (i = 2; i <= NF && $i !~ /^#/; i++) if ($i == h || $i == s) next; stale = 1 } END { exit !stale }' /etc/hosts; then
@@ -29,6 +29,35 @@ if awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
 	HOSTS_NEW=$(awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
 		'$1 == "127.0.1.1" { for (i = 2; i <= NF && $i !~ /^#/; i++) if ($i == h || $i == s) { print; next } print "# " $0 " # not this machine (Mail-in-a-Box)"; next } { print }' /etc/hosts)
 	echo "$HOSTS_NEW" > /etc/hosts
+fi
+
+# cloud-init (images of Proxmox and of many hosting providers) can write /etc/hosts
+# again on every boot (manage_etc_hosts), from /etc/cloud/templates/hosts.debian.tmpl
+# with its own name of the machine on the 127.0.1.1 line, and the line above came
+# back. Where that happened (the commented-out line above), the template's 127.0.1.1
+# line names the box instead, as the header cloud-init puts in /etc/hosts suggests,
+# and /etc/hosts gets the same line now. dpkg asks about the template when an update
+# of cloud-init changes it: keep the local version. With manage_etc_hosts: localhost
+# cloud-init writes the line without the template; that can only be turned off in
+# the machine's cloud-init user data (B68).
+HOSTS_TMPL=/etc/cloud/templates/hosts.debian.tmpl
+HOSTS_LINE="127.0.1.1 $PRIMARY_HOSTNAME ${PRIMARY_HOSTNAME%%.*}"
+if grep -qs "^# 127\.0\.1\.1[[:space:]].* # not this machine (Mail-in-a-Box)$" /etc/hosts && command -v cloud-init > /dev/null; then
+	CI_MANAGE=$(cloud-init query combined_cloud_config 2> /dev/null \
+		| python3 -c 'import json, sys; print(str(json.load(sys.stdin).get("manage_etc_hosts", "")).lower())' 2> /dev/null || true)
+	if [ -z "$CI_MANAGE" ] && grep -qs "manage_etc_hosts" /etc/hosts; then CI_MANAGE=true; fi
+	if [ "$CI_MANAGE" = localhost ]; then
+		echo "cloud-init writes the 127.0.1.1 line of /etc/hosts on every boot (manage_etc_hosts: localhost). To stop it, set manage_etc_hosts: false in the machine's cloud-init user data."
+	elif [[ "$CI_MANAGE" =~ ^(true|template)$ ]] \
+		&& TMPL_LINE=$(grep -sE '^127\.0\.1\.1[[:space:]]' "$HOSTS_TMPL" | head -n 1) \
+		&& [ -n "$TMPL_LINE" ] && [ "$TMPL_LINE" != "$HOSTS_LINE" ]; then
+		echo "Putting the box's name on the 127.0.1.1 line of cloud-init's template for /etc/hosts..."
+		sed -i "s/^127\.0\.1\.1[[:space:]].*/$HOSTS_LINE/" "$HOSTS_TMPL"
+		if ! grep -qs '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+			HOSTS_NEW=$(awk -v l="$HOSTS_LINE" '!done && /^# 127\.0\.1\.1[[:space:]].* # not this machine \(Mail-in-a-Box\)$/ { print l; done = 1; next } { print }' /etc/hosts)
+			echo "$HOSTS_NEW" > /etc/hosts
+		fi
+	fi
 fi
 
 # ### Fix permissions
