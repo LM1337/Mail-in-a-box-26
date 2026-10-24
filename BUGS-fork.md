@@ -33,15 +33,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-58 bugs: 1 critical, 11 high, 27 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B58 by the in-place upgrade of a production box with rc3.
+59 bugs: 1 critical, 11 high, 27 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B59 by the in-place upgrade of a production box with rc3.
 
 | Origin | Count |
 |---|---|
 | Upstream | 14 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 13 |
+| 26.04 change | 14 |
 | Fork | 4 |
 
 13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
@@ -109,6 +109,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
 | [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
 | [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
+| [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | unreleased |
 
 ## Details
 
@@ -792,6 +793,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
 * **Evidence:** /var/log/mail.log of the 26.04 test box (Dovecot 2.4.2, log_path=/var/log/mail.log): `Oct 23 02:16:29 imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=192.0.2.10, lip=192.0.2.11, mpid=53945, TLS, session=<...>`, likewise for pop3-login and managesieve-login; no "Info: Login:" line. The code before the fix counted none of 108 sample lines as an IMAP/POP3 login (only 3 SMTP logins), the fixed code 24 IMAP, 2 POP3 and 2 ManageSieve logins for alice. The fail2ban filter dovecotimap.conf already matches the 2.4 "Login aborted: ... (auth failed, ...)" lines (fail2ban-regex on the same box), the Postfix lines of mail_log.py are unchanged in 3.10.
 * **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** unreleased
+
+### B59
+
+**Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file** (low, Postfix)
+
+* **Symptom:** Every `postconf` call (in setup, the status checks, the tools and by hand) and every Postfix start prints `postconf: warning: /etc/postfix/main.cf: support for parameter "smtpd_tls_dh1024_param_file" will be removed; instead, do not specify (leave at default)`.
+* **Cause:** setup/mail-postfix.sh set smtpd_tls_dh1024_param_file=$STORAGE_ROOT/ssl/dh2048.pem, as upstream did for the DHE ciphers of old clients. Postfix 3.10 deprecates the parameter; its default (empty) uses the FFDHE groups of tls_ffdhe_auto_groups (ffdhe2048 ffdhe3072, RFC 7919) with OpenSSL 3.
+* **Fix:** Setup no longer sets the parameter and comments out an existing line with editconf.py -e. dh2048.pem stays: nginx (ssl_dhparam) and Dovecot (ssl_server_dh_file) still use it.
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Evidence:** On the 26.04 test box (Postfix 3.10.6, OpenSSL 3.5.5) `postconf -h smtpd_recipient_restrictions` prints the warning on stderr; `postconf -d` gives `smtpd_tls_dh1024_param_file =` and `tls_ffdhe_auto_groups = ffdhe2048 ffdhe3072`. v78 (Postfix 3.6 on 22.04) sets the same parameter without a warning. Nothing else in the repo references the parameter.
+* **Found by:** production upgrade; **commit:** see `git log --grep B59`; **fixed in:** unreleased
 
 ## Not counted above
 

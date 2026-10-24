@@ -42,6 +42,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
   ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
   "Login:" (B58).
+* Postfix: setup no longer sets `smtpd_tls_dh1024_param_file` and removes it
+  from an existing main.cf. Postfix 3.10 warned on every `postconf` call that
+  its support will be removed; the default uses the RFC 7919 FFDHE groups
+  (B59).
 
 ### Changed
 
