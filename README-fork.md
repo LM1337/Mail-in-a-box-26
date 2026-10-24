@@ -113,6 +113,37 @@ The status checks of rc1 to rc3 look for new releases at the previous home;
 they may keep reporting such a box as up to date, so check the
 [releases](https://github.com/LM1337/Mail-in-a-box-26/releases) yourself.
 
+Such a checkout also keeps the release tags of the previous home:
+`git -C /root/mailinabox tag` lists `v78-r2604.0-rc3` (and rc1, rc2 if they
+were fetched) with other commit ids than on GitHub, because the history was
+rewritten for publication. Updates are not affected (bootstrap.sh fetches only
+the tag it installs, with `--force`). To clean up, delete the old tags:
+
+	sudo git -C /root/mailinabox tag -d v78-r2604.0-rc1 v78-r2604.0-rc2 v78-r2604.0-rc3
+
+("not found" for a tag that is not there is fine). Do not use
+`git fetch --tags` for this: the checkout is shallow, and it would download
+the history behind every upstream tag of the repository.
+
+Right after the update:
+
+* **Allowlist your own networks.** From rc4 on, adaptive banning and the
+  slow mail jails are on as soon as setup has finished, with an empty
+  allowlist; there is nothing to turn on. Put the networks your users work
+  from (office, VPN) on the allowlist right away, under System > Intrusion
+  Protection or with
+  `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
+  Otherwise a single phone with an old password can get the whole office
+  banned from the mail ports, for longer each time (up to a week). See
+  [Intrusion protection](#intrusion-protection-adaptive-fail2ban--schutz-vor-anmeldeangriffen).
+* **The nightly job moves.** Setup picks a new random minute between 01:00
+  and 01:59 (system time) for the nightly backup and status checks on every
+  run, as upstream does (`/etc/cron.d/mailinabox-nightly`). Check the time
+  there before you plan the next update or upgrade.
+* Check that the services are enabled: `systemctl is-enabled dovecot postfix`
+  must say `enabled` twice. A box upgraded in place with rc3 had Dovecot
+  disabled (B67); setup of later releases enables it again.
+
 ### Deutsch
 
 Eine Box mit diesem Fork wird wie upstream Mail-in-a-Box aktualisiert: den
@@ -138,6 +169,94 @@ Die Statusprüfungen von rc1 bis rc3 suchen neue Releases unter der früheren
 Adresse; sie melden eine solche Box womöglich weiter als aktuell, deshalb die
 [Releases](https://github.com/LM1337/Mail-in-a-box-26/releases) selbst
 prüfen.
+
+Ein solcher Checkout behält auch die Release-Tags der früheren Adresse:
+`git -C /root/mailinabox tag` zeigt `v78-r2604.0-rc3` (und rc1, rc2, falls
+sie geholt wurden) mit anderen Commit-IDs als auf GitHub, weil die Historie
+für die Veröffentlichung neu geschrieben wurde. Auf Updates wirkt sich das
+nicht aus (bootstrap.sh holt nur den Tag, den es installiert, mit `--force`).
+Zum Aufräumen die alten Tags löschen:
+
+	sudo git -C /root/mailinabox tag -d v78-r2604.0-rc1 v78-r2604.0-rc2 v78-r2604.0-rc3
+
+(„not found“ für einen Tag, den es nicht gibt, ist in Ordnung). Nicht
+`git fetch --tags` dafür nehmen: Der Checkout ist flach (shallow) und würde
+die Historie hinter jedem Upstream-Tag des Repositorys herunterladen.
+
+Gleich nach dem Update:
+
+* **Eigene Netze freigeben.** Ab rc4 sind die wachsenden Sperren und die
+  langsamen Mail-Jails eingeschaltet, sobald setup fertig ist, mit leerer
+  Freigabeliste (allowlist); einzuschalten ist nichts. Die Netze, aus denen
+  die Benutzer arbeiten (Büro, VPN), sofort freigeben, unter System >
+  Intrusion Protection oder mit
+  `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
+  Sonst kann ein einziges Telefon mit altem Passwort das ganze Büro von den
+  Mail-Ports aussperren, jedes Mal länger (bis zu einer Woche). Siehe
+  [Schutz vor Anmeldeangriffen](#intrusion-protection-adaptive-fail2ban--schutz-vor-anmeldeangriffen).
+* **Die nächtliche Aufgabe wandert.** Setup wählt bei jedem Lauf eine neue
+  zufällige Minute zwischen 01:00 und 01:59 Uhr (Systemzeit) für die
+  nächtliche Sicherung und die Statusprüfungen, wie upstream
+  (`/etc/cron.d/mailinabox-nightly`). Die Zeit dort nachsehen, bevor das
+  nächste Update oder Upgrade geplant wird.
+* Prüfen, ob die Dienste eingeschaltet sind: `systemctl is-enabled dovecot
+  postfix` muss zweimal `enabled` sagen. Auf einer mit rc3 an Ort und Stelle
+  aktualisierten Box war Dovecot ausgeschaltet (B67); setup späterer
+  Releases schaltet es wieder ein.
+
+
+Setup output / Ausgaben von setup
+---------------------------------
+
+### English
+
+Some lines in the output of setup on Ubuntu 26.04 look like errors but are
+harmless; setup goes on and ends with "Your Mail-in-a-Box is running.":
+
+* `/usr/bin/pollinate: 57: cannot create /var/cache/pollinate/log: Permission denied`,
+  followed by "pollinate could not seed the random number generator (not
+  critical)": on a box upgraded from an older Ubuntu, pollinate's log belongs
+  to root. Seeding from the pollinate servers is an extra; the kernel seeds
+  its random number generator anyway (B56).
+* "No upgrade required." and "Note: This command triggers the upgrade
+  actions associated with a new version ...", with a link to the upgrade
+  documentation: Nextcloud's `occ upgrade`, which setup runs on every run,
+  found nothing to upgrade.
+* "Synchronizing state of fail2ban.service with SysV service script ..." and
+  "Executing: /usr/lib/systemd/systemd-sysv-install enable fail2ban":
+  systemctl enabling a service that also has an init script.
+* "Connection to 127.0.0.1 10222 port [tcp/*] succeeded!": setup waiting for
+  the management daemon.
+* "Commenting out the 127.0.1.1 line of /etc/hosts with another machine's
+  name...": setup fixing a provider's host name (B60, B68).
+* "Cleaning up legacy php version": setup removing PHP 8.2, which it only
+  needs for the step-by-step upgrade of an old Nextcloud.
+
+### Deutsch
+
+Einige Zeilen in der Ausgabe von setup unter Ubuntu 26.04 sehen wie Fehler
+aus, sind aber harmlos; setup läuft weiter und endet mit „Your Mail-in-a-Box
+is running.“:
+
+* `/usr/bin/pollinate: 57: cannot create /var/cache/pollinate/log: Permission denied`,
+  danach „pollinate could not seed the random number generator (not
+  critical)“: Auf einer von einer älteren Ubuntu-Version aktualisierten Box
+  gehört das Protokoll von pollinate root. Das Füllen des Zufallsgenerators
+  über die pollinate-Server ist eine Zugabe; der Kernel füllt ihn ohnehin
+  (B56).
+* „No upgrade required.“ und „Note: This command triggers the upgrade
+  actions associated with a new version ...“ mit einem Verweis auf die
+  Upgrade-Dokumentation: `occ upgrade` von Nextcloud, das setup bei jedem
+  Lauf aufruft, hat nichts zu aktualisieren gefunden.
+* „Synchronizing state of fail2ban.service with SysV service script ...“ und
+  „Executing: /usr/lib/systemd/systemd-sysv-install enable fail2ban“:
+  systemctl schaltet einen Dienst ein, der auch ein Init-Skript hat.
+* „Connection to 127.0.0.1 10222 port [tcp/*] succeeded!“: setup wartet auf
+  den Verwaltungsdienst.
+* „Commenting out the 127.0.1.1 line of /etc/hosts with another machine's
+  name...“: setup ersetzt den Hostnamen eines Anbieters (B60, B68).
+* „Cleaning up legacy php version“: setup entfernt PHP 8.2, das es nur für
+  das schrittweise Upgrade einer alten Nextcloud braucht.
 
 
 Greylisting exceptions / Ausnahmen vom Greylisting
@@ -608,7 +727,9 @@ What it does, in phases that continue on their own after each reboot:
 1. **preflight**: release, Mail-in-a-Box and Nextcloud versions, disk space,
    a backup younger than 24 hours (a backup that is running, e.g. the nightly
    one, does not block: the upgrade waits for it, at most 2 hours,
-   `UPGRADE_BACKUP_WAIT`, before it stops anything), and a list of
+   `UPGRADE_BACKUP_WAIT`, before it stops anything; the nightly job runs at
+   the minute after 01:00 in `/etc/cron.d/mailinabox-nightly`, which every
+   setup run picks anew), and a list of
    everything that is not managed by Mail-in-a-Box (Dovecot plugins, systemd
    drop-ins, nginx files, Docker, third-party apt sources). Local extensions
    block the upgrade until you pass `--keep-local`.
@@ -709,7 +830,10 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 1. **preflight**: Release, Versionen von Mail-in-a-Box und Nextcloud,
    Speicherplatz, eine Sicherung jünger als 24 Stunden (eine laufende
    Sicherung, etwa die nächtliche, hält nichts an: das Upgrade wartet auf sie,
-   höchstens 2 Stunden, `UPGRADE_BACKUP_WAIT`, bevor es etwas anhält) und
+   höchstens 2 Stunden, `UPGRADE_BACKUP_WAIT`, bevor es etwas anhält; die
+   nächtliche Aufgabe läuft zu der Minute nach 01:00 Uhr, die in
+   `/etc/cron.d/mailinabox-nightly` steht und die jeder Lauf von setup neu
+   wählt) und
    eine Liste von allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.

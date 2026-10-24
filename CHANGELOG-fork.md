@@ -49,6 +49,37 @@ and following).
   same file; it now removes such a link and enables the units by name
   (B69).
 
+### Changed
+
+* Docs: README-fork.md has a new section "Setup output" with the lines of
+  setup's output that look like errors but are harmless on 26.04
+  (pollinate "Permission denied", Nextcloud's "No upgrade required", the
+  SysV note of systemctl). "Updating the fork" says what to do right after
+  an update (allowlist, the nightly job's new minute, enabled services) and
+  how to remove the old release tags of rc1 to rc3 checkouts.
+
+### Upgrade note
+
+* Boxes upgraded in place with rc3 have Dovecot disabled (B67): it runs,
+  but does not start after a reboot. Check with `systemctl is-enabled
+  dovecot`; until this release is installed, `sudo systemctl enable
+  dovecot` fixes it. Setup of this release enables it by itself.
+* Adaptive banning and the slow mail jails are on as soon as setup of rc4
+  or later has finished; turning them on changes nothing. Put your own
+  networks on the allowlist right after the update (System > Intrusion
+  Protection, or `sudo /root/mailinabox/management/fail2ban_admin.py
+  --allow 192.0.2.0/24`), see the upgrade note of rc4.
+* Every setup run picks a new random minute between 01:00 and 01:59 for
+  the nightly backup and status checks (`/etc/cron.d/mailinabox-nightly`),
+  as upstream does. Look it up before the next update or in-place upgrade:
+  the in-place tool waits for a running backup before it stops mail, at
+  most 2 hours.
+* Checkouts of rc1 to rc3 keep the release tags of the fork's previous
+  home, which have other commit ids than on GitHub. They do no harm;
+  `sudo git -C /root/mailinabox tag -d v78-r2604.0-rc1 v78-r2604.0-rc2
+  v78-r2604.0-rc3` removes them. Not `git fetch --tags`: the checkout is
+  shallow, and that downloads the history of all upstream tags.
+
 ## v78-r2604.0-rc4 (2026-10-24)
 
 Project home on GitHub, adaptive fail2ban with the control panel page System >
