@@ -116,8 +116,8 @@ RESUME_UNIT_FILE=/etc/systemd/system/$RESUME_UNIT
 RESUME_SCRIPT=$STATE_DIR/resume.sh
 RESUME_MAX=8
 TMUX_SESSION=upgrade-2604
-# The environment variables this script reads (passed into that session).
-MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE)
+# The environment variables this script and setup read (passed into that session).
+MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE)
 MUX_TERM=
 # Keep the old configuration files during the release upgrades (removed again in finish).
 APT_OVERRIDE=/etc/apt/apt.conf.d/99-upgrade-in-place-to-2604
@@ -139,7 +139,8 @@ GIB=$((1024 * 1024 * 1024))
 
 # Phases that are recorded in the state file, in order.
 PHASES=(preflight snapshot quiesce prepare_release release_2404 release_2604 cleanup_etc setup local_ext verify finish)
-# A box that already runs this fork on 26.04 only runs setup again.
+# A box that already runs this fork on 26.04 only runs setup again (of the
+# release tag, see update_fork_dir).
 PHASES_RERUN=(preflight setup local_ext verify finish)
 
 # Files in /etc/dovecot/conf.d that upstream Mail-in-a-Box (v60..v78) or this
@@ -220,11 +221,11 @@ reboots, a box already release-upgraded to 24.04 (Mail-in-a-Box v7x) with one
 reboot. Nextcloud must be 26 or later. Run it as root. Started from a
 terminal outside tmux or screen, it runs itself in the tmux session
 "upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
-connection drops, log in again and run "tmux attach -t upgrade-2604".
+connection drops, log in again and run "sudo tmux attach -t upgrade-2604".
 Mail is offline from phase "snapshot" on (after the system archive, before
 the fresh backup; with --skip-miab-backup or backups turned off from phase
 "quiesce") until setup has finished (typically 1-3 hours). After each reboot the upgrade continues on its own;
-follow it with "tmux attach -t upgrade-2604" or
+follow it with "sudo tmux attach -t upgrade-2604" or
 "tail -f /root/upgrade-2604/upgrade.log".
 Running the command again continues an interrupted upgrade.
 
@@ -436,14 +437,14 @@ session_check() {
 			return 0
 		fi
 		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
-		say "(tmux is installed if needed; reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+		say "(tmux is installed if needed; reattach after a disconnect with: sudo tmux attach -t $TMUX_SESSION)."
 		return 0
 	fi
 	warn "This does not run inside tmux or screen. If your SSH connection drops, a release
 upgrade or setup stops halfway (a release upgrade stopped in the middle can leave the
 machine unbootable; a Nextcloud upgrade stopped in the middle stays in maintenance mode).
 Better: install tmux (apt-get install tmux) and run the command again without --no-tmux:
-it then runs itself in tmux (reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+it then runs itself in tmux (reattach after a disconnect with: sudo tmux attach -t $TMUX_SESSION)."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue without tmux or screen?"; fi
 }
 
@@ -1145,6 +1146,40 @@ connection drops outside tmux or screen, the run stops halfway. Better: stop now
 	sleep 5
 }
 
+# GitHub treats the owner and repository names case-insensitively, and a
+# trailing .git or / names the same repository.
+same_repo() { # URL URL
+	local a=${1%/} b=${2%/}
+	a=${a%.git}
+	b=${b%.git}
+	[ "${a,,}" = "${b,,}" ]
+}
+
+# A checkout cloned from another repository (rc1 to rc3 came from the fork's
+# previous home) would fetch the release from there: stop with the command
+# that points it to SOURCE, as setup/bootstrap.sh does.
+check_origin() { # DIR SOURCE
+	local o
+	o=$(git -C "$1" config --get remote.origin.url 2> /dev/null || true)
+	same_repo "$o" "$2" && return 0
+	die "$1 is a checkout of ${o:-an unknown repository}, not of $2.
+Point it there once and run the command again:
+  git -C $1 remote set-url origin $2
+(To keep using ${o:-it} instead, set SOURCE=${o:-...}.)"
+}
+
+# Fetch REF (a release tag, or a branch such as main) from origin and check
+# it out. A tag is fetched as a tag, so that git describe names the version.
+checkout_ref() { # DIR REF [--force]
+	local d=$1 ref=$2 force=${3:-}
+	if git -C "$d" fetch -q --depth 1 --force --prune origin tag "$ref" < /dev/null 2> /dev/null; then
+		git -C "$d" checkout -q ${force:+"$force"} "$ref"
+	else
+		git -C "$d" fetch -q --depth 1 --force origin "$ref" < /dev/null \
+			&& git -C "$d" checkout -q ${force:+"$force"} FETCH_HEAD
+	fi
+}
+
 # Through curl | bash there is no file to continue from after a reboot:
 # clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
 # in tools/migrate-to-2604.sh, with the script name and the directory as
@@ -1156,11 +1191,16 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 	local how="curl -so $script $DEFAULT_RAW/tools/$script && sudo bash $script"
 	command -v git > /dev/null || install_packages git
 	if [ -d "$d/.git" ]; then
-		# From an earlier run: bring it to the tag (it may be older).
-		say "Updating $d to $tag..."
-		git -C "$d" fetch -q --depth 1 --force origin "$tag" < /dev/null && git -C "$d" checkout -q --force FETCH_HEAD \
-			|| warn "Could not update $d to $tag."
-	else
+		# From an earlier run, possibly of an older release from another
+		# repository: bring it to the tag from SOURCE, never run it as it is.
+		say "Updating $d to $tag from $source..."
+		if ! git -C "$d" remote set-url origin "$source" < /dev/null || ! checkout_ref "$d" "$tag" --force; then
+			warn "Could not update $d to $tag; downloading it again."
+			rm -rf "$d"
+		fi
+	fi
+	if [ ! -d "$d/.git" ]; then
+		rm -rf "$d"
 		say "Downloading Mail-in-a-Box $tag from $source..."
 		git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 	fi
@@ -1855,8 +1895,9 @@ start_command() {
 show_plan() {
 	section "Plan"
 	if [ "$(state_get MODE)" = rerun ]; then
-		say "This box already runs Ubuntu 26.04 with this fork (${F[MIAB_VERSION]:-}). Only setup runs"
-		say "again (like 'sudo mailinabox'), then the hooks in $HOOK_DIR and the checks."
+		say "This box already runs Ubuntu 26.04 with this fork (${F[MIAB_VERSION]:-}). Its checkout is"
+		say "brought to ${TAG:-$DEFAULT_TAG} (unless this script runs from it and TAG= is not set), then"
+		say "only setup runs again (like 'sudo mailinabox'), then the hooks in $HOOK_DIR and the checks."
 		return 0
 	fi
 	local v=${F[OS_VERSION]} n=1 nc=${F[NC_VERSION]:-} steps=0 oc
@@ -2620,7 +2661,7 @@ $MOTD_BEGIN
 *** Mail-in-a-Box is being upgraded to Ubuntu 26.04 ($SCRIPT_NAME). ***
 $how
 If SSH does not come back after a reboot, use the provider's console (VNC/KVM).
-  follow it:  tmux attach -t $TMUX_SESSION      (detach: Ctrl-b d)
+  follow it:  sudo tmux attach -t $TMUX_SESSION (detach: Ctrl-b d)
           or  tail -f $LOG_FILE
   state:      $SELF --status
 $MOTD_END
@@ -2684,7 +2725,7 @@ reboot_and_resume() {
 	section "Rebooting: $why"
 	say "The upgrade continues on its own after the reboot ($RESUME_UNIT)."
 	say "Log in again in a few minutes and follow it with:"
-	say "  tmux attach -t $TMUX_SESSION     (detach: Ctrl-b d)"
+	say "  sudo tmux attach -t $TMUX_SESSION     (detach: Ctrl-b d)"
 	say "  tail -f $LOG_FILE"
 	say "If the machine does not come back on the network, use the provider's console."
 	if [ -z "$ASSUME_YES" ]; then
@@ -2972,6 +3013,29 @@ phase_cleanup_etc() {
 # ---------------------------------------------------------------------------
 # Setup.
 
+# Bring an existing checkout of this fork to TAG (without TAG= to DEFAULT_TAG)
+# from SOURCE: a 26.04 box with an older release of the fork (rerun), or
+# CLONE_DIR from an earlier run. The checkout this script runs from stays as
+# it is unless TAG= is set.
+update_fork_dir() { # DIR TAG SOURCE
+	local d=$1 tag=$2 source=$3 cur
+	cur=$(git -C "$d" describe --always --tags 2> /dev/null || true)
+	[ "$cur" != "$tag" ] || return 0
+	if [ -z "${TAG:-}" ] && [ "$(state_get SCRIPT_CHECKOUT)" = "$d" ]; then
+		say "Using $d as it is (${cur:-unknown version}): this script runs from it. Set TAG= to update it."
+		return 0
+	fi
+	[ -d "$d/.git" ] || die "$d is not a git checkout, so it cannot be updated to $tag."
+	check_origin "$d" "$source"
+	say "Updating $d from ${cur:-an unknown version} to $tag..."
+	if checkout_ref "$d" "$tag"; then return 0; fi
+	if [ -z "${TAG:-}" ] && checkout_ref "$d" main; then
+		warn "The release tag $tag is not published yet. Using the branch main instead."
+		return 0
+	fi
+	die "Could not update $d to $tag from $source. Did you modify something in $d?"
+}
+
 # The fork's checkout that setup runs from: the old checkout if it is the
 # fork already, the checkout this script came from, or a new clone in
 # /root/mailinabox (the old checkout is moved to <dir>-<old version> first).
@@ -2986,11 +3050,7 @@ resolve_fork_dir() {
 	ver=$(state_get OLD_MIAB_VERSION | tr -c 'A-Za-z0-9._-' '_' | sed 's/_*$//')
 	if [ -n "$old" ] && is_fork_dir "$old"; then
 		MIAB_DIR=$old
-		if [ -n "${TAG:-}" ] && [ "$TAG" != "$(git -C "$old" describe --always --tags 2> /dev/null)" ]; then
-			say "Updating $old to $TAG..."
-			git -C "$old" fetch --depth 1 --force --prune origin tag "$TAG" < /dev/null || die "Could not fetch $TAG."
-			git -C "$old" checkout -q "$TAG" || die "Update failed. Did you modify something in $old?"
-		fi
+		update_fork_dir "$old" "$tag" "$source"
 		state_set FORK_DIR "$MIAB_DIR"
 		return 0
 	fi
@@ -3014,6 +3074,7 @@ resolve_fork_dir() {
 	d=$CLONE_DIR
 	if [ -e "$d" ]; then
 		is_fork_dir "$d" || die "$d exists and is not a checkout of this fork. Move it away and run the command again."
+		update_fork_dir "$d" "$tag" "$source"
 	else
 		command -v git > /dev/null || install_packages git
 		say "Downloading Mail-in-a-Box $tag from $source to $d..."
@@ -3591,7 +3652,7 @@ do_status() {
 		fi
 	done
 	if [ "$(state_get BACKUPS_PAUSED)" = 1 ]; then say "Backups:         paused until the upgrade is finished"; fi
-	if [ -f "$RESUME_UNIT_FILE" ]; then say "After a reboot:  $RESUME_UNIT continues (tmux attach -t $TMUX_SESSION)"; fi
+	if [ -f "$RESUME_UNIT_FILE" ]; then say "After a reboot:  $RESUME_UNIT continues (sudo tmux attach -t $TMUX_SESSION)"; fi
 	if [ -n "$(state_get FINISHED_AT)" ]; then
 		say "Finished:        $(state_get FINISHED_AT)"
 		return 0

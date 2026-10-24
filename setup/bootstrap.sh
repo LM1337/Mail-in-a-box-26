@@ -88,7 +88,9 @@ fi
 cd "$HOME/mailinabox" || exit
 
 # An existing checkout of upstream Mail-in-a-Box does not have this fork's tags
-# (In-Place 5). Say so instead of failing with "Update failed".
+# (In-Place 5), and a checkout of this fork cloned from elsewhere (up to rc3
+# the fork had another home) would fetch the release from there. Say so
+# instead of failing with "Update failed" or installing an old release.
 if [ "$SOURCE" == "" ]; then SOURCE=$DEFAULT_SOURCE; fi
 # GitHub treats the owner and repository names case-insensitively.
 ORIGIN=$(git config --get remote.origin.url || true)
@@ -96,8 +98,15 @@ ORIGIN_CMP=${ORIGIN%.git}
 SOURCE_CMP=${SOURCE%.git}
 if [ "${ORIGIN_CMP,,}" != "${SOURCE_CMP,,}" ]; then
 	echo "$HOME/mailinabox is a checkout of $ORIGIN, not of $SOURCE."
-	echo "To upgrade this box in place use tools/upgrade-in-place-to-2604.sh, see README-fork.md."
-	echo "To use this checkout anyway: git -C $HOME/mailinabox remote set-url origin $SOURCE"
+	if [ -f tools/migrate-to-2604.sh ]; then
+		# This fork (rc1 to rc3 were cloned from the fork's previous home).
+		echo "To update it from $SOURCE, point it there once and run this command again:"
+		echo "  git -C $HOME/mailinabox remote set-url origin $SOURCE"
+		echo "(To keep using $ORIGIN instead, give SOURCE=$ORIGIN to bash.)"
+	else
+		echo "To upgrade this box in place use tools/upgrade-in-place-to-2604.sh, see README-fork.md."
+		echo "To use this checkout anyway: git -C $HOME/mailinabox remote set-url origin $SOURCE"
+	fi
 	exit 1
 fi
 

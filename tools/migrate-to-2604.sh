@@ -72,9 +72,9 @@ BACKUP_WAIT=${MIGRATE_BACKUP_WAIT:-7200}
 # Where --push-zones-to-old keeps the old box's own zone files (on the old box).
 OLD_NSD_SAVE=/root/migrate-to-2604-nsd-orig
 TMUX_SESSION=migrate-2604
-# The environment variables this script reads (passed into that session);
-# SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
-MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK)
+# The environment variables this script and setup read (passed into that
+# session); SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
+MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK FTS NEXTCLOUD_SHARE_SCOPE)
 MUX_TERM=
 
 # Phases that are recorded in the state file, in order.
@@ -149,7 +149,7 @@ release-upgraded in place to Ubuntu 24.04) to THIS machine, a fresh Ubuntu
 hours, and a dropped SSH connection would stop them halfway: started from a
 terminal outside tmux or screen, it runs itself in the tmux session
 "migrate-2604" (it installs tmux if needed) and attaches to it. If the SSH
-connection drops, log in again and run "tmux attach -t migrate-2604".
+connection drops, log in again and run "sudo tmux attach -t migrate-2604".
 The old machine's data is never changed; only its services are stopped for
 the final copy, after you confirm. Running the command again continues an
 interrupted migration.
@@ -363,13 +363,13 @@ session_check() {
 			return 0
 		fi
 		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
-		say "(tmux is installed if needed; reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+		say "(tmux is installed if needed; reattach after a disconnect with: sudo tmux attach -t $TMUX_SESSION)."
 		return 0
 	fi
 	warn "This does not run inside tmux or screen. If your SSH connection drops, the copy
 or setup stops halfway (a Nextcloud upgrade stopped in the middle stays in maintenance mode).
 Better: install tmux (apt-get install tmux) and run the command again without --no-tmux:
-it then runs itself in tmux (reattach after a disconnect with: tmux attach -t $TMUX_SESSION)."
+it then runs itself in tmux (reattach after a disconnect with: sudo tmux attach -t $TMUX_SESSION)."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue without tmux or screen?"; fi
 }
 
@@ -1291,6 +1291,41 @@ checkout_dir() { # the checkout this script runs from, if any
 	echo "$d"
 }
 
+# Keep these three in sync with tools/upgrade-in-place-to-2604.sh.
+# GitHub treats the owner and repository names case-insensitively, and a
+# trailing .git or / names the same repository.
+same_repo() { # URL URL
+	local a=${1%/} b=${2%/}
+	a=${a%.git}
+	b=${b%.git}
+	[ "${a,,}" = "${b,,}" ]
+}
+
+# A checkout cloned from another repository (rc1 to rc3 came from the fork's
+# previous home) would fetch the release from there: stop with the command
+# that points it to SOURCE, as setup/bootstrap.sh does.
+check_origin() { # DIR SOURCE
+	local o
+	o=$(git -C "$1" config --get remote.origin.url 2> /dev/null || true)
+	same_repo "$o" "$2" && return 0
+	die "$1 is a checkout of ${o:-an unknown repository}, not of $2.
+Point it there once and run the command again:
+  git -C $1 remote set-url origin $2
+(To keep using ${o:-it} instead, set SOURCE=${o:-...}.)"
+}
+
+# Fetch REF (a release tag, or a branch such as main) from origin and check
+# it out. A tag is fetched as a tag, so that git describe names the version.
+checkout_ref() { # DIR REF [--force]
+	local d=$1 ref=$2 force=${3:-}
+	if git -C "$d" fetch -q --depth 1 --force --prune origin tag "$ref" < /dev/null 2> /dev/null; then
+		git -C "$d" checkout -q ${force:+"$force"} "$ref"
+	else
+		git -C "$d" fetch -q --depth 1 --force origin "$ref" < /dev/null \
+			&& git -C "$d" checkout -q ${force:+"$force"} FETCH_HEAD
+	fi
+}
+
 resolve_miab_dir() {
 	local d
 	if d=$(checkout_dir); then
@@ -1316,10 +1351,19 @@ resolve_miab_dir() {
 				|| die "Could not download $source. Set TAG and SOURCE like this:
   $how"
 		fi
-	elif [ -n "${TAG:-}" ] && [ "$TAG" != "$(git -C "$d" describe --always --tags 2> /dev/null)" ]; then
-		say "Updating $d to $TAG..."
-		git -C "$d" fetch --depth 1 --force --prune origin tag "$TAG" < /dev/null || die "Could not fetch $TAG."
-		git -C "$d" checkout -q "$TAG" || die "Update failed. Did you modify something in $d?"
+	elif [ "$tag" != "$(git -C "$d" describe --always --tags 2> /dev/null)" ]; then
+		# From an earlier run (e.g. a rehearsal with an older release): bring it
+		# to the tag from SOURCE instead of running the old copy.
+		[ -d "$d/.git" ] || die "$d is not a git checkout, so it cannot be updated to $tag."
+		check_origin "$d" "$source"
+		say "Updating $d to $tag..."
+		if ! checkout_ref "$d" "$tag"; then
+			if [ -z "${TAG:-}" ] && checkout_ref "$d" main; then
+				warn "The release tag $tag is not published yet. Using the branch main instead."
+			else
+				die "Could not update $d to $tag from $source. Did you modify something in $d?"
+			fi
+		fi
 	fi
 	[ -x "$d/tools/migrate-to-2604.sh" ] || die "$d has no tools/migrate-to-2604.sh. Is it this fork?"
 	warn_no_auto_tmux "$d/tools/migrate-to-2604.sh" "$tag"
@@ -2184,8 +2228,16 @@ What they changed may be missing here. Stopping them again and copying once more
 write_mailinabox_conf() {
 	# setup/start.sh treats this as a re-run: it runs setup/migrate.py on the copied
 	# data first and keeps STORAGE_USER/STORAGE_ROOT/MTA_STS_MODE. It rewrites the
-	# file with the IPs given in the environment (see run_setup).
-	cat > /etc/mailinabox.conf <<EOF
+	# file with the IPs given in the environment (see run_setup). The other
+	# settings of a file from an earlier run (FTS=off or NEXTCLOUD_SHARE_SCOPE=all,
+	# set after a rehearsal) are kept: setup reads them as its defaults.
+	local keep=""
+	if [ -f /etc/mailinabox.conf ]; then
+		keep=$(grep -E '^[A-Z_][A-Z0-9_]*=' /etc/mailinabox.conf \
+			| grep -vE '^(STORAGE_USER|STORAGE_ROOT|PRIMARY_HOSTNAME|PUBLIC_IP|PUBLIC_IPV6|PRIVATE_IP|PRIVATE_IPV6|MTA_STS_MODE)=' || true)
+	fi
+	{
+		cat <<EOF
 STORAGE_USER=$STORAGE_USER
 STORAGE_ROOT=$STORAGE_ROOT
 PRIMARY_HOSTNAME=$NEW_PRIMARY_HOSTNAME
@@ -2195,6 +2247,10 @@ PRIVATE_IP=$NEW_PRIVATE_IP
 PRIVATE_IPV6=$NEW_PRIVATE_IPV6
 MTA_STS_MODE=$MTA_STS_MODE
 EOF
+		if [ -n "$keep" ]; then printf '%s\n' "$keep"; fi
+	} > /etc/mailinabox.conf.new
+	chmod 644 /etc/mailinabox.conf.new
+	mv /etc/mailinabox.conf.new /etc/mailinabox.conf
 	state_set CONF_WRITTEN 1
 }
 
