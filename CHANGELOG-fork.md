@@ -70,10 +70,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   reports it in the preflight (also with `--check`) without a blocker, then
   waits for it with progress dots before anything is stopped (at most 2
   hours, `UPGRADE_BACKUP_WAIT`; Ctrl-C is safe) and checks the age of the
-  last backup again; `tools/migrate-to-2604.sh` waits the same way on the old
-  box before stop-old (`MIGRATE_BACKUP_WAIT`). A running backup is found in
+  last backup again, also when that backup has finished by itself before the
+  stop; `tools/migrate-to-2604.sh` waits the same way on the old box before
+  stop-old (`MIGRATE_BACKUP_WAIT`). A check that fails while waiting (e.g.
+  ssh) is not taken for "finished": it is retried, and three failures in a
+  row stop the run before anything is stopped. A running backup is found in
   `/proc` (a python running `management/backup.py`, or duplicity), no longer
-  with `pgrep -f`, which also matched command lines that only name them.
+  with `pgrep -f`, which also matched command lines that only name them; the
+  `--rollback` of the migration ends a backup still running by these PIDs,
+  no longer with `pkill -f`.
 * Tools: `tools/upgrade-in-place-to-2604.sh` and `tools/migrate-to-2604.sh`
   run themselves in a tmux session (`upgrade-2604`, `migrate-2604`) when a
   command that changes something is started from a terminal outside tmux or

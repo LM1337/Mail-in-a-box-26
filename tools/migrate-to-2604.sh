@@ -1739,7 +1739,7 @@ Then MX/NS records, the TLS certificate and all clients must be changed as well.
 # "rollback" (local only): wait at most a minute, then end this machine's
 # backup jobs and only warn about the rest, so that the old box is not left down.
 wait_quiet() {
-	local where=$1 mode=${2:-} label out start now shown=0 timeout=$QUIET_TIMEOUT
+	local where=$1 mode=${2:-} label out start now shown=0 timeout=$QUIET_TIMEOUT pids
 	if [ "$where" = old ]; then label="on the old box"; else label="on this machine"; fi
 	if [ "$mode" = rollback ] && [ "$timeout" -gt 60 ]; then timeout=60; fi
 	start=$(date +%s)
@@ -1759,11 +1759,17 @@ wait_quiet() {
 			# The old box takes over the backup target again: a backup still running
 			# here must not write to it at the same time. Duplicity cleans up an
 			# interrupted backup on its next run.
-			if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
-				warn "Ending the backup that is still running on this machine."
-				pkill -TERM -f 'management/backup\.py|/usr/bin/duplicity' || true
+			# Found like wait_backup_done does: pkill -f would also end any process
+			# whose command line only names them (an editor, a tmux server).
+			pids=$(local_bash "$BACKUP_PIDS_SCRIPT" | paste -sd ' ' || true)
+			if [ -n "$pids" ]; then
+				warn "Ending the backup that is still running on this machine (PID $pids)."
+				# shellcheck disable=SC2086 # a list of PIDs
+				kill -TERM $pids 2> /dev/null || true
 				sleep 10
-				pkill -KILL -f 'management/backup\.py|/usr/bin/duplicity' || true
+				pids=$(local_bash "$BACKUP_PIDS_SCRIPT" | paste -sd ' ' || true)
+				# shellcheck disable=SC2086 # a list of PIDs
+				if [ -n "$pids" ]; then kill -KILL $pids 2> /dev/null || true; fi
 				sleep 2
 			fi
 			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' || true)
@@ -1797,7 +1803,7 @@ backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT"; }
 # Sets BACKUP_WAITED. Keep in sync with tools/upgrade-in-place-to-2604.sh
 # (there on that box, without LABEL).
 wait_backup_done() { # [LABEL]
-	local label=${1:-} pids start
+	local label=${1:-} pids start fails=0
 	BACKUP_WAITED=
 	pids=$(backup_pids | paste -sd ' ')
 	[ -n "$pids" ] || return 0
@@ -1805,10 +1811,23 @@ wait_backup_done() { # [LABEL]
 	start=$(date +%s)
 	say "A Mail-in-a-Box backup is running$label (PID $pids). Waiting until it has finished"
 	say "(at most $(fmt_dur "$BACKUP_WAIT"); nothing was stopped yet, so Ctrl-C is safe here)..."
-	while [ -n "$(backup_pids)" ]; do
+	while :; do
+		# errexit does not apply in a command substitution: a failed check
+		# (e.g. ssh) must not count as "finished".
+		if ! pids=$(backup_pids); then
+			fails=$((fails + 1))
+			echo
+			[ "$fails" -lt 3 ] || die "Could not check $fails times in a row whether the backup$label still runs.
+Nothing was stopped yet. Run the command again."
+			warn "Could not check whether the backup$label still runs; trying again."
+			sleep 30
+			continue
+		fi
+		fails=0
+		[ -n "$pids" ] || break
 		if [ $(($(date +%s) - start)) -ge "$BACKUP_WAIT" ]; then
 			echo
-			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(backup_pids | paste -sd ' ')).
+			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(paste -sd ' ' <<< "$pids")).
 Nothing was stopped yet. Run the command again when it has finished."
 		fi
 		printf '.'

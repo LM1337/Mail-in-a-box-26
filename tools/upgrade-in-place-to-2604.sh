@@ -1065,7 +1065,7 @@ backup_pids() { local_bash "$BACKUP_PIDS_SCRIPT"; }
 # Sets BACKUP_WAITED. Keep in sync with tools/migrate-to-2604.sh (there on
 # the old box, LABEL " on the old box").
 wait_backup_done() { # [LABEL]
-	local label=${1:-} pids start
+	local label=${1:-} pids start fails=0
 	BACKUP_WAITED=
 	pids=$(backup_pids | paste -sd ' ')
 	[ -n "$pids" ] || return 0
@@ -1073,10 +1073,23 @@ wait_backup_done() { # [LABEL]
 	start=$(date +%s)
 	say "A Mail-in-a-Box backup is running$label (PID $pids). Waiting until it has finished"
 	say "(at most $(fmt_dur "$BACKUP_WAIT"); nothing was stopped yet, so Ctrl-C is safe here)..."
-	while [ -n "$(backup_pids)" ]; do
+	while :; do
+		# errexit does not apply in a command substitution: a failed check
+		# (e.g. ssh) must not count as "finished".
+		if ! pids=$(backup_pids); then
+			fails=$((fails + 1))
+			echo
+			[ "$fails" -lt 3 ] || die "Could not check $fails times in a row whether the backup$label still runs.
+Nothing was stopped yet. Run the command again."
+			warn "Could not check whether the backup$label still runs; trying again."
+			sleep 30
+			continue
+		fi
+		fails=0
+		[ -n "$pids" ] || break
 		if [ $(($(date +%s) - start)) -ge "$BACKUP_WAIT" ]; then
 			echo
-			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(backup_pids | paste -sd ' ')).
+			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(paste -sd ' ' <<< "$pids")).
 Nothing was stopped yet. Run the command again when it has finished."
 		fi
 		printf '.'
@@ -1340,6 +1353,9 @@ backup_blocker() {
 check_backup() {
 	local target last age running=
 	target=$(backup_target)
+	# Set below when the age check waits for the running backup: stop_mail
+	# checks then even if that backup has finished by itself meanwhile.
+	state_set BACKUP_CHECK_DEFERRED ""
 	say "Backups:             ${F[BACKUP_TARGET]:-local}"
 	if [ "$target" = off ]; then
 		backup_blocker "Backups are turned off (System > Backup Status). A release upgrade cannot be undone:
@@ -1356,6 +1372,7 @@ make a backup first."
 	last=$(last_backup_epoch)
 	if [ -z "$last" ] && [ -n "$running" ]; then
 		say "Last backup:         none yet; checked again when the running one has finished"
+		state_set BACKUP_CHECK_DEFERRED 1
 	elif [ -z "$last" ]; then
 		backup_blocker "No Mail-in-a-Box backup found in $STORAGE_ROOT/backup. Make one first
 (System > Backup Status, or $(state_get OLD_MIAB_DIR)/management/backup.py)."
@@ -1365,6 +1382,7 @@ make a backup first."
 		say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
 		if [ "$age" -gt "$BACKUP_MAX_AGE" ] && [ -n "$running" ]; then
 			say "                     older than $(fmt_dur "$BACKUP_MAX_AGE"); checked again when the running one has finished"
+			state_set BACKUP_CHECK_DEFERRED 1
 		elif [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
 			backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
 		fi
@@ -1946,8 +1964,9 @@ miab_backup_wanted() {
 	return 0
 }
 
-# After waiting for a running backup: it must have left a backup that is
-# recent enough (like check_backup), or the next one would likely fail too.
+# After waiting for a running backup (or when the preflight saw one running):
+# it must have left a backup that is recent enough (like check_backup), or the
+# next one would likely fail too.
 backup_check_after_wait() {
 	local last
 	[ -z "$NO_BACKUP_CHECK" ] && [ "$(backup_target)" != off ] || return 0
@@ -2303,7 +2322,7 @@ stop_mail() {
 and run the command again. Nothing was stopped yet."
 		fi
 		wait_backup_done
-		if [ -n "$BACKUP_WAITED" ]; then
+		if [ -n "$BACKUP_WAITED" ] || [ "$(state_get BACKUP_CHECK_DEFERRED)" = 1 ]; then
 			backup_check_after_wait
 			# The facts (apt) may have changed meanwhile.
 			read_facts
