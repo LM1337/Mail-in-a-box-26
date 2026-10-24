@@ -97,7 +97,9 @@ A box that runs this fork is updated like upstream Mail-in-a-Box: run the
 bootstrap command from [Installation](#installation) again. It brings
 `/root/mailinabox` to the current release tag and runs setup. Read the
 upgrade note of the new release in [CHANGELOG-fork.md](CHANGELOG-fork.md)
-first. The in-place tool is not needed for this.
+first. The in-place tool is not needed for this. Setup shows its dialog
+boxes again (the welcome text, the host name, the public IP address when it
+differs from what the Internet sees); Enter keeps the current values.
 
 Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
 tool) were cloned from the fork's previous home. bootstrap.sh stops on them
@@ -118,7 +120,10 @@ Bootstrap-Befehl aus [Installation](#installation) noch einmal aufrufen. Er
 bringt `/root/mailinabox` auf den aktuellen Release-Tag und lässt setup
 laufen. Vorher den Upgrade-Hinweis des neuen Releases in
 [CHANGELOG-fork.md](CHANGELOG-fork.md) lesen. Das Werkzeug für das Upgrade
-an Ort und Stelle wird dafür nicht gebraucht.
+an Ort und Stelle wird dafür nicht gebraucht. Das Setup zeigt seine
+Dialogfenster noch einmal (den Begrüßungstext, den Hostnamen und die
+öffentliche IP-Adresse, wenn sie von der abweicht, die das Internet sieht);
+Enter behält die bisherigen Werte.
 
 Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
 In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.
