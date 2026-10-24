@@ -521,7 +521,7 @@ upgrade). Nextcloud must be 26 or later.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # after reading the check (with v78-r2604.0-rc3: inside tmux or screen, see below):
+    # after reading the check:
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
 
@@ -621,7 +621,7 @@ Version 26 haben.
 
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash -s -- --check
-    # nach Durchsicht der Prüfung (mit v78-r2604.0-rc3: in tmux oder screen, siehe unten):
+    # nach Durchsicht der Prüfung:
     curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
       | sudo bash
 

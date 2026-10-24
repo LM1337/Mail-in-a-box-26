@@ -107,11 +107,11 @@ upstream pull requests, independent of the 26.04 port.
 | [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
-| [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
-| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
-| [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | unreleased |
-| [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | unreleased |
-| [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | unreleased |
+| [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | rc4 |
+| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | rc4 |
+| [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | rc4 |
+| [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | rc4 |
+| [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 
 ## Details
 
@@ -783,7 +783,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Cause:** Phase snapshot ran management/backup.py while mail was running. backup.py stops Postfix, Dovecot, postgrey and PHP for its run and starts them again afterwards; then the system archive was written, encrypted and copied (several minutes on a production box), and only phase quiesce stopped mail.
 * **Fix:** Mail, web, cron and the update timers are stopped and masked before the fresh backup (stop_mail, recorded in the state like quiesce, so the downtime and `--rollback` start there); backup.py cannot start the masked units again. Phase quiesce then only pauses the backups. With `--skip-miab-backup` or backups off, mail keeps running until quiesce as before. The system archive, the copy of `/etc` and the package lists are taken before the stop, so they do not record the masks (restoring `/etc` from them must not leave Postfix and Dovecot masked); a run interrupted after the stop keeps them and skips a backup that already ran with mail offline.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3).
-* **Found by:** production upgrade; **commit:** see `git log --grep B57`; **fixed in:** unreleased
+* **Found by:** production upgrade; **commit:** see `git log --grep B57`; **fixed in:** v78-r2604.0-rc4
 
 ### B58
 
@@ -794,7 +794,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** The regex accepts `Login:` and `Logged in:` and any mechanism name. The protocol is named after the service without "-login" (managesieve instead of "mana").
 * **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
 * **Evidence:** /var/log/mail.log of the 26.04 test box (Dovecot 2.4.2, log_path=/var/log/mail.log): `Oct 23 02:16:29 imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=192.0.2.10, lip=192.0.2.11, mpid=53945, TLS, session=<...>`, likewise for pop3-login and managesieve-login; no "Info: Login:" line. The code before the fix counted none of 108 sample lines as an IMAP/POP3 login (only 3 SMTP logins), the fixed code 24 IMAP, 2 POP3 and 2 ManageSieve logins for alice. The fail2ban filter dovecotimap.conf already matches the 2.4 "Login aborted: ... (auth failed, ...)" lines (fail2ban-regex on the same box), the Postfix lines of mail_log.py are unchanged in 3.10.
-* **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** unreleased
+* **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** v78-r2604.0-rc4
 
 ### B59
 
@@ -805,7 +805,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** Setup no longer sets the parameter and comments out an existing line with editconf.py -e. dh2048.pem stays: nginx (ssl_dhparam) and Dovecot (ssl_server_dh_file) still use it.
 * **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
 * **Evidence:** On the 26.04 test box (Postfix 3.10.6, OpenSSL 3.5.5) `postconf -h smtpd_recipient_restrictions` prints the warning on stderr; `postconf -d` gives `smtpd_tls_dh1024_param_file =` and `tls_ffdhe_auto_groups = ffdhe2048 ffdhe3072`. v78 (Postfix 3.6 on 22.04) sets the same parameter without a warning. Nothing else in the repo references the parameter.
-* **Found by:** production upgrade; **commit:** see `git log --grep B59`; **fixed in:** unreleased
+* **Found by:** production upgrade; **commit:** see `git log --grep B59`; **fixed in:** v78-r2604.0-rc4
 
 ### B60
 
@@ -817,7 +817,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04). The wrong /etc/mailname only where the machine had another name when Postfix was installed; the missing root@ alias everywhere.
 * **Evidence:** Production box (from the upgrade report): /etc/mailname was the hosting provider's default host name of the machine, /etc/hosts had the same name on the 127.0.1.1 line, and mail.log showed the daily "loops back to myself" bounces since at least 2026-10-18. 26.04 test box: `postconf -h myorigin` is /etc/mailname, `postmap -q root@<PRIMARY_HOSTNAME> sqlite:/etc/postfix/virtual-alias-maps.cf` finds nothing (hostmaster@ and postmaster@ resolve to administrator@), /etc/hosts still has the cloud-init line `127.0.1.1 testvm.example.net testvm`. v78:setup/system.sh only writes /etc/hostname, v78:management/mailconfig.py get_required_aliases() has administrator@, hostmaster@, postmaster@, admin@ and abuse@ but no root@. The bounce of root@PRIMARY_HOSTNAME as unknown user is derived from the Postfix configuration, it was not reproduced (no mail was sent on the test box).
 * **Report upstream:** MIAB main: the missing /etc/mailname and root@ handling are the same in v78.
-* **Found by:** production upgrade; **commit:** see `git log --grep B60`; **fixed in:** unreleased
+* **Found by:** production upgrade; **commit:** see `git log --grep B60`; **fixed in:** v78-r2604.0-rc4
 
 ### B61
 
@@ -829,7 +829,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04).
 * **Evidence:** fail2ban-regex 1.1.0 with the old filter and the line `warning: unknown[203.0.113.5]: SASL LOGIN authentication failed: (reason unavailable), sasl_username=x[198.51.100.7]: x authentication failed` gives 198.51.100.7, with the new one 203.0.113.5. That Postfix logs the user name unescaped is from the log format (`sasl_username=` is printed as sent, brackets, colons and spaces are printable); not reproduced with a live AUTH.
 * **Report upstream:** MIAB main: anchor miab-postfix-submission.conf.
-* **Found by:** review (adaptive fail2ban); **commit:** "fail2ban: anchor the SMTP AUTH filter (B61)"; **fixed in:** unreleased
+* **Found by:** review (adaptive fail2ban); **commit:** "fail2ban: anchor the SMTP AUTH filter (B61)"; **fixed in:** v78-r2604.0-rc4
 
 ## Not counted above
 

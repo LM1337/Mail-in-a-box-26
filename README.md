@@ -34,11 +34,24 @@ builds on that port. Its goals:
   archive. packages.sury.org is only a fallback, limited by an apt pin to what
   Ubuntu lacks (`php8.5-imap`, `php-common`, and PHP 8.2 for the Nextcloud
   upgrade chain).
-* Keep Mail-in-a-Box's design: one setup command, no user-configurable setup
-  options (the only new switch is `FTS=off` in `/etc/mailinabox.conf`).
+* Keep Mail-in-a-Box's design: one setup command, almost no user-configurable
+  setup options (the only new switches in `/etc/mailinabox.conf` are
+  `FTS=off` and `NEXTCLOUD_SHARE_SCOPE=all`; the intrusion protection
+  settings are in the control panel under System > Intrusion Protection).
 * Provide a way from an existing box: a migration to a new 26.04 machine, or
   an in-place upgrade from Ubuntu 22.04 or 24.04 (see
-  [Supported paths](#supported-paths)).
+  [Supported paths](#supported-paths)). Started outside tmux or screen, both
+  tools run themselves in tmux, so a dropped SSH connection does not stop
+  them halfway.
+* Protect the logins better than v78 does: repeat offenders get longer
+  fail2ban bans (up to a week), slow jails catch attacks that stay below
+  the normal limits, own networks can be put on an allowlist, and the status
+  checks report password spraying. Bans and settings are managed in the
+  control panel (System > Intrusion Protection).
+* Keep the mail domains of a box apart in Nextcloud: users only see and share
+  with the accounts of their own mail domain, members of the Nextcloud group
+  `admin` with everyone (`NEXTCLOUD_SHARE_SCOPE=all` keeps upstream's
+  behaviour).
 
 ### Main components
 
@@ -53,13 +66,14 @@ builds on that port. Its goals:
 | Dovecot | 2.3.16 | 2.4.2 |
 | Full-text search (Dovecot) | none | **new:** fts_xapian 1.9.3, on by default (`FTS=off` turns it off) |
 | Postfix | 3.6.4 | 3.10.6 |
+| fail2ban | 0.11.2 | 1.1.0, **new:** longer bans for repeat offenders, slow jails, allowlist (System > Intrusion Protection) |
 | SpamAssassin (via spampd) | 3.4.6 (spampd 2.53), learning via dovecot-antispam | 4.0.2 (spampd 2.62), **new:** learning via IMAPSieve |
 | nginx | 1.18.0 | 1.28.3 |
 | OpenSSL | 3.0.2 | 3.5.5 (LTS, supported until April 2030) |
 | Python (management daemon) | 3.10.12 | 3.14.4 |
 | duplicity (backups) ² | 3.2.2 | 3.2.2 (unchanged) |
 
-Versions as of `v78-r2604.0-rc3` (October 2026). For v78 the table shows the
+Versions as of `v78-r2604.0-rc4` (October 2026). For v78 the table shows the
 version pinned in v78's setup scripts or the current Ubuntu 22.04 package.
 
 ¹ Pinned by the setup scripts (download with checksum). These change only with
@@ -67,7 +81,8 @@ a new release of Mail-in-a-Box or of this fork.
 
 ² From `ppa:duplicity-team/duplicity-release-git`, in v78 and in the fork.
 
-³ Nextcloud 35 was released in September 2026; this fork is still on 34.
+³ Nextcloud 35 was released in September 2026; this fork stays on 34 until
+the user_external app (Nextcloud logins with the mail password) supports 35.
 
 Rows without a mark come from the Ubuntu archive (except PHP in v78, which
 comes from `ppa:ondrej/php`) and are updated with Ubuntu's package updates;
@@ -84,7 +99,7 @@ Ubuntu's main component, which gets security updates during standard support;
 > Tauberer for help with this fork. Use this repository's
 > [issues](https://github.com/LM1337/Mail-in-a-box-26/issues) instead.
 
-**Status: release candidate (`v78-r2604.0-rc3`).** It is tested on test
+**Status: release candidate (`v78-r2604.0-rc4`).** It is tested on test
 machines and on a copy of a production box, but it is not a final release.
 Make a backup, and try it on a copy or a spare machine before you run it on
 the box that holds your mail.

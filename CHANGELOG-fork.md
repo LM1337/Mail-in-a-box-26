@@ -9,7 +9,12 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
-## Unreleased
+## v78-r2604.0-rc4 (2026-10-24)
+
+Project home on GitHub, adaptive fail2ban with the control panel page System >
+Intrusion Protection, Nextcloud sharing within the mail domain, tmux for both
+tools, and the fixes from the in-place upgrade of a production box with rc3
+(B57-B60) and B61.
 
 ### New
 
