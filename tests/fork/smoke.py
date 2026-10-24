@@ -1168,6 +1168,8 @@ def c_fail2ban_api(ctx):
         raise Fail("jails missing: %s" % sorted(want - names))
     if not j.get("config_current"):
         raise Fail("rendered jail file does not match the settings")
+    if "client" not in j:
+        raise Fail("no client address in the status (needed for the panel's allowlist hint)")
     return "%d jails, %d bans; adaptive=%s slow_jails=%s allowlist=%d" % (
         len(names), j.get("banned_entries", 0), s.get("adaptive"), s.get("slow_jails"), len(s.get("allowlist") or []))
 
@@ -1195,6 +1197,18 @@ def c_fail2ban_settings_roundtrip(ctx):
     if admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["spray_min_ips"] != orig:
         raise Fail("spray_min_ips not restored")
     return "set/restore ok, invalid allowlist refused (400)"
+
+
+def c_fail2ban_panel(ctx):
+    # The control panel page (System > Intrusion Protection) is part of index.html.
+    r = http_req(ctx, "GET", "/admin/")
+    if r.status != 200:
+        raise Fail("HTTP %d" % r.status)
+    page = r.text()
+    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(") if m not in page]
+    if missing:
+        raise Fail("control panel lacks %s" % missing)
+    return "Intrusion Protection page present"
 
 
 def c_fail2ban_report(ctx):
@@ -1919,6 +1933,7 @@ def main():
         run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
         run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
+        run_check("admin-fail2ban-panel", c_fail2ban_panel, ctx)
     if want("dns"):
         print("== dns")
         for zone in (ctx.domain, ctx.seed2, ctx.seed3):

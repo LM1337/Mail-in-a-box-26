@@ -14,9 +14,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 ### New
 
 * fail2ban: adaptive intrusion protection, on by default (README-fork.md,
-  "Intrusion protection"). Each new ban of an address lasts twice as long as
-  its previous one, counted over all jails, up to one week; the ban history
-  is kept for 30 days. Slow jails for SMTP AUTH, IMAP/POP3/ManageSieve,
+  "Intrusion protection"; control panel: System > Intrusion Protection).
+  Each new ban of an address lasts twice as long as its previous one,
+  counted over all jails, up to one week; the ban history is kept for
+  30 days. Slow jails for SMTP AUTH, IMAP/POP3/ManageSieve,
   Roundcube, Nextcloud and the control panel ban after 10 failures within
   6 hours (the Dovecot one ignores connections without a login attempt). An
   allowlist of own networks is added to ignoreip. The settings are stored in
@@ -34,8 +35,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   left), `GET`/`POST /system/fail2ban/settings`, `POST /system/fail2ban/unban`
   (one jail, or all jails including the ban history), `POST
   /system/fail2ban/unban-all` (one jail), `GET /system/fail2ban/report`.
-* Tests: smoke checks `admin-fail2ban-status`, `admin-fail2ban-settings`
-  and `admin-fail2ban-report`; `prepare-testenv.sh` puts the jump host on the
+* Control panel: new page System > Intrusion Protection. It lists the banned
+  addresses (jails, time left; filter) and the jails with their counters,
+  unbans an address in all jails or in one jail and empties a jail (with a
+  confirmation), shows the failed-login report and edits the settings
+  (adaptive banning and slow jails on/off with a confirmation before turning
+  off, thresholds, allowlist, restore defaults). It shows the admin's own
+  address and offers to allowlist or unban it.
+* Tests: smoke checks `admin-fail2ban-status`, `admin-fail2ban-settings`,
+  `admin-fail2ban-report` and `admin-fail2ban-panel`; `prepare-testenv.sh` puts the jump host on the
   allowlist.
 
 ### Fixed

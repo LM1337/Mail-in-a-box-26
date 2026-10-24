@@ -114,12 +114,23 @@ the old files back if fail2ban rejects it, and reloads fail2ban only if a file
 changed. `--print` shows the files, `--allow 192.0.2.0/24` adds a network,
 `--report` prints the failed-login report.
 
-The control panel page (System > Intrusion protection) uses this API (admin
+In the control panel, **System > Intrusion Protection** shows whether
+fail2ban runs, the banned addresses (per address: the jails, time left, length
+and start of each ban; with a filter), the jails with their counters and the
+failed-login report (accounts with failures from many addresses, addresses
+that keep failing, with their ban status). It unbans an address in all jails
+or in one jail, unbans all addresses of a jail (after a confirmation), and
+edits the settings: adaptive banning and slow jails on/off (turning one off
+asks first), the thresholds (durations also as `30m`, `6h`, `2d`, `1w`), the
+allowlist (one address or network per line) and "Restore defaults". It also
+shows the address you use the panel from and offers to put it on the
+allowlist, or to unban it if it is banned (the slow mail jails block only the
+mail ports, so the panel stays reachable). The page uses this API (admin
 only, changes by POST with form fields):
 
 | Request | |
 |---|---|
-| `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban), the settings, defaults and limits |
+| `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban), the settings, defaults and limits, and `client` (the address of the request, whether it is allowlisted or one of the box's own) |
 | `GET /admin/system/fail2ban/settings` | the settings, defaults and warnings about invalid stored values |
 | `POST /admin/system/fail2ban/settings` | fields named like the settings; fields not sent keep their value, `reset=1` starts from the defaults. Answers with `changed`, `reloaded`, `skipped_jails` and the new settings, or HTTP 400 with the reason |
 | `POST /admin/system/fail2ban/unban` | `ip`, optionally `jail`. Answers with `unbanned_from` and `still_banned_in` |
@@ -188,9 +199,21 @@ Dateien wieder her und lädt fail2ban nur neu, wenn sich eine Datei geändert
 hat. `--print` zeigt die Dateien, `--allow 192.0.2.0/24` fügt ein Netz hinzu,
 `--report` gibt den Bericht über Fehlanmeldungen aus.
 
-Die Seite der Admin-Oberfläche (System > Intrusion protection) nutzt die oben
-beschriebene API unter `/admin/system/fail2ban` (nur für Administratoren,
-Änderungen per POST mit Formularfeldern).
+In der Admin-Oberfläche zeigt **System > Intrusion Protection**, ob fail2ban
+läuft, die gesperrten Adressen (je Adresse die Jails mit Restdauer, Länge und
+Beginn jeder Sperre; mit Filter), die Jails mit ihren Zählern und den Bericht
+über Fehlanmeldungen (Konten mit Fehlversuchen von vielen Adressen, Adressen,
+die immer wieder scheitern, mit ihrem Sperrstatus). Dort lässt sich eine
+Adresse in allen Jails oder in einem Jail freigeben, ein ganzes Jail nach
+Rückfrage leeren und alles einstellen: mitwachsende Sperren und langsame Jails
+an/aus (das Ausschalten fragt nach), die Schwellen (Dauern auch als `30m`,
+`6h`, `2d`, `1w`), die Freigabeliste (eine Adresse oder ein Netz pro Zeile)
+und „Restore defaults“. Die Seite zeigt außerdem die Adresse, von der aus sie
+benutzt wird, und bietet an, sie in die Freigabeliste aufzunehmen oder, falls
+gesperrt, freizugeben (die langsamen Mail-Jails sperren nur die Mail-Ports,
+die Oberfläche bleibt also erreichbar). Sie nutzt die oben beschriebene API
+unter `/admin/system/fail2ban` (nur für Administratoren, Änderungen per POST
+mit Formularfeldern).
 
 Eine Freigabe ohne Jail ruft `fail2ban-client unban <ip>` auf: Die Adresse
 wird in allen Jails freigegeben, recidive eingeschlossen, und ihre
