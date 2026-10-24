@@ -439,8 +439,21 @@ mux_term() {
 # Attach this terminal (also when stdin is the curl pipe). tmux refuses the
 # name /dev/tty, so the terminal's own device. screen -d -r: a client of a
 # dropped SSH connection may still count as attached.
+# Not through "curl ... | sudo bash" when sudo runs the command in a terminal
+# of its own (sudo-rs on 26.04, use_pty of sudo 1.9.14+ on 24.04): the client
+# shows nothing there. Return 1, so that the caller names the attach command.
 mux_attach() { # TOOL
-	local t
+	local t sid
+	if [ ! -t 0 ]; then
+		sid=$(ps -o sid= -p $$ 2> /dev/null | tr -d ' ' || true)
+		case "$(ps -o comm= -p "${sid:-0}" 2> /dev/null || true)" in
+			sudo | sudo.ws | sudo-rs)
+				say "This terminal cannot show the session: sudo runs this command in a terminal of its"
+				say "own, and its input is the curl pipe."
+				return 1
+				;;
+		esac
+	fi
 	t=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
 	case "$t" in '' | '?') t=/dev/tty ;; *) t=/dev/$t ;; esac
 	# shellcheck disable=SC2094 # a terminal, not a file

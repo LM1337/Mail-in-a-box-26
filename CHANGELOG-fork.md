@@ -178,7 +178,10 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   in the middle of a release upgrade, and only if that upgrades or removes
   no other package), fall back to screen, pass the arguments and the
   environment variables they read into the session, attach the terminal
-  (also through `curl | bash`), keep the window open until Enter (also
+  (also through `curl | bash`; not through `curl ... | sudo bash` where sudo
+  runs the command in a terminal of its own, as sudo-rs on 26.04 and sudo
+  1.9.15 on 24.04 do: the tmux client showed nothing there, so the tools say
+  so and print `sudo tmux attach -t ...`), keep the window open until Enter (also
   after Ctrl-C; with `--yes` at most 10 minutes, so that `ssh -t ... --yes`
   returns) and exit with the code of the run. The environment goes
   through a file readable only by root, not the command line. A terminal
