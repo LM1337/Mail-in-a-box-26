@@ -65,12 +65,14 @@ DEFAULT_TAG=v78-r2604.0-rc3 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5 # keep in sync with setup/functions.sh
 QUIET_TIMEOUT=${MIGRATE_QUIET_TIMEOUT:-900}
+# How long to wait for a Mail-in-a-Box backup on the old box (wait_backup_done).
+BACKUP_WAIT=${MIGRATE_BACKUP_WAIT:-7200}
 # Where --push-zones-to-old keeps the old box's own zone files (on the old box).
 OLD_NSD_SAVE=/root/migrate-to-2604-nsd-orig
 TMUX_SESSION=migrate-2604
 # The environment variables this script reads (passed into that session);
 # SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
-MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK)
+MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK)
 MUX_TERM=
 
 # Phases that are recorded in the state file, in order.
@@ -92,6 +94,7 @@ CHECK_BLOCKERS=()
 VERIFY_PROBLEMS=()
 CHECK_ONLY=
 CHECK_TMP=
+BACKUP_WAITED=
 LOG_READY=
 IN_DIE=
 USER_STOPPED=
@@ -223,7 +226,9 @@ is run through curl, e.g.
   curl -s .../tools/migrate-to-2604.sh | sudo TAG=main bash -s -- --from root@old.example.com
 MIGRATE_STATE_DIR (default /root/migration) holds the state, the log and the
 copy of the old /etc. MIGRATE_QUIET_TIMEOUT (default 900) is how many seconds
-to wait for processes that still use the data.
+to wait for processes that still use the data, MIGRATE_BACKUP_WAIT (default
+7200) how many seconds to wait for a Mail-in-a-Box backup that runs on the old
+box (e.g. the nightly one) before it is stopped.
 EOF
 }
 
@@ -684,8 +689,33 @@ load_kv() {
 	done
 }
 
+# The PIDs of a running Mail-in-a-Box backup: a python running
+# management/backup.py, or duplicity. From /proc and not with pgrep -f, which
+# also matches any command line that only names them (the checking shell, a
+# grep, an editor). Keep in sync with tools/upgrade-in-place-to-2604.sh.
+BACKUP_PIDS_SCRIPT=$(cat <<'EOF'
+for f in /proc/[0-9]*/cmdline; do
+	a=()
+	mapfile -d '' -t -n 3 a 2> /dev/null < "$f" || continue
+	case "${a[0]:-}" in python* | */python* | duplicity | */duplicity) ;; *) continue ;; esac
+	for x in "${a[@]}"; do
+		case "$x" in
+			management/backup.py | */management/backup.py | duplicity | */duplicity)
+				f=${f#/proc/}
+				echo "${f%/cmdline}"
+				break
+				;;
+		esac
+	done
+done
+EOF
+)
+
 # Facts about the old box. Cheap, runs on every start.
-FACTS_SCRIPT=$(cat <<'EOF'
+FACTS_SCRIPT="backup_pids() {
+$BACKUP_PIDS_SCRIPT
+}
+$(cat <<'EOF'
 . /etc/os-release 2> /dev/null || true
 echo "OS_ID=${ID:-unknown}"
 echo "OS_VERSION=${VERSION_ID:-unknown}"
@@ -740,7 +770,7 @@ echo "BACKUP_TARGET=$(sed -n 's/^target:[[:space:]]*//p' "$SR/backup/custom.yaml
 
 # Messages waiting in the Postfix queue live in /var/spool/postfix, not in $STORAGE_ROOT.
 echo "POSTQUEUE=$(find /var/spool/postfix/deferred /var/spool/postfix/active /var/spool/postfix/incoming /var/spool/postfix/hold /var/spool/postfix/maildrop -type f 2> /dev/null | wc -l)"
-if pgrep -f 'management/backup.py|/usr/bin/duplicity' > /dev/null; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
+if [ -n "$(backup_pids)" ]; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
 if systemctl is-active --quiet apt-daily.service 2> /dev/null || systemctl is-active --quiet apt-daily-upgrade.service 2> /dev/null \
 	|| pgrep -f 'bin/unattended-upgrade( |$)' > /dev/null; then
 	echo "APT_BUSY=1"
@@ -769,7 +799,7 @@ if [ -f /root/.ssh/id_rsa_miab ]; then echo "HAS_BACKUP_SSH_KEY=1"; fi
 if [ -d /var/lib/z-push ]; then echo "HAS_ZPUSH=1"; fi
 if [ -d /var/lib/munin ]; then echo "HAS_MUNIN=1"; fi
 EOF
-)
+)"
 
 # Size and number of files of $STORAGE_ROOT and of the parts that may be left
 # out. Slow on big boxes.
@@ -1541,7 +1571,8 @@ Their data stays in the database. Reinstall them afterwards if they support Next
 		warn "This machine's clock is not NTP-synchronized (timedatectl). TLS, TOTP and DNSSEC need the right time."
 	fi
 	if [ "${OLD[BACKUP_RUNNING]:-0}" = 1 ]; then
-		warn "A backup is running on the old box right now."
+		say "Backup:            a Mail-in-a-Box backup runs on the old box right now. The copy goes on;"
+		say "                   the switch-over waits until it has finished before it stops the old box."
 	fi
 
 	read_old_queue
@@ -1756,6 +1787,35 @@ then run the command again."
 		fi
 		sleep 10
 	done
+}
+
+backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT"; }
+
+# A Mail-in-a-Box backup that is running (the nightly one starts at 01:04,
+# /etc/cron.d/mailinabox-nightly): wait until it has finished, at most
+# BACKUP_WAIT seconds. Only before anything is stopped, so Ctrl-C is safe.
+# Sets BACKUP_WAITED. Keep in sync with tools/upgrade-in-place-to-2604.sh
+# (there on that box, without LABEL).
+wait_backup_done() { # [LABEL]
+	local label=${1:-} pids start
+	BACKUP_WAITED=
+	pids=$(backup_pids | paste -sd ' ')
+	[ -n "$pids" ] || return 0
+	BACKUP_WAITED=1
+	start=$(date +%s)
+	say "A Mail-in-a-Box backup is running$label (PID $pids). Waiting until it has finished"
+	say "(at most $(fmt_dur "$BACKUP_WAIT"); nothing was stopped yet, so Ctrl-C is safe here)..."
+	while [ -n "$(backup_pids)" ]; do
+		if [ $(($(date +%s) - start)) -ge "$BACKUP_WAIT" ]; then
+			echo
+			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(backup_pids | paste -sd ' ')).
+Nothing was stopped yet. Run the command again when it has finished."
+		fi
+		printf '.'
+		sleep 30
+	done
+	echo
+	say "The backup$label has finished (waited $(fmt_dur $(($(date +%s) - start))))."
 }
 
 local_units() {
@@ -2019,16 +2079,21 @@ phase_stop_old() {
 		die "Package updates are running on the old box (apt-daily / unattended-upgrades).
 Wait until they are finished and run the command again. Nothing was stopped yet."
 	fi
-	if [ "${OLD[BACKUP_RUNNING]:-0}" = 1 ]; then
-		die "A backup is running on the old box. Wait until it is finished and run the command
-again. Nothing was stopped yet."
-	fi
 	if [ ${#NET_BLOCKERS[@]} -gt 0 ] && [ -z "$SKIP_NETWORK_CHECKS" ]; then
 		die "$(printf '%s\n' "${NET_BLOCKERS[@]}")
 The old box was not stopped. Fix this first (or use --skip-network-checks)."
 	fi
 	if [ -n "$ASSUME_YES" ] && [ -z "$SWITCH_OVER" ]; then
 		die "--yes does not stop the old box on its own. Add --switch-over, or run without --yes."
+	fi
+	wait_backup_done " on the old box"
+	if [ -n "$BACKUP_WAITED" ]; then
+		# The facts (apt) may have changed meanwhile.
+		read_old_facts
+		if [ "${OLD[APT_BUSY]:-0}" = 1 ]; then
+			die "Package updates are running on the old box (apt-daily / unattended-upgrades).
+Wait until they are finished and run the command again. Nothing was stopped yet."
+		fi
 	fi
 	handle_old_queue
 	session_check

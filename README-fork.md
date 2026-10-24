@@ -82,10 +82,12 @@ tmux by themselves: with those, start the command inside tmux yourself
 What it does, in phases that continue on their own after each reboot:
 
 1. **preflight**: release, Mail-in-a-Box and Nextcloud versions, disk space,
-   a backup younger than 24 hours, and a list of everything that is not
-   managed by Mail-in-a-Box (Dovecot plugins, systemd drop-ins, nginx files,
-   Docker, third-party apt sources). Local extensions block the upgrade until
-   you pass `--keep-local`.
+   a backup younger than 24 hours (a backup that is running, e.g. the nightly
+   one, does not block: the upgrade waits for it, at most 2 hours,
+   `UPGRADE_BACKUP_WAIT`, before it stops anything), and a list of
+   everything that is not managed by Mail-in-a-Box (Dovecot plugins, systemd
+   drop-ins, nginx files, Docker, third-party apt sources). Local extensions
+   block the upgrade until you pass `--keep-local`.
 2. **snapshot**: mail, web, cron and the update timers are stopped and
    masked, so they stay off across reboots. **Mail is offline from here.**
    Then a fresh Mail-in-a-Box backup (so it holds all mail), counts and key
@@ -155,8 +157,10 @@ noch nicht selbst: mit ihnen den Befehl selbst in tmux starten
 Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 
 1. **preflight**: Release, Versionen von Mail-in-a-Box und Nextcloud,
-   Speicherplatz, eine Sicherung jünger als 24 Stunden und eine Liste von
-   allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
+   Speicherplatz, eine Sicherung jünger als 24 Stunden (eine laufende
+   Sicherung, etwa die nächtliche, hält nichts an: das Upgrade wartet auf sie,
+   höchstens 2 Stunden, `UPGRADE_BACKUP_WAIT`, bevor es etwas anhält) und
+   eine Liste von allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.
 2. **snapshot**: Mail, Web, Cron und die Update-Timer werden angehalten und
@@ -323,7 +327,9 @@ setup always uses it; to have no IPv6, remove it from the machine.
 2. **sync-live**: `rsync -aHAXS --numeric-ids --delete` of `$STORAGE_ROOT`
    while the old box keeps running. Resumable, retried automatically after
    connection problems; repeat it with `--sync-only`.
-3. **stop-old** (asks first): stops cron, the apt timers (package updates
+3. **stop-old** (asks first): waits for a Mail-in-a-Box backup that runs on
+   the old box (e.g. the nightly one; at most 2 hours, `MIGRATE_BACKUP_WAIT`),
+   then stops cron, the apt timers (package updates
    would restart services), the management daemon, nginx, PHP-FPM, Postfix,
    spampd, postgrey, OpenDKIM/OpenDMARC, Dovecot and the socket units that
    would start one of them again (e.g. `dovecot.socket`). They are masked
@@ -697,7 +703,9 @@ von der Maschine.
 2. **sync-live**: `rsync -aHAXS --numeric-ids --delete` von `$STORAGE_ROOT`,
    während die alte Box weiterläuft. Fortsetzbar, nach Verbindungsproblemen
    automatisch wiederholt; mit `--sync-only` wiederholbar.
-3. **stop-old** (mit Rückfrage): hält auf der alten Box cron, die apt-Timer
+3. **stop-old** (mit Rückfrage): wartet auf eine Mail-in-a-Box-Sicherung, die
+   auf der alten Box läuft (etwa die nächtliche; höchstens 2 Stunden,
+   `MIGRATE_BACKUP_WAIT`), und hält dann auf der alten Box cron, die apt-Timer
    (Paketaktualisierungen würden Dienste neu starten), den Verwaltungsdienst,
    nginx, PHP-FPM, Postfix, spampd, postgrey, OpenDKIM/OpenDMARC, Dovecot und
    die Socket-Units an, die einen davon wieder starten würden (z. B.

@@ -103,7 +103,7 @@ RESUME_SCRIPT=$STATE_DIR/resume.sh
 RESUME_MAX=8
 TMUX_SESSION=upgrade-2604
 # The environment variables this script reads (passed into that session).
-MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_REEXEC TAG SOURCE)
+MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE)
 MUX_TERM=
 # Keep the old configuration files during the release upgrades (removed again in finish).
 APT_OVERRIDE=/etc/apt/apt.conf.d/99-upgrade-in-place-to-2604
@@ -117,6 +117,8 @@ PHP_VER=8.5        # keep in sync with setup/functions.sh
 PHP_LEGACY_VER=8.2 # keep in sync with setup/system.sh
 QUIET_TIMEOUT=${UPGRADE_QUIET_TIMEOUT:-900}
 BACKUP_MAX_AGE=${UPGRADE_BACKUP_MAX_AGE:-86400}
+# How long to wait for a Mail-in-a-Box backup that is running (wait_backup_done).
+BACKUP_WAIT=${UPGRADE_BACKUP_WAIT:-7200}
 GIB=$((1024 * 1024 * 1024))
 
 # Phases that are recorded in the state file, in order.
@@ -146,6 +148,7 @@ EXT_BLOCK=()
 EXT_INFO=()
 EXT_FTS=()
 CHECK_ONLY=
+BACKUP_WAITED=
 LOG_READY=
 LOCKED=
 IN_DIE=
@@ -257,7 +260,9 @@ setup runs from (default: the release tag). UPGRADE_STATE_DIR (default
 /root/upgrade-2604) holds the state, the log, the system archive and the copy
 of the old /etc. UPGRADE_QUIET_TIMEOUT (default 900) is how many seconds to
 wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
-86400) the age in seconds the last backup may have.
+86400) the age in seconds the last backup may have, UPGRADE_BACKUP_WAIT
+(default 7200) how many seconds to wait for a Mail-in-a-Box backup that is
+running (e.g. the nightly one) before anything is stopped.
 EOF
 }
 
@@ -657,10 +662,35 @@ load_kv() {
 	done
 }
 
+# The PIDs of a running Mail-in-a-Box backup: a python running
+# management/backup.py, or duplicity. From /proc and not with pgrep -f, which
+# also matches any command line that only names them (the checking shell, a
+# grep, an editor). Keep in sync with tools/migrate-to-2604.sh.
+BACKUP_PIDS_SCRIPT=$(cat <<'EOF'
+for f in /proc/[0-9]*/cmdline; do
+	a=()
+	mapfile -d '' -t -n 3 a 2> /dev/null < "$f" || continue
+	case "${a[0]:-}" in python* | */python* | duplicity | */duplicity) ;; *) continue ;; esac
+	for x in "${a[@]}"; do
+		case "$x" in
+			management/backup.py | */management/backup.py | duplicity | */duplicity)
+				f=${f#/proc/}
+				echo "${f%/cmdline}"
+				break
+				;;
+		esac
+	done
+done
+EOF
+)
+
 # Facts about this box. Cheap, runs on every start. Keep in sync with
 # FACTS_SCRIPT in tools/migrate-to-2604.sh; differs: OS_CODENAME, PROMPT,
 # MIAB_IS_FORK, the backup target also from a paused custom.yaml, no unit list.
-FACTS_SCRIPT=$(cat <<'EOF'
+FACTS_SCRIPT="backup_pids() {
+$BACKUP_PIDS_SCRIPT
+}
+$(cat <<'EOF'
 . /etc/os-release 2> /dev/null || true
 echo "OS_ID=${ID:-unknown}"
 echo "OS_VERSION=${VERSION_ID:-unknown}"
@@ -720,7 +750,7 @@ echo "BACKUP_TARGET=$(sed -n 's/^target:[[:space:]]*//p' "$bf" 2> /dev/null | he
 
 # Messages waiting in the Postfix queue live in /var/spool/postfix, not in $STORAGE_ROOT.
 echo "POSTQUEUE=$(find /var/spool/postfix/deferred /var/spool/postfix/active /var/spool/postfix/incoming /var/spool/postfix/hold /var/spool/postfix/maildrop -type f 2> /dev/null | wc -l)"
-if pgrep -f 'management/backup.py|/usr/bin/duplicity' > /dev/null; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
+if [ -n "$(backup_pids)" ]; then echo "BACKUP_RUNNING=1"; else echo "BACKUP_RUNNING=0"; fi
 if systemctl is-active --quiet apt-daily.service 2> /dev/null || systemctl is-active --quiet apt-daily-upgrade.service 2> /dev/null \
 	|| pgrep -f 'bin/unattended-upgrade( |$)' > /dev/null; then
 	echo "APT_BUSY=1"
@@ -729,7 +759,7 @@ if [ -f /root/.ssh/id_rsa_miab ]; then echo "HAS_BACKUP_SSH_KEY=1"; fi
 if [ -d /var/lib/z-push ]; then echo "HAS_ZPUSH=1"; fi
 if [ -d /var/lib/munin ]; then echo "HAS_MUNIN=1"; fi
 EOF
-)
+)"
 
 # Size and number of files of $STORAGE_ROOT. Slow on big boxes. Keep in sync
 # with tools/migrate-to-2604.sh.
@@ -1003,6 +1033,43 @@ backup_target() {
 	echo "${t:-local}"
 }
 
+# When the last Mail-in-a-Box backup finished (epoch), if any. duplicity keeps
+# a copy of each manifest in its archive directory (backup/cache), whatever
+# the target; local targets have them in encrypted/.
+last_backup_epoch() {
+	find "$STORAGE_ROOT/backup/cache" "$STORAGE_ROOT/backup/encrypted" -name 'duplicity-*.manifest*' \
+		-printf '%T@\n' 2> /dev/null | sort -n | tail -n 1 | cut -d. -f1 || true
+}
+
+backup_pids() { local_bash "$BACKUP_PIDS_SCRIPT"; }
+
+# A Mail-in-a-Box backup that is running (the nightly one starts at 01:04,
+# /etc/cron.d/mailinabox-nightly): wait until it has finished, at most
+# BACKUP_WAIT seconds. Only before anything is stopped, so Ctrl-C is safe.
+# Sets BACKUP_WAITED. Keep in sync with tools/migrate-to-2604.sh (there on
+# the old box, LABEL " on the old box").
+wait_backup_done() { # [LABEL]
+	local label=${1:-} pids start
+	BACKUP_WAITED=
+	pids=$(backup_pids | paste -sd ' ')
+	[ -n "$pids" ] || return 0
+	BACKUP_WAITED=1
+	start=$(date +%s)
+	say "A Mail-in-a-Box backup is running$label (PID $pids). Waiting until it has finished"
+	say "(at most $(fmt_dur "$BACKUP_WAIT"); nothing was stopped yet, so Ctrl-C is safe here)..."
+	while [ -n "$(backup_pids)" ]; do
+		if [ $(($(date +%s) - start)) -ge "$BACKUP_WAIT" ]; then
+			echo
+			die "The backup$label still runs after $(fmt_dur "$BACKUP_WAIT") (PID $(backup_pids | paste -sd ' ')).
+Nothing was stopped yet. Run the command again when it has finished."
+		fi
+		printf '.'
+		sleep 30
+	done
+	echo
+	say "The backup$label has finished (waited $(fmt_dur $(($(date +%s) - start))))."
+}
+
 # ---------------------------------------------------------------------------
 # This fork's checkout. Keep in sync with tools/migrate-to-2604.sh.
 
@@ -1255,7 +1322,7 @@ backup_blocker() {
 }
 
 check_backup() {
-	local target last age
+	local target last age running=
 	target=$(backup_target)
 	say "Backups:             ${F[BACKUP_TARGET]:-local}"
 	if [ "$target" = off ]; then
@@ -1263,19 +1330,28 @@ check_backup() {
 make a backup first."
 		return 0
 	fi
-	# duplicity keeps a copy of each manifest in its archive directory
-	# (backup/cache), whatever the target; local targets have them in encrypted/.
-	last=$(find "$STORAGE_ROOT/backup/cache" "$STORAGE_ROOT/backup/encrypted" -name 'duplicity-*.manifest*' \
-		-printf '%T@\n' 2> /dev/null | sort -n | tail -n 1 | cut -d. -f1 || true)
-	if [ -z "$last" ]; then
+	# Not a blocker: the upgrade waits for it (wait_backup_done) and then
+	# checks the age again (backup_check_after_wait).
+	if [ "${F[BACKUP_RUNNING]:-0}" = 1 ]; then
+		running=1
+		say "Backup running:      yes; the upgrade waits until it has finished (at most $(fmt_dur "$BACKUP_WAIT"))"
+		say "                     before it stops anything"
+	fi
+	last=$(last_backup_epoch)
+	if [ -z "$last" ] && [ -n "$running" ]; then
+		say "Last backup:         none yet; checked again when the running one has finished"
+	elif [ -z "$last" ]; then
 		backup_blocker "No Mail-in-a-Box backup found in $STORAGE_ROOT/backup. Make one first
 (System > Backup Status, or $(state_get OLD_MIAB_DIR)/management/backup.py)."
 		return 0
-	fi
-	age=$(($(date +%s) - last))
-	say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
-	if [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
-		backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
+	else
+		age=$(($(date +%s) - last))
+		say "Last backup:         $(date -d "@$last" '+%F %H:%M') ($(fmt_dur "$age") ago)"
+		if [ "$age" -gt "$BACKUP_MAX_AGE" ] && [ -n "$running" ]; then
+			say "                     older than $(fmt_dur "$BACKUP_MAX_AGE"); checked again when the running one has finished"
+		elif [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
+			backup_blocker "The last backup is $(fmt_dur "$age") old (more than $(fmt_dur "$BACKUP_MAX_AGE")). Check System > Backup Status."
+		fi
 	fi
 	case "$target" in
 		local | file://"$STORAGE_ROOT"/*)
@@ -1666,9 +1742,6 @@ afterwards if they support Nextcloud 34 (setup keeps the app store off, see 'app
 		say "Data:                $(human "$(state_get SIZE_TOTAL)") in $(state_get FILES_TOTAL) files and directories (stays in place)"
 		check_space
 		check_apt_state
-		if [ "${F[BACKUP_RUNNING]:-0}" = 1 ]; then
-			blocker "A backup is running right now. Wait until it is finished."
-		fi
 		check_release_offer
 		check_backup
 		check_purge
@@ -1840,11 +1913,24 @@ miab_backup_wanted() {
 	return 0
 }
 
+# After waiting for a running backup: it must have left a backup that is
+# recent enough (like check_backup), or the next one would likely fail too.
+backup_check_after_wait() {
+	local last
+	[ -z "$NO_BACKUP_CHECK" ] && [ "$(backup_target)" != off ] || return 0
+	last=$(last_backup_epoch)
+	if [ -z "$last" ] || [ $(($(date +%s) - last)) -gt "$BACKUP_MAX_AGE" ]; then
+		die "The backup that ran has not left a backup younger than $(fmt_dur "$BACKUP_MAX_AGE") (see System >
+Backup Status and the mail to the administrator). Nothing was stopped yet. Fix it and run
+the command again, or use --no-backup-check."
+	fi
+}
+
 # With mail stopped (stop_mail): the backup is the last state of the mail.
 run_miab_backup() {
 	local dir
 	dir=$(state_get OLD_MIAB_DIR)
-	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
+	if [ -n "$(backup_pids)" ]; then
 		die "A backup is running already. Wait until it is finished and run the command again."
 	fi
 	say "Running a Mail-in-a-Box backup now ($dir/management/backup.py, target ${F[BACKUP_TARGET]:-local})."
@@ -2154,8 +2240,15 @@ stop_mail() {
 			die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
 and run the command again. Nothing was stopped yet."
 		fi
-		if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
-			die "A backup is running. Wait until it is finished and run the command again. Nothing was stopped yet."
+		wait_backup_done
+		if [ -n "$BACKUP_WAITED" ]; then
+			backup_check_after_wait
+			# The facts (apt) may have changed meanwhile.
+			read_facts
+			if [ "${F[APT_BUSY]:-0}" = 1 ]; then
+				die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
+and run the command again. Nothing was stopped yet."
+			fi
 		fi
 		for u in "${units[@]}"; do
 			if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
