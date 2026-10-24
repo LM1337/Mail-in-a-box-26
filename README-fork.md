@@ -7,7 +7,7 @@ port) merged with upstream v78, plus the fixes listed in
 [CHANGELOG-fork.md](CHANGELOG-fork.md). Each fixed bug is documented with
 symptom, cause and affected versions in [BUGS-fork.md](BUGS-fork.md).
 Upstream's own history is in
-[CHANGELOG.md](CHANGELOG.md), its documentation in [README.md](README.md) and
+[CHANGELOG.md](CHANGELOG.md), its documentation in [README-upstream.md](README-upstream.md) and
 on <https://mailinabox.email>.
 
 Main differences from upstream v78 (Ubuntu 22.04):

@@ -1,6 +1,12 @@
 Mail-in-a-Box Security Guide
 ============================
 
+> **Note for this fork:** this is upstream's security guide, written for
+> Ubuntu 22.04. It also describes the Ubuntu 26.04 fork unless
+> CHANGELOG-fork.md says otherwise. Report vulnerabilities in this fork
+> privately as described in [.github/SECURITY.md](.github/SECURITY.md), not to
+> the upstream maintainer.
+
 Mail-in-a-Box turns a fresh Ubuntu 22.04 LTS 64-bit machine into a mail server appliance by installing and configuring various components.
 
 This page documents the security posture of Mail-in-a-Box. The term “box” is used below to mean a configured Mail-in-a-Box.
@@ -8,7 +14,9 @@ This page documents the security posture of Mail-in-a-Box. The term “box” is
 Reporting Security Vulnerabilities
 ----------------------------------
 
-Security vulnerabilities should be reported to the [project's maintainer](https://joshdata.me) via email.
+For this fork: see [.github/SECURITY.md](.github/SECURITY.md) (GitHub private vulnerability reporting).
+
+Upstream's text: Security vulnerabilities should be reported to the [project's maintainer](https://joshdata.me) via email. (Only for vulnerabilities that also affect upstream Mail-in-a-Box.)
 
 Threat Model
 ------------

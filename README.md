@@ -1,100 +1,116 @@
-Mail-in-a-Box
-=============
+Mail-in-a-Box for Ubuntu 26.04 (unofficial fork)
+================================================
 
-By [@JoshData](https://github.com/JoshData) and [contributors](https://github.com/mail-in-a-box/mailinabox/graphs/contributors).
+> **This is an unofficial, community-maintained fork of
+> [Mail-in-a-Box](https://github.com/mail-in-a-box/mailinabox).** It is not
+> affiliated with, maintained or endorsed by the Mail-in-a-Box project or its
+> maintainer. Please do **not** ask the upstream project, its forum or Joshua
+> Tauberer for help with this fork. Use this repository's
+> [issues](https://github.com/LM1337/Mail-in-a-box-26/issues) instead.
 
-Mail-in-a-Box helps individuals take back control of their email by defining a one-click, easy-to-deploy SMTP+everything else server: a mail server in a box.
+**Status: release candidate (`v78-r2604.0-rc3`).** It is tested on test
+machines and on a copy of a production box, but it is not a final release.
+Make a backup, and try it on a copy or a spare machine before you run it on
+the box that holds your mail.
 
-**Please see [https://mailinabox.email](https://mailinabox.email) for the project's website and setup guide!**
+Mail-in-a-Box v78, the latest upstream release, supports Ubuntu 22.04 only.
+This fork runs on **Ubuntu 26.04 LTS** and keeps Mail-in-a-Box's design (one
+setup command, no configuration options). Main differences from v78: Dovecot
+2.4, PHP 8.5, Nextcloud 34, Roundcube 1.7, Z-Push 2.7, full-text search with
+fts_xapian. All changes are in [CHANGELOG-fork.md](CHANGELOG-fork.md), every
+fixed bug with cause and affected versions in [BUGS-fork.md](BUGS-fork.md).
+The full documentation of the fork (English and German) is
+[README-fork.md](README-fork.md).
 
-* * *
+### Supported paths
 
-Our goals are to:
+| You have | Use | Details |
+|---|---|---|
+| a fresh Ubuntu 26.04 machine | `setup/bootstrap.sh` | [Installation](README-fork.md#installation) |
+| a Mail-in-a-Box on Ubuntu 22.04 (v68 or later, older after an update to v78) or a release-upgraded 24.04, and a new 26.04 machine | `tools/migrate-to-2604.sh` (recommended: the old box stays as the way back) | [Migration](README-fork.md#migration-from-mail-in-a-box-22042404--umzug-von-mail-in-a-box) |
+| the same machine, no second server | `tools/upgrade-in-place-to-2604.sh` (22.04 → 24.04 → 26.04 or 24.04 → 26.04; cannot be undone after the first release upgrade) | [In-place upgrade](README-fork.md#in-place-upgrade-to-2604--upgrade-an-ort-und-stelle) |
 
-* Make deploying a good mail server easy.
-* Promote [decentralization](http://redecentralize.org/), innovation, and privacy on the web.
-* Have automated, auditable, and [idempotent](https://web.archive.org/web/20190518072631/https://sharknet.us/2014/02/01/automated-configuration-management-challenges-with-idempotency/) configuration.
-* **Not** make a totally unhackable, NSA-proof server.
-* **Not** make something customizable by power users.
+Ubuntu 22.04 boxes that stay on 22.04 should keep using upstream
+Mail-in-a-Box v78.
 
-Additionally, this project has a [Code of Conduct](CODE_OF_CONDUCT.md), which supersedes the goals above. Please review it when joining our community.
+### Quick start (fresh Ubuntu 26.04)
 
+	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
 
-In The Box
-----------
+This installs the current release tag. The box's status checks compare the
+installed version with the latest release of this repository (unless the
+version check is disabled in the privacy setting).
 
-Mail-in-a-Box turns a fresh Ubuntu 22.04 LTS 64-bit machine into a working mail server by installing and configuring various components.
+### Reporting problems
 
-It is a one-click email appliance. There are no user-configurable setup options. It "just works."
+* Bugs and questions: [GitHub issues](https://github.com/LM1337/Mail-in-a-box-26/issues).
+  Please include the output of `sudo mailinabox` or of the tool's `--status`,
+  the Ubuntu release and the version (`git -C ~/mailinabox describe`).
+  Remove passwords, keys and your domain names first.
+* **Security vulnerabilities: do not open a public issue.** Report them
+  privately through
+  [GitHub private vulnerability reporting](https://github.com/LM1337/Mail-in-a-box-26/security/advisories/new),
+  see [SECURITY.md](.github/SECURITY.md). Vulnerabilities that also affect
+  upstream Mail-in-a-Box v78 should additionally be reported to upstream as
+  described in its [security guide](security.md).
 
-The components installed are:
+### Credits
 
-* SMTP ([postfix](http://www.postfix.org/)), IMAP ([Dovecot](http://dovecot.org/)), CardDAV/CalDAV ([Nextcloud](https://nextcloud.com/)), and Exchange ActiveSync ([z-push](http://z-push.org/)) servers
-* Webmail ([Roundcube](http://roundcube.net/)), mail filter rules (thanks to Roundcube and Dovecot), and email client autoconfig settings (served by [nginx](http://nginx.org/))
-* Spam filtering ([spamassassin](https://spamassassin.apache.org/)) and greylisting ([postgrey](http://postgrey.schweikert.ch/))
-* DNS ([nsd4](https://www.nlnetlabs.nl/projects/nsd/)) with [SPF](https://en.wikipedia.org/wiki/Sender_Policy_Framework), DKIM ([OpenDKIM](http://www.opendkim.org/)), [DMARC](https://en.wikipedia.org/wiki/DMARC), [DNSSEC](https://en.wikipedia.org/wiki/DNSSEC), [DANE TLSA](https://en.wikipedia.org/wiki/DNS-based_Authentication_of_Named_Entities), [MTA-STS](https://tools.ietf.org/html/rfc8461), and [SSHFP](https://tools.ietf.org/html/rfc4255) policy records automatically set
-* TLS certificates are automatically provisioned using [Let's Encrypt](https://letsencrypt.org/) for protecting https and all of the other services on the box
-* Backups ([duplicity](http://duplicity.nongnu.org/)), firewall ([ufw](https://launchpad.net/ufw)), intrusion protection ([fail2ban](http://www.fail2ban.org/wiki/index.php/Main_Page)), and basic system monitoring ([munin](http://munin-monitoring.org/))
+* **Mail-in-a-Box** was created by [Joshua Tauberer (@JoshData)](https://github.com/JoshData)
+  and is developed by its
+  [contributors](https://github.com/mail-in-a-box/mailinabox/graphs/contributors).
+  Almost all of this code is theirs. Upstream: <https://mailinabox.email>;
+  upstream's own README is kept as [README-upstream.md](README-upstream.md).
+* The **Ubuntu 26.04 port** this fork is based on is by
+  [David Blythe (@writeDavid)](https://github.com/writeDavid)
+  ([writeDavid/mailinabox-26.04](https://github.com/writeDavid/mailinabox-26.04),
+  upstream [PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603),
+  not yet merged upstream), with fixes by
+  [Yoann Gauthier-Colin (@Gwerlas)](https://github.com/Gwerlas).
+* The IMAPSieve spam/ham learning that replaces dovecot-antispam comes from
+  upstream [PR #2571](https://github.com/mail-in-a-box/mailinabox/pull/2571)
+  by [@yeah](https://github.com/yeah) (not yet merged upstream).
+* Fork maintenance, the migration and in-place upgrade tools and the fixes in
+  CHANGELOG-fork.md: [@LM1337](https://github.com/LM1337), with AI assistance
+  (commits marked `Co-Authored-By: Claude`).
 
-It also includes system management tools:
+### License
 
-* Comprehensive health monitoring that checks each day that services are running, ports are open, TLS certificates are valid, and DNS records are correct
-* A control panel for adding/removing mail users, aliases, custom DNS records, configuring backups, etc.
-* An API for all of the actions on the control panel
+Like Mail-in-a-Box, this fork is in the public domain: copyright and related
+rights are waived through
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/), see
+[LICENSE](LICENSE). The fork's own changes are released under the same
+waiver, and so must be all contributions (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+CC0 does not cover trademarks: "Mail-in-a-Box" is the name of the upstream
+project and is used here only to say what this fork is based on.
+`conf/dovecot-*.conf` contain comments from Dovecot's default configuration
+(Dovecot's license: MIT/LGPL-2.1). The programs that setup downloads and
+installs (Nextcloud, Roundcube, Z-Push, the Roundcube plugins, Ubuntu and
+sury.org packages) keep their own licenses.
 
-Internationalized domain names are supported and configured easily (but SMTPUTF8 is not supported, unfortunately).
+---
 
-It also supports static website hosting since the box is serving HTTPS anyway. (To serve a website for your domains elsewhere, just add a custom DNS "A" record in you Mail-in-a-Box's control panel to point domains to another server.)
+### Deutsch (Kurzfassung)
 
-For more information on how Mail-in-a-Box handles your privacy, see the [security details page](security.md).
+Dies ist eine **inoffizielle Abspaltung (Fork) von Mail-in-a-Box** für
+**Ubuntu 26.04 LTS**. Sie wird nicht vom Mail-in-a-Box-Projekt betreut oder
+unterstützt; Fragen bitte nicht im Upstream-Forum stellen, sondern hier als
+[Issue](https://github.com/LM1337/Mail-in-a-box-26/issues).
 
+**Stand: Release Candidate (`v78-r2604.0-rc3`).** Vor dem Einsatz eine
+Sicherung anlegen und zuerst auf einer Kopie oder einer Ersatzmaschine
+ausprobieren.
 
-Installation
-------------
+Unterstützte Wege: Neuinstallation auf Ubuntu 26.04 (`setup/bootstrap.sh`),
+Umzug einer bestehenden Box (Ubuntu 22.04 oder per Release-Upgrade auf 24.04
+gehoben) auf eine neue 26.04-Maschine (`tools/migrate-to-2604.sh`, empfohlen)
+und Upgrade an Ort und Stelle derselben Maschine
+(`tools/upgrade-in-place-to-2604.sh`). Einzelheiten stehen auf Deutsch in
+[README-fork.md](README-fork.md).
 
-See the [setup guide](https://mailinabox.email/guide.html) for detailed, user-friendly instructions.
+Sicherheitslücken bitte nicht öffentlich melden, sondern über die private
+Meldefunktion von GitHub (siehe [SECURITY.md](.github/SECURITY.md)).
 
-For experts, start with a completely fresh (really, I mean it) Ubuntu 22.04 LTS 64-bit machine. On the machine...
-
-Clone this repository and checkout the tag corresponding to the most recent release (which you can find in the tags or releases lists on GitHub):
-
-	$ git clone https://github.com/mail-in-a-box/mailinabox
-	$ cd mailinabox
-	$ git checkout TAGNAME
-
-Begin the installation.
-
-	$ sudo setup/start.sh
-
-The installation will install, uninstall, and configure packages to turn the machine into a working, good mail server.
-
-For help, DO NOT contact Josh directly --- I don't do tech support by email or tweet (no exceptions).
-
-Post your question on the [discussion forum](https://discourse.mailinabox.email/) instead, where maintainers and Mail-in-a-Box users may be able to help you.
-
-Note that while we want everything to "just work," we can't control the rest of the Internet. Other mail services might block or spam-filter email sent from your Mail-in-a-Box.
-This is a challenge faced by everyone who runs their own mail server, with or without Mail-in-a-Box. See our discussion forum for tips about that.
-
-
-Contributing and Development
-----------------------------
-
-Mail-in-a-Box is an open source project. Your contributions and pull requests are welcome. See [CONTRIBUTING](CONTRIBUTING.md) to get started. 
-
-
-The Acknowledgements
---------------------
-
-This project was inspired in part by the ["NSA-proof your email in 2 hours"](http://sealedabstract.com/code/nsa-proof-your-e-mail-in-2-hours/) blog post by Drew Crawford, [Sovereign](https://github.com/sovereign/sovereign) by Alex Payne, and conversations with <a href="https://twitter.com/shevski" target="_blank">@shevski</a>, <a href="https://github.com/konklone" target="_blank">@konklone</a>, and <a href="https://github.com/gregelin" target="_blank">@GregElin</a>.
-
-Mail-in-a-Box is similar to [iRedMail](http://www.iredmail.org/) and [Modoboa](https://github.com/tonioo/modoboa).
-
-
-The History
------------
-
-* In 2007 I wrote a relatively popular Mozilla Thunderbird extension that added client-side SPF and DKIM checks to mail to warn users about possible phishing: [add-on page](https://addons.mozilla.org/en-us/thunderbird/addon/sender-verification-anti-phish/), [source](https://github.com/JoshData/thunderbird-spf).
-* In August 2013 I began Mail-in-a-Box by combining my own mail server configuration with the setup in ["NSA-proof your email in 2 hours"](http://sealedabstract.com/code/nsa-proof-your-e-mail-in-2-hours/) and making the setup steps reproducible with bash scripts.
-* Mail-in-a-Box was a semifinalist in the 2014 [Knight News Challenge](https://www.newschallenge.org/challenge/2014/submissions/mail-in-a-box), but it was not selected as a winner.
-* Mail-in-a-Box hit the front page of Hacker News in [April](https://news.ycombinator.com/item?id=7634514) 2014, [September](https://news.ycombinator.com/item?id=8276171) 2014, [May](https://news.ycombinator.com/item?id=9624267) 2015, and [November](https://news.ycombinator.com/item?id=13050500) 2016.
-* FastCompany mentioned Mail-in-a-Box a [roundup of privacy projects](http://www.fastcompany.com/3047645/your-own-private-cloud) on June 26, 2015.
+Dank an Joshua Tauberer und alle, die an Mail-in-a-Box mitgearbeitet haben,
+sowie an David Blythe (writeDavid) für die 26.04-Portierung. Lizenz: CC0 1.0
+(gemeinfrei), wie das Original.

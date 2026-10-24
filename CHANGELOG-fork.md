@@ -9,6 +9,37 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### Project home moved to GitHub
+
+* The fork is now published at https://github.com/LM1337/Mail-in-a-box-26.
+  `setup/bootstrap.sh`, `tools/migrate-to-2604.sh` and
+  `tools/upgrade-in-place-to-2604.sh` clone from there by default, and the
+  curl commands in the documentation use
+  `https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/...`.
+* Status checks: the version check reads the latest release tag from the
+  fork's `setup/bootstrap.sh` on GitHub, and the upgrade hint names this
+  fork and its URL. A bootstrap.sh without a `TAG=` line now gives "could not
+  be determined" instead of an error.
+* `setup/bootstrap.sh` compares the checkout's origin with `SOURCE`
+  case-insensitively. A checkout cloned from the fork's previous location
+  stops with "is a checkout of ..., not of ..."; switch it with
+  `git -C ~/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`.
+* The installed box points to the fork instead of only to upstream: the
+  Roundcube support link, the admin panel footer, the default web page (new
+  boxes only) and the SMTP banner.
+* New public README.md (unofficial-fork notice, status, supported paths,
+  credits, license); upstream's README is kept as README-upstream.md. New
+  `.github/SECURITY.md` (GitHub private vulnerability reporting); fork notes
+  in security.md, CODE_OF_CONDUCT.md and CONTRIBUTING.md.
+* Tests: `tests/fork` no longer contains addresses or host names of a
+  particular test network. `prepare-testenv.sh` needs `JUMP_HOST`, `PEERS`,
+  `BLOCK_V4` and `BLOCK_V6` (environment or `TESTENV_FILE`); `smoke.py` reads
+  its env file from `MIAB_TEST_ENV` (default `tests/fork/credentials.env`,
+  ignored by git) and the seed domains from `SEED2_DOMAIN`/`SEED3_DOMAIN`
+  (default `seed2.example.net`/`seed3.example.net`), like `seed-legacy.sh`.
+
 ## v78-r2604.0-rc3 (2026-10-23)
 
 In-place upgrade and full-text search. Tested in place on a copy of a
