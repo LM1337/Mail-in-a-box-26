@@ -523,10 +523,12 @@ mux_attach() { # TOOL
 }
 
 # Start the session; the window stays open after the command until Enter is
-# pressed, and the exit code is kept in RC_FILE.
+# pressed (with --yes at most 10 minutes: a caller such as "ssh -t ... --yes"
+# must not wait for someone to press it), and the exit code is kept in RC_FILE.
 mux_start() { # TOOL RC_FILE HINT ARGS...
-	local tool=$1 rc_file=$2 hint=$3 v scope=() env_file=$STATE_DIR/.multiplexer-env
+	local tool=$1 rc_file=$2 hint=$3 v scope=() env_file=$STATE_DIR/.multiplexer-env close=
 	shift 3
+	if [ -n "$ASSUME_YES" ]; then close=600; fi
 	# A tmux server that runs already gives a new session its own environment,
 	# not this one: pass what the script reads, and unset what is not set here.
 	# In a file, not on the command line (ps shows that to every user, and
@@ -544,11 +546,12 @@ mux_start() { # TOOL RC_FILE HINT ARGS...
 	# shellcheck disable=SC2016 # expanded by that bash
 	local cmd=(bash -c '
 trap : INT QUIT
-rc_file=$1 hint=$2 env_file=$3
-shift 3
+rc_file=$1 hint=$2 env_file=$3 close=$4
+shift 4
+wait_enter() { if [ -n "$close" ]; then read -r -t "$close" _; else read -r _; fi; }
 if ! . "$env_file"; then
 	echo "Could not read $env_file. Press Enter to close this window."
-	read -r _
+	wait_enter
 	exit 1
 fi
 rm -f "$env_file"
@@ -557,9 +560,9 @@ printf "%s\n\n" "$hint"
 rc=$?
 echo "$rc" > "$rc_file"
 echo
-echo "The command ended with exit code $rc. Press Enter to close this window."
-read -r _
-exit "$rc"' mux "$rc_file" "$hint" "$env_file" bash "$SELF_FILE" "$@")
+echo "The command ended with exit code $rc. Press Enter to close this window${close:+ (it closes by itself after $close seconds, --yes)}."
+wait_enter
+exit "$rc"' mux "$rc_file" "$hint" "$env_file" "$close" bash "$SELF_FILE" "$@")
 	case "$tool" in
 		tmux)
 			# In a scope of its own (like the resume unit): logind must not end the

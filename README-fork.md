@@ -118,8 +118,9 @@ Started from a terminal outside tmux or screen, the tool runs itself in the
 tmux session `upgrade-2604` (it installs tmux if needed, or falls back to
 screen) and attaches your terminal to it. If the SSH connection drops, the
 upgrade goes on: log in again and run `sudo tmux attach -t upgrade-2604`.
-When the command has ended, the window stays open until you press Enter.
-`--no-tmux` turns this off.
+When the command has ended, the window stays open until you press Enter
+(with `--yes` at most 10 minutes, so that a script calling it through
+`ssh -t` gets its exit code). `--no-tmux` turns this off.
 
 Through `curl | bash`, the tool runs the copy of the release tag (`TAG`,
 default: the latest release). Releases up to v78-r2604.0-rc3 do not start
@@ -218,7 +219,9 @@ Werkzeug selbst in der tmux-Sitzung `upgrade-2604` (tmux wird bei Bedarf
 installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
 Reißt die SSH-Verbindung ab, läuft das Upgrade weiter: neu anmelden und
 `sudo tmux attach -t upgrade-2604` aufrufen. Nach dem Ende des Befehls bleibt
-das Fenster offen, bis Enter gedrückt wird. `--no-tmux` schaltet das ab.
+das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10 Minuten,
+damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen Exit-Code
+bekommt). `--no-tmux` schaltet das ab.
 
 Über `curl | bash` führt das Werkzeug die Fassung des Release-Tags aus (`TAG`,
 vorgegeben: das neueste Release). Releases bis v78-r2604.0-rc3 starten tmux
@@ -374,7 +377,9 @@ explains what to do when the old box is too old.
 > session `migrate-2604` (it installs tmux if needed, or falls back to
 > screen) and attaches your terminal to it. After a disconnect, log in again
 > and run `tmux attach -t migrate-2604`. When the command has ended, the
-> window stays open until you press Enter. `--no-tmux` turns this off.
+> window stays open until you press Enter (with `--yes` at most 10 minutes,
+> so that a script calling it through `ssh -t` gets its exit code).
+> `--no-tmux` turns this off.
 
 On the new machine, as root (`sudo -i`):
 
@@ -747,7 +752,9 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
 > installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
 > Nach einem Verbindungsabbruch neu anmelden und
 > `tmux attach -t migrate-2604` aufrufen. Nach dem Ende des Befehls bleibt
-> das Fenster offen, bis Enter gedrückt wird. `--no-tmux` schaltet das ab.
+> das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10
+> Minuten, damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen
+> Exit-Code bekommt). `--no-tmux` schaltet das ab.
 
 Auf der neuen Maschine als root (`sudo -i`):
 

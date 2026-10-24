@@ -90,7 +90,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   no other package), fall back to screen, pass the arguments and the
   environment variables they read into the session, attach the terminal
   (also through `curl | bash`), keep the window open until Enter (also
-  after Ctrl-C) and exit with the code of the run. The environment goes
+  after Ctrl-C; with `--yes` at most 10 minutes, so that `ssh -t ... --yes`
+  returns) and exit with the code of the run. The environment goes
   through a file readable only by root, not the command line. A terminal
   type without a terminfo entry on the box (xterm-ghostty, xterm-kitty, ...)
   attaches as xterm-256color; screen reattaches with `screen -d -r`. A
