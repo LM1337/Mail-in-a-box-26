@@ -13,7 +13,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 In-place upgrade and full-text search. Tested in place on a copy of a
 production box (Ubuntu 24.04 release-upgraded from 22.04, Mail-in-a-Box v74,
-PHP 8.0 from ppa:ondrej, Dovecot 2.3 with fts_xapian and a Lua push plugin):
+PHP 8.0 from ppa:ondrej, Dovecot 2.3 with fts_xapian and a custom Dovecot plugin):
 "All checks passed", smoke test 53/55 (the two differences were a test mail
 of the preparation), about 50 minutes of mail downtime.
 
