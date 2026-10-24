@@ -42,6 +42,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   copy of `/etc` and the package lists are still taken before the stop, so
   they hold `/etc` without the masks; a run interrupted after the stop keeps
   them and does not repeat a backup that already ran with mail offline.
+  The downtime estimate of the plan (`--check`) includes the fresh backup and
+  says that a full one can take much longer.
 * Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
   ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
   "Login:" (B58).

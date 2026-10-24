@@ -182,10 +182,14 @@ that they can run twice. For example:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
-Downtime on a test box was about 50 minutes; plan 1-3 hours. The release
-upgrades cannot be undone: `--rollback` only works before the first one.
-After that the way back is the backup. Have the provider's console at hand,
-SSH can be gone for a while during the release upgrade or after a reboot.
+Downtime on a test box was about 50 minutes; plan 1-3 hours. The fresh
+backup is part of it: a few minutes when it is incremental, much longer when
+backup.py makes a full backup (when there is none yet, or on a Saturday or
+Sunday after many changes or about a month since the last full one);
+`--check` shows the estimate. The release upgrades cannot be undone:
+`--rollback` only works before the first one. After that the way back is the
+backup. Have the provider's console at hand, SSH can be gone for a while
+during the release upgrade or after a reboot.
 `--status` shows where it stands; running the command again continues.
 `--cleanup-only` removes leftovers of the old releases afterwards.
 
@@ -283,7 +287,11 @@ dürfen. Beispiel:
     cd /opt/myapp && docker compose up -d
 
 Die Ausfallzeit lag auf einer Testbox bei etwa 50 Minuten; einplanen sollte
-man 1 bis 3 Stunden. Die Release-Upgrades lassen sich nicht zurücknehmen:
+man 1 bis 3 Stunden. Die frische Sicherung zählt dazu: einige Minuten, wenn
+sie inkrementell ist, viel länger, wenn backup.py eine Vollsicherung macht
+(wenn es noch keine gibt, oder an einem Samstag oder Sonntag nach vielen
+Änderungen oder etwa einem Monat seit der letzten Vollsicherung); `--check`
+zeigt die Schätzung. Die Release-Upgrades lassen sich nicht zurücknehmen:
 `--rollback` geht nur vor dem ersten. Danach führt der Weg zurück über die
 Sicherung. Die Konsole des Anbieters sollte bereitliegen, weil SSH während
 des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.

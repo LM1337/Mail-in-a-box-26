@@ -1879,12 +1879,19 @@ show_plan() {
 		say "The hooks in $HOOK_AFTER_DIR run at the end, when mail and the backups are back."
 	fi
 	say
-	local rel=0
+	local rel=0 bk_lo=0 bk_hi=0 bk=
 	if [ "$v" = 22.04 ]; then rel=2; elif [ "$v" = 24.04 ]; then rel=1; fi
-	local lo=$((rel * 1500 + 600 + 900 + steps * 120 + steps * oc / 50000)) hi=$((rel * 4200 + 1200 + 1800 + steps * 600 + steps * oc / 10000))
+	# An incremental backup; a full one is not foreseeable (see below).
+	if fresh_backup_planned; then bk_lo=120 bk_hi=900 bk=", the fresh backup"; fi
+	local lo=$((rel * 1500 + 600 + 900 + steps * 120 + steps * oc / 50000 + bk_lo)) hi=$((rel * 4200 + 1200 + 1800 + steps * 600 + steps * oc / 10000 + bk_hi))
 	say "Expected downtime, roughly: $(fmt_dur "$lo") - $(fmt_dur "$hi")"
 	say "  ($rel release upgrade(s) of 20-60 minutes each, reboots, setup 15-30 minutes plus"
-	say "  $steps Nextcloud upgrade steps over $oc files)."
+	say "  $steps Nextcloud upgrade steps over $oc files$bk)."
+	if [ -n "$bk" ]; then
+		say "The fresh backup runs with mail offline: a few minutes when it is incremental, much longer"
+		say "when backup.py makes a full backup of the $(human "$(state_get SIZE_TOTAL)") (when there is none yet, or on a"
+		say "Saturday or Sunday after many changes or about a month since the last full one)."
+	fi
 	say "The release upgrades cannot be undone; '--rollback' only works before the first one."
 }
 
