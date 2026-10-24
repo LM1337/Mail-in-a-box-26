@@ -18,6 +18,8 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * Nextcloud 34.0.5. Existing installations are upgraded step by step from
   Nextcloud 26; older versions are refused.
 * Roundcube 1.7.5, Z-Push 2.7.7.
+* Nextcloud users only see and share with their own mail domain, admins with
+  everyone (`NEXTCLOUD_SHARE_SCOPE`, see below).
 
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
 Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md, die behobenen Fehler einzeln in BUGS-fork.md.
@@ -46,6 +48,125 @@ wählen. Die Variablen gehören hinter `sudo` vor `bash` (sudo reicht die
 Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Solange es
 noch keinen Release-Tag gibt, den Zweig `main` nehmen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
+
+
+Nextcloud: sharing within the mail domain / Teilen innerhalb der Maildomain
+---------------------------------------------------------------------------
+
+### English
+
+On a box with several mail domains, Nextcloud users only see and share with
+the accounts of their own mail domain: the share dialog (files, folders,
+calendars, address books), the contacts menu, the system address book over
+CardDAV and the member search of teams. Members of the Nextcloud group
+`admin` see and share with everyone. Public links, shares by e-mail and
+federated sharing are not affected.
+
+`NEXTCLOUD_SHARE_SCOPE` in `/etc/mailinabox.conf` switches it:
+
+* `domain` (default): as described above.
+* `all`: upstream's behaviour, everyone sees everyone.
+
+After changing it, run setup again (`sudo mailinabox`).
+
+How it works: Nextcloud has no setting for "same mail domain", so each mail
+domain becomes a Nextcloud group named after the domain (`example.com`), and
+Nextcloud lets users share only with members of their own groups
+(`shareapi_only_share_with_group_members`,
+`shareapi_restrict_user_enumeration_to_group`, team search through the same
+rules with `circles search_from_collaborator`). user_external puts a new user
+into the group at the first login. `tools/nextcloud-share-scope.sh` sets the
+options and puts all existing users into their group; setup runs it and cron
+runs it every hour, so new domains, new users and new admins are picked up.
+Nextcloud cannot exempt admins from the rule, so the script puts the members
+of `admin` into every domain group. Mail-in-a-Box does not make anyone a
+Nextcloud admin; `tools/owncloud-unlockadmin.sh` does that for one account.
+
+Limits:
+
+* Admins are members of every domain group. Every user therefore sees the
+  admins in the share dialog, and admins receive what is shared with a whole
+  domain group. Turn group sharing off if that is not wanted:
+  `sudo -u www-data php8.5 /usr/local/lib/owncloud/occ config:app:set core shareapi_allow_group_sharing --value no`.
+* Shares between domains that existed before stay until their owner removes
+  them.
+* The script never removes anyone from a group. Nextcloud deletes the shares
+  of a user who leaves a group and then has no group in common with the
+  other side. An account that is no longer admin stays in all domain groups
+  until it is removed by hand (`occ group:removeuser <domain> <user>`).
+* A team (Nextcloud Teams) that already has members of another domain still
+  works, and so does sharing with it. A team member added through the API by
+  the exact address is not checked against the domain.
+* CardDAV clients that synced the system address book before keep their copy
+  of the other domains until they sync it from scratch (remove the address
+  book or account in the client and add it again). A client that syncs it may
+  also get the names of deleted accounts of other domains as "deleted"
+  entries.
+* Mail domains longer than 64 characters get no group (Nextcloud stores such
+  group names as a hash); their users see no one.
+* With `all`, the domain groups stay and show up in the share dialog as
+  groups that everyone can share with. `occ group:delete <domain>` removes one, together with the shares
+  made to it.
+
+### Deutsch
+
+Auf einer Box mit mehreren Maildomains sehen Nextcloud-Benutzer nur die Konten
+ihrer eigenen Maildomain und können nur mit diesen teilen: Teilen-Dialog
+(Dateien, Ordner, Kalender, Adressbücher), Kontaktmenü, das
+Systemadressbuch über CardDAV und die Mitgliedersuche von Teams. Mitglieder
+der Nextcloud-Gruppe `admin` sehen alle und können mit allen teilen.
+Öffentliche Links, Freigaben per E-Mail und Federation bleiben unberührt.
+
+`NEXTCLOUD_SHARE_SCOPE` in `/etc/mailinabox.conf` schaltet das um:
+
+* `domain` (Standard): wie oben beschrieben.
+* `all`: Verhalten von upstream, alle sehen alle.
+
+Nach einer Änderung Setup erneut laufen lassen (`sudo mailinabox`).
+
+Funktionsweise: Nextcloud kennt keine Einstellung „gleiche Maildomain“. Deshalb
+wird jede Maildomain zu einer Nextcloud-Gruppe mit dem Namen der Domain
+(`example.com`), und Nextcloud erlaubt das Teilen nur mit Mitgliedern der
+eigenen Gruppen (`shareapi_only_share_with_group_members`,
+`shareapi_restrict_user_enumeration_to_group`, die Teamsuche mit
+`circles search_from_collaborator` nach denselben Regeln). user_external nimmt
+neue Benutzer bei der ersten Anmeldung in die Gruppe auf.
+`tools/nextcloud-share-scope.sh` setzt die Optionen und nimmt alle
+vorhandenen Benutzer in ihre Gruppe auf; Setup ruft es auf und Cron jede
+Stunde, damit neue Domains, neue Benutzer und neue Admins dazukommen.
+Nextcloud kann Admins nicht von der Regel ausnehmen, deshalb nimmt das Skript
+die Mitglieder von `admin` in jede Domaingruppe auf. Mail-in-a-Box macht
+niemanden zum Nextcloud-Admin; `tools/owncloud-unlockadmin.sh` erledigt das
+für ein Konto.
+
+Grenzen:
+
+* Admins sind Mitglied jeder Domaingruppe. Deshalb sieht jeder Benutzer die
+  Admins im Teilen-Dialog, und Admins erhalten, was mit einer ganzen
+  Domaingruppe geteilt wird. Wer das nicht will, schaltet das Teilen mit
+  Gruppen ab:
+  `sudo -u www-data php8.5 /usr/local/lib/owncloud/occ config:app:set core shareapi_allow_group_sharing --value no`.
+* Freigaben zwischen Domains, die es schon gab, bleiben, bis ihr Besitzer sie
+  entfernt.
+* Das Skript nimmt niemanden aus einer Gruppe heraus. Nextcloud löscht die
+  Freigaben eines Benutzers, der eine Gruppe verlässt und danach keine
+  gemeinsame Gruppe mehr mit der Gegenseite hat. Ein Konto, das kein Admin
+  mehr ist, bleibt in allen Domaingruppen, bis es von Hand entfernt wird
+  (`occ group:removeuser <domain> <benutzer>`).
+* Ein Team (Nextcloud Teams), das schon Mitglieder einer anderen Domain hat,
+  funktioniert weiter, das Teilen damit auch. Ein Teammitglied, das über die
+  API mit der genauen Adresse hinzugefügt wird, wird nicht gegen die Domain
+  geprüft.
+* CardDAV-Programme, die das Systemadressbuch schon vorher abgeglichen haben,
+  behalten ihre Kopie der anderen Domains, bis sie es von Grund auf neu
+  abgleichen (Adressbuch oder Konto im Programm entfernen und neu
+  hinzufügen). Ein Programm, das es abgleicht, kann außerdem die Namen
+  gelöschter Konten anderer Domains als „gelöscht“ gemeldet bekommen.
+* Maildomains mit mehr als 64 Zeichen bekommen keine Gruppe (Nextcloud
+  speichert solche Gruppennamen als Hash); ihre Benutzer sehen niemanden.
+* Mit `all` bleiben die Domaingruppen bestehen und erscheinen im
+  Teilen-Dialog als Gruppen, mit denen alle teilen können. `occ group:delete <domain>` entfernt eine,
+  zusammen mit den Freigaben an sie.
 
 
 In-place upgrade to 26.04 / Upgrade an Ort und Stelle

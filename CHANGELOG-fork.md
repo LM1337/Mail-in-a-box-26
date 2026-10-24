@@ -9,6 +9,21 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### New
+
+* Nextcloud: users only see and share with the accounts of their own mail
+  domain (share dialog, contacts menu, system address book, calendar and team
+  member search); members of the Nextcloud group `admin` with everyone.
+  Each mail domain becomes a Nextcloud group (user_external `groupDomain`),
+  `tools/nextcloud-share-scope.sh` sets the sharing options, puts existing
+  users into their group and the admins into all of them; setup runs it, cron
+  every hour. `NEXTCLOUD_SHARE_SCOPE=all` in `/etc/mailinabox.conf` keeps
+  upstream's behaviour. See README-fork.md for the limits.
+* Tests: smoke check `nextcloud-share-scope` (sharee search across domains,
+  system address book, admin view).
+
 ## v78-r2604.0-rc3 (2026-10-23)
 
 In-place upgrade and full-text search. Tested in place on a copy of a
