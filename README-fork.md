@@ -22,6 +22,27 @@ Main differences from upstream v78 (Ubuntu 22.04):
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
 Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md, die behobenen Fehler einzeln in BUGS-fork.md.
 
+Versioning / Versionierung
+--------------------------
+
+Release tags look like `v78-r2604.0-rc3`: `v78` is the upstream release the
+fork is based on (not a version number of its own), `r2604` the fork line for
+Ubuntu 26.04, `.0`, `.1`, … the fork's own releases on that base, and `-rcN`
+a release candidate. The fork never uses an upstream number before upstream
+has released it: when it takes over upstream v79, the counter starts again
+with `v79-r2604.0`. The `v<upstream>` prefix stays because the tools compare
+Mail-in-a-Box versions numerically and `git describe` shows which upstream
+code a box runs. Details: [CONTRIBUTING.md](CONTRIBUTING.md#versioning).
+
+Release-Tags sehen so aus: `v78-r2604.0-rc3`. `v78` ist das Upstream-Release,
+auf dem der Fork beruht (keine eigene Versionsnummer), `r2604` die Linie für
+Ubuntu 26.04, `.0`, `.1` … die eigenen Releases auf dieser Basis und `-rcN`
+ein Release Candidate. Eine Upstream-Nummer verwendet der Fork erst, wenn
+Upstream sie veröffentlicht hat: Mit der Übernahme von upstream v79 beginnt
+der Zähler neu bei `v79-r2604.0`. Das Präfix `v<upstream>` bleibt, weil die
+Werkzeuge Mail-in-a-Box-Versionen als Zahlen vergleichen und `git describe`
+zeigt, welcher Upstream-Stand auf einer Box läuft.
+
 Installation
 ------------
 
