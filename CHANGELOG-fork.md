@@ -14,7 +14,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Project home on GitHub, adaptive fail2ban with the control panel page System >
 Intrusion Protection, Nextcloud sharing within the mail domain, tmux for both
 tools, and the fixes from the in-place upgrade of a production box with rc3
-(B57-B60), B61, B62 and B63.
+(B57-B60), B61 to B64.
 
 ### New
 
@@ -90,6 +90,9 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   injected user names) and `admin-fail2ban-panel`, and in the opt-in fail2ban
   group `fail2ban-adaptive-toggle` (turning adaptive banning off reaches the
   running jails); `prepare-testenv.sh` puts the jump host on the allowlist.
+  The ban checks of that group also accept a ban by the slow jails, which
+  count the failures of all Dovecot (SMTP) protocols together and can ban
+  the source before the fast jail does.
 * Docs: new public README.md (unofficial-fork notice, status, supported paths,
   credits, license); upstream's README is kept as README-upstream.md. New
   `.github/SECURITY.md` (GitHub private vulnerability reporting); fork notes
@@ -232,6 +235,13 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
 * Management: the API call `system/latest-upstream-version` answers HTTP
   503 "The latest version could not be determined." instead of HTTP 500 with
   a traceback in the daemon log when the release cannot be looked up (B63).
+* Management: a failed write to the user database (adding a user or alias
+  that exists, changing the password, quota or privileges of an address
+  that is no user, removing one that does not exist) no longer keeps
+  `users.sqlite` locked. With Python 3.14 the connection stayed open with
+  its transaction until the garbage collector ran, often for minutes, and
+  every other change in the control panel failed with "database is locked"
+  (HTTP 500) until then (B64).
 
 ### Upgrade note
 

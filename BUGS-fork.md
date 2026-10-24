@@ -33,15 +33,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-63 bugs: 1 critical, 11 high, 30 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63 in the test runs of rc4.
+64 bugs: 1 critical, 11 high, 31 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63 and B64 in the test runs of rc4.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 14 |
+| 26.04 change | 15 |
 | Fork | 4 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
@@ -114,6 +114,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 | [B62](#b62) | medium | fail2ban | Control panel and Roundcube filters take a host from text written by a client, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 | [B63](#b63) | low | Management | API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined | Upstream | yes | yes | rc4 |
+| [B64](#b64) | medium | Management | A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail | 26.04 change | no | yes | rc4 |
 
 ## Details
 
@@ -857,6 +858,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** 26.04 test box with rc4 before the project home on GitHub was published (raw.githubusercontent.com answered 404): the call gave HTTP 500, journal `TypeError: The view function for 'system_latest_upstream_version' did not return a valid response`. The control panel itself does not use this call; API clients do.
 * **Report upstream:** MIAB main: return an error status instead of None.
 * **Found by:** test run (rc4); **commit:** see `git log --grep B63`; **fixed in:** v78-r2604.0-rc4
+
+### B64
+
+**A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail** (medium, Management)
+
+* **Symptom:** After one failed change in the control panel or the API, such as adding a user or an alias that already exists or changing the password of an address that is no user, every following change of users, aliases, passwords, quotas or privileges fails with HTTP 500 for minutes; the daemon logs `sqlite3.OperationalError: database is locked`. Reading (logins, mail delivery) keeps working.
+* **Cause:** management/mailconfig.py opens a new connection for each change and returns early on these errors without commit() or close(). The write statement has already started the implicit transaction and taken the database's write lock. Python 3.10 (22.04) freed the connection, and rolled the transaction back, as soon as the function returned. Since Python 3.11 an `sqlite3.Connection` is part of a reference cycle, so it is only freed by the cyclic garbage collector, which in the mostly idle daemon can take minutes. Ubuntu 26.04 has Python 3.14.
+* **Fix:** The error paths of add_mail_user, set_mail_password, set_mail_quota, remove_mail_user, add_remove_mail_user_privilege, add_mail_alias and remove_mail_alias close the connection, which rolls the transaction back.
+* **Affects:** v78 no (Python 3.10), PR #2603 yes. Origin: 26.04 change (Python 3.14).
+* **Evidence:** 26.04 test box: `POST /admin/mail/users/add` for an existing user (HTTP 400), then `sqlite3 users.sqlite "BEGIN IMMEDIATE"` fails with "database is locked" for more than two minutes; the smoke test's second run on the same box failed `provision-test-accounts` and `admin-api-tmp-user-alias` with HTTP 500. A minimal script (connect, failing INSERT, return) leaves the database locked with Python 3.12 and 3.14 and frees it with Python 3.10; `gc.collect()` frees it in all. With the fix, the same three API errors leave the database writable.
+* **Found by:** test run (rc4); **commit:** see `git log --grep B64`; **fixed in:** v78-r2604.0-rc4
 
 ## Not counted above
 

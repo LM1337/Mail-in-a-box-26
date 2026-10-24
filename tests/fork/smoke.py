@@ -2291,11 +2291,16 @@ def main():
         run_check("fail2ban-adaptive-toggle", c_fail2ban_adaptive_toggle, ctx)
         st, _ = run_check("fail2ban-prepare", f2b_prepare, ctx)
         if st == "PASS":
-            run_check("fail2ban-imap", c_fail2ban, ctx, "imap", ["dovecot"], 993)
-            run_check("fail2ban-pop3", c_fail2ban, ctx, "pop3", ["dovecot"], 995)
-            run_check("fail2ban-managesieve", c_fail2ban, ctx, "managesieve", ["dovecot"], 4190)
-            run_check("fail2ban-smtp587", c_fail2ban, ctx, "smtp587", ["miab-postfix587", "postfix-sasl"], 587)
-            run_check("fail2ban-smtp465", c_fail2ban, ctx, "smtp465", ["miab-postfix465", "postfix-sasl"], 465)
+            # The slow jails (on by default) count the failures of all
+            # Dovecot (SMTP) protocols together over hours, so after the
+            # first protocol they can ban the source before the fast jail.
+            dovecot = ["dovecot", "miab-slow-dovecot"]
+            smtp = ["postfix-sasl", "miab-slow-smtp"]
+            run_check("fail2ban-imap", c_fail2ban, ctx, "imap", dovecot, 993)
+            run_check("fail2ban-pop3", c_fail2ban, ctx, "pop3", dovecot, 995)
+            run_check("fail2ban-managesieve", c_fail2ban, ctx, "managesieve", dovecot, 4190)
+            run_check("fail2ban-smtp587", c_fail2ban, ctx, "smtp587", ["miab-postfix587"] + smtp, 587)
+            run_check("fail2ban-smtp465", c_fail2ban, ctx, "smtp465", ["miab-postfix465"] + smtp, 465)
 
     ctx.net.close()
     summary = {}
