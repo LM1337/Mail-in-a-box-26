@@ -3292,12 +3292,17 @@ restriction_items() {
 # The units that were enabled before the upgrade (meta/unit-files.txt of
 # phase snapshot, taken before the masks) and are disabled now. The services
 # of Mail-in-a-Box are enabled again by unquiesce and verify_services (B67);
-# for the others a release upgrade can have had its reasons.
+# for the others a release upgrade can have had its reasons. Units that setup
+# turns off on purpose are left out, so that nobody is told to enable them
+# again: spamd.service (setup/spamassassin.sh, spampd runs SpamAssassin itself;
+# Ubuntu 24.04 had it enabled).
+SETUP_DISABLED_UNITS="spamd.service"
 units_disabled_now() {
 	local ref=$STATE_DIR/meta/unit-files.txt
 	[ -s "$ref" ] || return 0
 	LC_ALL=C join <(awk '$2 == "enabled" {print $1}' "$ref" | LC_ALL=C sort -u) \
-		<(systemctl list-unit-files --no-legend --no-pager 2> /dev/null | awk '$2 == "disabled" {print $1}' | LC_ALL=C sort -u) || true
+		<(systemctl list-unit-files --no-legend --no-pager 2> /dev/null | awk '$2 == "disabled" {print $1}' | LC_ALL=C sort -u) \
+		| grep -vxF -f <(tr ' ' '\n' <<< "$SETUP_DISABLED_UNITS") || true
 }
 
 # Customized files from before the upgrade that are different or gone now.
