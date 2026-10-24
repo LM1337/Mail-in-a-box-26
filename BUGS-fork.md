@@ -32,7 +32,7 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-57 bugs: 1 critical, 11 high, 25 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+57 bugs: 1 critical, 11 high, 26 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3,
 B61 while adding the adaptive fail2ban.
 
 | Origin | Count |
@@ -106,7 +106,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
-| [B61](#b61) | low | fail2ban | recidive bans (1 week) are lost when fail2ban restarts more than a day later (dbpurgeage 1 day) | Upstream | yes | yes | unreleased |
+| [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | unreleased |
 
 ## Details
 
@@ -772,15 +772,15 @@ upstream pull requests, independent of the 26.04 port.
 
 ### B61
 
-**recidive bans (1 week) are lost when fail2ban restarts more than a day later (dbpurgeage 1 day)** (low, fail2ban)
+**SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned** (medium, fail2ban)
 
-* **Symptom:** An address banned by the recidive jail for a week is free again after the next fail2ban restart (setup run, reboot, package update) once the ban is older than one day. The ban stays in effect only as long as fail2ban keeps running.
-* **Cause:** conf/fail2ban/jails.conf enables recidive with jail.conf's `bantime = 1w`, but leaves `dbpurgeage = 1d` of Debian's fail2ban.conf. fail2ban's hourly purge deletes rows of the `bans` table older than dbpurgeage, and on start a jail restores its bans only from that table. jail.conf itself warns at [recidive]: "Increase dbpurgeage defined in fail2ban.conf to e.g. 648000 (7.5 days)".
-* **Fix:** With adaptive banning (the default) `management/fail2ban_admin.py` writes `/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf` with `dbpurgeage` = the setting `memory` (30 days, never less than `bantime_max`, which is at least one week). With adaptive banning turned off the upstream behaviour (1 day) comes back.
+* **Symptom:** A client that sends AUTH on port 465 or 587 with a user name like `x[198.51.100.7]: x authentication failed` gets 198.51.100.7 banned (miab-postfix465/587: 20 in 30 s), not itself. With the fork's adaptive banning the slow jail `miab-slow-smtp` reuses the filter, so the third party is banned after 20 lines in 6 hours, and longer each time.
+* **Cause:** conf/fail2ban/filter.d/miab-postfix-submission.conf had `failregex=postfix/submission/smtpd.*warning.*\[<HOST>\]: .* authentication (failed|aborted)`. The greedy `.*` before `\[<HOST>\]` takes the last `[ip]: ` of the line, and Postfix appends the client-chosen `sasl_username=` after the client address. The same kind of bug as B08's user name in dovecotimap.conf.
+* **Fix:** Anchored like fail2ban's own postfix filter: `^%(__prefix_line)swarning: [-._\w]+\[<HOST>\]: SASL \S+ authentication (?:failed|aborted)` with `_daemon = postfix/submission/smtpd`, so only the address right after `warning:` can be the host. tests/fork/smoke.py `admin-fail2ban-filters` runs fail2ban-regex with such a line on the box.
 * **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04).
-* **Evidence:** From reading the code of fail2ban 1.1.0 (Ubuntu 26.04): server/database.py `purge()` runs `DELETE FROM bans WHERE timeofban < ?` with now - purgeAge; server/jail.py `restoreCurrentBans()` reads `getCurrentBans()` from the `bans` table only. /etc/fail2ban/fail2ban.conf on the 26.04 test box has `dbpurgeage = 1d`; v78's jails.conf and the fork's set no dbpurgeage. Not reproduced with a real week-long ban.
-* **Report upstream:** MIAB main: set dbpurgeage to at least the recidive bantime (a fail2ban.d file from setup/system.sh).
-* **Found by:** review (adaptive fail2ban); **commit:** see `git log --grep B61`; **fixed in:** unreleased
+* **Evidence:** fail2ban-regex 1.1.0 with the old filter and the line `warning: unknown[203.0.113.5]: SASL LOGIN authentication failed: (reason unavailable), sasl_username=x[198.51.100.7]: x authentication failed` gives 198.51.100.7, with the new one 203.0.113.5. That Postfix logs the user name unescaped is from the log format (`sasl_username=` is printed as sent, brackets, colons and spaces are printable); not reproduced with a live AUTH.
+* **Report upstream:** MIAB main: anchor miab-postfix-submission.conf.
+* **Found by:** review (adaptive fail2ban); **commit:** "fail2ban: anchor the SMTP AUTH filter (B61)"; **fixed in:** unreleased
 
 ## Not counted above
 
