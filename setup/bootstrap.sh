@@ -113,8 +113,17 @@ fi
 # Update it.
 if [ "$TAG" != "$(git describe --always)" ]; then
 	echo "Updating Mail-in-a-Box to $TAG . . ."
-	git fetch --depth 1 --force --prune origin tag "$TAG"
-	if ! git checkout -q "$TAG"; then
+	# A release tag, or a branch (TAG=main, for testing): a branch is not a
+	# tag, and a local branch of that name may be old or missing.
+	if git fetch --depth 1 --force --prune origin tag "$TAG" 2> /dev/null; then
+		REF=$TAG
+	elif git fetch --depth 1 --force origin "$TAG"; then
+		REF=FETCH_HEAD
+	else
+		echo "Could not fetch $TAG from $ORIGIN."
+		exit 1
+	fi
+	if ! git checkout -q "$REF"; then
 		echo "Update failed. Did you modify something in $PWD?"
 		exit 1
 	fi

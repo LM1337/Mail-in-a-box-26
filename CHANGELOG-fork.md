@@ -113,7 +113,11 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   only the command that points it to GitHub
   (`git -C ~/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`);
   the hint to the in-place tool is only given for a checkout of upstream
-  Mail-in-a-Box. See "Updating the fork" in README-fork.md.
+  Mail-in-a-Box. See "Updating the fork" in README-fork.md. `TAG=` with a
+  branch (`TAG=main`, for testing) updates an existing checkout to that
+  branch instead of failing with "Update failed" or keeping an old local
+  branch, and a fresh install with a branch no longer prints "couldn't find
+  remote ref".
 * Tools: `tools/upgrade-in-place-to-2604.sh` on a 26.04 box that already
   runs the fork brings `/root/mailinabox` to the release tag (without `TAG=`
   the tool's own one) before setup runs again, instead of running setup of
