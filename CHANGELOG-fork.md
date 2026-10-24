@@ -14,7 +14,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Project home on GitHub, adaptive fail2ban with the control panel page System >
 Intrusion Protection, Nextcloud sharing within the mail domain, tmux for both
 tools, and the fixes from the in-place upgrade of a production box with rc3
-(B57-B60), B61 and B62.
+(B57-B60), B61, B62 and B63.
 
 ### New
 
@@ -229,6 +229,9 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   address banned from the web ports (and through recidive from all); the
   Roundcube filter took the first ` from <ip>.` of the line, which could be
   part of the user name (B62).
+* Management: the API call `system/latest-upstream-version` answers HTTP
+  503 "The latest version could not be determined." instead of HTTP 500 with
+  a traceback in the daemon log when the release cannot be looked up (B63).
 
 ### Upgrade note
 

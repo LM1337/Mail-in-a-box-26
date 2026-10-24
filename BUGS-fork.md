@@ -33,18 +33,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-62 bugs: 1 critical, 11 high, 30 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4.
+63 bugs: 1 critical, 11 high, 30 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63 in the test runs of rc4.
 
 | Origin | Count |
 |---|---|
-| Upstream | 17 |
+| Upstream | 18 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 14 |
 | Fork | 4 |
 
-18 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62). They are candidates for
+19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -113,6 +113,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | rc4 |
 | [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 | [B62](#b62) | medium | fail2ban | Control panel and Roundcube filters take a host from text written by a client, so a client can get a third party banned | Upstream | yes | yes | rc4 |
+| [B63](#b63) | low | Management | API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined | Upstream | yes | yes | rc4 |
 
 ## Details
 
@@ -844,6 +845,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** fail2ban-regex 1.1.0 on the 26.04 test box: the old control panel filter gives 198.51.100.7 for the line `box postfix/submission/smtpd[1234]: warning: unknown[203.0.113.5]: SASL PLAIN authentication failed: (reason unavailable), sasl_username=Mail-in-a-Box Management Daemon: Failed login attempt from ip 198.51.100.7 - timestamp 1`, the new one nothing; both match the two real lines of a failed control panel login (`start[pid]: [time] WARNING in daemon: Mail-in-a-Box Management Daemon: ...` and `box Mail-in-a-Box Management Daemon: ...`). The old Roundcube filter gives 198.51.100.7 for `Login failed for x from 198.51.100.7. AUTHENTICATE against localhost from 203.0.113.5. AUTHENTICATE PLAIN: ...`, the new one 203.0.113.5; a real failed webmail login with a quoted user name was logged lowercased (`"x from 198.51.100.7. authenticate"@example.com`) and gives the real address with both. Dovecot writes /var/log/mail.log itself and truncates long user names, so its lines do not reach syslog. The forged lines were checked with fail2ban-regex only, no ban was made.
 * **Report upstream:** MIAB main: anchor miab-management-daemon.conf and miab-roundcube.conf.
 * **Found by:** review of rc4; **commit:** "fail2ban: anchor the control panel and Roundcube filters (B62)"; **fixed in:** v78-r2604.0-rc4
+
+### B63
+
+**API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined** (low, Management)
+
+* **Symptom:** `POST /admin/system/latest-upstream-version` answers HTTP 500 with Flask's "Internal Server Error" page, and the management daemon logs a TypeError traceback, whenever the release cannot be looked up (no network, the release URL answers 404, or the script has no `TAG=` line). The status checks themselves handle the same case ("Latest Mail-in-a-Box version could not be determined").
+* **Cause:** management/daemon.py `system_latest_upstream_version()` returns the result of `get_latest_miab_version()` as it is. That function returns None in these cases, and a Flask view must not return None; the `try`/`except` around the call does not catch it, because Flask raises the TypeError after the view has returned.
+* **Fix:** The view answers HTTP 503 with "The latest version could not be determined." when the version is None.
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (same view and the same None in v78).
+* **Evidence:** 26.04 test box with rc4 before the project home on GitHub was published (raw.githubusercontent.com answered 404): the call gave HTTP 500, journal `TypeError: The view function for 'system_latest_upstream_version' did not return a valid response`. The control panel itself does not use this call; API clients do.
+* **Report upstream:** MIAB main: return an error status instead of None.
+* **Found by:** test run (rc4); **commit:** see `git log --grep B63`; **fixed in:** v78-r2604.0-rc4
 
 ## Not counted above
 

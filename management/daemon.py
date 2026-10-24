@@ -565,9 +565,13 @@ def system_version():
 def system_latest_upstream_version():
 	from status_checks import get_latest_miab_version
 	try:
-		return get_latest_miab_version()
+		latest = get_latest_miab_version()
 	except Exception as e:
 		return (str(e), 500)
+	if latest is None:
+		# Not reachable, or no TAG= line: say so instead of a 500 from Flask.
+		return ("The latest version could not be determined.", 503)
+	return latest
 
 @app.route('/system/status', methods=["POST"])
 @authorized_personnel_only
