@@ -33,15 +33,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-57 bugs: 1 critical, 11 high, 26 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57 by the in-place upgrade of a production box with rc3.
+58 bugs: 1 critical, 11 high, 27 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B58 by the in-place upgrade of a production box with rc3.
 
 | Origin | Count |
 |---|---|
 | Upstream | 14 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 12 |
+| 26.04 change | 13 |
 | Fork | 4 |
 
 13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
@@ -108,6 +108,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
 | [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
+| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
 
 ## Details
 
@@ -780,6 +781,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** Mail, web, cron and the update timers are stopped and masked before the fresh backup (stop_mail, recorded in the state like quiesce, so the downtime and `--rollback` start there); backup.py cannot start the masked units again. Phase quiesce then only pauses the backups. With `--skip-miab-backup` or backups off, mail keeps running until quiesce as before.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3).
 * **Found by:** production upgrade; **commit:** see `git log --grep B57`; **fixed in:** unreleased
+
+### B58
+
+**mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:")** (medium, Management)
+
+* **Symptom:** On Ubuntu 26.04 the "User logins per hour" part of the weekly "Mail-in-a-Box Usage Report" (and of `management/mail_log.py -l`) lists no IMAP, POP3 or ManageSieve logins at all, only the SMTP logins taken from Postfix. Nothing reports an error.
+* **Cause:** Dovecot 2.4 logs a successful login as `imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=...`; Dovecot 2.3 logged `Info: Login: user=<...>`. scan_dovecot_login_line() only matched `Info: Login: user=<(.*?)>, method=PLAIN, rip=(.*?),`, so no 2.4 line matched. The regex also counted only method=PLAIN, while auth_mechanisms allows LOGIN too.
+* **Fix:** The regex accepts `Login:` and `Logged in:` and any mechanism name. The protocol is named after the service without "-login" (managesieve instead of "mana").
+* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Evidence:** /var/log/mail.log of the 26.04 test box (Dovecot 2.4.2, log_path=/var/log/mail.log): `Oct 23 02:16:29 imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=192.0.2.10, lip=192.0.2.11, mpid=53945, TLS, session=<...>`, likewise for pop3-login and managesieve-login; no "Info: Login:" line. The code before the fix counted none of 108 sample lines as an IMAP/POP3 login (only 3 SMTP logins), the fixed code 24 IMAP, 2 POP3 and 2 ManageSieve logins for alice. The fail2ban filter dovecotimap.conf already matches the 2.4 "Login aborted: ... (auth failed, ...)" lines (fail2ban-regex on the same box), the Postfix lines of mail_log.py are unchanged in 3.10.
+* **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** unreleased
 
 ## Not counted above
 

@@ -835,6 +835,24 @@ def c_sieve_login(ctx):
     return "login ok, scripts: %s" % (", ".join("%s%s" % (n, "*" if a else "") for n, a in scripts) or "none")
 
 
+def c_mail_log_logins(ctx):
+    # The usage report (management/mail_log.py, run weekly by daily_tasks.sh) must
+    # count the IMAP and POP3 logins just made (Dovecot 2.4 logs "Logged in:").
+    rc, miab, _err = ctx.remote.run("awk '$1 == \"cd\" { print $2; exit }' /usr/local/bin/mailinabox")
+    miab = miab.strip()
+    if rc != 0 or not miab:
+        raise Skip("Mail-in-a-Box checkout not found in /usr/local/bin/mailinabox")
+    cmd = "cd %s && management/mail_log.py -l -v -t hour -u %s" % (shlex.quote(miab), shlex.quote(ctx.alice))
+    rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=300)
+    if rc != 0:
+        raise Fail("mail_log.py rc=%d: %s" % (rc, (err or out).strip()[-200:]))
+    counts = {p: sum(int(n) for n in re.findall(r"\b%s \S+: (\d+) times" % p, out)) for p in ("imap", "pop3")}
+    missing = [p for p, n in counts.items() if not n]
+    if missing:
+        raise Fail("no %s logins of %s in the last hour counted" % ("/".join(missing), ctx.alice))
+    return "logins of the last hour: imap %d, pop3 %d" % (counts["imap"], counts["pop3"])
+
+
 # ---------------------------------------------------------------------------
 # provisioning (fresh box): users, aliases, sieve scripts
 # ---------------------------------------------------------------------------
@@ -1874,6 +1892,7 @@ def main():
         run_check("submission-465-login", c_sub465, ctx)
         run_check("submission-587-login", c_sub587, ctx)
         run_check("managesieve-4190-login", c_sieve_login, ctx)
+        run_check("mail-log-logins", c_mail_log_logins, ctx)
     if want("migrated"):
         print("== migrated (manifest comparison, before new mail)")
         run_check("mig-users-aliases", c_mig_users_aliases, ctx)
