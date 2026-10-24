@@ -3105,15 +3105,41 @@ compare_fingerprints() {
 	done
 }
 
+# The items (split at commas) of the smtpd_*_restrictions from before that are
+# gone now, as "parameter: item". Setup rewrites these parameters and drops
+# what an administrator added (e.g. a check_sender_access before greylisting);
+# upstream Mail-in-a-Box set the same items from v68 to v78.
+postfix_restrictions_gone() {
+	local before=$STATE_DIR/meta/postconf-n.txt p old now item
+	[ -s "$before" ] || return 0
+	for p in smtpd_client_restrictions smtpd_helo_restrictions smtpd_sender_restrictions smtpd_relay_restrictions \
+		smtpd_recipient_restrictions smtpd_data_restrictions smtpd_end_of_data_restrictions; do
+		old=$(sed -n "s/^${p}[[:space:]]*=[[:space:]]*//p" "$before")
+		[ -n "$old" ] || continue
+		now=$(postconf -h "$p" 2> /dev/null | restriction_items)
+		while IFS= read -r item; do
+			grep -qxF -- "$item" <<< "$now" || echo "$p: $item"
+		done < <(restriction_items <<< "$old")
+	done
+}
+
+restriction_items() {
+	tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g; /^$/d'
+}
+
 # Customized files from before the upgrade that are different or gone now.
 # Like etc_report in tools/migrate-to-2604.sh, for one machine.
 etc_report() {
-	local out=$STATE_DIR/etc-report.txt f d rel
+	local out=$STATE_DIR/etc-report.txt f d rel gone line
 	[ -d "$OLD_ETC" ] || return 0
+	gone=$(postfix_restrictions_gone)
 	{
 		echo "Configuration from before the upgrade that is different or gone now."
 		echo "The old /etc (as of $(state_get ETC_SAVED_AT)) is in $OLD_ETC,"
 		echo "what this tool moved away in $MOVED_DIR."
+		echo
+		echo "== Postfix restrictions from before that are gone now (redo them in main.cf)"
+		if [ -n "$gone" ]; then sed 's/^/  /' <<< "$gone"; fi
 		echo
 		echo "== Postfix settings (postconf -n) from before that differ now"
 		if [ -s "$STATE_DIR/meta/postconf-n.txt" ]; then
@@ -3148,6 +3174,14 @@ etc_report() {
 	} > "$out"
 	say "Configuration from before that is different or gone now: $out"
 	sed -n '1,80p' "$out"
+	# Restrictions decide which mail is accepted: a lost one is a failed check
+	# (redo it, or accept with --finish), not only a line in the report.
+	if [ -n "$gone" ]; then
+		while IFS= read -r line; do
+			warn "Postfix restriction from before is gone: $line"
+			VERIFY_PROBLEMS+=("Postfix restriction from before is gone: $line (see $out)")
+		done <<< "$gone"
+	fi
 }
 
 phase_verify() {

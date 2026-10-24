@@ -1521,6 +1521,35 @@ def c_quotaroot(ctx):
     return "bob STORAGE %d / %d KiB" % (used, limit)
 
 
+GREYLIST_BYPASS = "/etc/postfix/greylist_bypass_senders"
+
+
+def c_greylist_bypass(ctx):
+    # prepare-testenv.sh whitelists the peers in postgrey, so greylisting cannot
+    # be watched on port 25 here: check what setup/mail-postfix.sh configured.
+    rc, _out, _err = ctx.remote.run("test -f %s" % GREYLIST_BYPASS)
+    if rc != 0:
+        raise Skip("no %s on the box" % GREYLIST_BYPASS)
+    rc, out, err = ctx.remote.run("postconf -h smtpd_recipient_restrictions", timeout=60)
+    items = [i.strip() for i in out.strip().split(",")]
+    bypass = "check_sender_access hash:" + GREYLIST_BYPASS
+    grey = "check_policy_service inet:127.0.0.1:10023"
+    quota = "check_policy_service inet:127.0.0.1:12340"
+    for item in (bypass, grey, quota):
+        if item not in items:
+            raise Fail("%r missing in smtpd_recipient_restrictions: %s" % (item, out.strip()[:200]))
+    if not items.index(quota) < items.index(bypass) == items.index(grey) - 1:
+        raise Fail("order should be quota check, sender bypass, postgrey: %s" % out.strip()[:200])
+    rc, key, _err = ctx.remote.run("sed -n 's/^\\([^#[:space:]][^[:space:]]*\\).*/\\1/p' %s" % GREYLIST_BYPASS)
+    key = (key.split() or [""])[0]
+    if not key:
+        return ("PASS", "restrictions ok; the file has no entries")
+    rc, val, err = ctx.remote.run("postmap -q %s hash:%s" % (shlex.quote(key), GREYLIST_BYPASS), sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("postmap -q %s gives nothing (is the .db older than the file?) %s" % (key, err.strip()[:150]))
+    return "quota check, then %s (%s -> %s), then postgrey" % (bypass, key, val.strip()[:20])
+
+
 def c_vacation(ctx):
     f = _flow(ctx)
     if f["smtp"]["vacation"][0] != 250:
@@ -1889,6 +1918,7 @@ def main():
         run_check("no-quota-reject-for-aliases", c_no_quota_reject_alias, ctx)
         run_check("overquota-reject-bob", c_overquota, ctx)
         run_check("imap-getquotaroot-bob", c_quotaroot, ctx)
+        run_check("greylist-bypass-config", c_greylist_bypass, ctx)
         run_check("sieve-filter-filtered", c_delivery, ctx, "filtered", "Filtered", "[filtered] mail")
         run_check("sieve-vacation-reply", c_vacation, ctx)
         run_check("submission-465-delivery", c_submission_delivery, ctx, "s465", "465 submission")

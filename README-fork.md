@@ -48,6 +48,54 @@ noch keinen Release-Tag gibt, den Zweig `main` nehmen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
 
 
+Greylisting exceptions / Ausnahmen vom Greylisting
+--------------------------------------------------
+
+### English
+
+Postgrey delays mail from unknown senders by a few minutes. Single senders
+can skip that delay: list them in `/etc/postfix/greylist_bypass_senders`
+(Postfix access(5) format, one envelope sender address or domain per line,
+followed by `OK`) and run setup (`sudo mailinabox`):
+
+    newsletter@example.com  OK
+    example.org             OK
+
+Setup runs `postmap` on the file and adds
+`check_sender_access hash:/etc/postfix/greylist_bypass_senders` to
+`smtpd_recipient_restrictions` right before greylisting; the quota check
+moves in front of it, so a full mailbox is still refused. The file is yours:
+setup never writes it and keeps the rule on every run. After later changes,
+`postmap /etc/postfix/greylist_bypass_senders` is enough. Without the file the
+restrictions are those of upstream Mail-in-a-Box. The envelope sender is easy
+to forge, so list single senders, not the domains of whole mail providers.
+Servers known by their IP address go into postgrey's own
+`/etc/postgrey/whitelist_clients.local` instead.
+
+### Deutsch
+
+Postgrey hält Mail von unbekannten Absendern einige Minuten zurück. Einzelne
+Absender können diese Verzögerung überspringen: Sie kommen in
+`/etc/postfix/greylist_bypass_senders` (Format von Postfix access(5), je Zeile
+eine Absenderadresse des Umschlags oder eine Domain, dahinter `OK`), danach
+setup aufrufen (`sudo mailinabox`):
+
+    newsletter@example.com  OK
+    example.org             OK
+
+Setup führt `postmap` auf der Datei aus und setzt
+`check_sender_access hash:/etc/postfix/greylist_bypass_senders` in
+`smtpd_recipient_restrictions` unmittelbar vor das Greylisting; die
+Quota-Prüfung rückt davor, ein volles Postfach wird also weiter abgewiesen.
+Die Datei gehört dem Administrator: setup schreibt sie nie und behält die
+Regel bei jedem Lauf bei. Nach späteren Änderungen genügt
+`postmap /etc/postfix/greylist_bypass_senders`. Ohne die Datei bleiben die
+Regeln die von upstream Mail-in-a-Box. Der Absender des Umschlags lässt sich
+leicht fälschen, deshalb einzelne Absender eintragen, nicht die Domains ganzer
+Mail-Anbieter. Server, die man an ihrer IP-Adresse erkennt, gehören stattdessen
+in die Liste von postgrey selbst, `/etc/postgrey/whitelist_clients.local`.
+
+
 In-place upgrade to 26.04 / Upgrade an Ort und Stelle
 -----------------------------------------------------
 
@@ -112,7 +160,10 @@ What it does, in phases that continue on their own after each reboot:
    `MOVED_DIR`; a non-zero exit stops the upgrade.
 8. **verify** and **finish**: counts and fingerprints compared with before,
    services, Nextcloud, status checks, a report of configuration that changed;
-   backups and timers back on.
+   backups and timers back on. A Postfix restriction from before that setup
+   dropped (an item of `smtpd_*_restrictions`) is a failed check: redo it in
+   `main.cf` or accept the result with `--finish`. The greylisting exceptions
+   (see above) are kept by setup.
 
 Services of your own that use the mail (e.g. a docker compose stack that logs
 in by IMAP or receives Dovecot push calls) can be stopped and started with
@@ -205,7 +256,11 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
    `MOVED_DIR`; ein Exit-Code ungleich 0 hält das Upgrade an.
 8. **verify** und **finish**: Zählungen und Fingerabdrücke gegen vorher,
    Dienste, Nextcloud, Statusprüfungen, ein Bericht über geänderte
-   Konfiguration; Sicherungen und Timer wieder an.
+   Konfiguration; Sicherungen und Timer wieder an. Eine Postfix-Regel von
+   vorher, die setup verworfen hat (ein Eintrag in `smtpd_*_restrictions`),
+   gilt als fehlgeschlagene Prüfung: in `main.cf` wieder eintragen oder das
+   Ergebnis mit `--finish` annehmen. Die Ausnahmen vom Greylisting (siehe oben)
+   behält setup bei.
 
 Eigene Dienste, die die Mail nutzen (etwa ein docker-compose-Stack, der sich
 per IMAP anmeldet oder Push-Aufrufe von Dovecot empfängt), lassen sich mit
