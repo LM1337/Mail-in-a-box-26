@@ -9,6 +9,23 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+Fixes from the update of a copy of a production box from rc3 to rc4 (B66
+and following).
+
+### Fixed
+
+* Dovecot: vacation replies and Sieve redirects no longer create the
+  folders `dovecot`, `dovecot.lda-dupes` and `dovecot.lda-dupes.locks`.
+  Dovecot 2.4 put the lock files of its duplicate database into a
+  directory in the Maildir, which Maildir++ showed as a folder; setup sets
+  `mail_volatile_path` to `/run/dovecot-volatile/<domain>/<user>` (a tmpfs
+  directory, `/etc/tmpfiles.d/mailinabox-dovecot.conf`) and
+  `maildir_stat_dirs = yes`. On existing boxes setup deletes these folders
+  (through doveadm, with their subscriptions and full-text index) unless
+  one holds messages (B66).
+
 ## v78-r2604.0-rc4 (2026-10-24)
 
 Project home on GitHub, adaptive fail2ban with the control panel page System >

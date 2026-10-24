@@ -30,18 +30,19 @@ reproduced on a box, the evidence line says so.
   * *test run*: the T1/T2 smoke tests on VMs.
   * *in-place test*: T3, the in-place upgrade of a copy of a production box.
   * *production upgrade*: the in-place upgrade of a production box with rc3.
+  * *update test*: the update of a copy of that production box from rc3 to rc4, and the fresh rc4 test box.
 
 ## Summary
 
-65 bugs: 1 critical, 12 high, 31 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4.
+66 bugs: 1 critical, 12 high, 32 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66 in the update test of rc4.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 16 |
+| 26.04 change | 17 |
 | Fork | 4 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
@@ -116,6 +117,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B63](#b63) | low | Management | API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined | Upstream | yes | yes | rc4 |
 | [B64](#b64) | medium | Management | A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail | 26.04 change | no | yes | rc4 |
 | [B65](#b65) | high | Setup | 'curl ... \| sudo bash' hangs at setup's first dialog box: sudo-rs stops it | 26.04 change | no | yes | rc4 |
+| [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | unreleased |
 
 ## Details
 
@@ -881,6 +883,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (22.04), PR #2603 yes (upstream's command on 26.04). Origin: 26.04 change (sudo-rs).
 * **Evidence:** 26.04 test box with sudo-rs 0.2.13, in tmux and over a plain `ssh -tt`: `cat t.sh | sudo bash` with `t.sh` = `dialog --msgbox x 6 30; echo RC=$?` shows nothing and the dialog stays stopped after Enter; the same with `sudo.ws`, with `sudo bash -c "$(cat t.sh)"` and with `sudo bash -c 'cat t.sh | bash'` shows the box and ends with RC=0 on Enter. The update of the rc3 test box with `curl ... | sudo SOURCE=... TAG=... bash` hung like this (ps: `dialog` and `setup/start.sh` in state T+). A `printf q > /dev/tty; read a < /dev/tty` through the same pipe works.
 * **Found by:** test run (rc4); **commit:** see `git log --grep B65`; **fixed in:** v78-r2604.0-rc4
+
+### B66
+
+**Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks"** (medium, Dovecot)
+
+* **Symptom:** After the first vacation reply or Sieve redirect of a user, mail programs, Roundcube and `doveadm mailbox list` show the folders `dovecot`, `dovecot.lda-dupes` and `dovecot.lda-dupes.locks`; full-text search indexes `dovecot.lda-dupes.locks` as a folder, and LMTP can log `Error: maildir: stat(.../.dovecot.lda-dupes/tmp) failed: Not a directory` (the mail is still delivered). A user cannot get rid of them: Dovecot creates them again.
+* **Cause:** The user's home (userdb `home`) is the root of the Maildir, as in upstream. Dovecot keeps the duplicate database of vacation and redirect in the home (`~/.dovecot.lda-dupes`, a file; that is the same on 22.04), and Dovecot 2.4 locks each entry with a file in a directory next to it, `~/.dovecot.lda-dupes.locks/`, unless `mail_volatile_path` is set (lib-storage/mail-duplicate.c). Maildir++ takes every directory whose name starts with a dot for a folder, so the lock directory became the folder `dovecot.lda-dupes.locks` (Dovecot then made a Maildir of it), with `dovecot` and `dovecot.lda-dupes` as its parents. Dovecot 2.3 (22.04) used a single dotlock file `.dovecot.lda-dupes.lock`, which a listing skips. Dovecot's documentation advises against a home that is the Maildir for this reason ("Non-mailbox files may show up as mailboxes").
+* **Fix:** setup/mail-dovecot.sh sets `mail_volatile_path = /run/dovecot-volatile/%{user|domain}/%{user|username}` (a tmpfs directory of the mail user, created by `/etc/tmpfiles.d/mailinabox-dovecot.conf`), so these lock files, and Dovecot's other short-lived lock files, are no longer written into the Maildir; and `maildir_stat_dirs = yes`, which keeps the database file out of the folder list also on file systems that do not report file types when listing (on ext4 the setting has no effect). The home stays where it is, so Sieve, quota, the full-text indexes and backups are unchanged. On existing boxes setup deletes the lock directory through `doveadm mailbox delete -s` (it unsubscribes it and updates the folder list), unsubscribes `dovecot.lda-dupes` and `dovecot`, and removes its full-text index; a lock directory that holds messages (moved there with a mail program) is kept with a message. The duplicate database stays, so a sender who got a vacation reply does not get a second one.
+* **Affects:** v78 no (Dovecot 2.3), PR #2603 yes. Origin: 26.04 change (Dovecot 2.4).
+* **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `doveadm mailbox list -u` of the user with the vacation reply listed `dovecot`, `dovecot.lda-dupes` and `dovecot.lda-dupes.locks`; the directory `.dovecot.lda-dupes.locks` in the Maildir had `cur/`, `new/`, `tmp/` and `dovecot-uidlist`, and xapian-indexes had a database for it; the box copy logged the LMTP error above. Dovecot 2.4.2 source: `mail_duplicate_db_init()` puts the database at `<home>/.dovecot.<name>` and the lock directory at `<mail_volatile_path or home>/.dovecot.<name>.locks`. With the fix on the fresh box: setup removed the folders of the existing user (folder list, subscriptions and its full-text index clean), and for a new user with a vacation script two mails from the same sender gave one reply ("discarded duplicate vacation response" for the second), the lock directory was in `/run/dovecot-volatile/<domain>/<user>/` and no folder appeared.
+* **Report upstream:** MIAB main: relevant once upstream moves to Dovecot 2.4 (PR #2603).
+* **Found by:** update test; **commit:** see `git log --grep B66`; **fixed in:** unreleased
 
 ## Not counted above
 
