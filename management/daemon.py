@@ -674,8 +674,12 @@ def privacy_status_set():
 @app.route('/system/fail2ban', methods=["GET"])
 @authorized_personnel_only
 def fail2ban_status():
-	from fail2ban_admin import get_status
-	return json_response(get_status(env))
+	from fail2ban_admin import get_status, client_info
+	status = get_status(env)
+	# nginx puts the client's address in X-Forwarded-For (see log_failed_login).
+	ip = request.headers.getlist("X-Forwarded-For")[0] if request.headers.getlist("X-Forwarded-For") else request.remote_addr
+	status["client"] = client_info(env, ip, status["settings"])
+	return json_response(status)
 
 @app.route('/system/fail2ban/settings', methods=["GET"])
 @authorized_personnel_only

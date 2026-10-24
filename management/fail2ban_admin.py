@@ -226,7 +226,7 @@ def render_config(env, settings):
 	lines = [
 		"# Mail-in-a-Box (fork): adaptive fail2ban. Do not edit.",
 		"# Written by management/fail2ban_admin.py from the \"fail2ban\" settings in",
-		"# " + os.path.join(env["STORAGE_ROOT"], "settings.yaml") + " (control panel: System > Intrusion protection).",
+		"# " + os.path.join(env["STORAGE_ROOT"], "settings.yaml") + " (control panel: System > Intrusion Protection).",
 		"# Read after mailinabox.conf ('_' sorts after '.'), so the [DEFAULT] values here win.",
 		"",
 		"[DEFAULT]",
@@ -639,6 +639,20 @@ def _own_ips(env):
 				pass
 	return ret
 
+def client_info(env, ip, settings):
+	# The address the control panel is used from (as nginx passes it on), for
+	# the "your address" hint on the page. None if it is not a valid address.
+	try:
+		ip = normalize_ip(ip)
+	except ValueError:
+		return None
+	a = ipaddress.ip_address(ip)
+	return {
+		"ip": ip,
+		"own": a.is_loopback or a in _own_ips(env),
+		"allowlisted": any(a in ipaddress.ip_network(n, strict=False) for n in settings["allowlist"]),
+	}
+
 def failed_login_report(env, settings=None, now=None, events=None, with_bans=True):
 	# Accounts with failed logins from many IPs in the last 24 h, and IPs that
 	# keep failing for 12 h or more within the last 48 h. Only accounts that
@@ -756,7 +770,7 @@ def check_failed_logins(rounded_values, env, output):
 		output.print_warning(w)
 	if not config_is_current(env, settings):
 		output.print_warning("""The fail2ban configuration does not match the intrusion protection settings.
-			Save the settings again in the control panel (System > Intrusion protection) or re-run setup.""")
+			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
 
 	try:
 		report = failed_login_report(env, settings)
@@ -780,7 +794,7 @@ def check_failed_logins(rounded_values, env, output):
 		problems = True
 		if rounded_values:
 			output.print_warning(f"""Some IP addresses kept failing to log in for {report['persistent_min_hours']}
-				hours or more without being banned. See System > Intrusion protection in the control panel.""")
+				hours or more without being banned. See System > Intrusion Protection in the control panel.""")
 		else:
 			if settings["slow_jails"]:
 				hint = "If this keeps happening, lower the number of failures or lengthen the window of the slow jails."
@@ -791,7 +805,7 @@ def check_failed_logins(rounded_values, env, output):
 				count = "At least " + count
 			output.print_warning(f"""{count} IP address(es) kept failing to log in for {report['persistent_min_hours']}
 				hours or more within the last {report['scan_hours']} hours without being banned (a slow attack below
-				the ban thresholds). {hint} (System > Intrusion protection in the control panel)""")
+				the ban thresholds). {hint} (System > Intrusion Protection in the control panel)""")
 			for p in lurking[:5]:
 				output.print_line(f"{p['ip']}: {p['failures']} failures in {p['hours']} hours")
 	for p in own[:5]:
