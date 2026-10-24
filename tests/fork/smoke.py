@@ -1279,6 +1279,131 @@ def c_nc_dav(ctx, kind):
     return "207, %d entries (user id %s)" % (n, uid)
 
 
+def nc_user_info(ctx, user, pw):
+    r = http_req(ctx, "GET", "/cloud/ocs/v1.php/cloud/user?format=json",
+                 headers={"OCS-APIRequest": "true"}, auth=(user, pw))
+    if r.status != 200:
+        raise Fail("OCS user lookup for %s: HTTP %d" % (user, r.status))
+    return r.json()["ocs"]["data"]
+
+
+def nc_sharees(ctx, user, pw, search):
+    """User ids and group ids the share dialog offers to user for search."""
+    q = urllib.parse.urlencode([("search", search), ("itemType", "file"), ("perPage", "50"),
+                                ("format", "json"), ("shareType[]", "0"), ("shareType[]", "1")])
+    r = http_req(ctx, "GET", "/cloud/ocs/v2.php/apps/files_sharing/api/v1/sharees?" + q,
+                 headers={"OCS-APIRequest": "true"}, auth=(user, pw))
+    if r.status != 200:
+        raise Fail("sharee search as %s: HTTP %d" % (user, r.status))
+    d = r.json()["ocs"]["data"]
+    exact = d.get("exact") or {}
+    users = {e["value"]["shareWith"] for e in (d.get("users") or []) + (exact.get("users") or [])}
+    groups = {e["value"]["shareWith"] for e in (d.get("groups") or []) + (exact.get("groups") or [])}
+    return users, groups
+
+
+def nc_share_scope_sync(ctx):
+    """With --ssh: run the cron job of tools/nextcloud-share-scope.sh (admins into
+    the domain groups that first logins just created) and fill the system
+    address book. Returns False without --ssh or without that cron job."""
+    if not ctx.remote.available():
+        return False
+    rc, out, _ = ctx.remote.run("grep -o '(cd .*nextcloud-share-scope.sh --cron)' /etc/cron.d/mailinabox-nextcloud")
+    line = out.strip().splitlines()[0] if rc == 0 and out.strip() else ""
+    if not line:
+        return False
+    ctx.remote.run("bash -c " + shlex.quote(line), sudo=True, timeout=300, check=True)
+    m = re.search(r"PHP_VER=(\S+)", line)
+    ctx.remote.run("sudo -n -u www-data php%s /usr/local/lib/owncloud/occ dav:sync-system-addressbook"
+                   % (m.group(1) if m else ""), timeout=300, check=True)
+    return True
+
+
+def c_nc_share_scope(ctx):
+    """NEXTCLOUD_SHARE_SCOPE: alice (domain A) finds carol (A), not bob (domain B); a Nextcloud admin finds both."""
+    scope = "domain"
+    if ctx.remote.available():
+        rc, out, _ = ctx.remote.run("sed -n 's/^NEXTCLOUD_SHARE_SCOPE=//p' /etc/mailinabox.conf")
+        if rc == 0 and out.strip():
+            scope = out.strip()
+    # Log every account in once, so that Nextcloud knows it (the first login
+    # creates the user and, with groupDomain, its domain group membership).
+    alice, bob, carol = (nc_userid(ctx, u) for u in (ctx.alice, ctx.bob, ctx.carol))
+    pw = ctx.user_pw
+    out = ["scope " + scope]
+    synced = scope == "domain" and nc_share_scope_sync(ctx)
+    if scope == "domain":
+        groups = nc_user_info(ctx, ctx.alice, pw).get("groups") or []
+        if ctx.domain.lower() not in groups:
+            raise Fail("alice is not in the group %s (groups: %s)" % (ctx.domain.lower(), ", ".join(groups) or "none"))
+    found, _ = nc_sharees(ctx, ctx.alice, pw, "carol")
+    if carol not in found:
+        raise Fail("alice does not find carol (same domain)")
+    found_b, groups_b = set(), set()
+    for term in ("bob", ctx.bob):
+        u, g = nc_sharees(ctx, ctx.alice, pw, term)
+        found_b |= u
+        groups_b |= g
+    if scope == "domain":
+        if bob in found_b:
+            raise Fail("alice finds bob of %s in the share dialog" % ctx.seed2)
+        u, g = nc_sharees(ctx, ctx.alice, pw, ctx.seed2)
+        if bob in u or ctx.seed2 in g:
+            raise Fail("alice finds the domain %s (users %s, groups %s)" % (ctx.seed2, sorted(u), sorted(g)))
+        # The system address book over CardDAV must not list bob either.
+        path = "/cloud/remote.php/dav/addressbooks/users/%s/z-server-generated--system/" % urllib.parse.quote(alice)
+        body = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>'
+        r = http_req(ctx, "PROPFIND", path, auth=(ctx.alice, pw), body=body,
+                     headers={"Depth": "1", "Content-Type": "application/xml"})
+        if r.status == 207:
+            hrefs = urllib.parse.unquote(r.text())
+            if ":" + bob + ".vcf" in hrefs:
+                raise Fail("the system address book of alice lists bob")
+            # Positive control: without carol's card the check above proves nothing.
+            # Cards of user_external accounts appear only after a sync (--ssh).
+            if ":" + carol + ".vcf" in hrefs:
+                out.append("system address book %d cards, carol but not bob" % r.text().count(".vcf<"))
+            elif synced:
+                raise Fail("the system address book of alice does not list carol (same domain)")
+            else:
+                out.append("system address book not checked (no card of carol yet, needs --ssh)")
+        elif r.status == 404:
+            out.append("system address book not checked (not exposed, HTTP 404)")
+        else:
+            raise Fail("PROPFIND %s HTTP %d" % (path, r.status))
+        out.append("alice finds carol, not bob")
+    else:
+        if bob not in found_b:
+            raise Fail("scope all: alice does not find bob of %s" % ctx.seed2)
+        out.append("alice finds carol and bob")
+    # A member of the Nextcloud group admin sees every domain.
+    if not ctx.admin_user or not ctx.admin_pw:
+        out.append("admin part skipped (no admin credentials)")
+        return "; ".join(out)
+    info = nc_user_info(ctx, ctx.admin_user, ctx.admin_pw)
+    if "admin" not in (info.get("groups") or []):
+        out.append("admin part skipped (%s is not in the Nextcloud group admin, see tools/owncloud-unlockadmin.sh)"
+                   % ctx.admin_user)
+        return "; ".join(out)
+    if scope == "domain":
+        # Admins are put into the domain groups by the cron job; a group that a
+        # first login above created only has them after its next run (--ssh runs it).
+        lacking = [d for d in (ctx.domain.lower(), ctx.seed2.lower()) if d not in (info.get("groups") or [])]
+        if lacking and synced:
+            raise Fail("the Nextcloud admin %s is not in the group(s) %s after the cron job"
+                       % (ctx.admin_user, ", ".join(lacking)))
+        if lacking:
+            out.append("admin part skipped (%s not yet in the group(s) %s, cron job pending; --ssh runs it)"
+                       % (ctx.admin_user, ", ".join(lacking)))
+            return "; ".join(out)
+    missing = [who for who, uid, term in (("bob", bob, ctx.bob), ("carol", carol, ctx.carol))
+               if uid not in nc_sharees(ctx, ctx.admin_user, ctx.admin_pw, term)[0]]
+    if missing:
+        raise Fail("the Nextcloud admin %s does not find %s" % (ctx.admin_user, ", ".join(missing)))
+    out.append("admin finds bob and carol")
+    return "; ".join(out)
+
+
 def c_roundcube(ctx):
     r = http_req(ctx, "GET", "/mail/")
     if r.status != 200 or 'name="_user"' not in r.text():
@@ -1943,6 +2068,7 @@ def main():
         run_check("nextcloud-caldav-propfind", c_nc_dav, ctx, "caldav")
         run_check("nextcloud-carddav-propfind", c_nc_dav, ctx, "carddav")
         run_check("nextcloud-webdav-propfind", c_nc_dav, ctx, "webdav")
+        run_check("nextcloud-share-scope", c_nc_share_scope, ctx)
         run_check("roundcube-login", c_roundcube, ctx)
         run_check("zpush-options", c_zpush_options, ctx)
         run_check("zpush-autodiscover", c_zpush_autodiscover, ctx)

@@ -349,6 +349,16 @@ fi
 
 # ### Configuring Nextcloud
 
+# With NEXTCLOUD_SHARE_SCOPE=domain (the default, see tools/nextcloud-share-scope.sh)
+# user_external puts each new user into a group named after their mail domain at the
+# first login: the 6th argument of the IMAP backend (groupDomain). "all" keeps upstream's
+# behaviour without these groups.
+if [ "${NEXTCLOUD_SHARE_SCOPE:-domain}" = all ]; then
+	NC_GROUP_DOMAIN=false
+else
+	NC_GROUP_DOMAIN=true
+fi
+
 # Setup Nextcloud if the Nextcloud database does not yet exist. Running setup when
 # the database does exist wipes the database and user data.
 if [ ! -f "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
@@ -372,7 +382,7 @@ if [ ! -f "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
     array(
       'class' => '\OCA\UserExternal\IMAP',
       'arguments' => array(
-        '127.0.0.1', 143, null, null, false, false
+        '127.0.0.1', 143, null, null, false, $NC_GROUP_DOMAIN
        ),
     ),
   ),
@@ -441,7 +451,7 @@ include("$STORAGE_ROOT/owncloud/config.php");
   array(
     'class' => '\OCA\UserExternal\IMAP',
     'arguments' => array(
-      '127.0.0.1', 143, null, null, false, false
+      '127.0.0.1', 143, null, null, false, $NC_GROUP_DOMAIN
     ),
   ),
 );
@@ -530,11 +540,23 @@ MAILTO=root
 */5 * * * *	www-data	php$PHP_VER -f /usr/local/lib/owncloud/cron.php
 */5 * * * *	www-data	php$PHP_VER -f /usr/local/lib/owncloud/occ dav:send-event-reminders
 EOF
+if [ "${NEXTCLOUD_SHARE_SCOPE:-domain}" != all ]; then
+	# Puts new users, new domains and new admins into the domain groups (see below).
+	# Every 5 minutes, because the admins do not see a new domain until then.
+	echo "*/5 * * * *	root	(cd $PWD && PHP_VER=$PHP_VER tools/nextcloud-share-scope.sh --cron)" >> /etc/cron.d/mailinabox-nextcloud
+fi
 chmod +x /etc/cron.d/mailinabox-nextcloud
 
 # We also need to change the sending mode from background-job to occ.
 # Or else the reminders will just be sent as soon as possible when the background jobs run.
 hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config:app:set dav sendEventRemindersMode --value occ
+
+# Sharing within the own mail domain (NEXTCLOUD_SHARE_SCOPE=domain, the default):
+# users only see and share with the accounts of their mail domain, members of the
+# group "admin" with everyone. The script sets the sharing options and puts all
+# existing users into their domain group, not only those who log in from now on.
+# With NEXTCLOUD_SHARE_SCOPE=all it removes the options again.
+PHP_VER=$PHP_VER tools/nextcloud-share-scope.sh
 
 # Now set the config to read-only.
 # Do this only at the very bottom when no further occ commands are needed.

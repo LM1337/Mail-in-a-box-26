@@ -33,6 +33,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   hand on every run. To turn it off, delete the file and run setup (keep the
   `.db` until then). `tools/migrate-to-2604.sh` takes the file over from the
   old box before setup (not from a backup, which does not contain it).
+* Nextcloud: users only see and share with the accounts of their own mail
+  domain (share dialog, contacts menu, system address book, calendar and team
+  member search); members of the Nextcloud group `admin` with everyone.
+  Each mail domain becomes a Nextcloud group (user_external `groupDomain`),
+  `tools/nextcloud-share-scope.sh` sets the sharing options, puts existing
+  users into their group and the admins into all of them; setup runs it, cron
+  every 5 minutes. `NEXTCLOUD_SHARE_SCOPE=all` in `/etc/mailinabox.conf` keeps
+  upstream's behaviour and puts back the sharing options from before. See
+  README-fork.md for the limits.
+* Tests: smoke check `nextcloud-share-scope` (sharee search across domains,
+  system address book, admin view).
 
 ### Fixed
 

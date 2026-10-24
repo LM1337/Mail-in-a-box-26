@@ -21,3 +21,7 @@ echo "Press enter to continue."
 read
 
 sudo -u www-data "php$PHP_VER" /usr/local/lib/owncloud/occ group:adduser admin "$ADMIN" && echo "Done."
+
+# With NEXTCLOUD_SHARE_SCOPE=domain, admins see the accounts of all mail domains
+# once they are in every domain group.
+"$(dirname "$0")/nextcloud-share-scope.sh"
