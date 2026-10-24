@@ -1568,6 +1568,20 @@ def c_greylist_bypass(ctx):
     return "quota check, then %s (%s -> %s), then postgrey" % (bypass, key, val.strip()[:20])
 
 
+def c_root_mail(ctx):
+    # Mail of cron and root goes to root@ + /etc/mailname (myorigin); setup sets
+    # /etc/mailname to PRIMARY_HOSTNAME and makes root@ an automatic alias.
+    rc, out, err = ctx.remote.run("cat /etc/mailname")
+    if rc != 0 or out.strip() != ctx.hostname:
+        raise Fail("/etc/mailname is %r, expected %s" % (out.strip()[:80], ctx.hostname))
+    root = "root@" + ctx.hostname
+    rc, out, err = ctx.remote.run("postmap -q %s sqlite:/etc/postfix/virtual-alias-maps.cf" % shlex.quote(root),
+                                  sudo=True, timeout=60)
+    if rc != 0 or not out.strip():
+        raise Fail("%s is no alias, system mail would bounce (rc=%d %s)" % (root, rc, err.strip()[:120]))
+    return "/etc/mailname ok, %s -> %s" % (root, out.strip()[:60])
+
+
 def c_vacation(ctx):
     f = _flow(ctx)
     if f["smtp"]["vacation"][0] != 250:
@@ -1938,6 +1952,7 @@ def main():
         run_check("overquota-reject-bob", c_overquota, ctx)
         run_check("imap-getquotaroot-bob", c_quotaroot, ctx)
         run_check("greylist-bypass-config", c_greylist_bypass, ctx)
+        run_check("root-mail-alias", c_root_mail, ctx)
         run_check("sieve-filter-filtered", c_delivery, ctx, "filtered", "Filtered", "[filtered] mail")
         run_check("sieve-vacation-reply", c_vacation, ctx)
         run_check("submission-465-delivery", c_submission_delivery, ctx, "s465", "465 submission")

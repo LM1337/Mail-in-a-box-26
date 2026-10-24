@@ -33,18 +33,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-59 bugs: 1 critical, 11 high, 27 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B59 by the in-place upgrade of a production box with rc3.
+60 bugs: 1 critical, 11 high, 28 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3.
 
 | Origin | Count |
 |---|---|
-| Upstream | 14 |
+| Upstream | 15 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 14 |
 | Fork | 4 |
 
-13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
+14 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B60). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -110,6 +110,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
 | [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
 | [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | unreleased |
+| [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | unreleased |
 
 ## Details
 
@@ -804,6 +805,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
 * **Evidence:** On the 26.04 test box (Postfix 3.10.6, OpenSSL 3.5.5) `postconf -h smtpd_recipient_restrictions` prints the warning on stderr; `postconf -d` gives `smtpd_tls_dh1024_param_file =` and `tls_ffdhe_auto_groups = ffdhe2048 ffdhe3072`. v78 (Postfix 3.6 on 22.04) sets the same parameter without a warning. Nothing else in the repo references the parameter.
 * **Found by:** production upgrade; **commit:** see `git log --grep B59`; **fixed in:** unreleased
+
+### B60
+
+**Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist** (medium, System)
+
+* **Symptom:** Output of cron jobs and other mail to local accounts (root, www-data) never reaches the administrator. On a box installed on a hosting provider's image it bounces every day with "mail for <the hosting provider's default host name> loops back to myself" (3 to 7 bounces a day on the production box, before and after the upgrade); on other boxes it bounces as unknown user.
+* **Cause:** Postfix takes the domain of unqualified local addresses from myorigin=/etc/mailname. Setup set /etc/hostname but never /etc/mailname, which kept the name the machine had when Postfix was first installed (the provider's name, also on the 127.0.1.1 line of /etc/hosts). And even with /etc/mailname = PRIMARY_HOSTNAME, root@PRIMARY_HOSTNAME is neither a user nor an alias: PRIMARY_HOSTNAME is a virtual mailbox domain, where /etc/aliases does not apply. www-data, the owner of the Nextcloud cron jobs, has no address either.
+* **Fix:** setup/system.sh writes PRIMARY_HOSTNAME to /etc/mailname and comments out a 127.0.1.1 line in /etc/hosts that names neither PRIMARY_HOSTNAME nor its first label. root@PRIMARY_HOSTNAME is a required alias, so it becomes an automatic alias to administrator@PRIMARY_HOSTNAME (a manual alias or user of that name wins). Setup writes the automatic aliases at the end (`mailconfig.py update-auto-aliases`), so existing boxes get it without a change of users or aliases. The Nextcloud cron file sends its output to root (MAILTO=root).
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04). The wrong /etc/mailname only where the machine had another name when Postfix was installed; the missing root@ alias everywhere.
+* **Evidence:** Production box (from the upgrade report): /etc/mailname was the hosting provider's default host name of the machine, /etc/hosts had the same name on the 127.0.1.1 line, and mail.log showed the daily "loops back to myself" bounces since at least 2026-10-18. 26.04 test box: `postconf -h myorigin` is /etc/mailname, `postmap -q root@<PRIMARY_HOSTNAME> sqlite:/etc/postfix/virtual-alias-maps.cf` finds nothing (hostmaster@ and postmaster@ resolve to administrator@), /etc/hosts still has the cloud-init line `127.0.1.1 testvm.example.net testvm`. v78:setup/system.sh only writes /etc/hostname, v78:management/mailconfig.py get_required_aliases() has administrator@, hostmaster@, postmaster@, admin@ and abuse@ but no root@. The bounce of root@PRIMARY_HOSTNAME as unknown user is derived from the Postfix configuration, it was not reproduced (no mail was sent on the test box).
+* **Report upstream:** MIAB main: the missing /etc/mailname and root@ handling are the same in v78.
+* **Found by:** production upgrade; **commit:** see `git log --grep B60`; **fixed in:** unreleased
 
 ## Not counted above
 

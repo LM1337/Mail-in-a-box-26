@@ -15,6 +15,22 @@ source setup/functions.sh # load our functions
 echo "$PRIMARY_HOSTNAME" > /etc/hostname
 hostname "$PRIMARY_HOSTNAME"
 
+# Postfix takes the domain of mail from local accounts (cron, root) from /etc/mailname
+# (myorigin). The image of a hosting provider can leave its own name there and on the
+# 127.0.1.1 line of /etc/hosts: mail to root then goes
+# to that name and bounces. Use the box's name; mail to root@PRIMARY_HOSTNAME goes to
+# the administrator (an automatic alias, see management/mailconfig.py). A 127.0.1.1
+# line that names neither PRIMARY_HOSTNAME nor its first label is commented out. (On a
+# machine where cloud-init manages /etc/hosts, the next boot may write it again.)
+echo "$PRIMARY_HOSTNAME" > /etc/mailname
+if awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
+	'$1 == "127.0.1.1" { for (i = 2; i <= NF && $i !~ /^#/; i++) if ($i == h || $i == s) next; stale = 1 } END { exit !stale }' /etc/hosts; then
+	echo "Commenting out the 127.0.1.1 line of /etc/hosts with another machine's name..."
+	HOSTS_NEW=$(awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
+		'$1 == "127.0.1.1" { for (i = 2; i <= NF && $i !~ /^#/; i++) if ($i == h || $i == s) { print; next } print "# " $0 " # not this machine (Mail-in-a-Box)"; next } { print }' /etc/hosts)
+	echo "$HOSTS_NEW" > /etc/hosts
+fi
+
 # ### Fix permissions
 
 # The default Ubuntu Bionic image on Scaleway throws warnings during setup about incorrect

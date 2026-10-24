@@ -46,6 +46,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   from an existing main.cf. Postfix 3.10 warned on every `postconf` call that
   its support will be removed; the default uses the RFC 7919 FFDHE groups
   (B59).
+* System: mail of cron jobs and root reaches the administrator. Setup writes
+  PRIMARY_HOSTNAME to `/etc/mailname` (Postfix's myorigin; a provider's image
+  could leave its own name there, and such mail bounced daily), comments out
+  a 127.0.1.1 line in `/etc/hosts` with another machine's name, makes
+  root@PRIMARY_HOSTNAME an automatic alias to administrator@ and writes the
+  automatic aliases at the end of every setup run. The Nextcloud cron jobs
+  send their output to root instead of www-data (B60).
 
 ### Changed
 
