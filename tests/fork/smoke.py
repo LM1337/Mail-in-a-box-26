@@ -842,6 +842,33 @@ def c_sieve_login(ctx):
     return "login ok, scripts: %s" % (", ".join("%s%s" % (n, "*" if a else "") for n, a in scripts) or "none")
 
 
+# The services of Mail-in-a-Box must be enabled, or they do not start after a
+# reboot (the in-place upgrade of rc3 left Dovecot disabled, B67). The PHP-FPM
+# unit is found, so that the baseline against an old box works too.
+CORE_UNITS = ["postfix", "dovecot", "nginx", "spampd", "opendkim", "opendmarc", "postgrey",
+              "fail2ban", "nsd", "named", "munin-node", "mailinabox", "cron"]
+UNIT_ENABLED_STATES = ("enabled", "static", "indirect", "generated", "alias")
+
+
+def c_services_enabled(ctx):
+    cmd = ("for u in %s $(cd /lib/systemd/system && ls php*-fpm.service 2>/dev/null); do "
+           "printf '%%s ' \"${u%%.service}\"; systemctl is-enabled \"$u\" 2>&1 | head -n 1; done"
+           % " ".join(CORE_UNITS))
+    rc, out, err = ctx.remote.run(cmd, timeout=60)
+    states = {}
+    for line in out.splitlines():
+        unit, _, state = line.strip().partition(" ")
+        if unit:
+            states[unit] = state.strip()
+    missing = [u for u in CORE_UNITS if u not in states]
+    if missing:
+        raise Fail("no answer for %s: %s" % (" ".join(missing), (err or out).strip()[:200]))
+    bad = ["%s=%s" % (u, st) for u, st in sorted(states.items()) if st not in UNIT_ENABLED_STATES]
+    if bad:
+        raise Fail("not enabled (would not start after a reboot): %s" % ", ".join(bad))
+    return "%d units enabled" % len(states)
+
+
 def c_mail_log_logins(ctx):
     # The usage report (management/mail_log.py, run weekly by daily_tasks.sh) must
     # count the IMAP and POP3 logins just made (Dovecot 2.4 logs "Logged in:").
@@ -1877,6 +1904,36 @@ def c_vacation(ctx):
     return "auto-reply arrived via catch-all in bob's %s" % f["found"]["vacation_reply"]
 
 
+def c_vacation_no_phantom_folders(ctx):
+    # Dovecot 2.4 kept the lock files of the duplicate database (vacation,
+    # redirect) in .dovecot.lda-dupes.locks in the Maildir, which IMAP listed as
+    # folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" (B66).
+    # \Noselect entries count too.
+    f = _flow(ctx)
+    if not f["found"].get("vacation_reply"):
+        raise Skip("no vacation reply, so the duplicate database was not used")
+    M = imap_login(ctx, ctx.carol)
+    try:
+        typ, data = M.list()
+    finally:
+        M.logout()
+    names = []
+    for raw in data or []:
+        if raw is None:
+            continue
+        if isinstance(raw, tuple):
+            names.append(raw[1].decode(errors="replace"))
+            continue
+        m = LIST_RE.match(raw.decode(errors="replace"))
+        if m:
+            name = m.group("name")
+            names.append(name[1:-1] if name.startswith('"') else name)
+    phantom = [n for n in names if re.match(r"(?i)^dovecot($|[./])", n)]
+    if phantom:
+        raise Fail("%s has the folders %s" % (ctx.carol, ", ".join(sorted(phantom))))
+    return "%d folders of %s, none from Dovecot's duplicate database" % (len(names), ctx.carol)
+
+
 # ---------------------------------------------------------------------------
 # checks: IMAPSieve -> sa-learn
 # ---------------------------------------------------------------------------
@@ -2229,6 +2286,7 @@ def main():
         run_check("submission-587-login", c_sub587, ctx)
         run_check("managesieve-4190-login", c_sieve_login, ctx)
         run_check("mail-log-logins", c_mail_log_logins, ctx)
+        run_check("services-enabled", c_services_enabled, ctx)
     if want("migrated"):
         print("== migrated (manifest comparison, before new mail)")
         run_check("mig-users-aliases", c_mig_users_aliases, ctx)
@@ -2283,6 +2341,7 @@ def main():
         run_check("root-mail-alias", c_root_mail, ctx)
         run_check("sieve-filter-filtered", c_delivery, ctx, "filtered", "Filtered", "[filtered] mail")
         run_check("sieve-vacation-reply", c_vacation, ctx)
+        run_check("sieve-vacation-no-phantom-folders", c_vacation_no_phantom_folders, ctx)
         run_check("submission-465-delivery", c_submission_delivery, ctx, "s465", "465 submission")
         run_check("submission-587-delivery", c_submission_delivery, ctx, "s587", "587 submission")
         run_check("permitted-sender-allowed", c_submission_delivery, ctx, "team_ok", "alice as team@")

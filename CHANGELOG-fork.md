@@ -51,6 +51,9 @@ and following).
 
 ### Changed
 
+* Tests: smoke checks `services-enabled` (the services of Mail-in-a-Box are
+  enabled, over `--ssh`) and `sieve-vacation-no-phantom-folders` (after the
+  vacation reply, IMAP lists no folder of Dovecot's duplicate database).
 * Docs: README-fork.md has a new section "Setup output" with the lines of
   setup's output that look like errors but are harmless on 26.04
   (pollinate "Permission denied", Nextcloud's "No upgrade required", the
