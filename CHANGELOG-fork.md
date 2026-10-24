@@ -14,7 +14,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Project home on GitHub, adaptive fail2ban with the control panel page System >
 Intrusion Protection, Nextcloud sharing within the mail domain, tmux for both
 tools, and the fixes from the in-place upgrade of a production box with rc3
-(B57-B60) and B61.
+(B57-B60), B61 and B62.
 
 ### New
 
@@ -108,9 +108,31 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   fork and its URL. A bootstrap.sh without a `TAG=` line now gives "could not
   be determined" instead of an error.
 * Setup: `setup/bootstrap.sh` compares the checkout's origin with `SOURCE`
-  case-insensitively. A checkout cloned from the fork's previous location
-  stops with "is a checkout of ..., not of ..."; switch it with
-  `git -C ~/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`.
+  case-insensitively. A checkout of this fork cloned from its previous
+  location (rc1 to rc3) stops with "is a checkout of ..., not of ..." and
+  only the command that points it to GitHub
+  (`git -C ~/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`);
+  the hint to the in-place tool is only given for a checkout of upstream
+  Mail-in-a-Box. See "Updating the fork" in README-fork.md.
+* Tools: `tools/upgrade-in-place-to-2604.sh` on a 26.04 box that already
+  runs the fork brings `/root/mailinabox` to the release tag (without `TAG=`
+  the tool's own one) before setup runs again, instead of running setup of
+  the old release; the checkout the tool runs from stays as it is unless
+  `TAG=` is set. A clone from an earlier run that `curl | bash` reuses
+  (`/root/upgrade-2604/fork`, and `/root/mailinabox` of the migration) is
+  fetched from `SOURCE` and checked out at the tag; if that fails, it is
+  downloaded again (in place) or the tool stops, instead of running the old
+  copy. A checkout of the fork from another repository stops with the
+  `git remote set-url` command, as in bootstrap.sh. `TAG=` also takes a
+  branch such as `main` for an existing checkout.
+* Tools: `tools/migrate-to-2604.sh` keeps the other settings of an existing
+  `/etc/mailinabox.conf` on the new machine (e.g. `FTS=off` or
+  `NEXTCLOUD_SHARE_SCOPE=all`, set there after a rehearsal) when it writes
+  the file again; before, the real run dropped them. Both tools pass `FTS`
+  and `NEXTCLOUD_SHARE_SCOPE` from the environment into their tmux session.
+* Tools: `tools/upgrade-in-place-to-2604.sh` is executable in git, as its
+  own hints assume. The help texts, the reboot hints and the migration's
+  quick start say `sudo tmux attach -t ...`: the session belongs to root.
 * Branding: the installed box points to the fork instead of only to
   upstream: the Roundcube support link, the admin panel footer, the default web page (new
   boxes only) and the SMTP banner.
@@ -195,15 +217,42 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   `miab-postfix587`) is anchored. A client could put `[<ip>]: ` into the SASL
   user name, which Postfix logs after the client address, and get a third
   party banned (B61).
+* fail2ban: the filters `miab-management-daemon` (jails `miab-management`,
+  `miab-slow-management`) and `miab-roundcube` (`miab-roundcube`,
+  `miab-slow-roundcube`) are anchored. A client could put the control
+  panel's failed-login text with a third party's address into an SMTP AUTH
+  user name, which Postfix logs to /var/log/syslog as well, and get that
+  address banned from the web ports (and through recidive from all); the
+  Roundcube filter took the first ` from <ip>.` of the line, which could be
+  part of the user name (B62).
 
 ### Upgrade note
 
+* Boxes on rc1 to rc3 were cloned from the fork's previous home. Point the
+  checkout to GitHub once, then run the bootstrap command as usual:
+  `sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`
+  (see "Updating the fork" in README-fork.md). Their status checks look for
+  new releases at the previous home and may keep reporting the box as up to
+  date until it runs rc4.
 * The slow mail jails are on after the upgrade, with an empty allowlist. On a
   box whose users sit behind one office address, put that network on the
-  allowlist (System > Intrusion Protection, or `sudo
-  management/fail2ban_admin.py --allow 192.0.2.0/24`) before or right after
-  the upgrade: a single phone with an old password can otherwise get the
+  allowlist right after the upgrade (System > Intrusion Protection, or
+  `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`).
+  Before the upgrade, neither exists yet; `fail2ban: {allowlist:
+  [192.0.2.0/24]}` in `$STORAGE_ROOT/settings.yaml` (usually
+  `/home/user-data/settings.yaml`) has the same effect from the first setup
+  run on. Without it, a single phone with an old password can get the
   office banned from the mail ports, for longer each time.
+* Nextcloud sharing is limited to the own mail domain from this release on
+  (`NEXTCLOUD_SHARE_SCOPE=domain` is the default). On a box with several
+  mail domains, users no longer find the accounts of the other domains in
+  the share dialog, the contacts menu, the system address book and the team
+  search; admins become members of every domain group. Existing shares
+  between domains stay. To keep the old behaviour, put
+  `NEXTCLOUD_SHARE_SCOPE=all` into `/etc/mailinabox.conf` before the update
+  or in-place upgrade; for a migration, give it to the tool
+  (`NEXTCLOUD_SHARE_SCOPE=all /root/mailinabox/tools/migrate-to-2604.sh ...`).
+  Set later, it takes effect on the next setup run (`sudo mailinabox`).
 
 ## v78-r2604.0-rc3 (2026-10-23)
 

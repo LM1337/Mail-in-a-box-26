@@ -76,6 +76,53 @@ Entwicklungsstand des Zweigs `main`, nur zum Testen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
 
 
+Updating the fork / Fork aktualisieren
+--------------------------------------
+
+### English
+
+A box that runs this fork is updated like upstream Mail-in-a-Box: run the
+bootstrap command from [Installation](#installation) again. It brings
+`/root/mailinabox` to the current release tag and runs setup. Read the
+upgrade note of the new release in [CHANGELOG-fork.md](CHANGELOG-fork.md)
+first. The in-place tool is not needed for this.
+
+Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
+tool) were cloned from the fork's previous home. bootstrap.sh stops on them
+with "is a checkout of ..., not of https://github.com/LM1337/Mail-in-a-box-26".
+Point the checkout to GitHub once, then run the bootstrap command:
+
+	sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26
+	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+
+The status checks of rc1 to rc3 look for new releases at the previous home;
+they may keep reporting such a box as up to date, so check the
+[releases](https://github.com/LM1337/Mail-in-a-box-26/releases) yourself.
+
+### Deutsch
+
+Eine Box mit diesem Fork wird wie upstream Mail-in-a-Box aktualisiert: den
+Bootstrap-Befehl aus [Installation](#installation) noch einmal aufrufen. Er
+bringt `/root/mailinabox` auf den aktuellen Release-Tag und lässt setup
+laufen. Vorher den Upgrade-Hinweis des neuen Releases in
+[CHANGELOG-fork.md](CHANGELOG-fork.md) lesen. Das Werkzeug für das Upgrade
+an Ort und Stelle wird dafür nicht gebraucht.
+
+Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
+In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.
+bootstrap.sh hält bei ihnen mit „is a checkout of ..., not of
+https://github.com/LM1337/Mail-in-a-box-26“ an. Den Checkout einmal auf
+GitHub umstellen, danach den Bootstrap-Befehl aufrufen:
+
+	sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26
+	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+
+Die Statusprüfungen von rc1 bis rc3 suchen neue Releases unter der früheren
+Adresse; sie melden eine solche Box womöglich weiter als aktuell, deshalb die
+[Releases](https://github.com/LM1337/Mail-in-a-box-26/releases) selbst
+prüfen.
+
+
 Greylisting exceptions / Ausnahmen vom Greylisting
 --------------------------------------------------
 
@@ -684,8 +731,8 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 Eigene Dienste, die die Mail nutzen (etwa ein docker-compose-Stack, der sich
 per IMAP anmeldet oder Push-Aufrufe von Dovecot empfängt), lassen sich mit
 Hooks in zwei weiteren Verzeichnissen anhalten und starten:
-`/etc/mailinabox/upgrade-2604.d/before/*.sh` laufen unmittelbar bevor die Mail
-ausgeht, `/etc/mailinabox/upgrade-2604.d/after/*.sh` in der Phase finish,
+`/etc/mailinabox/upgrade-2604.d/before/*.sh` laufen unmittelbar, bevor die
+Mail ausgeht, `/etc/mailinabox/upgrade-2604.d/after/*.sh` in der Phase finish,
 nachdem Mail und Sicherungen wieder laufen (und am Ende von `--rollback`).
 Sie bekommen dieselben Variablen und dazu `HOOK_STAGE` (`before`,
 `local-ext`, `after`). Ein fehlschlagender before-Hook hält das Upgrade an,
@@ -778,6 +825,12 @@ explains what to do when the old box is too old.
    downtime; afterwards the DNS change takes effect over 1 to 3 days.
 9. **tmux**: the tool runs itself in tmux, see below.
 10. Optional, for big boxes: **rehearse** first, see "Downtime and rehearsal".
+11. **Fork settings**: full-text search and Nextcloud sharing within the mail
+    domain are on by default. To turn them off, give `FTS=off` or
+    `NEXTCLOUD_SHARE_SCOPE=all` to the tool
+    (`NEXTCLOUD_SHARE_SCOPE=all /root/mailinabox/tools/migrate-to-2604.sh --from ...`),
+    or put them into `/etc/mailinabox.conf` on the new machine after a
+    rehearsal: the real run keeps them.
 
 #### Quick start
 
@@ -787,7 +840,7 @@ explains what to do when the old box is too old.
 > started from a terminal outside tmux or screen, runs itself in the tmux
 > session `migrate-2604` (it installs tmux if needed, or falls back to
 > screen) and attaches your terminal to it. After a disconnect, log in again
-> and run `tmux attach -t migrate-2604`. When the command has ended, the
+> and run `sudo tmux attach -t migrate-2604`. When the command has ended, the
 > window stays open until you press Enter (with `--yes` at most 10 minutes,
 > so that a script calling it through `ssh -t` gets its exit code).
 > `--no-tmux` turns this off.
@@ -1156,6 +1209,12 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
 9. **tmux**: das Werkzeug läuft selbst in tmux, siehe unten.
 10. Optional, bei großen Boxen: zuerst **proben**, siehe „Ausfallzeit und
     Probelauf“.
+11. **Einstellungen des Forks**: Volltextsuche und Teilen in Nextcloud nur
+    innerhalb der Maildomain sind standardmäßig an. Zum Abschalten
+    `FTS=off` oder `NEXTCLOUD_SHARE_SCOPE=all` an das Werkzeug übergeben
+    (`NEXTCLOUD_SHARE_SCOPE=all /root/mailinabox/tools/migrate-to-2604.sh --from ...`)
+    oder nach einem Probelauf in `/etc/mailinabox.conf` der neuen Maschine
+    eintragen: Der eigentliche Lauf behält sie bei.
 
 #### Schnellstart
 
@@ -1166,7 +1225,7 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
 > gestartet, selbst in der tmux-Sitzung `migrate-2604` (tmux wird bei Bedarf
 > installiert, sonst dient screen als Ersatz) und hängt das Terminal daran.
 > Nach einem Verbindungsabbruch neu anmelden und
-> `tmux attach -t migrate-2604` aufrufen. Nach dem Ende des Befehls bleibt
+> `sudo tmux attach -t migrate-2604` aufrufen. Nach dem Ende des Befehls bleibt
 > das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10
 > Minuten, damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen
 > Exit-Code bekommt). `--no-tmux` schaltet das ab.

@@ -48,10 +48,13 @@ builds on that port. Its goals:
   the normal limits, own networks can be put on an allowlist, and the status
   checks report password spraying. Bans and settings are managed in the
   control panel (System > Intrusion Protection).
-* Keep the mail domains of a box apart in Nextcloud: users only see and share
-  with the accounts of their own mail domain, members of the Nextcloud group
-  `admin` with everyone (`NEXTCLOUD_SHARE_SCOPE=all` keeps upstream's
-  behaviour).
+* Keep the mail domains of a box apart in Nextcloud: in the web interface
+  and the system address book, users only find and share with the accounts
+  of their own mail domain, members of the Nextcloud group `admin` with
+  everyone (`NEXTCLOUD_SHARE_SCOPE=all` keeps upstream's behaviour). This is
+  not a hard separation, e.g. a hand-made CalDAV request can still share
+  with another domain; see the
+  [limits](README-fork.md#nextcloud-sharing-within-the-mail-domain--teilen-innerhalb-der-maildomain).
 
 ### Main components
 
@@ -88,7 +91,7 @@ Rows without a mark come from the Ubuntu archive (except PHP in v78, which
 comes from `ppa:ondrej/php`) and are updated with Ubuntu's package updates;
 the version shown is the upstream version Ubuntu ships. Most of them are in
 Ubuntu's main component, which gets security updates during standard support;
-`dovecot-fts-xapian` and `spampd` are in universe.
+`dovecot-fts-xapian`, `fail2ban` and `spampd` are in universe.
 
 ---
 
@@ -114,6 +117,7 @@ documentation of the fork (English, with German sections) is
 | You have | Use | Details |
 |---|---|---|
 | a fresh Ubuntu 26.04 machine | `setup/bootstrap.sh` | [Installation](README-fork.md#installation) |
+| a box with this fork (rc1 to rc3: point its checkout to GitHub first) | `setup/bootstrap.sh` again | [Updating the fork](README-fork.md#updating-the-fork--fork-aktualisieren) |
 | a Mail-in-a-Box on Ubuntu 22.04 (v68 or later, older after an update to v78) or a release-upgraded 24.04, and a new 26.04 machine | `tools/migrate-to-2604.sh` (recommended: the old box stays as the way back) | [Migration](README-fork.md#migration-from-mail-in-a-box-22042404--umzug-von-mail-in-a-box) |
 | the same machine, no second server | `tools/upgrade-in-place-to-2604.sh` (22.04 → 24.04 → 26.04 or 24.04 → 26.04; cannot be undone after the first release upgrade) | [In-place upgrade](README-fork.md#in-place-upgrade-to-2604--upgrade-an-ort-und-stelle) |
 

@@ -33,18 +33,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-61 bugs: 1 critical, 11 high, 29 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban.
+62 bugs: 1 critical, 11 high, 30 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4.
 
 | Origin | Count |
 |---|---|
-| Upstream | 16 |
+| Upstream | 17 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 14 |
 | Fork | 4 |
 
-16 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B60, B61). They are candidates for
+18 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -108,10 +108,11 @@ upstream pull requests, independent of the 26.04 port.
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
 | [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | rc4 |
-| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | rc4 |
+| [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | partly | yes | rc4 |
 | [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | rc4 |
 | [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | rc4 |
 | [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | rc4 |
+| [B62](#b62) | medium | fail2ban | Control panel and Roundcube filters take a host from text written by a client, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 
 ## Details
 
@@ -792,8 +793,9 @@ upstream pull requests, independent of the 26.04 port.
 * **Symptom:** On Ubuntu 26.04 the "User logins per hour" part of the weekly "Mail-in-a-Box Usage Report" (and of `management/mail_log.py -l`) lists no IMAP, POP3 or ManageSieve logins at all, only the SMTP logins taken from Postfix. Nothing reports an error.
 * **Cause:** Dovecot 2.4 logs a successful login as `imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=...`; Dovecot 2.3 logged `Info: Login: user=<...>`. scan_dovecot_login_line() only matched `Info: Login: user=<(.*?)>, method=PLAIN, rip=(.*?),`, so no 2.4 line matched. The regex also counted only method=PLAIN, while auth_mechanisms allows LOGIN too.
 * **Fix:** The regex accepts `Login:` and `Logged in:` and any mechanism name. The protocol is named after the service without "-login" (managesieve instead of "mana").
-* **Affects:** v78 no, PR #2603 yes. Origin: 26.04 change.
+* **Affects:** v78 partly (only the "Login:" line with method=PLAIN is counted, so AUTH LOGIN logins are missing, and ManageSieve shows as "mana": v78:management/mail_log.py matches `method=PLAIN` and passes `service[:4]`, while v78:setup/mail-dovecot.sh enables `auth_mechanisms=plain login`), PR #2603 yes. Origin: 26.04 change (the missing 2.4 lines), upstream (the mechanism and the protocol name).
 * **Evidence:** /var/log/mail.log of the 26.04 test box (Dovecot 2.4.2, log_path=/var/log/mail.log): `Oct 23 02:16:29 imap-login: Info: Logged in: user=<...>, method=PLAIN, rip=192.0.2.10, lip=192.0.2.11, mpid=53945, TLS, session=<...>`, likewise for pop3-login and managesieve-login; no "Info: Login:" line. The code before the fix counted none of 108 sample lines as an IMAP/POP3 login (only 3 SMTP logins), the fixed code 24 IMAP, 2 POP3 and 2 ManageSieve logins for alice. The fail2ban filter dovecotimap.conf already matches the 2.4 "Login aborted: ... (auth failed, ...)" lines (fail2ban-regex on the same box), the Postfix lines of mail_log.py are unchanged in 3.10.
+* **Report upstream:** MIAB main: count every mechanism, not only method=PLAIN, and name the protocol after the service without "-login".
 * **Found by:** production upgrade; **commit:** see `git log --grep B58`; **fixed in:** v78-r2604.0-rc4
 
 ### B59
@@ -831,6 +833,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Report upstream:** MIAB main: anchor miab-postfix-submission.conf.
 * **Found by:** review (adaptive fail2ban); **commit:** "fail2ban: anchor the SMTP AUTH filter (B61)"; **fixed in:** v78-r2604.0-rc4
 
+### B62
+
+**Control panel and Roundcube filters take a host from text written by a client, so a client can get a third party banned** (medium, fail2ban)
+
+* **Symptom:** A client that fails SMTP AUTH with a user name like `Mail-in-a-Box Management Daemon: Failed login attempt from ip 198.51.100.7 - timestamp 1` adds a failure for 198.51.100.7 to the control panel jail `miab-management` (20 in 30 s, from several source addresses), and with the fork's slow web jails also to `miab-slow-management`. The third party is then banned from the control panel, webmail and Nextcloud (ports 80/443), and repeated bans make `recidive` block it on all ports. The Roundcube filter had the same weakness for user names containing ` from <ip>. AUTHENTICATE`.
+* **Cause:** conf/fail2ban/filter.d/miab-management-daemon.conf had the unanchored `failregex = Mail-in-a-Box Management Daemon: Failed login attempt from ip <HOST> - timestamp .*` and reads /var/log/syslog, which also gets every Postfix line (rsyslog `*.*;auth,authpriv.none -/var/log/syslog`); Postfix logs the client-chosen `sasl_username=` as sent (the premise of B61). miab-roundcube.conf had `IMAP Error: Login failed for .*? from <HOST>\. AUTHENTICATE.*`: the lazy `.*?` took the first ` from <ip>. AUTHENTICATE`, which can be inside the user name before Roundcube's own `against <host> from <ip>`.
+* **Fix:** Both filters are anchored. The control panel filter only takes lines of the daemon itself (`_daemon = (?:start|gunicorn)` with Flask's `[time] WARNING in daemon: ` prefix, or the untagged copy the daemon sends through /dev/log), up to the end of the line. The Roundcube filter is anchored at the start of the line, and its greedy `.*` takes the last `against <host> from <ip>. AUTHENTICATE <mechanism>:`, the one Roundcube wrote. tests/fork/smoke.py `admin-fail2ban-filters` checks real and forged lines of both.
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04, same filters and the same rsyslog rule). The Roundcube part is latent with Mail-in-a-Box's Roundcube settings: `login_username_filter = email` refuses user names with spaces unless they are quoted, and Roundcube lowercases the user name, so a forged `AUTHENTICATE` no longer matches.
+* **Evidence:** fail2ban-regex 1.1.0 on the 26.04 test box: the old control panel filter gives 198.51.100.7 for the line `box postfix/submission/smtpd[1234]: warning: unknown[203.0.113.5]: SASL PLAIN authentication failed: (reason unavailable), sasl_username=Mail-in-a-Box Management Daemon: Failed login attempt from ip 198.51.100.7 - timestamp 1`, the new one nothing; both match the two real lines of a failed control panel login (`start[pid]: [time] WARNING in daemon: Mail-in-a-Box Management Daemon: ...` and `box Mail-in-a-Box Management Daemon: ...`). The old Roundcube filter gives 198.51.100.7 for `Login failed for x from 198.51.100.7. AUTHENTICATE against localhost from 203.0.113.5. AUTHENTICATE PLAIN: ...`, the new one 203.0.113.5; a real failed webmail login with a quoted user name was logged lowercased (`"x from 198.51.100.7. authenticate"@example.com`) and gives the real address with both. Dovecot writes /var/log/mail.log itself and truncates long user names, so its lines do not reach syslog. The forged lines were checked with fail2ban-regex only, no ban was made.
+* **Report upstream:** MIAB main: anchor miab-management-daemon.conf and miab-roundcube.conf.
+* **Found by:** review of rc4; **commit:** "fail2ban: anchor the control panel and Roundcube filters (B62)"; **fixed in:** v78-r2604.0-rc4
+
 ## Not counted above
 
 * Fixes to `tools/migrate-to-2604.sh` and `tests/fork/` made before they were
@@ -851,8 +865,9 @@ upstream pull requests, independent of the 26.04 port.
 * **Not covered by the test environment:** Let's Encrypt issuance, outbound
   port 25 to the internet, blacklist checks, reverse DNS.
 * **Migration sources tested:** MIAB v74 on Ubuntu 22.04 with Nextcloud
-  26.0.13. A 24.04 in-place upgrade with PHP 8.0 is
-  supported by the script, but has not been tested with real data yet.
+  26.0.13. A 24.04 in-place upgrade with PHP 8.0 was tested on a copy of a
+  production box (rc3) and run on a production box (rc3, which found
+  B57-B60).
 * **Upstream v74 with current ondrej/sury PHP 8.0:** the php8.0-fpm unit's
   `ProtectSystem=full` makes Nextcloud 26 answer HTTP 503 ("Cannot write into
   apps directory") unless `appstoreenabled` is false. Upstream later fixed this

@@ -27,6 +27,8 @@ When upstream publishes a new release and the fork takes it over, the base chang
 
 Keep the `v<upstream>` prefix. The setup, migration and in-place tools compare Mail-in-a-Box versions numerically (for example "v68 or later"), and `git describe` must show which upstream code a box runs. A release is tagged with an annotated tag, `TAG=` in `setup/bootstrap.sh` and `DEFAULT_TAG` in `tools/migrate-to-2604.sh` and `tools/upgrade-in-place-to-2604.sh` are set to it in the same commit, and the GitHub release may carry a readable title such as "Mail-in-a-box-26 r2604.0 (based on Mail-in-a-Box v78)".
 
+Boxes installed with rc1 to rc3 were cloned from the fork's previous home, and their status checks read the latest release from `setup/bootstrap.sh` on the branch `main` there. As long as such boxes exist, keep `main` of the previous home up to date with every release (at least the `TAG=` line of `setup/bootstrap.sh`), so that they report the new release; updating them needs the `git remote set-url` step described in README-fork.md ("Updating the fork").
+
 The rest of this file is upstream's text, with the clone URL changed to this fork. The Vagrantfile already uses an Ubuntu 26.04 image.
 
 ## Development
