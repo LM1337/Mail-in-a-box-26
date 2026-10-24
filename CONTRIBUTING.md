@@ -2,11 +2,38 @@
 
 Mail-in-a-Box is an open source project. Your contributions and pull requests are welcome.
 
+## This fork (Ubuntu 26.04)
+
+This repository is an unofficial fork of Mail-in-a-Box for Ubuntu 26.04. For changes to the fork:
+
+* Clone https://github.com/LM1337/Mail-in-a-box-26 and send pull requests and issues to this repository, not to upstream.
+* Fixes that also apply to upstream Mail-in-a-Box (Ubuntu 22.04) are welcome upstream as well, at https://github.com/mail-in-a-box/mailinabox.
+* Describe user-visible changes in CHANGELOG-fork.md (section "Unreleased"), and bugs with symptom, cause and affected versions in BUGS-fork.md.
+* Test on a fresh Ubuntu 26.04 machine or VM, and for the migration and in-place tools on a copy of a real box. `tests/fork/smoke.py` checks a box from outside (see its `--help`); `tests/fork/seed-legacy.sh` fills an old box with test data; `tests/fork/prepare-testenv.sh` adapts a test VM. Keep credentials and the addresses of your test network in an env file outside the repository (`MIAB_TEST_ENV`).
+* The public domain dedication below (CC0) applies to all contributions to this fork as well.
+
+### Versioning
+
+Release tags have the form `v<upstream>-r<ubuntu>.<n>[-rc<m>]`, for example `v78-r2604.0-rc3`:
+
+| Part | Meaning |
+|---|---|
+| `v78` | The upstream Mail-in-a-Box release the fork is based on. It is not a version number of its own: the fork never uses an upstream number that upstream has not released (no `v79` before upstream's v79). |
+| `r2604` | The fork line for Ubuntu 26.04 (a line for Ubuntu 28.04 would be `r2804`). |
+| `.0`, `.1`, … | The fork's own releases on that base. Every release counts up, whether it fixes bugs or adds features. |
+| `-rc1`, `-rc2`, … | Release candidates before a release. |
+
+When upstream publishes a new release and the fork takes it over, the base changes and the counter starts again: `v78-r2604.3` → `v79-r2604.0`.
+
+Keep the `v<upstream>` prefix. The setup, migration and in-place tools compare Mail-in-a-Box versions numerically (for example "v68 or later"), and `git describe` must show which upstream code a box runs. A release is tagged with an annotated tag, `TAG=` in `setup/bootstrap.sh` and `DEFAULT_TAG` in `tools/migrate-to-2604.sh` and `tools/upgrade-in-place-to-2604.sh` are set to it in the same commit, and the GitHub release may carry a readable title such as "Mail-in-a-box-26 r2604.0 (based on Mail-in-a-Box v78)".
+
+The rest of this file is upstream's text, with the clone URL changed to this fork. The Vagrantfile already uses an Ubuntu 26.04 image.
+
 ## Development
 
-To start developing Mail-in-a-Box, [clone the repository](https://github.com/mail-in-a-box/mailinabox) and familiarize yourself with the code.
+To start developing this fork, [clone the repository](https://github.com/LM1337/Mail-in-a-box-26) and familiarize yourself with the code.
 
-    $ git clone https://github.com/mail-in-a-box/mailinabox
+    $ git clone https://github.com/LM1337/Mail-in-a-box-26
 
 ### Vagrant and VirtualBox
 

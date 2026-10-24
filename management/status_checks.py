@@ -981,13 +981,23 @@ def what_version_is_this(env):
 	miab_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 	return shell("check_output", ["/usr/bin/git", "describe", "--always", "--abbrev=0"], env={"GIT_DIR": os.path.join(miab_dir, '.git')}).strip()
 
+# The fork's repository, and its setup/bootstrap.sh on the branch main, whose
+# first TAG= line (the Ubuntu 26.04 branch) names the latest release.
+FORK_REPO_URL = "https://github.com/LM1337/Mail-in-a-box-26"
+FORK_BOOTSTRAP_URL = "https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh"
+
+def parse_bootstrap_tag(script):
+	# The first TAG= line of setup/bootstrap.sh (bytes), or None.
+	m = re.search(b'TAG=(.*)', script)
+	return m.group(1).decode("utf8") if m else None
+
 def get_latest_miab_version():
 	# This fetches the fork's setup/bootstrap.sh and extracts the tag named in
 	# the script to determine the current product version.
     from urllib.request import urlopen, HTTPError, URLError
 
     try:
-        return re.search(b'TAG=(.*)', urlopen("https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh", timeout=5).read()).group(1).decode("utf8")
+        return parse_bootstrap_tag(urlopen(FORK_BOOTSTRAP_URL, timeout=5).read())
     except (TimeoutError, HTTPError, URLError):
         return None
 
@@ -1009,7 +1019,7 @@ def check_miab_version(env, output):
 		elif latest_ver is None:
 			output.print_error(f"Latest Mail-in-a-Box version could not be determined. You are running version {this_ver}.")
 		else:
-			output.print_error(f"A new version of Mail-in-a-Box is available. You are running version {this_ver}. The latest version is {latest_ver}. For upgrade instructions, see https://github.com/LM1337/Mail-in-a-box-26. ")
+			output.print_error(f"A new version of this fork (Mail-in-a-Box for Ubuntu 26.04) is available. You are running version {this_ver}. The latest version is {latest_ver}. For upgrade instructions, see {FORK_REPO_URL}. ")
 
 def run_and_output_changes(env, pool):
 	import json

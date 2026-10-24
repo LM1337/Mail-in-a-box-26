@@ -61,6 +61,8 @@ PARTIAL_DIR=.rsync-partial
 # until setup has created the system users (see phase_prepare / phase_ownership).
 ID_OFFSET=2000000000
 DEFAULT_SOURCE=https://github.com/LM1337/Mail-in-a-box-26
+# Raw files of the branch main (GitHub serves them from another host).
+DEFAULT_RAW=https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main
 DEFAULT_TAG=v78-r2604.0-rc3 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5 # keep in sync with setup/functions.sh
@@ -1299,7 +1301,7 @@ resolve_miab_dir() {
 	[ -z "${MIGRATE_REEXEC:-}" ] || die "Could not find the setup scripts next to $SELF."
 
 	local source=${SOURCE:-$DEFAULT_SOURCE} tag=${TAG:-$DEFAULT_TAG}
-	local how="curl -s $DEFAULT_SOURCE/raw/branch/main/tools/migrate-to-2604.sh | sudo TAG=main bash -s -- --from root@old.example.com"
+	local how="curl -s $DEFAULT_RAW/tools/migrate-to-2604.sh | sudo TAG=main bash -s -- --from root@old.example.com"
 	d=$CLONE_DIR
 	if [ ! -d "$d" ]; then
 		command -v git > /dev/null || install_packages git

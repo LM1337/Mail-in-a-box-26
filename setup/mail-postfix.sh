@@ -58,7 +58,7 @@ tools/editconf.py /etc/postfix/main.cf \
 	smtp_bind_address="$PRIVATE_IP" \
 	smtp_bind_address6="$PRIVATE_IPV6" \
 	myhostname="$PRIMARY_HOSTNAME"\
-	smtpd_banner="\$myhostname ESMTP Hi, I'm a Mail-in-a-Box (Ubuntu/Postfix; see https://mailinabox.email/)" \
+	smtpd_banner="\$myhostname ESMTP Hi, I'm a Mail-in-a-Box (Ubuntu 26.04 fork/Postfix; see https://github.com/LM1337/Mail-in-a-box-26)" \
 	mydestination=localhost
 
 # Tweak some queue settings:

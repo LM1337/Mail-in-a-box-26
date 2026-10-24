@@ -137,7 +137,7 @@ cat > $RCM_CONFIG <<EOF;
      'verify_peer_name'  => false,
    ),
  );
-\$config['support_url'] = 'https://mailinabox.email/';
+\$config['support_url'] = 'https://github.com/LM1337/Mail-in-a-box-26';
 \$config['product_name'] = '$PRIMARY_HOSTNAME Webmail';
 \$config['cipher_method'] = 'AES-256-CBC'; # persistent login cookie and potentially other things
 \$config['des_key'] = '$SECRET_KEY'; # 37 characters -> ~256 bits for AES-256, see above
