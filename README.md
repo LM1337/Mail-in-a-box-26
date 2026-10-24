@@ -9,7 +9,8 @@ v78 that runs on **Ubuntu 26.04 LTS** with current versions of its software.
 Mail-in-a-Box v78, the latest upstream release, installs only on **Ubuntu
 22.04 LTS**. Standard security maintenance for Ubuntu 22.04 ends in **May
 2027** (after that only with Ubuntu Pro ESM, until May 2032). Several parts of
-the v78 stack are already out of support upstream:
+the v78 stack are no longer supported by their projects, or only get security
+fixes:
 
 * **PHP 8.0** from the third-party PPA `ppa:ondrej/php`. php.net ended
   security support for PHP 8.0 on 26 November 2023. v78 stays on 8.0 because
@@ -17,13 +18,15 @@ the v78 stack are already out of support upstream:
 * **Nextcloud 27.1.11**. Nextcloud 27 reached end of life in June 2024.
 * **Roundcube 1.6**, an LTS branch that only gets important security fixes;
   its active support ended on 10 May 2026.
-* **Dovecot 2.3** and **OpenSSL 3.0** are no longer actively supported by
-  their projects. Ubuntu 22.04 still backports security fixes to its packages
-  (Dovecot 2.3.16, OpenSSL 3.0.2) until May 2027.
+* Since Dovecot 2.4 came out (January 2025), **Dovecot 2.3** only gets
+  critical security fixes from its project, and the OpenSSL project no longer
+  supports **OpenSSL 3.0**. Ubuntu 22.04 still backports security fixes to its
+  packages (Dovecot 2.3.16, OpenSSL 3.0.2) until May 2027.
 
-Upstream is working on Ubuntu 26.04 (the port in
-[PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603) is open, not
-yet merged). This fork builds on that port. Its goals:
+A port to Ubuntu 26.04 has been proposed upstream in
+[PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603) by
+[@writeDavid](https://github.com/writeDavid) (open, not yet merged). This fork
+builds on that port. Its goals:
 
 * Run on **Ubuntu 26.04 LTS** (standard support until May 2031, ESM until May
   2036) with current versions of PHP, Nextcloud, Roundcube and Dovecot.
@@ -31,7 +34,8 @@ yet merged). This fork builds on that port. Its goals:
   archive. packages.sury.org is only a fallback, limited by an apt pin to what
   Ubuntu lacks (`php8.5-imap`, `php-common`, and PHP 8.2 for the Nextcloud
   upgrade chain).
-* Keep Mail-in-a-Box's design: one setup command, no configuration options.
+* Keep Mail-in-a-Box's design: one setup command, no user-configurable setup
+  options (the only new switch is `FTS=off` in `/etc/mailinabox.conf`).
 * Provide a way from an existing box: a migration to a new 26.04 machine, or
   an in-place upgrade from Ubuntu 22.04 or 24.04 (see
   [Supported paths](#supported-paths)).
@@ -61,12 +65,15 @@ version pinned in v78's setup scripts or the current Ubuntu 22.04 package.
 ¹ Pinned by the setup scripts (download with checksum). These change only with
 a new release of Mail-in-a-Box or of this fork.
 
-Rows without a mark come from the Ubuntu archive (except PHP in v78, which
-comes from `ppa:ondrej/php`) and are updated by Ubuntu's security updates; the version shown is the upstream version Ubuntu ships.
-
 ² From `ppa:duplicity-team/duplicity-release-git`, in v78 and in the fork.
 
-³ Nextcloud 35 was released in October 2026; this fork is still on 34.
+³ Nextcloud 35 was released in September 2026; this fork is still on 34.
+
+Rows without a mark come from the Ubuntu archive (except PHP in v78, which
+comes from `ppa:ondrej/php`) and are updated with Ubuntu's package updates;
+the version shown is the upstream version Ubuntu ships. Most of them are in
+Ubuntu's main component, which gets security updates during standard support;
+`dovecot-fts-xapian` and `spampd` are in universe.
 
 ---
 
@@ -166,7 +173,8 @@ Eine inoffizielle Abspaltung (Fork) von
 Mail-in-a-Box v78, die neueste Upstream-Version, lässt sich nur auf **Ubuntu
 22.04 LTS** installieren. Die normale Sicherheitsunterstützung für Ubuntu 22.04
 endet im **Mai 2027** (danach nur noch mit Ubuntu Pro ESM bis Mai 2032).
-Mehrere Teile von v78 werden von ihren Projekten schon nicht mehr unterstützt:
+Mehrere Teile von v78 werden von ihren Projekten nicht mehr oder nur noch mit
+Sicherheitskorrekturen unterstützt:
 
 * **PHP 8.0** aus dem Fremd-PPA `ppa:ondrej/php`. php.net hat die
   Sicherheitsunterstützung für PHP 8.0 am 26. November 2023 beendet. v78
@@ -175,13 +183,16 @@ Mehrere Teile von v78 werden von ihren Projekten schon nicht mehr unterstützt:
   Lebensdauer.
 * **Roundcube 1.6**, ein LTS-Zweig, der nur noch wichtige Sicherheitskorrekturen
   bekommt; die aktive Unterstützung endete am 10. Mai 2026.
-* **Dovecot 2.3** und **OpenSSL 3.0** werden von ihren Projekten nicht mehr
-  aktiv unterstützt. Ubuntu 22.04 portiert Sicherheitskorrekturen bis Mai 2027
-  in seine Pakete zurück (Dovecot 2.3.16, OpenSSL 3.0.2).
+* **Dovecot 2.3** bekommt von seinem Projekt seit dem Erscheinen von
+  Dovecot 2.4 (Januar 2025) nur noch kritische Sicherheitskorrekturen, und
+  **OpenSSL 3.0** wird vom OpenSSL-Projekt nicht mehr unterstützt. Ubuntu
+  22.04 portiert Sicherheitskorrekturen bis Mai 2027 in seine Pakete zurück
+  (Dovecot 2.3.16, OpenSSL 3.0.2).
 
-Upstream arbeitet an Ubuntu 26.04 (die Portierung in
-[PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603) ist offen,
-noch nicht übernommen). Dieser Fork baut auf dieser Portierung auf. Ziele:
+Eine Portierung auf Ubuntu 26.04 ist upstream in
+[PR #2603](https://github.com/mail-in-a-box/mailinabox/pull/2603) von
+[@writeDavid](https://github.com/writeDavid) vorgeschlagen (offen, noch nicht
+übernommen). Dieser Fork baut auf dieser Portierung auf. Ziele:
 
 * Betrieb auf **Ubuntu 26.04 LTS** (normale Unterstützung bis Mai 2031, ESM
   bis Mai 2036) mit aktuellen Versionen von PHP, Nextcloud, Roundcube und
@@ -190,8 +201,9 @@ noch nicht übernommen). Dieser Fork baut auf dieser Portierung auf. Ziele:
   packages.sury.org dient nur als Notlösung und ist per apt-Pin auf das
   beschränkt, was Ubuntu fehlt (`php8.5-imap`, `php-common` und PHP 8.2 für
   die Nextcloud-Upgrade-Kette).
-* Das Konzept von Mail-in-a-Box bleibt: ein Setup-Befehl, keine
-  Konfigurationsoptionen.
+* Das Konzept von Mail-in-a-Box bleibt: ein Setup-Befehl, keine vom Benutzer
+  wählbaren Setup-Optionen (einziger neuer Schalter ist `FTS=off` in
+  `/etc/mailinabox.conf`).
 * Ein Weg für bestehende Boxen: Umzug auf eine neue 26.04-Maschine oder
   Upgrade an Ort und Stelle von Ubuntu 22.04 oder 24.04.
 
@@ -222,14 +234,16 @@ Ubuntu 22.04.
 Versionen ändern sich nur mit einer neuen Version von Mail-in-a-Box oder
 dieses Forks.
 
-Zeilen ohne Markierung kommen aus dem Ubuntu-Archiv (außer PHP in v78, das
-aus `ppa:ondrej/php` stammt) und werden über die
-Sicherheitsaktualisierungen von Ubuntu aktualisiert; angegeben ist die
-Upstream-Version, die Ubuntu ausliefert.
-
 ² Aus `ppa:duplicity-team/duplicity-release-git`, in v78 wie im Fork.
 
-³ Nextcloud 35 ist im Oktober 2026 erschienen; dieser Fork ist noch bei 34.
+³ Nextcloud 35 ist im September 2026 erschienen; dieser Fork ist noch bei 34.
+
+Zeilen ohne Markierung kommen aus dem Ubuntu-Archiv (außer PHP in v78, das
+aus `ppa:ondrej/php` stammt) und werden mit den Paketaktualisierungen von
+Ubuntu aktualisiert; angegeben ist die Upstream-Version, die Ubuntu
+ausliefert. Die meisten liegen in Ubuntus Komponente main, die während der
+normalen Unterstützung Sicherheitsaktualisierungen bekommt;
+`dovecot-fts-xapian` und `spampd` liegen in universe.
 
 #### Hinweis und Stand
 
