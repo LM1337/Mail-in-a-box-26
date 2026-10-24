@@ -44,7 +44,7 @@ B57-B60 by the in-place upgrade of a production box with rc3.
 | 26.04 change | 14 |
 | Fork | 4 |
 
-14 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B60). They are candidates for
+15 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B60). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview

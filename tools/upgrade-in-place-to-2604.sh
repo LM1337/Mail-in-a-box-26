@@ -1129,10 +1129,6 @@ checkout_dir() { # the checkout this script runs from, if any
 	echo "$d"
 }
 
-# Through curl | bash there is no file to continue from after a reboot:
-# clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
-# in tools/migrate-to-2604.sh, with the script name and the directory as
-# parameters, and the branch main as the fallback when the tag lacks SCRIPT.)
 # A release tag older than run_in_multiplexer does not start tmux by itself:
 # say so before its copy runs (its own check only asks without --yes). Keep
 # in sync with tools/migrate-to-2604.sh.
@@ -1147,6 +1143,10 @@ connection drops outside tmux or screen, the run stops halfway. Better: stop now
 	sleep 5
 }
 
+# Through curl | bash there is no file to continue from after a reboot:
+# clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
+# in tools/migrate-to-2604.sh, with the script name and the directory as
+# parameters, and the branch main as the fallback when the tag lacks SCRIPT.)
 reexec_from_clone() { # SCRIPT DIR ARGS...
 	local script=$1 d=$2 source=${SOURCE:-$DEFAULT_SOURCE} tag=${TAG:-$DEFAULT_TAG}
 	shift 2

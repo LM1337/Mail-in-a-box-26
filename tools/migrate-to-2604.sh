@@ -1265,16 +1265,6 @@ and run sudo $CLONE_DIR/tools/migrate-to-2604.sh ..."
 	if [ -z "$CHECK_ONLY" ]; then confirm "Continue with $d anyway?"; fi
 }
 
-# Find this fork's setup scripts: the checkout this script runs from, or a
-# clone in /root/mailinabox (like setup/bootstrap.sh) when it runs through curl.
-checkout_dir() { # the checkout this script runs from, if any
-	local d
-	[ -n "$SELF_FILE" ] || return 1
-	d=$(dirname "$(dirname "$SELF_FILE")")
-	[ -f "$d/setup/start.sh" ] || return 1
-	echo "$d"
-}
-
 # A release tag older than run_in_multiplexer does not start tmux by itself:
 # say so before its copy runs (its own check only asks without --yes). Keep
 # in sync with tools/upgrade-in-place-to-2604.sh.
@@ -1287,6 +1277,16 @@ warn_no_auto_tmux() { # FILE TAG
 connection drops outside tmux or screen, the run stops halfway. Better: stop now
 (Ctrl-C), run tmux new -s $TMUX_SESSION and start the command again in there."
 	sleep 5
+}
+
+# Find this fork's setup scripts: the checkout this script runs from, or a
+# clone in /root/mailinabox (like setup/bootstrap.sh) when it runs through curl.
+checkout_dir() { # the checkout this script runs from, if any
+	local d
+	[ -n "$SELF_FILE" ] || return 1
+	d=$(dirname "$(dirname "$SELF_FILE")")
+	[ -f "$d/setup/start.sh" ] || return 1
+	echo "$d"
 }
 
 resolve_miab_dir() {
