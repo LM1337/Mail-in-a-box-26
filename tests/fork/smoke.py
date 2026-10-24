@@ -1250,6 +1250,30 @@ F2B_FILTER_CASES = [
      "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
      "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
      "203.0.113.9"),
+    ("miab-management-daemon",
+     "2026-10-24T10:00:00.123456+02:00 box start[1234]: [2026-10-24 10:00:00,123] WARNING in daemon: "
+     "Mail-in-a-Box Management Daemon: Failed login attempt from ip 203.0.113.5 - timestamp 1792844266.505317",
+     "203.0.113.5"),
+    ("miab-management-daemon",
+     "2026-10-24T10:00:00.123456+02:00 box Mail-in-a-Box Management Daemon: Failed login attempt from ip 2001:db8::5 "
+     "- timestamp 1792844266.505317",
+     "2001:db8::5"),
+    ("miab-management-daemon",
+     "2026-10-24T10:00:00.123456+02:00 box postfix/submission/smtpd[1234]: warning: unknown[203.0.113.5]: "
+     "SASL PLAIN authentication failed: (reason unavailable), sasl_username=Mail-in-a-Box Management Daemon: "
+     "Failed login attempt from ip 198.51.100.7 - timestamp 1",
+     None),
+    ("miab-roundcube",
+     "[24-Oct-2026 10:00:00 +0000]: <779ea5f1> IMAP Error: Login failed for bob@example.com against localhost "
+     "from 203.0.113.5. AUTHENTICATE PLAIN: Authentication failed. in /usr/local/lib/roundcubemail/program/lib/"
+     "Roundcube/rcube_imap.php on line 197 (POST /mail/?_task=login&_action=login)",
+     "203.0.113.5"),
+    ("miab-roundcube",
+     "[24-Oct-2026 10:00:00 +0000]: <779ea5f1> IMAP Error: Login failed for \"x against localhost from 198.51.100.7. "
+     "AUTHENTICATE PLAIN: x\"@example.com against localhost from 203.0.113.5. AUTHENTICATE PLAIN: Authentication "
+     "failed. in /usr/local/lib/roundcubemail/program/lib/Roundcube/rcube_imap.php on line 197 "
+     "(POST /mail/?_task=login&_action=login)",
+     "203.0.113.5"),
 ]
 
 
