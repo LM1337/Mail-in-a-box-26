@@ -114,6 +114,23 @@ What it does, in phases that continue on their own after each reboot:
    services, Nextcloud, status checks, a report of configuration that changed;
    backups and timers back on.
 
+Services of your own that use the mail (e.g. a docker compose stack that logs
+in by IMAP or receives Dovecot push calls) can be stopped and started with
+hooks in two more directories: `/etc/mailinabox/upgrade-2604.d/before/*.sh`
+run right before mail goes offline, `/etc/mailinabox/upgrade-2604.d/after/*.sh`
+in phase finish, after mail and the backups are back (and at the end of
+`--rollback`). They get the same variables, and `HOOK_STAGE` (`before`,
+`local-ext`, `after`). A failing before hook stops the upgrade before mail is
+stopped; a failing after hook only warns. If the final check fails, the after
+hooks run with `--finish` or with the next run that passes. Write hooks so
+that they can run twice. For example:
+
+    # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
+    cd /opt/myapp && docker compose stop
+
+    # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
+    cd /opt/myapp && docker compose up -d
+
 Downtime on a test box was about 50 minutes; plan 1-3 hours. The release
 upgrades cannot be undone: `--rollback` only works before the first one.
 After that the way back is the backup. Have the provider's console at hand,
@@ -189,6 +206,25 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 8. **verify** und **finish**: Zählungen und Fingerabdrücke gegen vorher,
    Dienste, Nextcloud, Statusprüfungen, ein Bericht über geänderte
    Konfiguration; Sicherungen und Timer wieder an.
+
+Eigene Dienste, die die Mail nutzen (etwa ein docker-compose-Stack, der sich
+per IMAP anmeldet oder Push-Aufrufe von Dovecot empfängt), lassen sich mit
+Hooks in zwei weiteren Verzeichnissen anhalten und starten:
+`/etc/mailinabox/upgrade-2604.d/before/*.sh` laufen unmittelbar bevor die Mail
+ausgeht, `/etc/mailinabox/upgrade-2604.d/after/*.sh` in der Phase finish,
+nachdem Mail und Sicherungen wieder laufen (und am Ende von `--rollback`).
+Sie bekommen dieselben Variablen und dazu `HOOK_STAGE` (`before`,
+`local-ext`, `after`). Ein fehlschlagender before-Hook hält das Upgrade an,
+bevor die Mail angehalten wird; ein fehlschlagender after-Hook warnt nur.
+Schlägt die Schlussprüfung fehl, laufen die after-Hooks mit `--finish` oder
+beim nächsten erfolgreichen Lauf. Hooks so schreiben, dass sie zweimal laufen
+dürfen. Beispiel:
+
+    # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
+    cd /opt/myapp && docker compose stop
+
+    # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
+    cd /opt/myapp && docker compose up -d
 
 Die Ausfallzeit lag auf einer Testbox bei etwa 50 Minuten; einplanen sollte
 man 1 bis 3 Stunden. Die Release-Upgrades lassen sich nicht zurücknehmen:

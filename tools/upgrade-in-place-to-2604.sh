@@ -60,16 +60,26 @@
 # 2.4 does not read 2.3 configuration, and /etc/dovecot is replaced by a
 # pristine copy before setup. To bring such extensions back, put hook scripts
 # into /etc/mailinabox/upgrade-2604.d/*.sh. They run in phase local-ext, after
-# setup and before verify, in the order of their names:
+# setup and before verify. Two more stages are for services of the operator
+# that use the mail (e.g. a docker compose stack that logs in by IMAP):
+#   /etc/mailinabox/upgrade-2604.d/before/*.sh  right before mail goes offline
+#       (stop_mail; on a box that only runs setup again: before setup);
+#   /etc/mailinabox/upgrade-2604.d/after/*.sh   in phase finish, after mail
+#       and the backups are back (and at the end of --rollback).
+# All hooks run in the order of their names:
 #   * as root, with bash, in /, stdin from /dev/null;
-#   * with the environment variables STORAGE_ROOT, PRIMARY_HOSTNAME, MIAB_DIR
-#     (this fork's checkout), OLD_ETC (/root/upgrade-2604/old-etc, a copy of
-#     /etc as it was before the upgrade), MOVED_DIR (/root/upgrade-2604/moved,
-#     everything this tool moved out of the way, at its original path) and
-#     UPGRADE_STATE_DIR;
-#   * a non-zero exit code makes the phase fail (fix the hook, run again;
-#     all hooks run again, so write them so that they can run twice).
-# After the hooks, "doveconf -n" must succeed without warnings.
+#   * with the environment variables HOOK_STAGE (before, local-ext, after),
+#     STORAGE_ROOT, PRIMARY_HOSTNAME, MIAB_DIR (this fork's checkout; in
+#     stage before and after --rollback the old one), OLD_ETC
+#     (/root/upgrade-2604/old-etc, a copy of /etc as it was before the
+#     upgrade; not yet in stage before),
+#     MOVED_DIR (/root/upgrade-2604/moved, everything this tool moved out of
+#     the way, at its original path) and UPGRADE_STATE_DIR;
+#   * a non-zero exit code makes the phase fail in stages before and
+#     local-ext (fix the hook, run again; all hooks of the stage run again, so
+#     write them so that they can run twice); in stage after it is only a
+#     warning (the upgrade is not undone).
+# After the hooks of local-ext, "doveconf -n" must succeed without warnings.
 #
 # See --help.
 #########################################################
@@ -96,6 +106,9 @@ APT_DISABLED=$STATE_DIR/apt-disabled
 # .deb files of the packages purged before the release upgrade (for --rollback).
 PURGED_DEBS=$STATE_DIR/purged-debs
 HOOK_DIR=/etc/mailinabox/upgrade-2604.d
+# Hook stages before (mail goes offline) and after (finish); see the header.
+HOOK_BEFORE_DIR=$HOOK_DIR/before
+HOOK_AFTER_DIR=$HOOK_DIR/after
 SCRIPT_NAME=upgrade-in-place-to-2604.sh
 RESUME_UNIT=mailinabox-upgrade-2604-resume.service
 RESUME_UNIT_FILE=/etc/systemd/system/$RESUME_UNIT
@@ -241,7 +254,10 @@ Safety nets:
                           not block the upgrade; they are only reported, and
                           the old /etc/dovecot is moved aside before setup.
                           Hooks in /etc/mailinabox/upgrade-2604.d/*.sh can
-                          bring them back for Dovecot 2.4.
+                          bring them back for Dovecot 2.4; hooks in its
+                          before/ and after/ run right before mail goes
+                          offline and when the upgrade is finished (e.g. to
+                          stop and start services that use the mail).
 
 Control:
   --yes                   do not ask for confirmation, and reboot without the
@@ -1597,11 +1613,15 @@ detect_extensions() {
 		dpkg -S "$f" > /dev/null 2>&1 && continue
 		EXT_INFO+=("$f (cron job; kept, cron is stopped during the upgrade)")
 	done
-	if [ -d "$HOOK_DIR" ]; then
-		for f in "$HOOK_DIR"/*.sh; do
-			if [ -f "$f" ]; then EXT_INFO+=("hook $f (runs in phase local-ext)"); fi
-		done
-	fi
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs right before mail goes offline)"); fi
+	done < <(hook_files "$HOOK_BEFORE_DIR")
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs in phase local-ext)"); fi
+	done < <(hook_files "$HOOK_DIR")
+	while IFS= read -r f; do
+		if [ -n "$f" ]; then EXT_INFO+=("hook $f (runs in phase finish, after mail is back)"); fi
+	done < <(hook_files "$HOOK_AFTER_DIR")
 }
 
 report_extensions() {
@@ -1852,6 +1872,12 @@ show_plan() {
 	say "$n. Setup of this fork (${TAG:-$DEFAULT_TAG}) on the existing data (Nextcloud ${nc:-} -> 34). Mail is back."
 	n=$((n + 1))
 	say "$n. Hooks ($HOOK_DIR), checks, services and backups back on."
+	if [ -n "$(hook_files "$HOOK_BEFORE_DIR")" ]; then
+		say "The hooks in $HOOK_BEFORE_DIR run right before mail goes offline."
+	fi
+	if [ -n "$(hook_files "$HOOK_AFTER_DIR")" ]; then
+		say "The hooks in $HOOK_AFTER_DIR run at the end, when mail and the backups are back."
+	fi
 	say
 	local rel=0
 	if [ "$v" = 22.04 ]; then rel=2; elif [ "$v" = 24.04 ]; then rel=1; fi
@@ -2250,6 +2276,7 @@ and run the command again. Nothing was stopped yet."
 and run the command again. Nothing was stopped yet."
 			fi
 		fi
+		run_hooks before "$HOOK_BEFORE_DIR"
 		for u in "${units[@]}"; do
 			if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
 		done
@@ -2287,7 +2314,8 @@ They stay in /var/spool/postfix and are delivered when Postfix runs again after 
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
 	if command -v docker > /dev/null && [ "$(docker ps -q 2> /dev/null | wc -l)" -gt 0 ]; then
-		warn "Docker containers are running and were NOT stopped: $(docker ps --format '{{.Names}}' 2> /dev/null | tr '\n' ' ')"
+		warn "Docker containers are running and were NOT stopped: $(docker ps --format '{{.Names}}' 2> /dev/null | tr '\n' ' ')
+If they use the mail, stop them with a hook in $HOOK_BEFORE_DIR next time (see the header)."
 	fi
 	say
 	say "MAIL IS OFFLINE NOW (since $(state_get QUIESCED_AT)). Senders queue their mail and retry;"
@@ -2975,6 +3003,8 @@ phase_setup() {
 		# update timers stay off until it has finished.
 		unquiesce cron.service apt-daily.timer apt-daily-upgrade.timer
 	fi
+	# Nothing goes offline before (no quiesce): the before stage runs here.
+	if [ "$(state_get MODE)" = rerun ]; then run_hooks before "$HOOK_BEFORE_DIR"; fi
 	local rc=0
 	run_setup || rc=$?
 	if [ "$rc" != 0 ]; then
@@ -2995,27 +3025,50 @@ Fix the cause and run this command again; it continues with setup."
 # ---------------------------------------------------------------------------
 # Hooks, checks, finish.
 
-phase_local_ext() {
-	section "Local extensions (hooks in $HOOK_DIR)"
-	resolve_fork_dir
-	local hooks=() h rc out warnings
-	if [ -d "$HOOK_DIR" ]; then
-		mapfile -t hooks < <(find "$HOOK_DIR" -maxdepth 1 -type f -name '*.sh' 2> /dev/null | LC_ALL=C sort)
-	fi
+# The operator's hook scripts in DIR (*.sh, not in subdirectories), in the
+# order of their names.
+hook_files() { # DIR
+	[ -d "$1" ] || return 0
+	find "$1" -maxdepth 1 -type f -name '*.sh' 2> /dev/null | LC_ALL=C sort
+}
+
+# Run the hooks of a stage (see the header of this script). A failing hook
+# stops the run, in stage "after" it only warns: mail runs again, and the
+# upgrade is not undone for it.
+run_hooks() { # STAGE DIR
+	local stage=$1 dir=$2 hooks=() h rc host miab=${MIAB_DIR:-$(state_get FORK_DIR)}
+	miab=${miab:-$(state_get OLD_MIAB_DIR)}
+	mapfile -t hooks < <(hook_files "$dir")
 	if [ ${#hooks[@]} -eq 0 ]; then
-		say "No hooks."
+		if [ "$stage" = local-ext ]; then say "No hooks."; fi
+		return 0
 	fi
-	local host
-	host=$(sed -n 's/^PRIMARY_HOSTNAME=//p' /etc/mailinabox.conf)
+	if [ "$stage" != local-ext ]; then say "Hooks of stage $stage ($dir):"; fi
+	host=$(sed -n 's/^PRIMARY_HOSTNAME=//p' /etc/mailinabox.conf 2> /dev/null || true)
 	for h in "${hooks[@]}"; do
 		say "Running $h..."
 		rc=0
-		(cd / && env STORAGE_ROOT="$STORAGE_ROOT" PRIMARY_HOSTNAME="$host" MIAB_DIR="$MIAB_DIR" \
+		(cd / && env HOOK_STAGE="$stage" STORAGE_ROOT="$STORAGE_ROOT" PRIMARY_HOSTNAME="$host" MIAB_DIR="$miab" \
 			OLD_ETC="$OLD_ETC" MOVED_DIR="$MOVED_DIR" UPGRADE_STATE_DIR="$STATE_DIR" bash "$h") < /dev/null || rc=$?
 		FAILED_CMD=
-		[ "$rc" = 0 ] || die "The hook $h failed (exit code $rc). Fix it and run the command again;
-all hooks run again."
+		[ "$rc" != 0 ] || continue
+		case "$stage" in
+			after) warn "The hook $h failed (exit code $rc). The upgrade is not undone for it; run the hook
+again by hand when you have fixed it." ;;
+			before) die "The hook $h failed (exit code $rc). Mail was not stopped yet. Fix it and run the
+command again; all hooks of $dir run again." ;;
+			*) die "The hook $h failed (exit code $rc). Fix it and run the command again;
+all hooks run again." ;;
+		esac
 	done
+	state_set "HOOKS_${stage//-/_}_AT" "$(date -u +%FT%TZ)"
+}
+
+phase_local_ext() {
+	section "Local extensions (hooks in $HOOK_DIR)"
+	resolve_fork_dir
+	local rc out warnings
+	run_hooks local-ext "$HOOK_DIR"
 	if command -v doveconf > /dev/null; then
 		rc=0
 		out=$(doveconf -n 2>&1 > /dev/null) || rc=$?
@@ -3216,6 +3269,7 @@ phase_finish() {
 	remove_resume
 	state_set FINISHED_AT "$(date -u +%FT%TZ)"
 	state_set FINISHED_EPOCH "$(date +%s)"
+	run_hooks after "$HOOK_AFTER_DIR"
 	local held
 	held=$(state_get HELD_PACKAGES)
 	if [ -n "$held" ]; then say "These packages were held before the upgrade and are not held again: $held"; fi
@@ -3496,6 +3550,7 @@ mail_plugins (/etc/dovecot/conf.d/20-imap.conf, 20-pop3.conf): install it, or re
 		systemctl start "${start[@]}" || warn "Not all of them started; see 'systemctl --failed'."
 	fi
 	if [ "$(state_get BACKUPS_PAUSED)" = 1 ]; then resume_backups; fi
+	run_hooks after "$HOOK_AFTER_DIR"
 	local saved
 	saved=$STATE_DIR/state.rolled-back-$(date -u +%Y%m%dT%H%M%SZ)
 	mv "$STATE_FILE" "$saved"
