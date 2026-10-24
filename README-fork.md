@@ -88,9 +88,13 @@ the following, on by default:
   with the same thresholds. They block HTTP and HTTPS: a calendar or contacts
   app with an old password polls Nextcloud every few minutes and would get its
   whole network banned from webmail and the control panel. Turn them on only
-  with your networks on the allowlist.
+  with your networks on the allowlist. fail2ban applies a changed ban time
+  also to the current first bans of a jail (a repeat offender's longer ban
+  keeps its length), and an address with a ban history is banned again after
+  fewer failures.
 * **Allowlist.** Addresses and networks in `allowlist` (empty by default) are
-  never banned, in addition to the box's own addresses. Put your office or
+  never banned, in addition to the box's own addresses. Saving the settings
+  unbans addresses that are banned and now on the allowlist. Put your office or
   home network there: the jails count the failures of an address, not of an
   account, so all devices behind one office address add up, and a phone with
   an old password gets its network banned from the mail ports, for longer
@@ -153,7 +157,7 @@ only, changes by POST with form fields):
 |---|---|
 | `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban), the settings, defaults and limits, and `client` (the address of the request, whether it is allowlisted or one of the box's own) |
 | `GET /admin/system/fail2ban/settings` | the settings, defaults and warnings about invalid stored values |
-| `POST /admin/system/fail2ban/settings` | fields named like the settings; fields not sent keep their value, `reset=1` starts from the defaults. Answers with `changed`, `reloaded`, `restarted` (the jails were restarted), `skipped_jails` and the new settings, or HTTP 400 with the reason |
+| `POST /admin/system/fail2ban/settings` | fields named like the settings; fields not sent keep their value, `reset=1` starts from the defaults. Answers with `changed`, `reloaded`, `restarted` (the jails were restarted), `skipped_jails`, `unbanned_allowlisted` (banned addresses that are on the allowlist now and were unbanned) and the new settings, or HTTP 400 with the reason |
 | `POST /admin/system/fail2ban/unban` | `ip`, optionally `jail`. Answers with `unbanned_from`, `still_banned_in` and `history_deleted` |
 | `POST /admin/system/fail2ban/unban-all` | `jail`: unbans every address banned in that jail |
 | `GET /admin/system/fail2ban/report` | the failed-login report as JSON |
@@ -206,9 +210,14 @@ eingeschaltet:
   sperren HTTP und HTTPS: Eine Kalender- oder Kontakte-App mit altem Passwort
   fragt Nextcloud alle paar Minuten ab und würde ihr ganzes Netz für Webmail
   und die Admin-Oberfläche sperren. Nur einschalten, wenn die eigenen Netze in
-  der Freigabeliste stehen.
+  der Freigabeliste stehen. Eine geänderte Sperrdauer wendet fail2ban auch
+  auf die laufenden ersten Sperren eines Jails an (die längere Sperre eines
+  Wiederholungstäters behält ihre Dauer), und eine Adresse mit
+  Sperrgeschichte wird schon nach weniger Fehlversuchen wieder gesperrt.
 * **Freigabeliste.** Adressen und Netze in `allowlist` (anfangs leer) werden
-  nie gesperrt, zusätzlich zu den eigenen Adressen der Box. Hier gehört das
+  nie gesperrt, zusätzlich zu den eigenen Adressen der Box. Beim Speichern
+  der Einstellungen werden gesperrte Adressen, die nun in der Freigabeliste
+  stehen, entsperrt. Hier gehört das
   Netz des Büros oder von zu Hause hinein: Die Jails zählen die Fehlversuche
   einer Adresse, nicht eines Kontos, alle Geräte hinter einer Büroadresse
   zählen also zusammen, und ein Telefon mit altem Passwort sperrt sein Netz

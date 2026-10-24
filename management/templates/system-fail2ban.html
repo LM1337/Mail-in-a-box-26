@@ -422,7 +422,7 @@ function f2b_render_settings() {
     var help = "Default " + fmt(d[k]) + ", from " + fmt(lim[k].min) + " to " + fmt(lim[k].max) + ".";
     if (k == "memory") help += " At least the maximum ban time.";
     if (k == "slow_maxretry") help = "Failed logins of one address that lead to a ban. " + help;
-    if (k == "slow_bantime") help = "On the mail ports repeat offenders get longer bans if adaptive banning is on. " + help;
+    if (k == "slow_bantime") help = "On the mail ports repeat offenders get longer bans if adaptive banning is on. A change also applies to the current first bans of the slow jails. " + help;
     if (k == "spray_min_ips") help = "Report an account that failed to log in from this many addresses within 24 hours. " + help;
     $('#f2b-help-' + k).text(help);
   });
@@ -468,9 +468,9 @@ function f2b_save_settings() {
   if (f2b_state.settings.adaptive && values.adaptive == "0")
     off.push("Adaptive banning: repeat offenders get Mail-in-a-Box's fixed bans again, and fail2ban forgets its ban history after one day. All jails are restarted; their current bans are kept.");
   if (f2b_state.settings.slow_jails && values.slow_jails == "0")
-    off.push("Slow jails: attacks with a few attempts per hour are no longer banned, and the addresses the slow jails banned are released.");
+    off.push("Slow jails: attacks with a few attempts per hour are no longer banned, and the addresses the slow jails banned are released (bans that have not run out yet come back if you turn them on again).");
   if (f2b_state.settings.slow_web_jails && values.slow_web_jails == "0")
-    off.push("Slow jails for webmail, Nextcloud and the control panel: the addresses they banned are released.");
+    off.push("Slow jails for webmail, Nextcloud and the control panel: the addresses they banned are released (bans that have not run out yet come back if you turn them on again).");
   if (off.length == 0) {
     f2b_post_settings(values);
     return;
@@ -505,6 +505,8 @@ function f2b_post_settings(values) {
       else if (r.changed) text += " The configuration files were written; fail2ban is not running, so they apply when it starts.";
       else text += " The fail2ban configuration did not change.";
       msg.append($("<p/>").text(text));
+      if (r.unbanned_allowlisted && r.unbanned_allowlisted.length)
+        msg.append($("<p/>").text("Unbanned because they are on the allowlist now: " + r.unbanned_allowlisted.join(", ") + "."));
       if (r.skipped_jails && r.skipped_jails.length)
         msg.append($("<p/>").text("Left out because their log file does not exist yet: " + r.skipped_jails.join(", ") + ". Save again later, or re-run setup."));
       show_modal_error("Intrusion Protection", msg, function() { show_fail2ban(); });

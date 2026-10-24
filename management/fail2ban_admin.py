@@ -215,7 +215,37 @@ def update_settings(env, values, reset=False):
 		save_settings(env, old)
 		raise
 	result["settings"] = new
+	result["unbanned_allowlisted"] = unban_allowlisted(new)
 	return result
+
+def unban_allowlisted(settings):
+	# ignoreip only stops new bans: an address banned before its network was
+	# put on the allowlist stays banned (fail2ban also restores it from its
+	# database after a restart). Unban those addresses in all jails, with their
+	# ban history. Returns the unbanned addresses.
+	if not settings["allowlist"] or not is_running():
+		return []
+	nets = [ipaddress.ip_network(n, strict=False) for n in settings["allowlist"]]
+	try:
+		banned = set()
+		for item in _literal(f2b("banned")):
+			for ips in item.values():
+				banned.update(ips)
+	except F2BError:
+		return []
+	ret = []
+	for ip in sorted(banned):
+		try:
+			a = ipaddress.ip_address(ip)
+		except ValueError:
+			continue
+		if any(a in n for n in nets):
+			try:
+				unban_ip(ip)
+				ret.append(ip)
+			except (ValueError, F2BError):
+				pass
+	return ret
 
 # RENDERING
 

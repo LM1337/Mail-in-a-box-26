@@ -23,7 +23,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   ports (the Dovecot one ignores connections without a login attempt); slow
   jails for Roundcube, Nextcloud and the control panel (HTTP/HTTPS) are a
   separate switch, off by default. An allowlist of own networks is added to
-  ignoreip. Changing the adaptive options restarts the jails (`reload
+  ignoreip; saving it unbans addresses that are banned and now on it. Changing the adaptive options restarts the jails (`reload
   --restart`), because a plain reload leaves the old values in running jails. The settings are stored in
   settings.yaml under `fail2ban`; `management/fail2ban_admin.py` writes
   `jail.d/mailinabox_adaptive.conf` and `fail2ban.d/mailinabox_adaptive.conf`
