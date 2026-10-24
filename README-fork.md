@@ -103,6 +103,12 @@ Limits:
 * A team (Nextcloud Teams) that already has members of another domain still
   works, and so does sharing with it. A team member added through the API by
   the exact address is not checked against the domain.
+* Calendars and address books can still be shared with an account of another
+  domain by a CalDAV/CardDAV request that names the account directly
+  (`principal:principals/users/<address>`): Nextcloud checks the groups when
+  it searches for sharees, not when it stores such a share. The web interface
+  does not offer accounts of other domains, so this needs a hand-made request
+  or a client that sends it.
 * CardDAV clients that synced the system address book before keep their copy
   of the other domains until they sync it from scratch (remove the address
   book or account in the client and add it again). A client that syncs it may
@@ -170,6 +176,12 @@ Grenzen:
   funktioniert weiter, das Teilen damit auch. Ein Teammitglied, das über die
   API mit der genauen Adresse hinzugefügt wird, wird nicht gegen die Domain
   geprüft.
+* Kalender und Adressbücher lassen sich weiterhin mit einem Konto einer
+  anderen Domain teilen, wenn eine CalDAV/CardDAV-Anfrage das Konto direkt
+  nennt (`principal:principals/users/<adresse>`): Nextcloud prüft die Gruppen
+  bei der Suche nach Empfängern, nicht beim Speichern einer solchen Freigabe.
+  Die Weboberfläche bietet Konten anderer Domains nicht an; dafür braucht es
+  also eine selbst gebaute Anfrage oder ein Programm, das sie schickt.
 * CardDAV-Programme, die das Systemadressbuch schon vorher abgeglichen haben,
   behalten ihre Kopie der anderen Domains, bis sie es von Grund auf neu
   abgleichen (Adressbuch oder Konto im Programm entfernen und neu
