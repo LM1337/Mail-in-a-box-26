@@ -15,12 +15,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * fail2ban: adaptive intrusion protection, on by default (README-fork.md,
   "Intrusion protection"; control panel: System > Intrusion Protection).
-  Each new ban of an address lasts twice as long as its previous one,
-  counted over all jails, up to one week; the ban history is kept for
-  30 days. Slow jails for SMTP AUTH, IMAP/POP3/ManageSieve,
-  Roundcube, Nextcloud and the control panel ban after 10 failures within
-  6 hours (the Dovecot one ignores connections without a login attempt). An
-  allowlist of own networks is added to ignoreip. The settings are stored in
+  Each new ban of an address in a jail lasts twice as long as its previous
+  ban in that jail, up to one week (no `bantime.overalljails`; recidive
+  handles addresses banned in many jails); bans of the web ports keep their
+  fixed length; the ban history is kept for 30 days. Slow jails for SMTP AUTH
+  and IMAP/POP3/ManageSieve ban after 20 failures within 6 hours on the mail
+  ports (the Dovecot one ignores connections without a login attempt); slow
+  jails for Roundcube, Nextcloud and the control panel (HTTP/HTTPS) are a
+  separate switch, off by default. An allowlist of own networks is added to
+  ignoreip. Changing the adaptive options restarts the jails (`reload
+  --restart`), because a plain reload leaves the old values in running jails. The settings are stored in
   settings.yaml under `fail2ban`; `management/fail2ban_admin.py` writes
   `jail.d/mailinabox_adaptive.conf` and `fail2ban.d/mailinabox_adaptive.conf`
   from them (setup, `--apply`), checks them with `fail2ban-client -t` and
@@ -29,8 +33,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   logins from 4,627 addresses in a week and no ban.
 * Status checks: a report of failed logins in the mail log of the last
   48 hours: accounts that failed from 20 or more addresses within 24 hours
-  (password spraying) and addresses that keep failing for 12 hours or more
-  without a ban. Only existing accounts are named.
+  (password spraying), addresses that keep failing for 12 hours or more
+  without a single ban in that time (expired bans are read from fail2ban's
+  database), and banned addresses that failed only as one or two existing
+  accounts (probably an own device with an old password: allowlist it). Only
+  existing accounts are named.
 * Management API (admin): `GET /system/fail2ban` (jails, bans with time
   left), `GET`/`POST /system/fail2ban/settings`, `POST /system/fail2ban/unban`
   (one jail, or all jails including the ban history), `POST
@@ -41,16 +48,28 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   confirmation), shows the failed-login report and edits the settings
   (adaptive banning and slow jails on/off with a confirmation before turning
   off, thresholds, allowlist, restore defaults). It shows the admin's own
-  address and offers to allowlist or unban it.
+  address (for IPv6 its /64) and offers to allowlist or unban it.
 * Tests: smoke checks `admin-fail2ban-status`, `admin-fail2ban-settings`,
-  `admin-fail2ban-report` and `admin-fail2ban-panel`; `prepare-testenv.sh` puts the jump host on the
-  allowlist.
+  `admin-fail2ban-report`, `admin-fail2ban-filters` (fail2ban-regex with
+  injected user names) and `admin-fail2ban-panel`, and in the opt-in fail2ban
+  group `fail2ban-adaptive-toggle` (turning adaptive banning off reaches the
+  running jails); `prepare-testenv.sh` puts the jump host on the allowlist.
 
 ### Fixed
 
-* fail2ban: recidive bans (1 week) are no longer forgotten when fail2ban
-  restarts more than a day after the ban. With adaptive banning `dbpurgeage`
-  is 30 days instead of Debian's 1 day (B61).
+* fail2ban: the `miab-postfix-submission` filter (jails `miab-postfix465`,
+  `miab-postfix587`) is anchored. A client could put `[<ip>]: ` into the SASL
+  user name, which Postfix logs after the client address, and get a third
+  party banned (B61).
+
+### Upgrade note
+
+* The slow mail jails are on after the upgrade, with an empty allowlist. On a
+  box whose users sit behind one office address, put that network on the
+  allowlist (System > Intrusion Protection, or `sudo
+  management/fail2ban_admin.py --allow 192.0.2.0/24`) before or right after
+  the upgrade: a single phone with an old password can otherwise get the
+  office banned from the mail ports, for longer each time.
 
 ## v78-r2604.0-rc3 (2026-10-23)
 

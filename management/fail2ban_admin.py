@@ -7,8 +7,10 @@
 # This module adds, on top of conf/fail2ban/jails.conf:
 #
 #  * adaptive banning: repeated offenders get longer bans (bantime.increment,
-#    counted over all jails, remembered in fail2ban's database),
-#  * slow jails: the same filters with a window of hours,
+#    per jail, remembered in fail2ban's database); bans of the web ports keep
+#    their fixed length,
+#  * slow jails: the same filters with a window of hours (mail ports by
+#    default, the web logins only when turned on),
 #  * an allowlist of own networks (added to ignoreip),
 #  * a report of failed logins from many IP addresses for one account
 #    (password spraying) and of IPs that keep failing below the ban threshold.
@@ -34,11 +36,12 @@ JAIL_FILE = "/etc/fail2ban/jail.d/mailinabox_adaptive.conf"
 SERVER_FILE = "/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf"
 
 DEFAULTS = {
-	"adaptive": True,             # bantime.increment over all jails
+	"adaptive": True,             # bantime.increment, per jail
 	"bantime_max": 7 * 86400,     # bantime.maxtime, seconds
 	"memory": 30 * 86400,         # dbpurgeage: how long past bans count, seconds
-	"slow_jails": True,
-	"slow_maxretry": 10,
+	"slow_jails": True,           # slow jails for the mail logins
+	"slow_web_jails": False,      # slow jails for webmail, Nextcloud, control panel
+	"slow_maxretry": 20,
 	"slow_findtime": 6 * 3600,
 	"slow_bantime": 3600,
 	"allowlist": [],              # addresses/networks added to ignoreip
@@ -55,7 +58,7 @@ LIMITS = {
 	"slow_bantime": (60, 7 * 86400),
 	"spray_min_ips": (2, 100000),
 }
-BOOLEANS = ("adaptive", "slow_jails")
+BOOLEANS = ("adaptive", "slow_jails", "slow_web_jails")
 DURATIONS = ("bantime_max", "memory", "slow_findtime", "slow_bantime")
 MAX_ALLOWLIST = 100
 MIN_PREFIX = { 4: 8, 6: 16 } # refuse networks so wide that they switch fail2ban off
@@ -64,15 +67,28 @@ MAIL_PORTS = "465,587,993,995,4190"
 
 # The slow jails reuse Mail-in-a-Box's filters. The mail jails block only the
 # mail ports, so a device with an old password does not lock its network out of
-# webmail and the control panel.
-SLOW_JAILS = [
+# webmail and the control panel. The web jails block HTTP and HTTPS, so they
+# are a separate switch, off by default: a CalDAV/CardDAV client with an old
+# password polls Nextcloud every few minutes and would ban its whole network
+# from webmail and the control panel.
+SLOW_MAIL_JAILS = [
 	# name, filter, log file, ports
 	("miab-slow-smtp", "miab-postfix-submission", "/var/log/mail.log", MAIL_PORTS),
 	("miab-slow-dovecot", "miab-dovecot-authfail", "/var/log/mail.log", MAIL_PORTS),
+]
+SLOW_WEB_JAILS = [
 	("miab-slow-roundcube", "miab-roundcube", "/var/log/roundcubemail/errors.log", "http,https"),
 	("miab-slow-owncloud", "miab-owncloud", "STORAGE_ROOT/owncloud/nextcloud.log", "http,https"),
 	("miab-slow-management", "miab-management-daemon", "/var/log/syslog", "http,https"),
 ]
+SLOW_JAILS = SLOW_MAIL_JAILS + SLOW_WEB_JAILS
+
+# Mail-in-a-Box's own jails (conf/fail2ban/jails.conf) that ban HTTP and HTTPS.
+# With adaptive banning their bans, and those of the slow web jails, keep their
+# fixed length: a growing ban would lock a whole office out of the control
+# panel (where it could unban itself), webmail and Nextcloud for days.
+# recidive still bans addresses that are banned again and again.
+WEB_JAILS = ["miab-management", "miab-munin", "miab-owncloud", "miab-roundcube"]
 
 # SETTINGS
 
@@ -220,7 +236,7 @@ def render_config(env, settings):
 	# not exist (fail2ban refuses to start with a jail without a log file).
 	files = { JAIL_FILE: None, SERVER_FILE: None }
 	skipped = []
-	if not (settings["adaptive"] or settings["slow_jails"] or settings["allowlist"]):
+	if not (settings["adaptive"] or settings["slow_jails"] or settings["slow_web_jails"] or settings["allowlist"]):
 		return files, skipped
 
 	lines = [
@@ -234,38 +250,55 @@ def render_config(env, settings):
 	if settings["allowlist"]:
 		lines.append("ignoreip = " + " ".join(base_ignoreip(env) + settings["allowlist"]))
 	if settings["adaptive"]:
+		# No bantime.overalljails: with it fail2ban 1.1 takes the exponent from
+		# the sum of the ban counts of all jails and stores that sum again in
+		# this jail's row, so one burst banned by three jails at once sent the
+		# next ban straight to the maximum. Addresses that are banned again and
+		# again in any jail are recidive's job.
 		lines += [
-			"# Each new ban of an IP lasts twice as long as its previous one",
-			"# (bantime * 2^bans, all jails together), up to bantime.maxtime.",
+			"# Each new ban of an address in a jail lasts twice as long as its",
+			"# previous ban in that jail (bantime * 2^bans), up to bantime.maxtime.",
+			"# Bans in other jails do not count; recidive bans addresses that are",
+			"# banned again and again in any jail.",
 			"bantime.increment = true",
-			"bantime.overalljails = true",
 			"bantime.maxtime = %d" % settings["bantime_max"],
 		]
+		lines += [
+			"",
+			"# Bans of the web ports keep their fixed length, so that an office behind",
+			"# one address cannot lose the control panel, webmail and Nextcloud for days.",
+		]
+		for name in WEB_JAILS:
+			lines += [f"[{name}]", "bantime.increment = false"]
 
-	if settings["slow_jails"]:
-		for name, filt, logpath, ports in SLOW_JAILS:
-			logpath = slow_jail_logpath(logpath, env)
-			if not os.path.exists(logpath):
-				skipped.append(name)
-				continue
-			lines += [
-				"",
-				f"[{name}]",
-				"enabled  = true",
-				f"filter   = {filt}",
-				f"port     = {ports}",
-				f"logpath  = {logpath}",
-				"backend  = auto",
-				"maxretry = %d" % settings["slow_maxretry"],
-				"findtime = %d" % settings["slow_findtime"],
-				"bantime  = %d" % settings["slow_bantime"],
-			]
+	slow = (SLOW_MAIL_JAILS if settings["slow_jails"] else []) + (SLOW_WEB_JAILS if settings["slow_web_jails"] else [])
+	for name, filt, logpath, ports in slow:
+		logpath = slow_jail_logpath(logpath, env)
+		if not os.path.exists(logpath):
+			skipped.append(name)
+			continue
+		lines += [
+			"",
+			f"[{name}]",
+			"enabled  = true",
+			f"filter   = {filt}",
+			f"port     = {ports}",
+			f"logpath  = {logpath}",
+			"backend  = auto",
+			"maxretry = %d" % settings["slow_maxretry"],
+			"findtime = %d" % settings["slow_findtime"],
+			"bantime  = %d" % settings["slow_bantime"],
+		]
+		if settings["adaptive"] and ports == "http,https":
+			lines.append("bantime.increment = false")
 	files[JAIL_FILE] = "\n".join(lines) + "\n"
 
 	if settings["adaptive"]:
-		# The ban history (and the bans restored after a restart) is kept for
-		# dbpurgeage seconds. Debian's default of 1 day forgets offenders, and
-		# the recidive bans (1 week), after a day.
+		# bantime.increment knows an address only while its row is in the
+		# database. fail2ban purges a row of the bips table once the ban is
+		# older than dbpurgeage and also older than 3 x its ban time. With
+		# Debian's 1 day a 10-minute ban is forgotten after a day, and a repeat
+		# offender starts again at 10 minutes.
 		files[SERVER_FILE] = "\n".join([
 			"# Mail-in-a-Box (fork): adaptive fail2ban. Do not edit.",
 			"# Written by management/fail2ban_admin.py (setting \"memory\").",
@@ -293,6 +326,17 @@ def _write(path, content):
 		f.write(content)
 	os.chmod(tmp, 0o644)
 	os.replace(tmp, path)
+
+def _bantime_options(content):
+	# The bantime.* options of a jail file, with their section.
+	ret = []
+	section = None
+	for line in (content or "").splitlines():
+		if line.startswith("["):
+			section = line.strip()
+		elif line.startswith("bantime."):
+			ret.append((section, line.strip()))
+	return ret
 
 def config_is_current(env, settings=None):
 	if settings is None:
@@ -329,14 +373,24 @@ def apply_config(env, settings=None, reload=True):
 		for path, content in files.items():
 			_write(path, content)
 
+	# A plain reload keeps the running jail objects. It sets the bantime.*
+	# options that are in the files, but never resets those that were removed:
+	# after turning adaptive banning off, every jail would go on with
+	# bantime.increment until fail2ban is restarted. So when these options
+	# change, the jails are restarted ("reload --restart"); their bans are
+	# restored from fail2ban's database, only the failures counted so far are
+	# lost.
+	restart = _bantime_options(old[JAIL_FILE]) != _bantime_options(files[JAIL_FILE])
+	reload_args = ["reload", "--restart"] if restart else ["reload"]
 	if reload and is_running():
 		try:
-			f2b("reload", timeout=120)
+			f2b(*reload_args, timeout=180)
 			result["reloaded"] = True
+			result["restarted"] = restart
 		except F2BError as e:
 			restore()
 			try:
-				f2b("reload", timeout=120)
+				f2b(*reload_args, timeout=180)
 			except F2BError:
 				pass
 			raise RuntimeError(f"fail2ban could not reload the new configuration, the previous one was restored: {e}") from None
@@ -456,7 +510,8 @@ def get_status(env):
 		"limits": { k: { "min": lo, "max": hi } for k, (lo, hi) in LIMITS.items() },
 		"max_allowlist": MAX_ALLOWLIST,
 		"config_current": config_is_current(env, settings),
-		"slow_jails": [ j[0] for j in SLOW_JAILS ],
+		"slow_jails": [ j[0] for j in SLOW_MAIL_JAILS ],
+		"slow_web_jails": [ j[0] for j in SLOW_WEB_JAILS ],
 	}
 	try:
 		jails = get_jails()
@@ -500,25 +555,59 @@ def check_jail(jail):
 		raise ValueError("Unknown jail.")
 	return jail
 
+def db_path():
+	# fail2ban's sqlite database, None if it has none.
+	out = f2b("get", "dbfile").strip()
+	m = re.search(r"(/\S+)$", out)
+	return m.group(1) if m else None
+
+def _forget_stopped_jails(ip, running):
+	# "fail2ban-client unban <ip>" deletes the address's rows only for the
+	# running jails. Rows of jails that no longer run (e.g. the slow jails
+	# after they were turned off) would make a ban start longer when such a
+	# jail runs again, so they are deleted here. Returns the number of rows.
+	import sqlite3
+	path = db_path()
+	if not path or not os.path.exists(path):
+		return 0
+	con = sqlite3.connect(path, timeout=10)
+	try:
+		with con:
+			marks = ",".join("?" * len(running))
+			n = 0
+			for table in ("bips", "bans"):
+				n += con.execute(f"DELETE FROM {table} WHERE ip = ? AND jail NOT IN ({marks})", [ip, *running]).rowcount
+			return n
+	finally:
+		con.close()
+
 def unban_ip(ip, jail=None):
 	# Without a jail: "fail2ban-client unban <ip>", which unbans the address in
 	# all jails (recidive included) and deletes its rows from fail2ban's
-	# database, so that a later ban starts again at the initial ban time.
+	# database (also those of jails that no longer run), so that a later ban
+	# starts again at the initial ban time. The failures that jails counted but
+	# did not ban yet are kept by fail2ban.
 	# With a jail: only that jail and that jail's history.
 	ip = normalize_ip(ip)
 	if jail:
 		jail = check_jail(jail)
 	before = banned_in([ip]).get(ip, [])
+	history_complete = True
 	if jail:
 		f2b("set", jail, "unbanip", ip)
 	else:
 		f2b("unban", ip)
+		try:
+			_forget_stopped_jails(ip, get_jails())
+		except Exception:
+			history_complete = False
 	after = banned_in([ip]).get(ip, [])
 	return {
 		"ip": ip,
 		"jail": jail or None,
 		"unbanned_from": [j for j in before if j not in after],
 		"still_banned_in": after,
+		"history_deleted": (not jail) and history_complete,
 	}
 
 def unban_jail(jail):
@@ -651,7 +740,27 @@ def client_info(env, ip, settings):
 		"ip": ip,
 		"own": a.is_loopback or a in _own_ips(env),
 		"allowlisted": any(a in ipaddress.ip_network(n, strict=False) for n in settings["allowlist"]),
+		# An IPv6 client usually has a temporary address that changes daily,
+		# and the other devices of its network have other addresses: offer the
+		# /64 for the allowlist instead.
+		"network": str(ipaddress.ip_network(ip + "/64", strict=False)) if a.version == 6 else None,
 	}
+
+def bans_since(since):
+	# {ip: set of jails} of the bans fail2ban recorded since the given time
+	# (its bans table, opened read-only). Rows older than dbpurgeage are gone.
+	import sqlite3, urllib.parse
+	path = db_path()
+	if not path or not os.path.exists(path):
+		return {}
+	con = sqlite3.connect("file:" + urllib.parse.quote(path) + "?mode=ro", uri=True, timeout=5)
+	try:
+		ret = {}
+		for ip, jail in con.execute("SELECT ip, jail FROM bans WHERE timeofban >= ?", (int(since),)):
+			ret.setdefault(str(ip), set()).add(str(jail))
+		return ret
+	finally:
+		con.close()
 
 def failed_login_report(env, settings=None, now=None, events=None, with_bans=True):
 	# Accounts with failed logins from many IPs in the last 24 h, and IPs that
@@ -735,17 +844,43 @@ def failed_login_report(env, settings=None, now=None, events=None, with_bans=Tru
 				"unknown_accounts": len([u for u in i["users"] if u not in known]),
 				"allowlisted": allowed(ip),
 				"banned_in": [],
+				"banned_before": [],
 			})
 	persistent.sort(key=lambda p: (-p["failures"], p["ip"]))
 	persistent_total = len(persistent)
 	persistent = persistent[:REPORT_LIMIT]
-	if with_bans and persistent:
+
+	# Current bans, and the bans of the scan window that have run out (so that
+	# an address banned 13 hours ago is not reported as "never banned").
+	current = {}
+	earlier = {}
+	if with_bans:
 		try:
-			b = banned_in([p["ip"] for p in persistent])
-			for p in persistent:
-				p["banned_in"] = b.get(p["ip"], [])
+			for item in _literal(f2b("banned")):
+				for jail, banned_ips in item.items():
+					for ip in banned_ips:
+						current.setdefault(ip, []).append(jail)
 		except F2BError:
 			pass
+		try:
+			earlier = bans_since(now - SCAN_HOURS * 3600)
+		except Exception:
+			pass
+	for p in persistent:
+		p["banned_in"] = sorted(current.get(p["ip"], []))
+		p["banned_before"] = sorted(earlier.get(p["ip"], set()) - set(p["banned_in"]))
+
+	# Banned addresses that failed only as one or two existing accounts: often
+	# a device of one's own with an old password (or an attack on these
+	# accounts). The allowlist is the remedy for the former.
+	devices = []
+	for ip, i in ips.items():
+		if ip not in current or allowed(ip):
+			continue
+		users = i["users"]
+		if users and len(users) <= 2 and all(u in known for u in users):
+			devices.append({ "ip": ip, "accounts": sorted(users), "failures": i["failures"], "banned_in": sorted(current[ip]) })
+	devices.sort(key=lambda d: (-d["failures"], d["ip"]))
 
 	return {
 		"scan_hours": SCAN_HOURS,
@@ -760,6 +895,7 @@ def failed_login_report(env, settings=None, now=None, events=None, with_bans=Tru
 		"unknown_accounts": unknown,
 		"persistent_ips": persistent, # the REPORT_LIMIT with the most failures
 		"persistent_total": persistent_total,
+		"banned_devices": devices[:REPORT_LIMIT],
 		"seconds": round(time.time() - t0, 2),
 	}
 
@@ -788,13 +924,15 @@ def check_failed_logins(rounded_values, env, output):
 			has a long password that is not used anywhere else, and if it is an administrator, turn on two-factor
 			authentication for the control panel.""")
 
-	lurking = [p for p in report["persistent_ips"] if not p["banned_in"] and not p["allowlisted"]]
+	# Addresses banned now or earlier in the scan window were caught; only the
+	# ones never banned in it are below the thresholds.
+	lurking = [p for p in report["persistent_ips"] if not p["banned_in"] and not p["banned_before"] and not p["allowlisted"]]
 	own = [p for p in report["persistent_ips"] if p["allowlisted"]]
 	if lurking:
 		problems = True
 		if rounded_values:
 			output.print_warning(f"""Some IP addresses kept failing to log in for {report['persistent_min_hours']}
-				hours or more without being banned. See System > Intrusion Protection in the control panel.""")
+				hours or more without ever being banned. See System > Intrusion Protection in the control panel.""")
 		else:
 			if settings["slow_jails"]:
 				hint = "If this keeps happening, lower the number of failures or lengthen the window of the slow jails."
@@ -804,10 +942,24 @@ def check_failed_logins(rounded_values, env, output):
 			if report["persistent_total"] > len(report["persistent_ips"]):
 				count = "At least " + count
 			output.print_warning(f"""{count} IP address(es) kept failing to log in for {report['persistent_min_hours']}
-				hours or more within the last {report['scan_hours']} hours without being banned (a slow attack below
-				the ban thresholds). {hint} (System > Intrusion Protection in the control panel)""")
+				hours or more within the last {report['scan_hours']} hours and were not banned once in that time (a slow
+				attack below the ban thresholds). {hint} (System > Intrusion Protection in the control panel)""")
 			for p in lurking[:5]:
 				output.print_line(f"{p['ip']}: {p['failures']} failures in {p['hours']} hours")
+	devices = report["banned_devices"]
+	if devices:
+		problems = True
+		if rounded_values:
+			output.print_warning("""Some banned IP addresses failed to log in only as existing accounts. If one of them
+				is a device of your own with an old password, put its network on the allowlist (System > Intrusion
+				Protection in the control panel).""")
+		else:
+			output.print_warning(f"""{len(devices)} banned IP address(es) failed to log in only as one or two existing
+				accounts. If one of them is a device of your own with an old password (e.g. a phone in the office),
+				unban it and put its network on the allowlist (System > Intrusion Protection in the control panel);
+				otherwise its bans get longer each time.""")
+			for d in devices[:5]:
+				output.print_line(f"{d['ip']}: {', '.join(d['accounts'])}, {d['failures']} failures, banned in {', '.join(d['banned_in'])}")
 	for p in own[:5]:
 		problems = True
 		who = ", ".join(p["accounts"]) if p["accounts"] else "an unknown account"

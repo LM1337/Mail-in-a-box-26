@@ -12,7 +12,7 @@
 
 <h2>Intrusion Protection</h2>
 
-<p>fail2ban watches the logs of this box and bans IP addresses that fail to log in too often. On top of Mail-in-a-Box&rsquo;s own rules (20 failures within 30 seconds, banned for 10 minutes), repeat offenders get longer bans each time, slow jails catch attacks that try only a few passwords per hour, and addresses on the allowlist are never banned.</p>
+<p>fail2ban watches the logs of this box and bans IP addresses that fail to log in too often. On top of Mail-in-a-Box&rsquo;s own rules (20 failures within 30 seconds, banned for 10 minutes), repeat offenders get longer bans on the mail ports each time, slow jails catch attacks that try only a few passwords per hour, and addresses on the allowlist are never banned.</p>
 
 <div id="f2b-alerts"></div>
 
@@ -85,13 +85,13 @@
 
 <h3>Settings</h3>
 
-<form id="fail2ban-settings" class="form-horizontal" role="form" onsubmit="f2b_save_settings(); return false;">
+<form id="fail2ban-settings" class="form-horizontal" role="form" onsubmit="f2b_save_settings(); return false;" oninput="f2b_settings_dirty = true;" onchange="f2b_settings_dirty = true;">
   <div class="form-group">
     <div class="col-sm-offset-2 col-sm-8">
       <div class="checkbox">
         <label class="f2b-section"><input type="checkbox" id="f2b-adaptive" onchange="f2b_toggle_inputs()"> Adaptive banning</label>
       </div>
-      <p class="help-block">Each new ban of an address lasts twice as long as its previous one, counted over all jails, up to the maximum ban time. fail2ban keeps the ban history for the memory period, also across restarts.</p>
+      <p class="help-block">Each new ban of an address in a jail lasts twice as long as its previous ban in that jail, up to the maximum ban time, and the address is banned again after fewer failures there. Bans of the web ports (control panel, webmail, Nextcloud) keep their fixed length. Addresses banned again and again in any jail get the one-week recidive ban on all ports, as before. fail2ban keeps the ban history for the memory period, also across restarts.</p>
     </div>
   </div>
   <div class="form-group">
@@ -114,7 +114,15 @@
       <div class="checkbox">
         <label class="f2b-section"><input type="checkbox" id="f2b-slow_jails" onchange="f2b_toggle_inputs()"> Slow jails</label>
       </div>
-      <p class="help-block">Additional jails with a long window for SMTP AUTH, IMAP/POP3/ManageSieve, Roundcube, Nextcloud and this control panel. The mail jails block only the mail ports, so webmail stays reachable for a banned address.</p>
+      <p class="help-block">Additional jails with a long window for SMTP AUTH and IMAP/POP3/ManageSieve. They block only the mail ports, so webmail and this control panel stay reachable for a banned address. They count the failures of an address, not of an account: all devices behind one office address add up, so put that address on the allowlist.</p>
+    </div>
+  </div>
+  <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-8">
+      <div class="checkbox">
+        <label class="f2b-section"><input type="checkbox" id="f2b-slow_web_jails" onchange="f2b_toggle_inputs()"> Slow jails for webmail, Nextcloud and the control panel</label>
+      </div>
+      <p class="help-block">The same for Roundcube, Nextcloud and this control panel, with the same thresholds. They block HTTP and HTTPS: a calendar or contacts app with an old password gets its whole network banned from webmail, Nextcloud and this control panel (for the first ban time; these bans do not grow). Turn them on only with your own networks on the allowlist.</p>
     </div>
   </div>
   <div class="form-group">
@@ -132,7 +140,7 @@
     </div>
   </div>
   <div class="form-group">
-    <label for="f2b-slow_bantime" class="col-sm-2 control-label">First ban</label>
+    <label for="f2b-slow_bantime" class="col-sm-2 control-label">Ban time</label>
     <div class="col-sm-3">
       <input type="text" class="form-control f2b-slow-input" id="f2b-slow_bantime">
       <p class="help-block small" id="f2b-help-slow_bantime"></p>
@@ -166,6 +174,7 @@
 
 <script>
 var f2b_state = null;
+var f2b_settings_dirty = false; // the settings form has unsaved edits
 var F2B_MAX_ROWS = 300;
 var F2B_INPUTS = ["bantime_max", "memory", "slow_maxretry", "slow_findtime", "slow_bantime", "spray_min_ips"];
 var F2B_DURATIONS = ["bantime_max", "memory", "slow_findtime", "slow_bantime"];
@@ -215,6 +224,7 @@ function show_fail2ban() {
   $('#f2b-bans tbody').html("");
   $('#f2b-jails tbody').html("");
   $('#f2b-report').html("<p class='text-muted'>Loading...</p>");
+  f2b_settings_dirty = false;
   f2b_load_status();
   f2b_load_report();
 }
@@ -229,7 +239,8 @@ function f2b_load_status() {
       f2b_render_alerts();
       f2b_render_bans();
       f2b_render_jails();
-      f2b_render_settings();
+      // Keep unsaved edits of the form (e.g. after an unban).
+      if (!f2b_settings_dirty) f2b_render_settings();
     },
     function(text, xhr) {
       if (xhr && xhr.status == 403) return;
@@ -285,11 +296,14 @@ function f2b_render_alerts() {
       div.append($('<button type="button" class="btn btn-default btn-sm">Unban it</button>').click(function() { f2b_unban(c.ip, null); }));
     } else if (c.allowlisted) {
       alerts.append($('<p class="text-muted"/>').text("You are using the control panel from " + c.ip + ", which is on the allowlist."));
+    } else if (c.network) {
+      // IPv6: the browser's address is usually a temporary one that changes
+      // daily, and the other devices of the network have other addresses.
+      var div = alert("alert-info", $("<p/>").text("You are using the control panel from " + c.ip + ". If this is your office or home network, put its network " + c.network + " on the allowlist (your own address changes, and the other devices there use other addresses), so that a device with an old password cannot get them banned."));
+      div.append($('<button type="button" class="btn btn-default btn-sm"/>').text("Add " + c.network + " to the allowlist").click(function() { f2b_allowlist_add(c.network); }));
     } else {
       var div = alert("alert-info", $("<p/>").text("You are using the control panel from " + c.ip + ". If this is a fixed address of your office or home network, put it (or its network) on the allowlist, so that a device with an old password cannot get it banned."));
-      div.append($('<button type="button" class="btn btn-default btn-sm"/>').text("Add " + c.ip + " to the allowlist").click(function() {
-        f2b_post_settings({ allowlist: r.settings.allowlist.concat([c.ip]).join("\n") });
-      }));
+      div.append($('<button type="button" class="btn btn-default btn-sm"/>').text("Add " + c.ip + " to the allowlist").click(function() { f2b_allowlist_add(c.ip); }));
     }
   }
 
@@ -386,10 +400,10 @@ function f2b_render_jails() {
     tr.append(td_btn);
     tbody.append(tr);
   });
-  var slow_on = f2b_state.settings.slow_jails;
   var running = f2b_state.jails.map(function(j) { return j.name; });
-  var missing = f2b_state.slow_jails.filter(function(name) { return running.indexOf(name) < 0; });
-  if (slow_on && missing.length > 0)
+  var expected = (f2b_state.settings.slow_jails ? f2b_state.slow_jails : []).concat(f2b_state.settings.slow_web_jails ? f2b_state.slow_web_jails : []);
+  var missing = expected.filter(function(name) { return running.indexOf(name) < 0; });
+  if (missing.length > 0)
     tbody.append($('<tr/>').append($('<td colspan="7" class="small text-muted"/>').text(
       "Not running: " + missing.join(", ") + " (left out because the log file does not exist yet, or the configuration was not applied).")));
 }
@@ -400,6 +414,7 @@ function f2b_render_settings() {
   var lim = f2b_state.limits;
   $('#f2b-adaptive').prop('checked', s.adaptive);
   $('#f2b-slow_jails').prop('checked', s.slow_jails);
+  $('#f2b-slow_web_jails').prop('checked', s.slow_web_jails);
   F2B_INPUTS.forEach(function(k) {
     var is_duration = F2B_DURATIONS.indexOf(k) >= 0;
     $('#f2b-' + k).val(is_duration ? f2b_duration_input(s[k]) : s[k]);
@@ -407,7 +422,7 @@ function f2b_render_settings() {
     var help = "Default " + fmt(d[k]) + ", from " + fmt(lim[k].min) + " to " + fmt(lim[k].max) + ".";
     if (k == "memory") help += " At least the maximum ban time.";
     if (k == "slow_maxretry") help = "Failed logins of one address that lead to a ban. " + help;
-    if (k == "slow_bantime") help = "Repeat offenders get longer bans if adaptive banning is on. " + help;
+    if (k == "slow_bantime") help = "On the mail ports repeat offenders get longer bans if adaptive banning is on. " + help;
     if (k == "spray_min_ips") help = "Report an account that failed to log in from this many addresses within 24 hours. " + help;
     $('#f2b-help-' + k).text(help);
   });
@@ -415,11 +430,25 @@ function f2b_render_settings() {
   $('#f2b-help-allowlist').text("Addresses and networks (CIDR) that are never banned, one per line, at most " + f2b_state.max_allowlist
     + ". The box's own addresses are always exempt. Put your office or home network here.");
   f2b_toggle_inputs();
+  f2b_settings_dirty = false;
 }
 
 function f2b_toggle_inputs() {
   $('.f2b-adaptive-input').prop('disabled', !$('#f2b-adaptive').prop('checked'));
-  $('.f2b-slow-input').prop('disabled', !$('#f2b-slow_jails').prop('checked'));
+  $('.f2b-slow-input').prop('disabled', !$('#f2b-slow_jails').prop('checked') && !$('#f2b-slow_web_jails').prop('checked'));
+}
+
+function f2b_allowlist_add(net) {
+  if (!f2b_settings_dirty) {
+    f2b_post_settings({ allowlist: f2b_state.settings.allowlist.concat([net]).join("\n") });
+    return;
+  }
+  // Unsaved edits in the form: add it there, so that nothing typed is lost.
+  var ta = $('#f2b-allowlist');
+  var cur = ta.val().replace(/\s+$/, "");
+  ta.val((cur ? cur + "\n" : "") + net);
+  show_modal_error("Intrusion Protection", $("<p/>").text(net + " was added to the allowlist in the settings form below, which has unsaved changes. Click Save to apply them."),
+    function() { $('html, body').animate({ scrollTop: $('#fail2ban-settings').offset().top }, 300); });
 }
 
 function f2b_save_settings() {
@@ -427,6 +456,7 @@ function f2b_save_settings() {
   var values = {
     adaptive: $('#f2b-adaptive').prop('checked') ? "1" : "0",
     slow_jails: $('#f2b-slow_jails').prop('checked') ? "1" : "0",
+    slow_web_jails: $('#f2b-slow_web_jails').prop('checked') ? "1" : "0",
     allowlist: $('#f2b-allowlist').val()
   };
   F2B_INPUTS.forEach(function(k) {
@@ -436,9 +466,11 @@ function f2b_save_settings() {
 
   var off = [];
   if (f2b_state.settings.adaptive && values.adaptive == "0")
-    off.push("Adaptive banning: repeat offenders get Mail-in-a-Box's fixed bans again, and fail2ban forgets its ban history after one day.");
+    off.push("Adaptive banning: repeat offenders get Mail-in-a-Box's fixed bans again, and fail2ban forgets its ban history after one day. All jails are restarted; their current bans are kept.");
   if (f2b_state.settings.slow_jails && values.slow_jails == "0")
     off.push("Slow jails: attacks with a few attempts per hour are no longer banned, and the addresses the slow jails banned are released.");
+  if (f2b_state.settings.slow_web_jails && values.slow_web_jails == "0")
+    off.push("Slow jails for webmail, Nextcloud and the control panel: the addresses they banned are released.");
   if (off.length == 0) {
     f2b_post_settings(values);
     return;
@@ -448,7 +480,7 @@ function f2b_save_settings() {
   var ul = $("<ul/>");
   off.forEach(function(t) { ul.append($("<li/>").text(t)); });
   q.append(ul);
-  if (values.adaptive == "0" && values.slow_jails == "0" && values.allowlist.trim() == "")
+  if (values.adaptive == "0" && values.slow_jails == "0" && values.slow_web_jails == "0" && values.allowlist.trim() == "")
     q.append($("<p/>").text("fail2ban then runs with Mail-in-a-Box's original configuration."));
   show_modal_confirm("Intrusion Protection", q, "Turn off", function() { f2b_post_settings(values); });
 }
@@ -468,7 +500,8 @@ function f2b_post_settings(values) {
     function(r) {
       var msg = $("<div/>");
       var text = "The settings were saved.";
-      if (r.reloaded) text += " fail2ban was reloaded with the new configuration.";
+      if (r.reloaded && r.restarted) text += " fail2ban restarted its jails with the new configuration (current bans are kept).";
+      else if (r.reloaded) text += " fail2ban was reloaded with the new configuration.";
       else if (r.changed) text += " The configuration files were written; fail2ban is not running, so they apply when it starts.";
       else text += " The fail2ban configuration did not change.";
       msg.append($("<p/>").text(text));
@@ -485,8 +518,10 @@ function f2b_unban_result(r) {
     msg.append($("<p/>").text(r.ip + " was unbanned in " + r.unbanned_from.join(", ") + "."));
   else
     msg.append($("<p/>").text(r.ip + " was not banned" + (r.jail ? " in " + r.jail : "") + "."));
-  if (!r.jail)
+  if (!r.jail && r.history_deleted)
     msg.append($("<p/>").text("Its ban history was deleted, so a new ban starts again at the initial ban time."));
+  else if (!r.jail)
+    msg.append($("<p/>").text("Its ban history was deleted for the running jails; the history of jails that no longer run could not be deleted."));
   if (r.still_banned_in.length)
     msg.append($("<p/>").text("It is still banned in " + r.still_banned_in.join(", ") + "."));
   show_modal_error("Unban " + r.ip, msg, function() { f2b_load_status(); f2b_load_report(); });
@@ -573,6 +608,17 @@ function f2b_render_report(r) {
       + u.failures + " time" + (u.failures == 1 ? "" : "s") + (u.flagged ? " (" + u.flagged + " of them from " + r.spray_min_ips + " or more addresses)" : "")
       + ". They are not listed, because a wrong login name can be a password typed into the wrong field."));
 
+  if (r.banned_devices && r.banned_devices.length > 0) {
+    var p = $('<div class="alert alert-warning"/>');
+    p.append($("<p/>").text("These banned addresses failed to log in only as one or two existing accounts. If one of them is a device of your own with an old password (e.g. a phone in the office), unban it and put its network on the allowlist; otherwise its bans get longer each time."));
+    var ul = $("<ul/>");
+    r.banned_devices.slice(0, 10).forEach(function(d) {
+      ul.append($("<li/>").text(d.ip + ": " + d.accounts.join(", ") + ", " + d.failures + " failure" + (d.failures == 1 ? "" : "s") + ", banned in " + d.banned_in.join(", ")));
+    });
+    p.append(ul);
+    div.append(p);
+  }
+
   div.append($("<h4/>").text("Addresses that keep failing"));
   div.append($('<p class="small text-muted"/>').text("Addresses with " + r.persistent_min_failures + " or more failures spread over "
     + r.persistent_min_hours + " hours or more within the last " + r.scan_hours + " hours: slow attacks below the ban thresholds, or devices with an old password."));
@@ -592,7 +638,8 @@ function f2b_render_report(r) {
     var status;
     if (p.allowlisted) status = $('<span class="text-warning"/>').text("allowlisted (old password?)");
     else if (p.banned_in.length) status = $('<span/>').text("banned in " + p.banned_in.join(", "));
-    else status = $('<span class="text-danger"/>').text("not banned");
+    else if (p.banned_before.length) status = $('<span class="text-muted"/>').text("banned earlier (" + p.banned_before.join(", ") + "), not at the moment");
+    else status = $('<span class="text-danger"/>').text("not banned in " + r.scan_hours + " hours");
     tr.append($('<td/>').append(status));
     var td_btn = $('<td/>');
     if (p.banned_in.length)

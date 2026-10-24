@@ -1199,6 +1199,49 @@ def c_fail2ban_settings_roundtrip(ctx):
     return "set/restore ok, invalid allowlist refused (400)"
 
 
+# Log lines for the installed fail2ban filters: (filter, line, expected host or
+# None for no match). Client-chosen user names must neither move the host to a
+# third-party address nor hide a real failure. Only fail2ban-regex runs: no
+# login, no ban.
+F2B_FILTER_CASES = [
+    ("miab-postfix-submission",
+     "2026-10-24T10:00:00.123456+02:00 box postfix/submission/smtpd[1234]: warning: unknown[203.0.113.5]: "
+     "SASL LOGIN authentication failed: (reason unavailable), sasl_username=x[198.51.100.7]: x authentication failed",
+     "203.0.113.5"),
+    ("miab-postfix-submission",
+     "2026-10-24T10:00:00.123456+02:00 box postfix/submission/smtpd[1234]: warning: mail.example.com[2001:db8::5]: "
+     "SASL PLAIN authentication failed: (reason unavailable), sasl_username=bob@example.com",
+     "2001:db8::5"),
+    ("miab-dovecot-authfail",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(auth failed, 3 attempts in 9 secs) (auth_failed): user=<admin@example.com (no auth attempts)>, method=PLAIN, "
+     "rip=203.0.113.5, lip=192.0.2.11, TLS, session=<abc>",
+     "203.0.113.5"),
+    ("miab-dovecot-authfail",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
+     None),
+    ("dovecotimap",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
+     "203.0.113.9"),
+]
+
+
+def c_fail2ban_filters(ctx):
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    for filt, line, want in F2B_FILTER_CASES:
+        rc, out, err = ctx.remote.run("fail2ban-regex -o '<ip>' %s %s" % (shlex.quote(line), shlex.quote(filt)),
+                                      sudo=True, timeout=60)
+        if rc != 0:
+            raise Fail("fail2ban-regex %s: exit %d %s" % (filt, rc, err.strip()[:200]))
+        got = [x.strip() for x in out.splitlines() if x.strip()]
+        if got != ([want] if want else []):
+            raise Fail("%s: expected %s, got %s for: %s" % (filt, want or "no match", got or "no match", line[:120]))
+    return "%d filter cases ok (no third-party host from user names)" % len(F2B_FILTER_CASES)
+
+
 def c_fail2ban_panel(ctx):
     # The control panel page (System > Intrusion Protection) is part of index.html.
     r = http_req(ctx, "GET", "/admin/")
@@ -1754,6 +1797,42 @@ def f2b_prepare(ctx):
     return "attack source %s, ssh source %s" % (attack_src or "unknown", ssh_src)
 
 
+def c_fail2ban_adaptive_toggle(ctx):
+    # Turning adaptive banning off must take effect in the running jails (a
+    # plain "fail2ban-client reload" left bantime.increment on), and on again.
+    # Restarts the jails twice; the original setting is restored.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+
+    def increment():
+        rc, out, err = ctx.remote.run("fail2ban-client get sshd bantime.increment", sudo=True, timeout=60)
+        if rc != 0:
+            raise Fail("fail2ban-client get sshd bantime.increment: %s" % err.strip()[:200])
+        return out.strip()
+
+    def post(value):
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"adaptive": value})
+        if r.status != 200:
+            raise Fail("set adaptive=%s: HTTP %d %s" % (value, r.status, r.text()[:200]))
+        return r.json()
+
+    orig = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["adaptive"]
+    seen = []
+    try:
+        steps = [("0", "False"), ("1", "True")]
+        for value, want in (steps if orig else steps[::-1]):
+            j = post(value)
+            if not j.get("restarted"):
+                raise Fail("adaptive=%s: jails not restarted (%s)" % (value, j))
+            got = increment()
+            seen.append(got)
+            if got != want:
+                raise Fail("adaptive=%s: sshd bantime.increment is %s, expected %s" % (value, got, want))
+    finally:
+        post("1" if orig else "0")
+    return "increment %s, restored adaptive=%s" % (" -> ".join(seen), orig)
+
+
 def c_fail2ban(ctx, proto, jails, port):
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
@@ -1933,6 +2012,7 @@ def main():
         run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
         run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
+        run_check("admin-fail2ban-filters", c_fail2ban_filters, ctx)
         run_check("admin-fail2ban-panel", c_fail2ban_panel, ctx)
     if want("dns"):
         print("== dns")
@@ -1978,6 +2058,7 @@ def main():
         run_check("cleanup-test-mail", c_cleanup, ctx)
     if want("fail2ban"):
         print("== fail2ban (bans and unbans the attacking IP)")
+        run_check("fail2ban-adaptive-toggle", c_fail2ban_adaptive_toggle, ctx)
         st, _ = run_check("fail2ban-prepare", f2b_prepare, ctx)
         if st == "PASS":
             run_check("fail2ban-imap", c_fail2ban, ctx, "imap", ["dovecot"], 993)
