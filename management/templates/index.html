@@ -115,6 +115,7 @@
                 <li><a href="#system_status">Status Checks</a></li>
                 <li><a href="#tls">TLS (SSL) Certificates</a></li>
                 <li><a href="#system_backup">Backup Status</a></li>
+                <li><a href="#fail2ban">Intrusion Protection</a></li>
                 <li class="divider"></li>
                 <li class="dropdown-header">Advanced Pages</li>
                 <li><a href="#custom_dns">Custom DNS</a></li>
@@ -155,6 +156,10 @@
 
       <div id="panel_system_backup" class="admin_panel">
       {% include "system-backup.html" %}
+      </div>
+
+      <div id="panel_fail2ban" class="admin_panel">
+      {% include "system-fail2ban.html" %}
       </div>
 
       <div id="panel_external_dns" class="admin_panel">

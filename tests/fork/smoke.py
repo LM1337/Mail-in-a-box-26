@@ -1169,6 +1169,118 @@ def c_backup_status(ctx):
     return "target=%s, %d backups, latest %s" % (cfg.get("target"), len(b), last)
 
 
+def c_fail2ban_api(ctx):
+    # Read-only: status of the adaptive fail2ban (intrusion protection).
+    r = admin_api(ctx, "GET", "system/fail2ban")
+    if r.status != 200:
+        raise Fail("HTTP %d %s" % (r.status, r.text()[:200]))
+    j = r.json()
+    if not j.get("running"):
+        raise Fail("fail2ban not running: %s" % j.get("error"))
+    names = {x["name"] for x in j["jails"]}
+    s = j["settings"]
+    want = {"dovecot", "miab-postfix587", "recidive"}
+    if s.get("slow_jails"):
+        want |= {"miab-slow-smtp", "miab-slow-dovecot"}
+    if want - names:
+        raise Fail("jails missing: %s" % sorted(want - names))
+    if not j.get("config_current"):
+        raise Fail("rendered jail file does not match the settings")
+    if "client" not in j:
+        raise Fail("no client address in the status (needed for the panel's allowlist hint)")
+    return "%d jails, %d bans; adaptive=%s slow_jails=%s allowlist=%d" % (
+        len(names), j.get("banned_entries", 0), s.get("adaptive"), s.get("slow_jails"), len(s.get("allowlist") or []))
+
+
+def c_fail2ban_settings_roundtrip(ctx):
+    # Changes only spray_min_ips (not part of the jail files, so no reload),
+    # then restores it; an invalid allowlist must be refused without a change.
+    cur = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+    orig = cur["spray_min_ips"]
+    new = orig + 1 if orig < 100000 else orig - 1
+    try:
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"spray_min_ips": str(new)})
+        if r.status != 200 or r.json()["settings"]["spray_min_ips"] != new:
+            raise Fail("set: HTTP %d %s" % (r.status, r.text()[:200]))
+        if r.json().get("changed"):
+            raise Fail("spray_min_ips changed the jail files")
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"allowlist": "0.0.0.0/0"})
+        if r.status != 400:
+            raise Fail("allowlist 0.0.0.0/0 accepted: HTTP %d" % r.status)
+        after = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+        if after["allowlist"] != cur["allowlist"]:
+            raise Fail("refused allowlist changed the settings")
+    finally:
+        admin_api(ctx, "POST", "system/fail2ban/settings", form={"spray_min_ips": str(orig)})
+    if admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["spray_min_ips"] != orig:
+        raise Fail("spray_min_ips not restored")
+    return "set/restore ok, invalid allowlist refused (400)"
+
+
+# Log lines for the installed fail2ban filters: (filter, line, expected host or
+# None for no match). Client-chosen user names must neither move the host to a
+# third-party address nor hide a real failure. Only fail2ban-regex runs: no
+# login, no ban.
+F2B_FILTER_CASES = [
+    ("miab-postfix-submission",
+     "2026-10-24T10:00:00.123456+02:00 box postfix/submission/smtpd[1234]: warning: unknown[203.0.113.5]: "
+     "SASL LOGIN authentication failed: (reason unavailable), sasl_username=x[198.51.100.7]: x authentication failed",
+     "203.0.113.5"),
+    ("miab-postfix-submission",
+     "2026-10-24T10:00:00.123456+02:00 box postfix/submission/smtpd[1234]: warning: mail.example.com[2001:db8::5]: "
+     "SASL PLAIN authentication failed: (reason unavailable), sasl_username=bob@example.com",
+     "2001:db8::5"),
+    ("miab-dovecot-authfail",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(auth failed, 3 attempts in 9 secs) (auth_failed): user=<admin@example.com (no auth attempts)>, method=PLAIN, "
+     "rip=203.0.113.5, lip=192.0.2.11, TLS, session=<abc>",
+     "203.0.113.5"),
+    ("miab-dovecot-authfail",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
+     None),
+    ("dovecotimap",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
+     "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
+     "203.0.113.9"),
+]
+
+
+def c_fail2ban_filters(ctx):
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    for filt, line, want in F2B_FILTER_CASES:
+        rc, out, err = ctx.remote.run("fail2ban-regex -o '<ip>' %s %s" % (shlex.quote(line), shlex.quote(filt)),
+                                      sudo=True, timeout=60)
+        if rc != 0:
+            raise Fail("fail2ban-regex %s: exit %d %s" % (filt, rc, err.strip()[:200]))
+        got = [x.strip() for x in out.splitlines() if x.strip()]
+        if got != ([want] if want else []):
+            raise Fail("%s: expected %s, got %s for: %s" % (filt, want or "no match", got or "no match", line[:120]))
+    return "%d filter cases ok (no third-party host from user names)" % len(F2B_FILTER_CASES)
+
+
+def c_fail2ban_panel(ctx):
+    # The control panel page (System > Intrusion Protection) is part of index.html.
+    r = http_req(ctx, "GET", "/admin/")
+    if r.status != 200:
+        raise Fail("HTTP %d" % r.status)
+    page = r.text()
+    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(") if m not in page]
+    if missing:
+        raise Fail("control panel lacks %s" % missing)
+    return "Intrusion Protection page present"
+
+
+def c_fail2ban_report(ctx):
+    r = admin_api(ctx, "GET", "system/fail2ban/report")
+    if r.status != 200:
+        raise Fail("HTTP %d %s" % (r.status, r.text()[:200]))
+    j = r.json()
+    return "%d failed logins from %d IPs in %d h, %d flagged accounts, %d persistent IPs (%.1f s)" % (
+        j["failures"], j["distinct_ips"], j["scan_hours"], len(j["flagged_accounts"]), j["persistent_total"], j["seconds"])
+
+
 # ---------------------------------------------------------------------------
 # checks: DNS
 # ---------------------------------------------------------------------------
@@ -1877,6 +1989,44 @@ def f2b_prepare(ctx):
     return "attack source %s, ssh source %s" % (attack_src or "unknown", ssh_src)
 
 
+def c_fail2ban_adaptive_toggle(ctx):
+    # Turning adaptive banning off must take effect in the running jails (a
+    # plain "fail2ban-client reload" left bantime.increment on), and on again.
+    # Restarts the jails twice; the original setting is restored.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+
+    def increment():
+        rc, out, err = ctx.remote.run("fail2ban-client get sshd bantime.increment", sudo=True, timeout=60)
+        if rc != 0:
+            raise Fail("fail2ban-client get sshd bantime.increment: %s" % err.strip()[:200])
+        return out.strip()
+
+    def post(value):
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"adaptive": value})
+        if r.status != 200:
+            raise Fail("set adaptive=%s: HTTP %d %s" % (value, r.status, r.text()[:200]))
+        return r.json()
+
+    orig = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["adaptive"]
+    seen = []
+    try:
+        # Off, a restarted jail has no bantime.increment at all ("None", as
+        # with upstream's configuration); "False" would be a leftover value.
+        steps = [("0", ("None", "False")), ("1", ("True",))]
+        for value, want in (steps if orig else steps[::-1]):
+            j = post(value)
+            if not j.get("restarted"):
+                raise Fail("adaptive=%s: jails not restarted (%s)" % (value, j))
+            got = increment()
+            seen.append(got)
+            if got not in want:
+                raise Fail("adaptive=%s: sshd bantime.increment is %s, expected %s" % (value, got, " or ".join(want)))
+    finally:
+        post("1" if orig else "0")
+    return "increment %s, restored adaptive=%s" % (" -> ".join(seen), orig)
+
+
 def c_fail2ban(ctx, proto, jails, port):
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
@@ -2054,6 +2204,11 @@ def main():
     if want("admin"):
         run_check("admin-api-tmp-user-alias", c_admin_tmp_user_alias, ctx)
         run_check("admin-backup-status", c_backup_status, ctx)
+        run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
+        run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
+        run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
+        run_check("admin-fail2ban-filters", c_fail2ban_filters, ctx)
+        run_check("admin-fail2ban-panel", c_fail2ban_panel, ctx)
     if want("dns"):
         print("== dns")
         for zone in (ctx.domain, ctx.seed2, ctx.seed3):
@@ -2101,6 +2256,7 @@ def main():
         run_check("cleanup-test-mail", c_cleanup, ctx)
     if want("fail2ban"):
         print("== fail2ban (bans and unbans the attacking IP)")
+        run_check("fail2ban-adaptive-toggle", c_fail2ban_adaptive_toggle, ctx)
         st, _ = run_check("fail2ban-prepare", f2b_prepare, ctx)
         if st == "PASS":
             run_check("fail2ban-imap", c_fail2ban, ctx, "imap", ["dovecot"], 993)

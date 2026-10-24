@@ -33,18 +33,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-60 bugs: 1 critical, 11 high, 28 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3.
+61 bugs: 1 critical, 11 high, 29 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban.
 
 | Origin | Count |
 |---|---|
-| Upstream | 15 |
+| Upstream | 16 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 14 |
 | Fork | 4 |
 
-15 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B60). They are candidates for
+16 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B60, B61). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -111,6 +111,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B58](#b58) | medium | Management | mail_log.py counts no IMAP/POP3 logins of Dovecot 2.4 ("Logged in:") | 26.04 change | no | yes | unreleased |
 | [B59](#b59) | low | Postfix | Postfix 3.10 warns on every postconf call about smtpd_tls_dh1024_param_file | 26.04 change | no | yes | unreleased |
 | [B60](#b60) | medium | System | Mail of cron and root bounces: /etc/mailname keeps another name, root@PRIMARY_HOSTNAME does not exist | Upstream | yes | yes | unreleased |
+| [B61](#b61) | medium | fail2ban | SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned | Upstream | yes | yes | unreleased |
 
 ## Details
 
@@ -817,6 +818,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** Production box (from the upgrade report): /etc/mailname was the hosting provider's default host name of the machine, /etc/hosts had the same name on the 127.0.1.1 line, and mail.log showed the daily "loops back to myself" bounces since at least 2026-10-18. 26.04 test box: `postconf -h myorigin` is /etc/mailname, `postmap -q root@<PRIMARY_HOSTNAME> sqlite:/etc/postfix/virtual-alias-maps.cf` finds nothing (hostmaster@ and postmaster@ resolve to administrator@), /etc/hosts still has the cloud-init line `127.0.1.1 testvm.example.net testvm`. v78:setup/system.sh only writes /etc/hostname, v78:management/mailconfig.py get_required_aliases() has administrator@, hostmaster@, postmaster@, admin@ and abuse@ but no root@. The bounce of root@PRIMARY_HOSTNAME as unknown user is derived from the Postfix configuration, it was not reproduced (no mail was sent on the test box).
 * **Report upstream:** MIAB main: the missing /etc/mailname and root@ handling are the same in v78.
 * **Found by:** production upgrade; **commit:** see `git log --grep B60`; **fixed in:** unreleased
+
+### B61
+
+**SMTP AUTH filter takes a host from the client's user name, so a client can get a third party banned** (medium, fail2ban)
+
+* **Symptom:** A client that sends AUTH on port 465 or 587 with a user name like `x[198.51.100.7]: x authentication failed` gets 198.51.100.7 banned (miab-postfix465/587: 20 in 30 s), not itself. With the fork's adaptive banning the slow jail `miab-slow-smtp` reuses the filter, so the third party is banned after 20 lines in 6 hours, and longer each time.
+* **Cause:** conf/fail2ban/filter.d/miab-postfix-submission.conf had `failregex=postfix/submission/smtpd.*warning.*\[<HOST>\]: .* authentication (failed|aborted)`. The greedy `.*` before `\[<HOST>\]` takes the last `[ip]: ` of the line, and Postfix appends the client-chosen `sasl_username=` after the client address. The same kind of bug as B08's user name in dovecotimap.conf.
+* **Fix:** Anchored like fail2ban's own postfix filter: `^%(__prefix_line)swarning: [-._\w]+\[<HOST>\]: SASL \S+ authentication (?:failed|aborted)` with `_daemon = postfix/submission/smtpd`, so only the address right after `warning:` can be the host. tests/fork/smoke.py `admin-fail2ban-filters` runs fail2ban-regex with such a line on the box.
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04).
+* **Evidence:** fail2ban-regex 1.1.0 with the old filter and the line `warning: unknown[203.0.113.5]: SASL LOGIN authentication failed: (reason unavailable), sasl_username=x[198.51.100.7]: x authentication failed` gives 198.51.100.7, with the new one 203.0.113.5. That Postfix logs the user name unescaped is from the log format (`sasl_username=` is printed as sent, brackets, colons and spaces are printable); not reproduced with a live AUTH.
+* **Report upstream:** MIAB main: anchor miab-postfix-submission.conf.
+* **Found by:** review (adaptive fail2ban); **commit:** "fail2ban: anchor the SMTP AUTH filter (B61)"; **fixed in:** unreleased
 
 ## Not counted above
 

@@ -19,6 +19,10 @@
 #    public wildcard *.example.net (DMARC p=quarantine on example.net) makes
 #    every unsigned port-25 test mail fail DMARC/SPF. Neutralize exactly those
 #    scores; GTUBE and the rest of the scoring stay in effect.
+#  * fail2ban: put the jump host on the allowlist of the adaptive fail2ban
+#    (management/fail2ban_admin.py), so that no jail (the slow ones count
+#    failures over hours) can lock the test lab out. Attacks for fail2ban
+#    tests must come from another source (the peer, or a container on the box).
 #
 # Usage: sudo bash tests/fork/prepare-testenv.sh
 set -euo pipefail
@@ -80,4 +84,10 @@ score DMARC_FAIL_REJECT 0
 score SPF_NONE 0
 CF
 systemctl restart spampd
+
+F2B_ADMIN="$(cd "$(dirname "$0")/../.." && pwd)/management/fail2ban_admin.py"
+if [ -x "$F2B_ADMIN" ] && [ -x /usr/local/lib/mailinabox/env/bin/python3 ]; then
+	"$F2B_ADMIN" --allow "$JUMP_HOST" > /dev/null
+	fail2ban-client unban "$JUMP_HOST" > /dev/null || true
+fi
 echo "test environment prepared on $(hostname -f)"

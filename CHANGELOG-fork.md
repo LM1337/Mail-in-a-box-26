@@ -44,35 +44,47 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   README-fork.md for the limits.
 * Tests: smoke check `nextcloud-share-scope` (sharee search across domains,
   system address book, admin view).
-
-### Fixed
-
-* Tools: `tools/upgrade-in-place-to-2604.sh` stops mail (and masks the units)
-  before the fresh Mail-in-a-Box backup of phase snapshot, not after it, so
-  the backup holds all mail. Before, backup.py started Postfix and Dovecot
-  again after its run, and mail accepted while the system archive was written
-  and copied was missing from the backup (B57). The downtime starts there;
-  with `--skip-miab-backup` or backups off, mail keeps running until quiesce
-  as before. `--rollback` brings it back as before. The system archive, the
-  copy of `/etc` and the package lists are still taken before the stop, so
-  they hold `/etc` without the masks; a run interrupted after the stop keeps
-  them and does not repeat a backup that already ran with mail offline.
-  The downtime estimate of the plan (`--check`) includes the fresh backup and
-  says that a full one can take much longer.
-* Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
-  ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
-  "Login:" (B58).
-* Postfix: setup no longer sets `smtpd_tls_dh1024_param_file` and removes it
-  from an existing main.cf. Postfix 3.10 warned on every `postconf` call that
-  its support will be removed; the default uses the RFC 7919 FFDHE groups
-  (B59).
-* System: mail of cron jobs and root reaches the administrator. Setup writes
-  PRIMARY_HOSTNAME to `/etc/mailname` (Postfix's myorigin; a provider's image
-  could leave its own name there, and such mail bounced daily), comments out
-  a 127.0.1.1 line in `/etc/hosts` with another machine's name, makes
-  root@PRIMARY_HOSTNAME an automatic alias to administrator@ and writes the
-  automatic aliases at the end of every setup run. The Nextcloud cron jobs
-  send their output to root instead of www-data (B60).
+* fail2ban: adaptive intrusion protection, on by default (README-fork.md,
+  "Intrusion protection"; control panel: System > Intrusion Protection).
+  Each new ban of an address in a jail lasts twice as long as its previous
+  ban in that jail, up to one week (no `bantime.overalljails`; recidive
+  handles addresses banned in many jails); bans of the web ports keep their
+  fixed length; the ban history is kept for 30 days. Slow jails for SMTP AUTH
+  and IMAP/POP3/ManageSieve ban after 20 failures within 6 hours on the mail
+  ports (the Dovecot one ignores connections without a login attempt); slow
+  jails for Roundcube, Nextcloud and the control panel (HTTP/HTTPS) are a
+  separate switch, off by default. An allowlist of own networks is added to
+  ignoreip; saving it unbans addresses that are banned and now on it. Changing the adaptive options restarts the jails (`reload
+  --restart`), because a plain reload leaves the old values in running jails. The settings are stored in
+  settings.yaml under `fail2ban`; `management/fail2ban_admin.py` writes
+  `jail.d/mailinabox_adaptive.conf` and `fail2ban.d/mailinabox_adaptive.conf`
+  from them (setup, `--apply`), checks them with `fail2ban-client -t` and
+  reloads fail2ban only on a change. All off with an empty allowlist is
+  upstream's configuration. Before, a production box had 19,586 failed SMTP
+  logins from 4,627 addresses in a week and no ban.
+* Status checks: a report of failed logins in the mail log of the last
+  48 hours: accounts that failed from 20 or more addresses within 24 hours
+  (password spraying), addresses that keep failing for 12 hours or more
+  without a single ban in that time (expired bans are read from fail2ban's
+  database), and banned addresses that failed only as one or two existing
+  accounts (probably an own device with an old password: allowlist it). Only
+  existing accounts are named.
+* Management API (admin): `GET /system/fail2ban` (jails, bans with time
+  left), `GET`/`POST /system/fail2ban/settings`, `POST /system/fail2ban/unban`
+  (one jail, or all jails including the ban history), `POST
+  /system/fail2ban/unban-all` (one jail), `GET /system/fail2ban/report`.
+* Control panel: new page System > Intrusion Protection. It lists the banned
+  addresses (jails, time left; filter) and the jails with their counters,
+  unbans an address in all jails or in one jail and empties a jail (with a
+  confirmation), shows the failed-login report and edits the settings
+  (adaptive banning and slow jails on/off with a confirmation before turning
+  off, thresholds, allowlist, restore defaults). It shows the admin's own
+  address (for IPv6 its /64) and offers to allowlist or unban it.
+* Tests: smoke checks `admin-fail2ban-status`, `admin-fail2ban-settings`,
+  `admin-fail2ban-report`, `admin-fail2ban-filters` (fail2ban-regex with
+  injected user names) and `admin-fail2ban-panel`, and in the opt-in fail2ban
+  group `fail2ban-adaptive-toggle` (turning adaptive banning off reaches the
+  running jails); `prepare-testenv.sh` puts the jump host on the allowlist.
 
 ### Changed
 
@@ -118,6 +130,48 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   of an older release tag that does not start tmux itself gets a warning
   first. `--no-tmux` turns it off; `--check`, `--status`, the resume unit and
   runs without a terminal are unchanged.
+
+### Fixed
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` stops mail (and masks the units)
+  before the fresh Mail-in-a-Box backup of phase snapshot, not after it, so
+  the backup holds all mail. Before, backup.py started Postfix and Dovecot
+  again after its run, and mail accepted while the system archive was written
+  and copied was missing from the backup (B57). The downtime starts there;
+  with `--skip-miab-backup` or backups off, mail keeps running until quiesce
+  as before. `--rollback` brings it back as before. The system archive, the
+  copy of `/etc` and the package lists are still taken before the stop, so
+  they hold `/etc` without the masks; a run interrupted after the stop keeps
+  them and does not repeat a backup that already ran with mail offline.
+  The downtime estimate of the plan (`--check`) includes the fresh backup and
+  says that a full one can take much longer.
+* Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
+  ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
+  "Login:" (B58).
+* Postfix: setup no longer sets `smtpd_tls_dh1024_param_file` and removes it
+  from an existing main.cf. Postfix 3.10 warned on every `postconf` call that
+  its support will be removed; the default uses the RFC 7919 FFDHE groups
+  (B59).
+* System: mail of cron jobs and root reaches the administrator. Setup writes
+  PRIMARY_HOSTNAME to `/etc/mailname` (Postfix's myorigin; a provider's image
+  could leave its own name there, and such mail bounced daily), comments out
+  a 127.0.1.1 line in `/etc/hosts` with another machine's name, makes
+  root@PRIMARY_HOSTNAME an automatic alias to administrator@ and writes the
+  automatic aliases at the end of every setup run. The Nextcloud cron jobs
+  send their output to root instead of www-data (B60).
+* fail2ban: the `miab-postfix-submission` filter (jails `miab-postfix465`,
+  `miab-postfix587`) is anchored. A client could put `[<ip>]: ` into the SASL
+  user name, which Postfix logs after the client address, and get a third
+  party banned (B61).
+
+### Upgrade note
+
+* The slow mail jails are on after the upgrade, with an empty allowlist. On a
+  box whose users sit behind one office address, put that network on the
+  allowlist (System > Intrusion Protection, or `sudo
+  management/fail2ban_admin.py --allow 192.0.2.0/24`) before or right after
+  the upgrade: a single phone with an old password can otherwise get the
+  office banned from the mail ports, for longer each time.
 
 ## v78-r2604.0-rc3 (2026-10-23)
 

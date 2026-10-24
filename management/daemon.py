@@ -669,6 +669,80 @@ def privacy_status_set():
 	utils.write_settings(config, env)
 	return "OK"
 
+# Intrusion protection (adaptive fail2ban, see fail2ban_admin.py)
+
+@app.route('/system/fail2ban', methods=["GET"])
+@authorized_personnel_only
+def fail2ban_status():
+	from fail2ban_admin import get_status, client_info
+	status = get_status(env)
+	# nginx puts the client's address in X-Forwarded-For (see log_failed_login).
+	ip = request.headers.getlist("X-Forwarded-For")[0] if request.headers.getlist("X-Forwarded-For") else request.remote_addr
+	status["client"] = client_info(env, ip, status["settings"])
+	return json_response(status)
+
+@app.route('/system/fail2ban/settings', methods=["GET"])
+@authorized_personnel_only
+def fail2ban_settings_get():
+	from fail2ban_admin import get_settings, DEFAULTS
+	settings, warnings = get_settings(env)
+	return json_response({ "settings": settings, "defaults": DEFAULTS, "warnings": warnings })
+
+@app.route('/system/fail2ban/settings', methods=["POST"])
+@authorized_personnel_only
+def fail2ban_settings_set():
+	# Form fields named like the settings; fields that are not sent keep their
+	# value. reset=1 starts from the defaults.
+	from fail2ban_admin import update_settings, DEFAULTS
+	values = { k: request.form[k] for k in DEFAULTS if k in request.form }
+	try:
+		result = update_settings(env, values, reset=(request.form.get('reset') == '1'))
+	except ValueError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	result["status"] = "ok"
+	return json_response(result)
+
+@app.route('/system/fail2ban/unban', methods=["POST"])
+@authorized_personnel_only
+def fail2ban_unban():
+	# ip, and optionally jail. Without a jail the address is unbanned in all
+	# jails and its ban history is deleted.
+	from fail2ban_admin import unban_ip, F2BError
+	try:
+		result = unban_ip(request.form.get('ip', ''), request.form.get('jail') or None)
+	except ValueError as e:
+		return (str(e), 400)
+	except F2BError as e:
+		return (str(e), 500)
+	app.logger.warning("fail2ban: %s unbanned %s (%s)", request.user_email, result["ip"], result["jail"] or "all jails")
+	result["status"] = "ok"
+	return json_response(result)
+
+@app.route('/system/fail2ban/unban-all', methods=["POST"])
+@authorized_personnel_only
+def fail2ban_unban_all():
+	from fail2ban_admin import unban_jail, F2BError
+	try:
+		result = unban_jail(request.form.get('jail', ''))
+	except ValueError as e:
+		return (str(e), 400)
+	except F2BError as e:
+		return (str(e), 500)
+	app.logger.warning("fail2ban: %s unbanned all %d addresses of jail %s", request.user_email, result["unbanned"], result["jail"])
+	result["status"] = "ok"
+	return json_response(result)
+
+@app.route('/system/fail2ban/report', methods=["GET"])
+@authorized_personnel_only
+def fail2ban_report():
+	from fail2ban_admin import failed_login_report
+	try:
+		return json_response(failed_login_report(env))
+	except Exception as e:
+		return (str(e), 500)
+
 # MUNIN
 
 @app.route('/munin/')

@@ -20,6 +20,7 @@ from mailconfig import get_mail_domains, get_mail_aliases
 
 from utils import shell, sort_domains, load_env_vars_from_file, load_settings, get_ssh_port, get_ssh_config_value
 from backup import get_backup_config, backup_status
+from fail2ban_admin import check_failed_logins
 
 def get_services():
 	return [
@@ -158,6 +159,7 @@ def run_system_checks(rounded_values, env, output):
 	check_free_disk_space(rounded_values, env, output)
 	check_free_memory(rounded_values, env, output)
 	check_backup(rounded_values, env, output)
+	check_failed_logins(rounded_values, env, output)
 
 def check_ufw(env, output):
 	if not os.path.isfile('/usr/sbin/ufw'):
