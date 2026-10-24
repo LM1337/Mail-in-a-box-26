@@ -94,15 +94,17 @@ tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
     mail_path="$STORAGE_ROOT/mail/mailboxes/%{user|domain}/%{user|username}"
 
 # The user's home (userdb "home" in mail-users.sh) is that same directory, the
-# root of the Maildir. Dovecot 2.4 puts the lock files of the duplicate
-# database (vacation replies, redirects) into a directory .dovecot.lda-dupes.locks
-# next to the database, and Maildir++ takes every directory whose name starts
-# with a dot for a folder: users got the folders "dovecot", "dovecot.lda-dupes"
-# and "dovecot.lda-dupes.locks". mail_volatile_path moves the lock files (and
+# root of the Maildir. Dovecot 2.4 (and already 2.3.21 on Ubuntu 24.04, not
+# 2.3.16 on 22.04) puts the lock files of the duplicate database (vacation
+# replies, redirects) into a directory .dovecot.lda-dupes.locks next to the
+# database, and Maildir++ takes every directory whose name starts with a dot
+# for a folder: users got the folders "dovecot", "dovecot.lda-dupes" and
+# "dovecot.lda-dupes.locks". mail_volatile_path moves the lock files (and
 # Dovecot's other short-lived lock files) out of the Maildir, to a tmpfs. The
 # database itself (.dovecot.lda-dupes, a file) stays in the home, as on 22.04;
 # maildir_stat_dirs keeps such files out of the folder list also on file
-# systems that do not tell files from directories when listing (B66).
+# systems that do not tell files from directories when listing (B66). The
+# folders of existing boxes are removed at the end of setup/mail-users.sh.
 cat > /etc/tmpfiles.d/mailinabox-dovecot.conf << EOF;
 # Managed by Mail-in-a-Box (setup/mail-dovecot.sh): Dovecot's mail_volatile_path.
 d /run/dovecot-volatile 0700 mail mail -
@@ -277,28 +279,3 @@ ufw_allow sieve
 
 # Restart services.
 restart_service dovecot
-
-# Boxes that ran without mail_volatile_path have the lock directory of the
-# duplicate database in the Maildir of every user who got a vacation reply or
-# a redirect, and Dovecot shows it as the folders "dovecot",
-# "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" (above, B66). Delete it
-# through Dovecot (which also unsubscribes it and updates the folder list) and
-# its full-text index; the lock files are not needed any more. A directory
-# that holds messages (moved there with a mail program) is kept.
-n_dupes=0
-while IFS= read -r -d '' dupes_dir; do
-	dupes_home=$(dirname "$dupes_dir")
-	dupes_user=$(basename "$dupes_home")@$(basename "$(dirname "$dupes_home")")
-	if [ -n "$(find "$dupes_dir/cur" "$dupes_dir/new" -type f -print -quit 2> /dev/null)" ]; then
-		echo "Kept $dupes_dir: it holds messages. Move them to another folder of $dupes_user and run setup again."
-		continue
-	fi
-	dupes_guid=$(doveadm -f flow mailbox status -u "$dupes_user" guid dovecot.lda-dupes.locks 2> /dev/null | sed -n 's/.*guid=\([0-9a-f]\{32\}\)$/\1/p' || true)
-	doveadm mailbox delete -u "$dupes_user" -s dovecot.lda-dupes.locks > /dev/null 2>&1 || rm -rf "$dupes_dir"
-	doveadm mailbox unsubscribe -u "$dupes_user" dovecot.lda-dupes dovecot > /dev/null 2>&1 || true
-	if [ -n "$dupes_guid" ]; then rm -rf "$dupes_home/xapian-indexes/db_$dupes_guid" "$dupes_home/xapian-indexes/db_${dupes_guid}"_*; fi
-	n_dupes=$((n_dupes + 1))
-done < <(find "$STORAGE_ROOT/mail/mailboxes" -mindepth 3 -maxdepth 3 -type d -name .dovecot.lda-dupes.locks -print0 2> /dev/null)
-if [ "$n_dupes" -gt 0 ]; then
-	echo "Removed the folders of Dovecot's duplicate database from $n_dupes mailboxes."
-fi

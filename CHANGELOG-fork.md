@@ -22,9 +22,12 @@ and following).
   directory in the Maildir, which Maildir++ showed as a folder; setup sets
   `mail_volatile_path` to `/run/dovecot-volatile/<domain>/<user>` (a tmpfs
   directory, `/etc/tmpfiles.d/mailinabox-dovecot.conf`) and
-  `maildir_stat_dirs = yes`. On existing boxes setup deletes these folders
-  (through doveadm, with their subscriptions and full-text index) unless
-  one holds messages (B66).
+  `maildir_stat_dirs = yes`. Dovecot 2.3.21 on Ubuntu 24.04 did the same,
+  so boxes that come from 24.04 can bring these folders along. On existing
+  boxes setup deletes them (through doveadm, with their subscriptions and
+  full-text index, after the user database is set up) unless one holds
+  messages; a real folder named `dovecot` keeps its subscription, and a
+  user that doveadm cannot handle is retried on the next setup run (B66).
 * Tools: `tools/upgrade-in-place-to-2604.sh` left Dovecot disabled: it
   installs Dovecot 2.4 while the unit is masked, which the package cannot
   enable, and after the next reboot there was no IMAP, POP3 or delivery to

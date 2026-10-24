@@ -157,3 +157,52 @@ restart_service dovecot
 
 # force a recalculation of all user quotas
 doveadm quota recalc -A
+
+# Boxes that ran without mail_volatile_path (Dovecot 2.4, and 2.3.21 on Ubuntu
+# 24.04) have the lock directory of the duplicate database in the Maildir of
+# every user who got a vacation reply or a redirect, and Dovecot shows it as
+# the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks"
+# (setup/mail-dovecot.sh, B66). This runs here and not in mail-dovecot.sh
+# because doveadm needs the user database above: a box that comes from 24.04
+# has none before this file. The parents are unsubscribed (unless a real
+# folder has that name), then the lock directory is deleted through Dovecot
+# (which also unsubscribes it and updates the folder list) with its full-text
+# index. A directory that holds messages (moved there with a mail program) is
+# kept. If Dovecot cannot handle a user, the directory is kept, so the next
+# setup run tries again; only the directory of a user who no longer exists is
+# removed directly.
+n_dupes=0
+while IFS= read -r -d '' dupes_dir; do
+	dupes_home=$(dirname "$dupes_dir")
+	dupes_user=$(basename "$dupes_home")@$(basename "$(dirname "$dupes_home")")
+	if [ -n "$(find "$dupes_dir/cur" "$dupes_dir/new" -type f -print -quit 2> /dev/null)" ]; then
+		echo "Kept $dupes_dir: it holds messages. Move them to another folder of $dupes_user and run setup again."
+		continue
+	fi
+	if doveadm user "$dupes_user" > /dev/null 2>&1; then dupes_rc=0; else dupes_rc=$?; fi
+	if [ "$dupes_rc" -eq 67 ]; then
+		# EX_NOUSER: the mailbox directory of a deleted user.
+		rm -rf "$dupes_dir"
+		n_dupes=$((n_dupes + 1))
+		continue
+	elif [ "$dupes_rc" -ne 0 ]; then
+		echo "Kept $dupes_dir: Dovecot could not look up $dupes_user (exit code $dupes_rc). Setup tries again on its next run."
+		continue
+	fi
+	dupes_failed=
+	for dupes_parent in dovecot dovecot.lda-dupes; do
+		if [ ! -d "$dupes_home/.$dupes_parent" ]; then
+			doveadm mailbox unsubscribe -u "$dupes_user" "$dupes_parent" > /dev/null 2>&1 || dupes_failed=1
+		fi
+	done
+	dupes_guid=$(doveadm -f flow mailbox status -u "$dupes_user" guid dovecot.lda-dupes.locks 2> /dev/null | sed -n 's/.*guid=\([0-9a-f]\{32\}\)$/\1/p' || true)
+	if [ -z "$dupes_failed" ] && doveadm mailbox delete -u "$dupes_user" -s dovecot.lda-dupes.locks > /dev/null 2>&1; then
+		if [ -n "$dupes_guid" ]; then rm -rf "$dupes_home/xapian-indexes/db_$dupes_guid" "$dupes_home/xapian-indexes/db_${dupes_guid}"_*; fi
+		n_dupes=$((n_dupes + 1))
+	else
+		echo "Kept $dupes_dir: Dovecot could not remove the folders of its duplicate database for $dupes_user. Setup tries again on its next run."
+	fi
+done < <(find "$STORAGE_ROOT/mail/mailboxes" -mindepth 3 -maxdepth 3 -type d -name .dovecot.lda-dupes.locks -print0 2> /dev/null)
+if [ "$n_dupes" -gt 0 ]; then
+	echo "Removed the folders of Dovecot's duplicate database from $n_dupes mailboxes."
+fi

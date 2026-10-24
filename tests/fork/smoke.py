@@ -1908,7 +1908,8 @@ def c_vacation_no_phantom_folders(ctx):
     # Dovecot 2.4 kept the lock files of the duplicate database (vacation,
     # redirect) in .dovecot.lda-dupes.locks in the Maildir, which IMAP listed as
     # folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" (B66).
-    # \Noselect entries count too.
+    # \Noselect entries count too. The parent "dovecot" alone is not counted:
+    # a user may have a real folder of that name.
     f = _flow(ctx)
     if not f["found"].get("vacation_reply"):
         raise Skip("no vacation reply, so the duplicate database was not used")
@@ -1928,7 +1929,7 @@ def c_vacation_no_phantom_folders(ctx):
         if m:
             name = m.group("name")
             names.append(name[1:-1] if name.startswith('"') else name)
-    phantom = [n for n in names if re.match(r"(?i)^dovecot($|[./])", n)]
+    phantom = [n for n in names if re.match(r"(?i)^dovecot[./]lda-dupes($|[./]locks$)", n)]
     if phantom:
         raise Fail("%s has the folders %s" % (ctx.carol, ", ".join(sorted(phantom))))
     return "%d folders of %s, none from Dovecot's duplicate database" % (len(names), ctx.carol)
