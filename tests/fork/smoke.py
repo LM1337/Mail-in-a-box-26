@@ -9,8 +9,8 @@ received the user-data of a legacy box (--mode migrated --manifest FILE, the
 manifest written by tests/fork/seed-legacy.sh).
 
 Where it can run
-  * from the workstation: the test VMs sit on a private bridge (192.0.2.0/24), so give
-    --jump SSHHOST: all TCP ports are forwarded through that host and the box
+  * from a workstation outside the test network: when the test VMs sit on a
+    private bridge (e.g. 192.0.2.0/24), give --jump SSHHOST: all TCP ports are forwarded through that host and the box
     sees the jump host as client.
   * on another host on the same network, or on the box itself (then the box
     treats the client as mynetworks: no greylisting, no quota-status policy).
@@ -23,10 +23,12 @@ Port-25 mail (and the fail2ban attack) can be sent from a second MIAB with
 --peer-ssh SSHHOST (--peer IP for the IP the target sees). The snippet runs
 there with "python3 -", so the target sees a real foreign MTA IP.
 
-Typical runs from the workstation (credentials from tests/fork/credentials.env):
+Typical runs from a workstation (credentials from --env-file, see below). The
+examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
+192.0.2.11 (new-box) and the virtualization host as jump-host:
 
   T1 fresh 26.04 box, test accounts created by the script:
-    tests/fork/smoke.py --host 192.0.2.11 --hostname box.testvm.example.net \\
+    tests/fork/smoke.py --host 192.0.2.11 --hostname box.fresh.example.net \\
         --mode fresh --provision --jump legacy-box --ssh new-box \\
         --peer 192.0.2.10 --peer-ssh legacy-box
 
@@ -38,13 +40,18 @@ Typical runs from the workstation (credentials from tests/fork/credentials.env):
 
   Baseline against the legacy box itself (22.04 / v74, Nextcloud 26):
     tests/fork/smoke.py --host 192.0.2.10 --hostname box.legacy.example.net \\
-        --mode migrated --manifest seed-manifest.json --jump jumphost \\
+        --mode migrated --manifest seed-manifest.json --jump jump-host \\
         --ssh legacy-box --expect-nc 26
 
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
 
-Passwords are read from --env-file / the environment and never printed.
+Passwords are read from --env-file / the environment and never printed. The
+env file (KEY=VALUE lines) defaults to $MIAB_TEST_ENV, else to
+tests/fork/credentials.env (ignored by git). Keys: TEST_USER_PW, FRESH_ADMIN,
+FRESH_ADMIN_PW, LEGACY_ADMIN, LEGACY_ADMIN_PW, and optionally SEED2_DOMAIN /
+SEED3_DOMAIN (default seed2.example.net / seed3.example.net; --seed2/--seed3
+override them, a --manifest overrides all).
 Exit code: 0 = no FAIL, 1 = at least one FAIL, 2 = usage error.
 """
 
@@ -74,7 +81,7 @@ from email.utils import formatdate
 if "MOVE" not in imaplib.Commands:
     imaplib.Commands["MOVE"] = ("SELECTED",)
 
-DEFAULT_ENV_FILE = "tests/fork/credentials.env"
+DEFAULT_ENV_FILE = os.environ.get("MIAB_TEST_ENV") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.env")
 GROUPS = ["login", "provision", "migrated", "admin", "dns", "web", "mail", "imapsieve", "fail2ban"]
 
 SIEVE_FILTER_NAME = "seedfilter"
@@ -1749,13 +1756,13 @@ def main():
     ap.add_argument("--mode", required=True, choices=["fresh", "migrated"])
     ap.add_argument("--manifest", help="seed manifest JSON (required for --mode migrated)")
     ap.add_argument("--domain", help="primary mail domain (default: manifest, else hostname without first label)")
-    ap.add_argument("--seed2", default="seed2.example.net")
-    ap.add_argument("--seed3", default="seed3.example.net")
+    ap.add_argument("--seed2", help="second seed domain (default SEED2_DOMAIN, else seed2.example.net)")
+    ap.add_argument("--seed3", help="third seed domain (default SEED3_DOMAIN, else seed3.example.net)")
     ap.add_argument("--env-file", default=DEFAULT_ENV_FILE)
     ap.add_argument("--admin-user", help="admin e-mail (default FRESH_ADMIN / LEGACY_ADMIN by mode)")
     ap.add_argument("--admin-pw-var", help="env var holding the admin password (default FRESH_ADMIN_PW / LEGACY_ADMIN_PW)")
     ap.add_argument("--user-pw-var", default="TEST_USER_PW")
-    ap.add_argument("--jump", help="ssh host to forward all ports through (needed from the workstation)")
+    ap.add_argument("--jump", help="ssh host to forward all ports through (needed from outside the test network)")
     ap.add_argument("--ssh", help="ssh host of the box for remote checks, or 'local'")
     ap.add_argument("--peer", help="IP of the peer MIAB as the target sees it (informational/safety)")
     ap.add_argument("--peer-ssh", help="ssh host of a second MIAB: port-25 mail and fail2ban attacks are sent from there")
@@ -1794,7 +1801,8 @@ def main():
 
     env = load_env_file(args.env_file)
     env.update({k: v for k, v in os.environ.items() if k in (
-        "TEST_USER_PW", "FRESH_ADMIN", "FRESH_ADMIN_PW", "LEGACY_ADMIN", "LEGACY_ADMIN_PW")})
+        "TEST_USER_PW", "FRESH_ADMIN", "FRESH_ADMIN_PW", "LEGACY_ADMIN", "LEGACY_ADMIN_PW",
+        "SEED2_DOMAIN", "SEED3_DOMAIN")})
     if args.admin_pw_var:
         env.setdefault(args.admin_pw_var, os.environ.get(args.admin_pw_var, ""))
 
@@ -1806,8 +1814,8 @@ def main():
         with open(args.manifest, encoding="utf-8") as f:
             ctx.manifest = json.load(f)
     ctx.domain = args.domain or (ctx.manifest or {}).get("primary_domain") or args.hostname.split(".", 1)[1]
-    ctx.seed2 = (ctx.manifest or {}).get("seed2", args.seed2)
-    ctx.seed3 = (ctx.manifest or {}).get("seed3", args.seed3)
+    ctx.seed2 = (ctx.manifest or {}).get("seed2", args.seed2 or env.get("SEED2_DOMAIN") or "seed2.example.net")
+    ctx.seed3 = (ctx.manifest or {}).get("seed3", args.seed3 or env.get("SEED3_DOMAIN") or "seed3.example.net")
     ctx.alice = "alice@" + ctx.domain
     ctx.bob = "bob@" + ctx.seed2
     ctx.carol = "carol@" + ctx.domain
@@ -1821,7 +1829,7 @@ def main():
     ctx.remote = Remote(args.ssh)
     SECRETS.update({ctx.user_pw, ctx.admin_pw or ""})
     if not ctx.user_pw:
-        print("TEST_USER_PW missing (env or --env-file)", file=sys.stderr)
+        print("TEST_USER_PW missing (env or --env-file %s)" % args.env_file, file=sys.stderr)
         return 2
 
     print("MIAB fork smoke test: host=%s hostname=%s mode=%s domain=%s token=%s"

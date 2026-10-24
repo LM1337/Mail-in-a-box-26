@@ -7,7 +7,7 @@
 #
 # Creates
 #   domains   $SEED_PRIMARY_DOMAIN (default: PRIMARY_HOSTNAME without its first label),
-#             seed2.example.net, seed3.example.net (domain alias @seed3 -> @seed2)
+#             $SEED2_DOMAIN, $SEED3_DOMAIN (domain alias @seed3 -> @seed2)
 #   users     alice@<primary> (quota 0), bob@seed2 (quota 10M), carol@<primary>
 #   aliases   info@<primary> -> alice, catch-all @seed2 -> bob, @seed3 -> @seed2,
 #             team@<primary> -> alice,carol with permitted sender alice
@@ -25,7 +25,8 @@
 #   TEST_USER_PW         password for alice/bob/carol (required)
 #   SEED_ENV_FILE        optional KEY=VALUE file to source first (e.g. credentials.env)
 #   SEED_PRIMARY_DOMAIN  primary mail domain (default derived from PRIMARY_HOSTNAME)
-#   SEED2_DOMAIN / SEED3_DOMAIN   (default seed2.example.net / seed3.example.net)
+#   SEED2_DOMAIN / SEED3_DOMAIN   (default seed2.example.net / seed3.example.net;
+#                        set them to test domains you control if the box refuses those)
 #   ADMIN_EMAIL/ADMIN_PW or LEGACY_ADMIN/LEGACY_ADMIN_PW
 #                        only used when /var/lib/mailinabox/api.key is not readable
 #   SEED_MANIFEST        manifest path (default /root/seed-manifest.json)
@@ -33,9 +34,10 @@
 #   SEED_SKIP_BACKUP=1, SEED_SKIP_NEXTCLOUD=1, SEED_SKIP_ROUNDCUBE=1
 #   SEED_BACKUP_ANY_TARGET=1   also run the backup when the target is not "local"
 #
-# Invocation from the workstation (password never on a command line):
+# Invocation from a workstation (password never on a command line; MIAB_TEST_ENV
+# is the local credentials file, see tests/fork/smoke.py):
 #   scp tests/fork/seed-legacy.sh legacy-box:/tmp/
-#   ssh legacy-box 'umask 077; cat > /tmp/seed.env' < tests/fork/credentials.env
+#   ssh legacy-box 'umask 077; cat > /tmp/seed.env' < "$MIAB_TEST_ENV"
 #   ssh legacy-box 'sudo SEED_ENV_FILE=/tmp/seed.env bash /tmp/seed-legacy.sh; rm -f /tmp/seed.env'
 #   ssh legacy-box 'sudo cat /root/seed-manifest.json' > seed-manifest.json
 
