@@ -129,7 +129,8 @@ Right after the update:
 
 * **Allowlist your own networks.** From rc4 on, adaptive banning and the
   slow mail jails are on as soon as setup has finished, with an empty
-  allowlist; there is nothing to turn on. Put the networks your users work
+  allowlist on a box that had none (an allowlist saved under rc4 or later
+  stays); there is nothing to turn on. Put the networks your users work
   from (office, VPN) on the allowlist right away, under System > Intrusion
   Protection or with
   `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
@@ -187,7 +188,8 @@ Gleich nach dem Update:
 
 * **Eigene Netze freigeben.** Ab rc4 sind die wachsenden Sperren und die
   langsamen Mail-Jails eingeschaltet, sobald setup fertig ist, mit leerer
-  Freigabeliste (allowlist); einzuschalten ist nichts. Die Netze, aus denen
+  Freigabeliste (allowlist), wenn die Box noch keine hatte (eine unter rc4
+  oder später gespeicherte bleibt); einzuschalten ist nichts. Die Netze, aus denen
   die Benutzer arbeiten (Büro, VPN), sofort freigeben, unter System >
   Intrusion Protection oder mit
   `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
@@ -728,8 +730,9 @@ What it does, in phases that continue on their own after each reboot:
    a backup younger than 24 hours (a backup that is running, e.g. the nightly
    one, does not block: the upgrade waits for it, at most 2 hours,
    `UPGRADE_BACKUP_WAIT`, before it stops anything; the nightly job runs at
-   the minute after 01:00 in `/etc/cron.d/mailinabox-nightly`, which every
-   setup run picks anew), and a list of
+   a random minute between 01:00 and 01:59 (system time), the one in
+   `/etc/cron.d/mailinabox-nightly`, which every setup run picks anew), and
+   a list of
    everything that is not managed by Mail-in-a-Box (Dovecot plugins, systemd
    drop-ins, nginx files, Docker, third-party apt sources). Local extensions
    block the upgrade until you pass `--keep-local`.
@@ -831,9 +834,9 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
    Speicherplatz, eine Sicherung jünger als 24 Stunden (eine laufende
    Sicherung, etwa die nächtliche, hält nichts an: das Upgrade wartet auf sie,
    höchstens 2 Stunden, `UPGRADE_BACKUP_WAIT`, bevor es etwas anhält; die
-   nächtliche Aufgabe läuft zu der Minute nach 01:00 Uhr, die in
-   `/etc/cron.d/mailinabox-nightly` steht und die jeder Lauf von setup neu
-   wählt) und
+   nächtliche Aufgabe läuft zu einer zufälligen Minute zwischen 01:00 und
+   01:59 Uhr (Systemzeit), der in `/etc/cron.d/mailinabox-nightly`, die
+   jeder Lauf von setup neu wählt) und
    eine Liste von allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.

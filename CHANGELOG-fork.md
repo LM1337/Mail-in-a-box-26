@@ -71,7 +71,7 @@ and following).
   dovecot`; until this release is installed, `sudo systemctl enable
   dovecot` fixes it. Setup of this release enables it by itself.
 * Adaptive banning and the slow mail jails are on as soon as setup of rc4
-  or later has finished; turning them on changes nothing. Put your own
+  or later has finished; there is nothing to turn on. Put your own
   networks on the allowlist right after the update (System > Intrusion
   Protection, or `sudo /root/mailinabox/management/fail2ban_admin.py
   --allow 192.0.2.0/24`), see the upgrade note of rc4.
