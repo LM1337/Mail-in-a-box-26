@@ -32,17 +32,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-56 bugs: 1 critical, 11 high, 25 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3.
+57 bugs: 1 critical, 11 high, 25 medium, 20 low. B51-B56 were found by the in-place upgrade test for rc3,
+B61 while adding the adaptive fail2ban.
 
 | Origin | Count |
 |---|---|
-| Upstream | 14 |
+| Upstream | 15 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 12 |
 | Fork | 3 |
 
-13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
+14 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B61). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -105,6 +106,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
+| [B61](#b61) | low | fail2ban | recidive bans (1 week) are lost when fail2ban restarts more than a day later (dbpurgeage 1 day) | Upstream | yes | yes | unreleased |
 
 ## Details
 
@@ -767,6 +769,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** A failing pollinate is reported and does not stop setup (seeding is not required).
 * **Affects:** v78 partly, PR #2603 partly. Origin: Upstream.
 * **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `27251d9`; **fixed in:** v78-r2604.0-rc3
+
+### B61
+
+**recidive bans (1 week) are lost when fail2ban restarts more than a day later (dbpurgeage 1 day)** (low, fail2ban)
+
+* **Symptom:** An address banned by the recidive jail for a week is free again after the next fail2ban restart (setup run, reboot, package update) once the ban is older than one day. The ban stays in effect only as long as fail2ban keeps running.
+* **Cause:** conf/fail2ban/jails.conf enables recidive with jail.conf's `bantime = 1w`, but leaves `dbpurgeage = 1d` of Debian's fail2ban.conf. fail2ban's hourly purge deletes rows of the `bans` table older than dbpurgeage, and on start a jail restores its bans only from that table. jail.conf itself warns at [recidive]: "Increase dbpurgeage defined in fail2ban.conf to e.g. 648000 (7.5 days)".
+* **Fix:** With adaptive banning (the default) `management/fail2ban_admin.py` writes `/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf` with `dbpurgeage` = the setting `memory` (30 days, never less than `bantime_max`, which is at least one week). With adaptive banning turned off the upstream behaviour (1 day) comes back.
+* **Affects:** v78 yes, PR #2603 yes. Origin: upstream (also in v78 on 22.04).
+* **Evidence:** From reading the code of fail2ban 1.1.0 (Ubuntu 26.04): server/database.py `purge()` runs `DELETE FROM bans WHERE timeofban < ?` with now - purgeAge; server/jail.py `restoreCurrentBans()` reads `getCurrentBans()` from the `bans` table only. /etc/fail2ban/fail2ban.conf on the 26.04 test box has `dbpurgeage = 1d`; v78's jails.conf and the fork's set no dbpurgeage. Not reproduced with a real week-long ban.
+* **Report upstream:** MIAB main: set dbpurgeage to at least the recidive bantime (a fail2ban.d file from setup/system.sh).
+* **Found by:** review (adaptive fail2ban); **commit:** see `git log --grep B61`; **fixed in:** unreleased
 
 ## Not counted above
 

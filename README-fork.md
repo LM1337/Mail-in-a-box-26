@@ -18,6 +18,9 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * Nextcloud 34.0.5. Existing installations are upgraded step by step from
   Nextcloud 26; older versions are refused.
 * Roundcube 1.7.5, Z-Push 2.7.7.
+* fail2ban: repeat offenders get longer bans, slow jails catch slow attacks,
+  an allowlist for own networks, a report of password spraying (see
+  "Intrusion protection" below).
 
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
 Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md, die behobenen Fehler einzeln in BUGS-fork.md.
@@ -46,6 +49,158 @@ wählen. Die Variablen gehören hinter `sudo` vor `bash` (sudo reicht die
 Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Solange es
 noch keinen Release-Tag gibt, den Zweig `main` nehmen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
+
+
+Intrusion protection (adaptive fail2ban) / Schutz vor Anmeldeangriffen
+---------------------------------------------------------------------
+
+### English
+
+Mail-in-a-Box bans an IP address after 20 failed logins within 30 seconds,
+for 10 minutes. Attacks that try a few passwords per address, or one password
+every few minutes, are never banned: a production box had 19,586 failed SMTP
+logins from 4,627 addresses in one week and not a single ban. The fork adds
+the following, on by default:
+
+* **Adaptive banning.** Each new ban of an address lasts twice as long as its
+  previous one, counted over all jails (fail2ban's `bantime.increment` and
+  `bantime.overalljails`), up to one week (`bantime_max`). fail2ban's
+  database keeps the ban history for 30 days (`memory`, sets `dbpurgeage`).
+  An address that was banned before is banned again after fewer failures.
+* **Slow jails.** `miab-slow-smtp` (SMTP AUTH on 465/587), `miab-slow-dovecot`
+  (IMAP, POP3, ManageSieve), `miab-slow-roundcube`, `miab-slow-owncloud`
+  (Nextcloud) and `miab-slow-management` (control panel) ban an address after
+  10 failures within 6 hours, for 1 hour the first time (`slow_maxretry`,
+  `slow_findtime`, `slow_bantime`). They use Mail-in-a-Box's filters; the
+  Dovecot one does not count connections without a login attempt (monitoring,
+  TLS probes). The mail jails block only the mail ports (465, 587, 993, 995,
+  4190), the web jails only HTTP and HTTPS.
+* **Allowlist.** Addresses and networks in `allowlist` (empty by default) are
+  never banned, in addition to the box's own addresses. Put your office or
+  home network there: otherwise a phone with an old password gets its network
+  banned from the mail ports, for longer each time.
+* **Failed-login report.** The status checks read the mail log of the last
+  48 hours (SMTP AUTH, IMAP, POP3, ManageSieve) and report accounts with failed
+  logins from 20 or more addresses within 24 hours (`spray_min_ips`, password
+  spraying) and addresses that keep failing for 12 hours or more without being
+  banned. Only accounts that exist on the box are named. Give such an account
+  a long password that is not used anywhere else, and if it is an
+  administrator, turn on two-factor authentication for the control panel.
+
+The settings are stored in `$STORAGE_ROOT/settings.yaml` under `fail2ban`,
+only the values that differ from the defaults, so they survive setup runs, the
+migration and the in-place upgrade:
+
+    fail2ban:
+      adaptive: true          # repeat offenders get longer bans
+      bantime_max: 604800     # seconds, 1 week to 1 year
+      memory: 2592000         # seconds, at least bantime_max
+      slow_jails: true
+      slow_maxretry: 10       # 3 to 1000
+      slow_findtime: 21600    # seconds, 10 minutes to 7 days
+      slow_bantime: 3600      # seconds, 1 minute to 7 days
+      allowlist: []           # e.g. [192.0.2.0/24, 2001:db8:1::/48], at most 100
+      spray_min_ips: 20
+
+`bantime_max` is at least one week so that it never shortens the recidive
+ban. Setup writes `/etc/fail2ban/jail.d/mailinabox_adaptive.conf` and
+`/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf` from them
+(`management/fail2ban_admin.py --setup`). A slow jail whose log file does not
+exist yet is left out. With `adaptive` and `slow_jails` off and an empty
+allowlist neither file exists, which is exactly upstream's configuration.
+After editing settings.yaml by hand run `sudo management/fail2ban_admin.py
+--apply`: it checks the whole configuration with `fail2ban-client -t`, puts
+the old files back if fail2ban rejects it, and reloads fail2ban only if a file
+changed. `--print` shows the files, `--allow 192.0.2.0/24` adds a network,
+`--report` prints the failed-login report.
+
+The control panel page (System > Intrusion protection) uses this API (admin
+only, changes by POST with form fields):
+
+| Request | |
+|---|---|
+| `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban), the settings, defaults and limits |
+| `GET /admin/system/fail2ban/settings` | the settings, defaults and warnings about invalid stored values |
+| `POST /admin/system/fail2ban/settings` | fields named like the settings; fields not sent keep their value, `reset=1` starts from the defaults. Answers with `changed`, `reloaded`, `skipped_jails` and the new settings, or HTTP 400 with the reason |
+| `POST /admin/system/fail2ban/unban` | `ip`, optionally `jail`. Answers with `unbanned_from` and `still_banned_in` |
+| `POST /admin/system/fail2ban/unban-all` | `jail`: unbans every address banned in that jail |
+| `GET /admin/system/fail2ban/report` | the failed-login report as JSON |
+
+Unbanning without a jail runs `fail2ban-client unban <ip>`: the address is
+unbanned in all jails, recidive included, and its ban history is deleted, so a
+new ban starts again at the initial ban time. Unbanning in one jail removes
+only that jail's ban and history. Failures that other jails counted but did
+not ban yet stay counted; to keep a device from being banned again, fix its
+password or put its network on the allowlist. Locked out? From another
+address (or the provider's console) run `sudo fail2ban-client unban <ip>`.
+
+### Deutsch
+
+Mail-in-a-Box sperrt eine IP-Adresse nach 20 fehlgeschlagenen Anmeldungen
+innerhalb von 30 Sekunden für 10 Minuten. Angriffe mit wenigen Passwörtern
+pro Adresse oder einem Passwort alle paar Minuten werden nie gesperrt: Eine
+Produktivbox hatte in einer Woche 19.586 fehlgeschlagene SMTP-Anmeldungen von
+4.627 Adressen und keine einzige Sperre. Der Fork ergänzt, standardmäßig
+eingeschaltet:
+
+* **Mitwachsende Sperren.** Jede neue Sperre einer Adresse dauert doppelt so
+  lange wie die vorige, gezählt über alle Jails (`bantime.increment` und
+  `bantime.overalljails` von fail2ban), höchstens eine Woche
+  (`bantime_max`). Die Datenbank von fail2ban behält die Sperrgeschichte
+  30 Tage (`memory`, setzt `dbpurgeage`). Eine schon einmal gesperrte Adresse
+  wird nach weniger Fehlversuchen wieder gesperrt.
+* **Langsame Jails.** `miab-slow-smtp` (SMTP AUTH auf 465/587),
+  `miab-slow-dovecot` (IMAP, POP3, ManageSieve), `miab-slow-roundcube`,
+  `miab-slow-owncloud` (Nextcloud) und `miab-slow-management` (Admin-Oberfläche)
+  sperren eine Adresse nach 10 Fehlversuchen innerhalb von 6 Stunden, beim
+  ersten Mal für 1 Stunde (`slow_maxretry`, `slow_findtime`, `slow_bantime`).
+  Sie nutzen die Filter von Mail-in-a-Box; der für Dovecot zählt Verbindungen
+  ohne Anmeldeversuch nicht mit (Überwachung, TLS-Prüfungen). Die Mail-Jails
+  sperren nur die Mail-Ports (465, 587, 993, 995, 4190), die Web-Jails nur HTTP
+  und HTTPS.
+* **Freigabeliste.** Adressen und Netze in `allowlist` (anfangs leer) werden
+  nie gesperrt, zusätzlich zu den eigenen Adressen der Box. Hier gehört das
+  Netz des Büros oder von zu Hause hinein: Sonst sperrt ein Telefon mit altem
+  Passwort sein Netz für die Mail-Ports, jedes Mal länger.
+* **Bericht über Fehlanmeldungen.** Die Statusprüfungen lesen das Mail-Log der
+  letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve) und melden Konten
+  mit Fehlanmeldungen von 20 oder mehr Adressen innerhalb von 24 Stunden
+  (`spray_min_ips`, Password Spraying) sowie Adressen, die 12 Stunden oder
+  länger scheitern, ohne gesperrt zu werden. Genannt werden nur Konten, die es
+  auf der Box gibt. Ein solches Konto braucht ein langes Passwort, das nirgends
+  sonst verwendet wird, und, wenn es ein Administrator ist, die
+  Zwei-Faktor-Anmeldung für die Admin-Oberfläche.
+
+Die Einstellungen stehen in `$STORAGE_ROOT/settings.yaml` unter `fail2ban`,
+nur die Werte, die vom Standard abweichen. Sie überstehen so Setup-Läufe, den
+Umzug und das Upgrade an Ort und Stelle (Beispiel und Grenzen siehe oben).
+`bantime_max` beträgt mindestens eine Woche, damit die recidive-Sperre nie
+kürzer wird. Das Setup schreibt daraus
+`/etc/fail2ban/jail.d/mailinabox_adaptive.conf` und
+`/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf`
+(`management/fail2ban_admin.py --setup`). Ein langsames Jail, dessen Logdatei
+noch fehlt, wird ausgelassen. Sind `adaptive` und `slow_jails` aus und ist die
+Freigabeliste leer, gibt es keine der beiden Dateien, also genau die
+Konfiguration von upstream. Nach einer Änderung von settings.yaml von Hand
+`sudo management/fail2ban_admin.py --apply` aufrufen: Es prüft die ganze
+Konfiguration mit `fail2ban-client -t`, stellt bei einer Ablehnung die alten
+Dateien wieder her und lädt fail2ban nur neu, wenn sich eine Datei geändert
+hat. `--print` zeigt die Dateien, `--allow 192.0.2.0/24` fügt ein Netz hinzu,
+`--report` gibt den Bericht über Fehlanmeldungen aus.
+
+Die Seite der Admin-Oberfläche (System > Intrusion protection) nutzt die oben
+beschriebene API unter `/admin/system/fail2ban` (nur für Administratoren,
+Änderungen per POST mit Formularfeldern).
+
+Eine Freigabe ohne Jail ruft `fail2ban-client unban <ip>` auf: Die Adresse
+wird in allen Jails freigegeben, recidive eingeschlossen, und ihre
+Sperrgeschichte wird gelöscht; eine neue Sperre beginnt also wieder mit der
+anfänglichen Dauer. Eine Freigabe in einem Jail entfernt nur dessen Sperre und
+Geschichte. Fehlversuche, die andere Jails gezählt, aber noch nicht gesperrt
+haben, bleiben gezählt. Damit ein Gerät nicht erneut gesperrt wird, sein
+Passwort korrigieren oder sein Netz in die Freigabeliste aufnehmen. Selbst
+ausgesperrt? Von einer anderen Adresse (oder über die Konsole des Anbieters)
+`sudo fail2ban-client unban <ip>` ausführen.
 
 
 In-place upgrade to 26.04 / Upgrade an Ort und Stelle

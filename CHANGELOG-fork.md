@@ -9,6 +9,41 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### New
+
+* fail2ban: adaptive intrusion protection, on by default (README-fork.md,
+  "Intrusion protection"). Each new ban of an address lasts twice as long as
+  its previous one, counted over all jails, up to one week; the ban history
+  is kept for 30 days. Slow jails for SMTP AUTH, IMAP/POP3/ManageSieve,
+  Roundcube, Nextcloud and the control panel ban after 10 failures within
+  6 hours (the Dovecot one ignores connections without a login attempt). An
+  allowlist of own networks is added to ignoreip. The settings are stored in
+  settings.yaml under `fail2ban`; `management/fail2ban_admin.py` writes
+  `jail.d/mailinabox_adaptive.conf` and `fail2ban.d/mailinabox_adaptive.conf`
+  from them (setup, `--apply`), checks them with `fail2ban-client -t` and
+  reloads fail2ban only on a change. All off with an empty allowlist is
+  upstream's configuration. Before, a production box had 19,586 failed SMTP
+  logins from 4,627 addresses in a week and no ban.
+* Status checks: a report of failed logins in the mail log of the last
+  48 hours: accounts that failed from 20 or more addresses within 24 hours
+  (password spraying) and addresses that keep failing for 12 hours or more
+  without a ban. Only existing accounts are named.
+* Management API (admin): `GET /system/fail2ban` (jails, bans with time
+  left), `GET`/`POST /system/fail2ban/settings`, `POST /system/fail2ban/unban`
+  (one jail, or all jails including the ban history), `POST
+  /system/fail2ban/unban-all` (one jail), `GET /system/fail2ban/report`.
+* Tests: smoke checks `admin-fail2ban-status`, `admin-fail2ban-settings`
+  and `admin-fail2ban-report`; `prepare-testenv.sh` puts the jump host on the
+  allowlist.
+
+### Fixed
+
+* fail2ban: recidive bans (1 week) are no longer forgotten when fail2ban
+  restarts more than a day after the ban. With adaptive banning `dbpurgeage`
+  is 30 days instead of Debian's 1 day (B61).
+
 ## v78-r2604.0-rc3 (2026-10-23)
 
 In-place upgrade and full-text search. Tested in place on a copy of a
