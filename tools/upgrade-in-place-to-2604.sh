@@ -30,13 +30,13 @@
 # reboot a systemd unit continues it on its own):
 #
 #   1. preflight        check everything (also alone, with --check)
-#   2. snapshot         mail goes OFFLINE first (mail/web/cron/apt timers
-#                       stopped and masked, also across reboots), so that
-#                       the fresh Mail-in-a-Box backup holds all mail; then
-#                       fingerprint, archive of /etc and the code outside
-#                       $STORAGE_ROOT, an encrypted copy of the archive next
-#                       to the backups (with --skip-miab-backup or backups
-#                       off, mail keeps running until quiesce)
+#   2. snapshot         archive of /etc and the code outside $STORAGE_ROOT,
+#                       an encrypted copy of it next to the backups; then
+#                       mail goes OFFLINE (mail/web/cron/apt timers stopped
+#                       and masked, also across reboots), so that the fresh
+#                       Mail-in-a-Box backup holds all mail; fingerprint
+#                       (with --skip-miab-backup or backups off, mail keeps
+#                       running until quiesce)
 #   3. quiesce          backups paused; mail goes OFFLINE here if it is not
 #                       yet
 #   4. prepare-release  third-party apt sources off, PHP from ppa:ondrej
@@ -72,7 +72,7 @@
 #     STORAGE_ROOT, PRIMARY_HOSTNAME, MIAB_DIR (this fork's checkout; in
 #     stage before and after --rollback the old one), OLD_ETC
 #     (/root/upgrade-2604/old-etc, a copy of /etc as it was before the
-#     upgrade; not yet in stage before),
+#     upgrade; missing on a box that only runs setup again),
 #     MOVED_DIR (/root/upgrade-2604/moved, everything this tool moved out of
 #     the way, at its original path) and UPGRADE_STATE_DIR;
 #   * a non-zero exit code makes the phase fail in stages before and
@@ -218,9 +218,9 @@ reboot. Nextcloud must be 26 or later. Run it as root. Started from a
 terminal outside tmux or screen, it runs itself in the tmux session
 "upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
 connection drops, log in again and run "tmux attach -t upgrade-2604".
-Mail is offline from the start of phase "snapshot" (before its fresh backup;
-with --skip-miab-backup from phase "quiesce") until setup has finished
-(typically 1-3 hours). After each reboot the upgrade continues on its own;
+Mail is offline from phase "snapshot" on (after the system archive, before
+the fresh backup; with --skip-miab-backup or backups turned off from phase
+"quiesce") until setup has finished (typically 1-3 hours). After each reboot the upgrade continues on its own;
 follow it with "tmux attach -t upgrade-2604" or
 "tail -f /root/upgrade-2604/upgrade.log".
 Running the command again continues an interrupted upgrade.
@@ -1841,10 +1841,10 @@ show_plan() {
 	local offsite="an encrypted copy of the archive next to the backups"
 	if [ -n "$NO_OFFSITE" ]; then offsite="the archive stays here (--no-offsite)"; fi
 	if fresh_backup_planned; then
-		say "$n. MAIL GOES OFFLINE: mail, web, cron and the update timers stopped and masked (they"
-		say "   stay off across reboots until setup). Then the snapshot: a fresh Mail-in-a-Box backup"
-		say "   (so it holds all mail), fingerprint, system archive (/etc, the code outside"
-		say "   $STORAGE_ROOT), $offsite."
+		say "$n. Snapshot: system archive (/etc, the code outside $STORAGE_ROOT), $offsite."
+		say "   Then MAIL GOES OFFLINE: mail, web, cron and the update timers stopped and masked"
+		say "   (they stay off across reboots until setup), a fresh Mail-in-a-Box backup (so it"
+		say "   holds all mail), fingerprint."
 		n=$((n + 1))
 		say "$n. Backups paused until the end."
 	else
@@ -2050,52 +2050,81 @@ targets. Copy $enc off this machine yourself (it is encrypted with backup/secret
 
 phase_snapshot() {
 	section "Snapshot"
-	local stamp arch rc=0 p paths=() miab
-	stamp=$(date -u +%Y%m%dT%H%M%SZ)
-	state_set SNAPSHOT_STAMP "$stamp"
+	local stamp arch rc=0 p paths=() miab excl=() b q
 	miab=$(state_get OLD_MIAB_DIR)
-	# The package lists and unit states as they are, before anything is stopped.
-	save_meta
+	arch=$(state_get SYSTEM_ARCHIVE)
+	# The package lists, the system archive and the copy of /etc record the box
+	# as it was, so they are taken while mail still runs: stop_mail masks and
+	# disables units in /etc. A run interrupted after stop_mail keeps them.
+	if [ "$(state_get QUIESCED)" = 1 ] && [ -f "$arch" ] && [ -d "$OLD_ETC" ] \
+		&& [ "$(stat -c %Y "$arch")" -le "$(state_get QUIESCED_EPOCH)" ]; then
+		say "Mail is offline since $(state_get QUIESCED_AT). The system archive from before stays: $arch"
+	else
+		stamp=$(date -u +%Y%m%dT%H%M%SZ)
+		state_set SNAPSHOT_STAMP "$stamp"
+		if [ "$(state_get QUIESCED)" = 1 ]; then
+			# Only when the archive is gone, or an older version of this tool
+			# stopped mail first: leave out the masks.
+			for p in $(state_get MASKED_UNITS); do excl+=("--exclude=etc/systemd/system/$p"); done
+			if [ ${#excl[@]} -gt 0 ]; then
+				warn "Mail is offline already, so the system archive and the copy of /etc leave out the
+masks of: $(state_get MASKED_UNITS)"
+			fi
+			if [ -n "$(state_get DISABLED_UNITS)" ]; then
+				warn "These units are disabled in them (they were enabled): $(state_get DISABLED_UNITS)"
+			fi
+			if [ ! -d "$STATE_DIR/meta" ]; then save_meta; fi
+		else
+			save_meta
+		fi
+
+		for p in etc "${miab#/}" var/lib/z-push var/lib/munin usr/local/lib/owncloud var/spool/cron usr/local/bin; do
+			if [ -n "$p" ] && [ -e "/$p" ]; then paths+=("$p"); fi
+		done
+		arch=$STATE_DIR/system-$stamp.tar.gz
+		say "Saving $(printf '/%s ' "${paths[@]}")and the package lists to $arch..."
+		rc=0
+		tar --numeric-owner "${excl[@]}" -czf "$arch.new" -C / "${paths[@]}" -C "$STATE_DIR" meta 2> "$STATE_DIR/tar-errors.txt" || rc=$?
+		# tar exits with 1 when a file changed while it was read.
+		[ "$rc" -le 1 ] || die "Could not write the system archive (exit code $rc, see $STATE_DIR/tar-errors.txt)."
+		mv "$arch.new" "$arch"
+		chmod 600 "$arch"
+		state_set SYSTEM_ARCHIVE "$arch"
+		say "System archive: $(human "$(stat -c %s "$arch")")"
+
+		# Taken once per upgrade and never replaced (the hooks rely on it). One left
+		# by an earlier attempt (rolled back) is kept aside.
+		if [ -d "$OLD_ETC" ] && [ -n "$(state_get ETC_SAVED_AT)" ]; then
+			say "The copy of /etc from $(state_get ETC_SAVED_AT) stays: $OLD_ETC"
+		else
+			if [ -e "$OLD_ETC" ]; then mv "$OLD_ETC" "$OLD_ETC.$stamp"; fi
+			mkdir -p "$OLD_ETC.new"
+			tar -C "$OLD_ETC.new" --numeric-owner --strip-components=1 -xzf "$arch" etc \
+				|| die "Could not unpack /etc from $arch."
+			mv "$OLD_ETC.new" "$OLD_ETC"
+			state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
+			say "A copy of /etc as it is now: $OLD_ETC"
+		fi
+
+		offsite_copy "$arch"
+	fi
 
 	# Mail goes offline before the backup: mail that arrived after it would
 	# not be in it (backup.py starts Postfix and Dovecot again after its run).
 	if miab_backup_wanted; then
 		stop_mail
-		run_miab_backup
+		b=$(state_get MIAB_BACKUP_AT)
+		q=$(state_get QUIESCED_AT)
+		if [ -n "$b" ] && [ -n "$q" ] && [[ $b > $q ]]; then
+			say "The backup of $b ran with mail offline already, so it holds all mail. Not again."
+		else
+			run_miab_backup
+		fi
 	fi
 
 	say "Recording counts and key fingerprints (before the upgrade)..."
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
-
-	for p in etc "${miab#/}" var/lib/z-push var/lib/munin usr/local/lib/owncloud var/spool/cron usr/local/bin; do
-		if [ -n "$p" ] && [ -e "/$p" ]; then paths+=("$p"); fi
-	done
-	arch=$STATE_DIR/system-$stamp.tar.gz
-	say "Saving $(printf '/%s ' "${paths[@]}")and the package lists to $arch..."
-	tar --numeric-owner -czf "$arch.new" -C / "${paths[@]}" -C "$STATE_DIR" meta 2> "$STATE_DIR/tar-errors.txt" || rc=$?
-	# tar exits with 1 when a file changed while it was read.
-	[ "$rc" -le 1 ] || die "Could not write the system archive (exit code $rc, see $STATE_DIR/tar-errors.txt)."
-	mv "$arch.new" "$arch"
-	chmod 600 "$arch"
-	state_set SYSTEM_ARCHIVE "$arch"
-	say "System archive: $(human "$(stat -c %s "$arch")")"
-
-	# Taken once per upgrade and never replaced (the hooks rely on it). One left
-	# by an earlier attempt (rolled back) is kept aside.
-	if [ -d "$OLD_ETC" ] && [ -n "$(state_get ETC_SAVED_AT)" ]; then
-		say "The copy of /etc from $(state_get ETC_SAVED_AT) stays: $OLD_ETC"
-	else
-		if [ -e "$OLD_ETC" ]; then mv "$OLD_ETC" "$OLD_ETC.$stamp"; fi
-		mkdir -p "$OLD_ETC.new"
-		tar -C "$OLD_ETC.new" --numeric-owner --strip-components=1 -xzf "$arch" etc \
-			|| die "Could not unpack /etc from $arch."
-		mv "$OLD_ETC.new" "$OLD_ETC"
-		state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
-		say "A copy of /etc as it is now: $OLD_ETC"
-	fi
-
-	offsite_copy "$arch"
 }
 
 # ---------------------------------------------------------------------------
@@ -3680,10 +3709,11 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 Mail stays offline until setup has finished. Nothing asks again. If SSH does not come
 back after a reboot, use the provider's console."
 		elif ! phase_is_done snapshot && fresh_backup_planned; then
-			confirm "Start the upgrade now? Mail goes OFFLINE right away, before the fresh backup (so that
-it holds all mail), and stays offline until setup has finished, with $(upgrade_steps_text).
-From the first release upgrade on there is no way back except the backups. Nothing asks
-again. If SSH does not come back after a reboot, use the provider's console."
+			confirm "Start the upgrade now? The system archive is written first; then mail goes OFFLINE,
+before the fresh backup (so that it holds all mail), and stays offline until setup has
+finished, with $(upgrade_steps_text). From the first release upgrade on there is no way
+back except the backups. Nothing asks again. If SSH does not come back after a reboot,
+use the provider's console."
 		elif ! phase_is_done snapshot; then
 			confirm "Start the upgrade now? The snapshot runs first (mail keeps running), then mail goes
 OFFLINE until setup has finished, with $(upgrade_steps_text). From the first

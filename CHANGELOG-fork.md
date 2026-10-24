@@ -38,7 +38,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   again after its run, and mail accepted while the system archive was written
   and copied was missing from the backup (B57). The downtime starts there;
   with `--skip-miab-backup` or backups off, mail keeps running until quiesce
-  as before. `--rollback` brings it back as before.
+  as before. `--rollback` brings it back as before. The system archive, the
+  copy of `/etc` and the package lists are still taken before the stop, so
+  they hold `/etc` without the masks; a run interrupted after the stop keeps
+  them and does not repeat a backup that already ran with mail offline.
 * Management: the usage report (`mail_log.py`) counts IMAP, POP3 and
   ManageSieve logins again: Dovecot 2.4 logs them as "Logged in:", not
   "Login:" (B58).

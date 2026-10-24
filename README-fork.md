@@ -136,12 +136,12 @@ What it does, in phases that continue on their own after each reboot:
    everything that is not managed by Mail-in-a-Box (Dovecot plugins, systemd
    drop-ins, nginx files, Docker, third-party apt sources). Local extensions
    block the upgrade until you pass `--keep-local`.
-2. **snapshot**: mail, web, cron and the update timers are stopped and
-   masked, so they stay off across reboots. **Mail is offline from here.**
-   Then a fresh Mail-in-a-Box backup (so it holds all mail), counts and key
-   fingerprints and a system archive (`/etc`, the code outside the data
-   directory, package lists). The archive is encrypted with the backup key and
-   copied next to the backups (for an rsync target: `<target>-system/`). With
+2. **snapshot**: a system archive (`/etc` as it was, the code outside the
+   data directory, package lists), encrypted with the backup key and copied
+   next to the backups (for an rsync target: `<target>-system/`). Then mail,
+   web, cron and the update timers are stopped and masked, so they stay off
+   across reboots. **Mail is offline from here.** Then a fresh Mail-in-a-Box
+   backup (so it holds all mail) and counts and key fingerprints. With
    `--skip-miab-backup` (or backups turned off) there is no fresh backup, and
    mail keeps running until quiesce.
 3. **quiesce**: the backups are paused until the end, and mail goes offline
@@ -231,15 +231,16 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
    eine Liste von allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.
-2. **snapshot**: Mail, Web, Cron und die Update-Timer werden angehalten und
-   maskiert, damit sie auch über Neustarts hinweg aus bleiben. **Ab hier ist
-   die Mail aus.** Danach eine frische Mail-in-a-Box-Sicherung (damit sie alle
-   Mails enthält), Zählungen und Schlüssel-Fingerabdrücke und ein Systemarchiv
-   (`/etc`, der Code außerhalb des Datenverzeichnisses, Paketlisten). Das
-   Archiv wird mit dem Backup-Schlüssel verschlüsselt und neben die
-   Sicherungen gelegt (bei einem rsync-Ziel: `<ziel>-system/`). Mit
-   `--skip-miab-backup` (oder abgeschalteten Sicherungen) gibt es keine
-   frische Sicherung, und die Mail läuft bis quiesce weiter.
+2. **snapshot**: ein Systemarchiv (`/etc` im alten Zustand, der Code
+   außerhalb des Datenverzeichnisses, Paketlisten), mit dem Backup-Schlüssel
+   verschlüsselt und neben die Sicherungen gelegt (bei einem rsync-Ziel:
+   `<ziel>-system/`). Danach werden Mail, Web, Cron und die Update-Timer
+   angehalten und maskiert, damit sie auch über Neustarts hinweg aus bleiben.
+   **Ab hier ist die Mail aus.** Dann eine frische Mail-in-a-Box-Sicherung
+   (damit sie alle Mails enthält) sowie Zählungen und
+   Schlüssel-Fingerabdrücke. Mit `--skip-miab-backup` (oder abgeschalteten
+   Sicherungen) gibt es keine frische Sicherung, und die Mail läuft bis
+   quiesce weiter.
 3. **quiesce**: Die Sicherungen werden bis zum Ende ausgesetzt; ist die Mail
    noch an, geht sie hier aus.
 4. **prepare-release**, **release-2404**, **release-2604**: fremde Quellen aus,
