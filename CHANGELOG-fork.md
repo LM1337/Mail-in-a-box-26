@@ -9,10 +9,12 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
-## Unreleased
+## v78-r2604.0-rc5 (2026-10-24)
 
-Fixes from the update of a copy of a production box from rc3 to rc4 (B66
-and following).
+Fixes from the update of a copy of a production box from rc3 to rc4: Dovecot
+stays enabled after the in-place upgrade (B67), no more phantom folders from
+vacation replies (B66), cloud-init keeps the box's name in /etc/hosts (B68),
+and the mailinabox and munin units are enabled by name (B69).
 
 ### Fixed
 

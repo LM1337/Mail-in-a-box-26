@@ -117,10 +117,10 @@ upstream pull requests, independent of the 26.04 port.
 | [B63](#b63) | low | Management | API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined | Upstream | yes | yes | rc4 |
 | [B64](#b64) | medium | Management | A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail | 26.04 change | no | yes | rc4 |
 | [B65](#b65) | high | Setup | 'curl ... \| sudo bash' hangs at setup's first dialog box: sudo-rs stops it | 26.04 change | no | yes | rc4 |
-| [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | unreleased |
-| [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | unreleased |
-| [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | unreleased |
-| [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | unreleased |
+| [B66](#b66) | medium | Dovecot | Vacation replies and redirects create the folders "dovecot", "dovecot.lda-dupes" and "dovecot.lda-dupes.locks" | 26.04 change | no | yes | rc5 |
+| [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | rc5 |
+| [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | rc5 |
+| [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | rc5 |
 
 ## Details
 
@@ -897,7 +897,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (Dovecot 2.3.16 on 22.04), PR #2603 yes. Origin: 26.04 change (Dovecot 2.4; upstream on 24.04 with Dovecot 2.3.21 has the lock directory too).
 * **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `doveadm mailbox list -u` of the user with the vacation reply listed `dovecot`, `dovecot.lda-dupes` and `dovecot.lda-dupes.locks`; the directory `.dovecot.lda-dupes.locks` in the Maildir had `cur/`, `new/`, `tmp/` and `dovecot-uidlist`, and xapian-indexes had a database for it; the box copy logged the LMTP error above. Dovecot 2.4.2 source: `mail_duplicate_db_init()` puts the database at `<home>/.dovecot.<name>` and the lock directory at `<mail_volatile_path or home>/.dovecot.<name>.locks`; the 2.3.21 source does the same, the 2.3.16 source has no lock directory (one dotlock on the database file). With the fix on the fresh box: setup removed the folders of the existing user (folder list, subscriptions and its full-text index clean), and for a new user with a vacation script two mails from the same sender gave one reply ("discarded duplicate vacation response" for the second), the lock directory was in `/run/dovecot-volatile/<domain>/<user>/` and no folder appeared.
 * **Report upstream:** MIAB main: relevant once upstream moves to Dovecot 2.4 (PR #2603).
-* **Found by:** update test; **commit:** see `git log --grep B66`; **fixed in:** unreleased
+* **Found by:** update test; **commit:** see `git log --grep B66`; **fixed in:** v78-r2604.0-rc5
 
 ### B67
 
@@ -908,7 +908,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** mask_units records which units are enabled before it masks them, and unquiesce enables those again that are disabled after the masks are gone ("Enabled again ..."). phase verify of both tools shows whether each service is enabled, enables a disabled one and counts any other state (e.g. masked) as a failed check; `tools/upgrade-in-place-to-2604.sh` also lists in `etc-report.txt` and as a warning the units that `meta/unit-files.txt` (before the upgrade) has as enabled and that are disabled now, except those that setup turns off on purpose (`spamd.service`: spampd runs SpamAssassin itself, and Ubuntu 24.04 had spamd enabled). Setup's `restart_service` enables a disabled unit before restarting it, and setup/system.sh restarts `named` by that name (bind9.service is only an alias link, which a disabled named does not have, so enabling or restarting it by that name fails), and setup/dns.sh does the same for nsd, so the next setup run (`sudo mailinabox`, or the update to the next release) heals a box upgraded with rc3.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3, `tools/upgrade-in-place-to-2604.sh`). `tools/migrate-to-2604.sh` installs Dovecot with setup on a fresh machine and is not affected; it gets the same check in phase verify.
 * **Evidence:** Copy of a production box upgraded in place with rc3: `meta/unit-files.txt` of the tool has `dovecot.service enabled`, the upgrade log has `Failed to preset unit: Unit /etc/systemd/system/dovecot.service is masked` and `deb-systemd-helper: error: systemctl preset failed` when dovecot-core 2.4 was set up, and after the upgrade and after the update to rc4 `dovecot.service` is `disabled`; after a reboot Dovecot was inactive and the status checks had three more errors (IMAP, LMTP, Sieve). It was the only Mail-in-a-Box service that went from enabled to disabled. The production box upgraded with rc3 has the same state. A fresh rc4 box has it `enabled`.
-* **Found by:** update test; **commit:** see `git log --grep B67`; **fixed in:** unreleased
+* **Found by:** update test; **commit:** see `git log --grep B67`; **fixed in:** v78-r2604.0-rc5
 
 ### B68
 
@@ -919,7 +919,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** When setup has commented out such a line and cloud-init manages `/etc/hosts` (`manage_etc_hosts` true or template in `cloud-init query combined_cloud_config`, or cloud-init's header in `/etc/hosts`), setup/system.sh changes the template's 127.0.1.1 line to `127.0.1.1 PRIMARY_HOSTNAME <first label>`, as the header that cloud-init writes into `/etc/hosts` suggests, and writes the same line into `/etc/hosts` instead of the commented-out one, so the file stays the same after the next boot. A template that already gives the box's name is left alone, and so is a box where cloud-init's name of the machine is PRIMARY_HOSTNAME. The template is a configuration file of the package cloud-init-base: when an update changes it, dpkg asks, and the local version should be kept. With `manage_etc_hosts: localhost` cloud-init does not use the template; setup then says that the setting can only be changed in the user data.
 * **Affects:** v78 no (it does not touch /etc/hosts), PR #2603 no. Origin: Fork (B60's fix in rc4).
 * **Evidence:** Fresh rc4 test box (Proxmox cloud-init, `manage_etc_hosts: true` and `fqdn` in the user data; a copy of a production box has the same template and setting): the template has `127.0.1.1 {{fqdn}} {{hostname}}`; re-running the module (`cloud-init single --name update_etc_hosts --frequency always`, as at boot) writes `127.0.1.1 <cloud-init fqdn> <hostname>` back. With the fix: the template and `/etc/hosts` have `127.0.1.1 PRIMARY_HOSTNAME <first label>`, the module writes the same line, and a second setup run changes nothing.
-* **Found by:** update test; **commit:** see `git log --grep B68`; **fixed in:** unreleased
+* **Found by:** update test; **commit:** see `git log --grep B68`; **fixed in:** v78-r2604.0-rc5
 
 ### B69
 
@@ -931,7 +931,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (systemd 249), PR #2603 yes. Origin: PR #2603 (with systemd 259 of 26.04). A box upgraded in place from v78 also has the link from `systemctl link -f`.
 * **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `ls -l /etc/systemd/system/mailinabox.service` gives `-> /lib/systemd/system/mailinabox.service`, `/lib -> usr/lib`, and is-enabled fails as above for mailinabox.service and munin.service (systemd 259.9). After removing the link and `systemctl reenable`, both are `enabled`, the `.wants` links point to `/usr/lib/systemd/system/`, and the management daemon keeps running.
 * **Report upstream:** PR #2603: enable the units by name.
-* **Found by:** update test; **commit:** see `git log --grep B69`; **fixed in:** unreleased
+* **Found by:** update test; **commit:** see `git log --grep B69`; **fixed in:** v78-r2604.0-rc5
 
 ## Not counted above
 
