@@ -92,7 +92,9 @@ fi
 # tools know where to look for data. The default MTA_STS_MODE setting
 # is blank unless set by an environment variable, but see web.sh for
 # how that is interpreted. FTS (full-text search in Dovecot) is "xapian"
-# unless set to "off", see mail-dovecot.sh.
+# unless set to "off", see mail-dovecot.sh. NEXTCLOUD_SHARE_SCOPE is "domain"
+# (Nextcloud users only see and share with their own mail domain) unless set
+# to "all", see tools/nextcloud-share-scope.sh.
 cat > /etc/mailinabox.conf << EOF;
 STORAGE_USER=$STORAGE_USER
 STORAGE_ROOT=$STORAGE_ROOT
@@ -103,6 +105,7 @@ PRIVATE_IP=$PRIVATE_IP
 PRIVATE_IPV6=$PRIVATE_IPV6
 MTA_STS_MODE=${DEFAULT_MTA_STS_MODE:-enforce}
 FTS=${FTS:-${DEFAULT_FTS:-xapian}}
+NEXTCLOUD_SHARE_SCOPE=${NEXTCLOUD_SHARE_SCOPE:-${DEFAULT_NEXTCLOUD_SHARE_SCOPE:-domain}}
 EOF
 
 # Start service configuration.
