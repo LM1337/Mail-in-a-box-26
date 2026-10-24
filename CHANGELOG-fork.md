@@ -19,7 +19,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   before mail goes offline (a failure stops the upgrade before anything is
   stopped), `/etc/mailinabox/upgrade-2604.d/after/*.sh` in phase finish
   after mail and the backups are back, and at the end of `--rollback` (a
-  failure only warns). All hooks get `HOOK_STAGE`; the hooks in the
+  failure only warns). If the final check fails, the after hooks run right
+  after it, as mail runs again, and not again in finish: services stopped
+  by a before hook do not wait for `--finish`. All hooks get `HOOK_STAGE`; the hooks in the
   directory itself still run only in phase local-ext. `--check` lists all
   three stages.
 * Postfix: senders listed in `/etc/postfix/greylist_bypass_senders` (an

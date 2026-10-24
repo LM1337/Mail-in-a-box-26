@@ -173,8 +173,8 @@ in phase finish, after mail and the backups are back (and at the end of
 `--rollback`). They get the same variables, and `HOOK_STAGE` (`before`,
 `local-ext`, `after`). A failing before hook stops the upgrade before mail is
 stopped; a failing after hook only warns. If the final check fails, the after
-hooks run with `--finish` or with the next run that passes. Write hooks so
-that they can run twice. For example:
+hooks run right after it (mail runs again, the backups stay paused) and not
+again in finish. Write hooks so that they can run twice. For example:
 
     # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
     cd /opt/myapp && docker compose stop
@@ -276,9 +276,9 @@ nachdem Mail und Sicherungen wieder laufen (und am Ende von `--rollback`).
 Sie bekommen dieselben Variablen und dazu `HOOK_STAGE` (`before`,
 `local-ext`, `after`). Ein fehlschlagender before-Hook hält das Upgrade an,
 bevor die Mail angehalten wird; ein fehlschlagender after-Hook warnt nur.
-Schlägt die Schlussprüfung fehl, laufen die after-Hooks mit `--finish` oder
-beim nächsten erfolgreichen Lauf. Hooks so schreiben, dass sie zweimal laufen
-dürfen. Beispiel:
+Schlägt die Schlussprüfung fehl, laufen die after-Hooks gleich danach (die
+Mail läuft wieder, die Sicherungen bleiben ausgesetzt) und in finish nicht
+noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
 
     # /etc/mailinabox/upgrade-2604.d/before/10-myapp.sh
     cd /opt/myapp && docker compose stop

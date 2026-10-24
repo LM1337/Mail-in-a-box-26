@@ -65,7 +65,8 @@
 #   /etc/mailinabox/upgrade-2604.d/before/*.sh  right before mail goes offline
 #       (stop_mail; on a box that only runs setup again: before setup);
 #   /etc/mailinabox/upgrade-2604.d/after/*.sh   in phase finish, after mail
-#       and the backups are back (and at the end of --rollback).
+#       and the backups are back (and at the end of --rollback); if the final
+#       check fails, right after it (mail runs again), and not again in finish.
 # All hooks run in the order of their names:
 #   * as root, with bash, in /, stdin from /dev/null;
 #   * with the environment variables HOOK_STAGE (before, local-ext, after),
@@ -256,8 +257,9 @@ Safety nets:
                           Hooks in /etc/mailinabox/upgrade-2604.d/*.sh can
                           bring them back for Dovecot 2.4; hooks in its
                           before/ and after/ run right before mail goes
-                          offline and when the upgrade is finished (e.g. to
-                          stop and start services that use the mail).
+                          offline and when the upgrade is finished or its
+                          final check failed (e.g. to stop and start
+                          services that use the mail).
 
 Control:
   --yes                   do not ask for confirmation, and reboot without the
@@ -1894,7 +1896,8 @@ show_plan() {
 		say "The hooks in $HOOK_BEFORE_DIR run right before mail goes offline."
 	fi
 	if [ -n "$(hook_files "$HOOK_AFTER_DIR")" ]; then
-		say "The hooks in $HOOK_AFTER_DIR run at the end, when mail and the backups are back."
+		say "The hooks in $HOOK_AFTER_DIR run at the end, when mail and the backups are back"
+		say "(or right after a final check that failed, as mail runs again then)."
 	fi
 	say
 	local rel=0 bk_lo=0 bk_hi=0 bk=
@@ -3093,6 +3096,8 @@ hook_files() { # DIR
 run_hooks() { # STAGE DIR
 	local stage=$1 dir=$2 hooks=() h rc host miab=${MIAB_DIR:-$(state_get FORK_DIR)}
 	miab=${miab:-$(state_get OLD_MIAB_DIR)}
+	# What the before hooks stop, the after hooks start again (once).
+	if [ "$stage" = before ]; then state_set HOOKS_after_AT ""; fi
 	mapfile -t hooks < <(hook_files "$dir")
 	if [ ${#hooks[@]} -eq 0 ]; then
 		if [ "$stage" = local-ext ]; then say "No hooks."; fi
@@ -3358,7 +3363,11 @@ phase_finish() {
 	remove_resume
 	state_set FINISHED_AT "$(date -u +%FT%TZ)"
 	state_set FINISHED_EPOCH "$(date +%s)"
-	run_hooks after "$HOOK_AFTER_DIR"
+	if [ -n "$(state_get HOOKS_after_AT)" ]; then
+		say "The hooks in $HOOK_AFTER_DIR ran already ($(state_get HOOKS_after_AT))."
+	else
+		run_hooks after "$HOOK_AFTER_DIR"
+	fi
 	local held
 	held=$(state_get HELD_PACKAGES)
 	if [ -n "$held" ]; then say "These packages were held before the upgrade and are not held again: $held"; fi
@@ -3533,6 +3542,12 @@ print_result() {
 	local p
 	say "These checks FAILED:"
 	for p in "${VERIFY_PROBLEMS[@]}"; do say "  - $p"; done
+	# The services the before hooks stopped must not wait for --finish.
+	if [ -z "$(state_get HOOKS_after_AT)" ] && [ -n "$(hook_files "$HOOK_AFTER_DIR")" ]; then
+		say
+		say "Mail runs again, so the hooks of stage after run now (not again in finish)."
+		run_hooks after "$HOOK_AFTER_DIR"
+	fi
 	say
 	say "Mail is running again, but cron jobs other than setup's, the update timers and the backups"
 	say "stay paused until the checks pass."
