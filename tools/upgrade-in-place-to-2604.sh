@@ -30,11 +30,15 @@
 # reboot a systemd unit continues it on its own):
 #
 #   1. preflight        check everything (also alone, with --check)
-#   2. snapshot         fingerprint, archive of /etc and the code outside
-#                       $STORAGE_ROOT, a fresh Mail-in-a-Box backup, an
-#                       encrypted copy of the archive next to the backups
-#   3. quiesce          mail goes OFFLINE: backups paused, mail/web/cron/apt
-#                       timers stopped and masked (also across reboots)
+#   2. snapshot         mail goes OFFLINE first (mail/web/cron/apt timers
+#                       stopped and masked, also across reboots), so that
+#                       the fresh Mail-in-a-Box backup holds all mail; then
+#                       fingerprint, archive of /etc and the code outside
+#                       $STORAGE_ROOT, an encrypted copy of the archive next
+#                       to the backups (with --skip-miab-backup or backups
+#                       off, mail keeps running until quiesce)
+#   3. quiesce          backups paused; mail goes OFFLINE here if it is not
+#                       yet
 #   4. prepare-release  third-party apt sources off, PHP from ppa:ondrej
 #                       removed, packages up to date, Prompt=lts
 #   5. release-2404     do-release-upgrade 22.04 -> 24.04, reboot (22.04 only)
@@ -198,9 +202,11 @@ reboot. Nextcloud must be 26 or later. Run it as root. Started from a
 terminal outside tmux or screen, it runs itself in the tmux session
 "upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
 connection drops, log in again and run "tmux attach -t upgrade-2604".
-Mail is offline from phase "quiesce" until setup has finished (typically 1-3
-hours). After each reboot the upgrade continues on its own; follow it with
-"tmux attach -t upgrade-2604" or "tail -f /root/upgrade-2604/upgrade.log".
+Mail is offline from the start of phase "snapshot" (before its fresh backup;
+with --skip-miab-backup from phase "quiesce") until setup has finished
+(typically 1-3 hours). After each reboot the upgrade continues on its own;
+follow it with "tmux attach -t upgrade-2604" or
+"tail -f /root/upgrade-2604/upgrade.log".
 Running the command again continues an interrupted upgrade.
 
 Have the provider's console (VNC, KVM or serial) at hand: if the network
@@ -224,7 +230,8 @@ Safety nets:
   --no-backup-check       start even though backups are off or the last one is
                           older than 24 hours
   --skip-miab-backup      do not run a fresh Mail-in-a-Box backup in the
-                          snapshot phase
+                          snapshot phase (mail then keeps running until
+                          phase quiesce)
   --no-offsite            keep the system archive only in /root/upgrade-2604
                           (default: an encrypted copy goes next to the backups)
   --keep-local            local extensions (see the header of the script) do
@@ -1738,12 +1745,23 @@ show_plan() {
 	oc=$(state_get FILES_OWNCLOUD)
 	oc=${oc:-0}
 	if [[ $nc =~ ^([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -lt 34 ]; then steps=$((34 - BASH_REMATCH[1])); fi
-	say "$n. Snapshot: fingerprint, system archive (/etc, the code outside $STORAGE_ROOT),"
-	say "   $([ -n "$SKIP_MIAB_BACKUP" ] && echo "no fresh backup (--skip-miab-backup)" || echo "a fresh Mail-in-a-Box backup (it stops mail for its run)"),"
-	say "   $([ -n "$NO_OFFSITE" ] && echo "the archive stays here (--no-offsite)" || echo "an encrypted copy of the archive next to the backups"). Mail keeps running."
-	n=$((n + 1))
-	say "$n. MAIL GOES OFFLINE: backups paused; mail, web, cron and the update timers stopped"
-	say "   and masked (they stay off across reboots until setup)."
+	local offsite="an encrypted copy of the archive next to the backups"
+	if [ -n "$NO_OFFSITE" ]; then offsite="the archive stays here (--no-offsite)"; fi
+	if fresh_backup_planned; then
+		say "$n. MAIL GOES OFFLINE: mail, web, cron and the update timers stopped and masked (they"
+		say "   stay off across reboots until setup). Then the snapshot: a fresh Mail-in-a-Box backup"
+		say "   (so it holds all mail), fingerprint, system archive (/etc, the code outside"
+		say "   $STORAGE_ROOT), $offsite."
+		n=$((n + 1))
+		say "$n. Backups paused until the end."
+	else
+		say "$n. Snapshot: fingerprint, system archive (/etc, the code outside $STORAGE_ROOT),"
+		say "   no fresh backup ($([ -n "$SKIP_MIAB_BACKUP" ] && echo "--skip-miab-backup" || echo "backups are off")),"
+		say "   $offsite. Mail keeps running."
+		n=$((n + 1))
+		say "$n. MAIL GOES OFFLINE: backups paused; mail, web, cron and the update timers stopped"
+		say "   and masked (they stay off across reboots until setup)."
+	fi
 	n=$((n + 1))
 	say "$n. Third-party apt sources off, PHP from ppa:ondrej removed, packages updated."
 	if [ "$v" = 22.04 ]; then
@@ -1798,35 +1816,48 @@ save_meta() {
 	} > "$m/miab-version.txt"
 }
 
-run_miab_backup() {
-	local dir target
+# Does the snapshot run a fresh Mail-in-a-Box backup? (Without output.)
+fresh_backup_planned() { [ -z "$SKIP_MIAB_BACKUP" ] && [ "$(backup_target)" != off ]; }
+
+# The same, with the reason when not, and the checks that would only fail
+# later (before mail is stopped for the backup).
+miab_backup_wanted() {
+	local dir
 	dir=$(state_get OLD_MIAB_DIR)
-	target=$(backup_target)
 	if [ -n "$SKIP_MIAB_BACKUP" ]; then
-		say "No fresh Mail-in-a-Box backup (--skip-miab-backup)."
-		return 0
+		say "No fresh Mail-in-a-Box backup (--skip-miab-backup); mail keeps running until phase quiesce."
+		return 1
 	fi
-	if [ "$target" = off ]; then
-		say "Backups are turned off: no fresh Mail-in-a-Box backup."
-		return 0
+	if [ "$(backup_target)" = off ]; then
+		say "Backups are turned off: no fresh Mail-in-a-Box backup; mail keeps running until phase quiesce."
+		return 1
 	fi
 	if [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-saved" ] || [ -e "$STORAGE_ROOT/backup/custom.yaml.upgrade-none" ]; then
 		# backup.py would see "target: off" and do nothing.
 		die "The backups are paused by this tool; a backup now would not run. Use --skip-miab-backup."
 	fi
 	[ -x "$dir/management/backup.py" ] || die "$dir/management/backup.py is missing. Use --skip-miab-backup to go on without a fresh backup."
+	return 0
+}
+
+# With mail stopped (stop_mail): the backup is the last state of the mail.
+run_miab_backup() {
+	local dir
+	dir=$(state_get OLD_MIAB_DIR)
 	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
 		die "A backup is running already. Wait until it is finished and run the command again."
 	fi
 	say "Running a Mail-in-a-Box backup now ($dir/management/backup.py, target ${F[BACKUP_TARGET]:-local})."
-	say "Mail-in-a-Box stops Postfix, Dovecot and PHP for the run and starts them again. That is"
-	say "fine here: mail goes offline for the upgrade right after this anyway."
+	say "backup.py stops Postfix, Dovecot, postgrey and PHP for its run and starts them again"
+	say "afterwards. They are masked now, so that start fails ('Unit ... is masked'), as it should:"
+	say "mail stays offline until setup."
 	local rc=0 started
 	started=$(date +%s)
 	(cd "$dir" && management/backup.py) < /dev/null || rc=$?
 	FAILED_CMD=
 	[ "$rc" = 0 ] || die "The backup failed (exit code $rc, see above). Fix it (System > Backup Status), or
-use --skip-miab-backup if a recent backup exists."
+use --skip-miab-backup if a recent backup exists. Mail stays offline until then; --rollback
+brings it back."
 	state_set MIAB_BACKUP_AT "$(date -u +%FT%TZ)"
 	say "Backup done ($(fmt_dur $(($(date +%s) - started))))."
 }
@@ -1906,18 +1937,24 @@ targets. Copy $enc off this machine yourself (it is encrypted with backup/secret
 }
 
 phase_snapshot() {
-	section "Snapshot (mail keeps running)"
+	section "Snapshot"
 	local stamp arch rc=0 p paths=() miab
 	stamp=$(date -u +%Y%m%dT%H%M%SZ)
 	state_set SNAPSHOT_STAMP "$stamp"
 	miab=$(state_get OLD_MIAB_DIR)
+	# The package lists and unit states as they are, before anything is stopped.
+	save_meta
 
-	run_miab_backup
+	# Mail goes offline before the backup: mail that arrived after it would
+	# not be in it (backup.py starts Postfix and Dovecot again after its run).
+	if miab_backup_wanted; then
+		stop_mail
+		run_miab_backup
+	fi
 
 	say "Recording counts and key fingerprints (before the upgrade)..."
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
-	save_meta
 
 	for p in etc "${miab#/}" var/lib/z-push var/lib/munin usr/local/lib/owncloud var/spool/cron usr/local/bin; do
 		if [ -n "$p" ] && [ -e "/$p" ]; then paths+=("$p"); fi
@@ -2103,29 +2140,48 @@ Let them finish (or end them), then run the command again. Mail stays offline."
 	done
 }
 
-phase_quiesce() {
-	section "Stopping mail (the downtime starts)"
-	read_facts
-	if [ "${F[APT_BUSY]:-0}" = 1 ]; then
-		die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
-and run the command again. Nothing was stopped yet."
-	fi
-	if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
-		die "A backup is running. Wait until it is finished and run the command again. Nothing was stopped yet."
-	fi
+# Mail goes offline: remember what runs, mask and stop the units (masked,
+# they stay off across reboots), wait until nothing uses $STORAGE_ROOT. In
+# phase snapshot before the fresh backup, otherwise in phase quiesce. The
+# first call starts the downtime (QUIESCED_AT); later calls (an interrupted
+# run, phase quiesce after snapshot) only make sure everything is off.
+stop_mail() {
 	local units=() u active=()
 	mapfile -t units < <(quiesce_units)
-	for u in "${units[@]}"; do
-		if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
-	done
-	state_add ACTIVE_BEFORE "${active[@]}"
-	state_set QUIESCED 1
-	state_set QUIESCED_AT "$(date -u +%FT%TZ)"
-	state_set QUIESCED_EPOCH "$(date +%s)"
-	pause_backups
+	if [ "$(state_get QUIESCED)" != 1 ]; then
+		read_facts
+		if [ "${F[APT_BUSY]:-0}" = 1 ]; then
+			die "Package updates are running (apt-daily / unattended-upgrades). Wait until they are finished
+and run the command again. Nothing was stopped yet."
+		fi
+		if pgrep -f 'management/backup\.py|/usr/bin/duplicity' > /dev/null; then
+			die "A backup is running. Wait until it is finished and run the command again. Nothing was stopped yet."
+		fi
+		for u in "${units[@]}"; do
+			if systemctl is-active --quiet "$u" 2> /dev/null; then active+=("$u"); fi
+		done
+		state_add ACTIVE_BEFORE "${active[@]}"
+		state_set QUIESCED 1
+		state_set QUIESCED_AT "$(date -u +%FT%TZ)"
+		state_set QUIESCED_EPOCH "$(date +%s)"
+		say "Mail goes OFFLINE now (the downtime starts)."
+	fi
 	say "Stopping and masking: ${units[*]}"
 	mask_units "${units[@]}"
 	systemctl stop "${units[@]}" 2> /dev/null || warn "Not all services stopped: ${units[*]}"
+	wait_quiet
+}
+
+phase_quiesce() {
+	if [ "$(state_get QUIESCED)" = 1 ]; then
+		section "Pausing the backups (mail is offline since $(state_get QUIESCED_AT))"
+	else
+		section "Stopping mail (the downtime starts)"
+	fi
+	stop_mail
+	# After the fresh backup of phase snapshot (backup.py would see "off");
+	# cron is masked, so no nightly backup runs in between.
+	pause_backups
 	local q
 	q=$(local_bash "$QUEUE_SCRIPT" "SR=$STORAGE_ROOT" 2> /dev/null || true)
 	local -A Q=()
@@ -2134,7 +2190,6 @@ and run the command again. Nothing was stopped yet."
 		warn "${Q[QUEUE_TOTAL]} messages are in the Postfix queue${Q[QUEUE_LOCAL]:+ (${Q[QUEUE_LOCAL]} for mailboxes of this box)}.
 They stay in /var/spool/postfix and are delivered when Postfix runs again after setup."
 	fi
-	wait_quiet
 	say "Recording counts and key fingerprints again, now that nothing changes..."
 	local_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/before-fingerprint.txt" \
 		|| die "Could not record the fingerprints."
@@ -3438,6 +3493,15 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 		[ -n "$RESUMED" ] || session_check
 		if [ "$(state_get MODE)" = rerun ]; then
 			phase_is_done setup || confirm "Run setup again now?"
+		elif [ "$(state_get QUIESCED)" = 1 ]; then
+			confirm "Mail is OFFLINE since $(state_get QUIESCED_AT). Continue the upgrade ($(upgrade_steps_text))?
+Mail stays offline until setup has finished. Nothing asks again. If SSH does not come
+back after a reboot, use the provider's console."
+		elif ! phase_is_done snapshot && fresh_backup_planned; then
+			confirm "Start the upgrade now? Mail goes OFFLINE right away, before the fresh backup (so that
+it holds all mail), and stays offline until setup has finished, with $(upgrade_steps_text).
+From the first release upgrade on there is no way back except the backups. Nothing asks
+again. If SSH does not come back after a reboot, use the provider's console."
 		elif ! phase_is_done snapshot; then
 			confirm "Start the upgrade now? The snapshot runs first (mail keeps running), then mail goes
 OFFLINE until setup has finished, with $(upgrade_steps_text). From the first

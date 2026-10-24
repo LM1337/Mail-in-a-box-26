@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 in rc3.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -29,10 +29,12 @@ reproduced on a box, the evidence line says so.
   * *late review*: a review before rc2.
   * *test run*: the T1/T2 smoke tests on VMs.
   * *in-place test*: T3, the in-place upgrade of a copy of a production box.
+  * *production upgrade*: the in-place upgrade of a production box with rc3.
 
 ## Summary
 
-56 bugs: 1 critical, 11 high, 25 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3.
+57 bugs: 1 critical, 11 high, 26 medium, 19 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57 by the in-place upgrade of a production box with rc3.
 
 | Origin | Count |
 |---|---|
@@ -40,7 +42,7 @@ reproduced on a box, the evidence line says so.
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 12 |
-| Fork | 3 |
+| Fork | 4 |
 
 13 of these bugs also affect v78 on Ubuntu 22.04 (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -105,6 +107,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B54](#b54) | low | Setup | bootstrap.sh fails with 'Update failed' over an upstream checkout | Fork | no | no | rc3 |
 | [B55](#b55) | medium | System/apt | PPA sources and keys of earlier releases stay trusted; Launchpad sury builds are not moved back to Ubuntu | PR #2603 | no | yes | rc3 |
 | [B56](#b56) | low | System | pollinate cache owned by root makes setup fail on boxes upgraded in place | Upstream | partly | partly | rc3 |
+| [B57](#b57) | medium | Tools | In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it | Fork | no | no | unreleased |
 
 ## Details
 
@@ -767,6 +770,16 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** A failing pollinate is reported and does not stop setup (seeding is not required).
 * **Affects:** v78 partly, PR #2603 partly. Origin: Upstream.
 * **Found by:** in-place test (T3 on a copy of a production box) and review; **commit:** `27251d9`; **fixed in:** v78-r2604.0-rc3
+
+### B57
+
+**In-place upgrade: mail accepted after the fresh backup of phase snapshot is missing from it** (medium, Tools)
+
+* **Symptom:** The Mail-in-a-Box backup that `tools/upgrade-in-place-to-2604.sh` makes before the upgrade lacks the mail (and other changes) of the minutes between its end and the start of the downtime. If the upgrade fails and the box is restored from that backup, that mail is lost.
+* **Cause:** Phase snapshot ran management/backup.py while mail was running. backup.py stops Postfix, Dovecot, postgrey and PHP for its run and starts them again afterwards; then the system archive was written, encrypted and copied (several minutes on a production box), and only phase quiesce stopped mail.
+* **Fix:** Mail, web, cron and the update timers are stopped and masked before the fresh backup (stop_mail, recorded in the state like quiesce, so the downtime and `--rollback` start there); backup.py cannot start the masked units again. Phase quiesce then only pauses the backups. With `--skip-miab-backup` or backups off, mail keeps running until quiesce as before.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc3).
+* **Found by:** production upgrade; **commit:** see `git log --grep B57`; **fixed in:** unreleased
 
 ## Not counted above
 

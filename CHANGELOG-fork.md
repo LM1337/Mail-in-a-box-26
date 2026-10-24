@@ -11,6 +11,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Fixed
+
+* Tools: `tools/upgrade-in-place-to-2604.sh` stops mail (and masks the units)
+  before the fresh Mail-in-a-Box backup of phase snapshot, not after it, so
+  the backup holds all mail. Before, backup.py started Postfix and Dovecot
+  again after its run, and mail accepted while the system archive was written
+  and copied was missing from the backup (B57). The downtime starts there;
+  with `--skip-miab-backup` or backups off, mail keeps running until quiesce
+  as before. `--rollback` brings it back as before.
+
 ### Changed
 
 * Tools: `tools/upgrade-in-place-to-2604.sh` and `tools/migrate-to-2604.sh`

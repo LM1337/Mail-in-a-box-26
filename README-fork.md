@@ -86,12 +86,16 @@ What it does, in phases that continue on their own after each reboot:
    managed by Mail-in-a-Box (Dovecot plugins, systemd drop-ins, nginx files,
    Docker, third-party apt sources). Local extensions block the upgrade until
    you pass `--keep-local`.
-2. **snapshot**: counts and key fingerprints, a fresh Mail-in-a-Box backup and
-   a system archive (`/etc`, the code outside the data directory, package
-   lists). The archive is encrypted with the backup key and copied next to the
-   backups (for an rsync target: `<target>-system/`).
-3. **quiesce**: mail, web, cron and the update timers are stopped and masked,
-   so they stay off across reboots. **Mail is offline from here.**
+2. **snapshot**: mail, web, cron and the update timers are stopped and
+   masked, so they stay off across reboots. **Mail is offline from here.**
+   Then a fresh Mail-in-a-Box backup (so it holds all mail), counts and key
+   fingerprints and a system archive (`/etc`, the code outside the data
+   directory, package lists). The archive is encrypted with the backup key and
+   copied next to the backups (for an rsync target: `<target>-system/`). With
+   `--skip-miab-backup` (or backups turned off) there is no fresh backup, and
+   mail keeps running until quiesce.
+3. **quiesce**: the backups are paused until the end, and mail goes offline
+   here if it is not yet.
 4. **prepare-release**, **release-2404**, **release-2604**: third-party sources
    off, PHP from ppa:ondrej removed, `do-release-upgrade` (old configuration
    files are kept), checks that the package system is clean, reboot.
@@ -155,14 +159,17 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
    allem, was Mail-in-a-Box nicht verwaltet (Dovecot-Plugins,
    systemd-Drop-ins, nginx-Dateien, Docker, fremde Paketquellen). Lokale
    Erweiterungen halten das Upgrade an, bis `--keep-local` angegeben wird.
-2. **snapshot**: Zählungen und Schlüssel-Fingerabdrücke, eine frische
-   Mail-in-a-Box-Sicherung und ein Systemarchiv (`/etc`, der Code außerhalb
-   des Datenverzeichnisses, Paketlisten). Das Archiv wird mit dem
-   Backup-Schlüssel verschlüsselt und neben die Sicherungen gelegt (bei einem
-   rsync-Ziel: `<ziel>-system/`).
-3. **quiesce**: Mail, Web, Cron und die Update-Timer werden angehalten und
+2. **snapshot**: Mail, Web, Cron und die Update-Timer werden angehalten und
    maskiert, damit sie auch über Neustarts hinweg aus bleiben. **Ab hier ist
-   die Mail aus.**
+   die Mail aus.** Danach eine frische Mail-in-a-Box-Sicherung (damit sie alle
+   Mails enthält), Zählungen und Schlüssel-Fingerabdrücke und ein Systemarchiv
+   (`/etc`, der Code außerhalb des Datenverzeichnisses, Paketlisten). Das
+   Archiv wird mit dem Backup-Schlüssel verschlüsselt und neben die
+   Sicherungen gelegt (bei einem rsync-Ziel: `<ziel>-system/`). Mit
+   `--skip-miab-backup` (oder abgeschalteten Sicherungen) gibt es keine
+   frische Sicherung, und die Mail läuft bis quiesce weiter.
+3. **quiesce**: Die Sicherungen werden bis zum Ende ausgesetzt; ist die Mail
+   noch an, geht sie hier aus.
 4. **prepare-release**, **release-2404**, **release-2604**: fremde Quellen aus,
    PHP aus ppa:ondrej entfernt, `do-release-upgrade` (alte Konfigurationsdateien
    bleiben), Prüfung, dass das Paketsystem sauber ist, Neustart.
