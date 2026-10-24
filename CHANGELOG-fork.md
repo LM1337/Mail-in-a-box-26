@@ -514,8 +514,8 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 - `setup/preflight.sh` now accepts only Ubuntu 26.04 (or 26.04.x) instead of 22.04, and the error message says so.
 - `setup/questions.sh` installs `python3-email-validator` and `python3-dnspython` from apt instead of running a global `pip3 install email_validator`. Ubuntu 26.04 blocks system-wide pip installs (PEP 668, "externally managed environment").
 - The Vagrant box changes from `ubuntu/jammy64` to `cloud-image/ubuntu-26.04`.
-- Limitation: the PR never touched `setup/bootstrap.sh`. It still only knows 22.04 and 18.04, so the curl one-line installer aborts on 26.04. Our fork added a 26.04 branch (73209cf).
-- Limitation: the apt install of the email validator only runs when `dialog`, `python3` or `pip3` is missing. On a host that already has all three, the address prompt loops on an ImportError. Fixed in our fork (7347986).
+- Limitation: the PR never touched `setup/bootstrap.sh`. It still only knows 22.04 and 18.04, so the curl one-line installer aborts on 26.04. Our fork added a 26.04 branch (a85fa0d).
+- Limitation: the apt install of the email validator only runs when `dialog`, `python3` or `pip3` is missing. On a host that already has all three, the address prompt loops on an ImportError. Fixed in our fork (9480754).
 
 ### System / apt / PHP source
 
@@ -524,7 +524,7 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 - The `ntp` package is no longer installed (26.04 handles time sync itself). `curl` is installed earlier as a prerequisite for the repo.
 - `pollinate` now runs as the `pollinate` user (`sudo -u pollinate`) instead of as root.
 - The inotify limit (`fs.inotify.max_user_instances=1024`) now goes into its own file, `/etc/sysctl.d/60-mailinabox.conf`, applied with `sysctl --system`. 26.04 no longer ships `/etc/sysctl.conf`, and `/usr/lib/sysctl.d/50-default.conf` is missing on some installs (contributed by Gwerlas in 0ddb859).
-- Limitation: the sury repo is not pinned and its key is trusted globally. Sury's higher version numbers quietly replace Ubuntu's `php8.5-*`, `libgd3` and `php-common`. Those packages then get updates from neither repo, and unattended-upgrades does not cover sury or the duplicity PPA. Our fork added an apt pin and a key fingerprint check, and moves already-replaced packages back to Ubuntu's builds (d84aad5, d3ebd9e).
+- Limitation: the sury repo is not pinned and its key is trusted globally. Sury's higher version numbers quietly replace Ubuntu's `php8.5-*`, `libgd3` and `php-common`. Those packages then get updates from neither repo, and unattended-upgrades does not cover sury or the duplicity PPA. Our fork added an apt pin and a key fingerprint check, and moves already-replaced packages back to Ubuntu's builds (f31885f, 832f3a7).
 
 ### Dovecot 2.4
 
@@ -541,43 +541,43 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 - The IMAP IDLE interval of 4 minutes, `mail_max_userip_connections` (IMAP 40, POP3 10 is new) and the POP3 UIDL format (now `%{uid | hex(8)}%{uidvalidity | hex(8)}`) move into the shipped config files.
 - Sieve is rebuilt with 2.4 `sieve_script` blocks (global before/after, personal, spam-global) and gains the `sieve_imapsieve` and `sieve_extprograms` plugins.
 - Limitations the PR left (all fixed in our fork):
-  - `99-local-sieve.conf` is copied with plain `cp`, so Dovecot sees the literal text `$STORAGE_ROOT` in its paths. User filters and vacation replies do not run (451b7e3).
-  - `sieve_redirect_envelope_from` sits inside the personal script block, where Dovecot ignores it. Sieve redirects keep the external sender as envelope sender and fail SPF (600d4ed).
-  - The userdb still returns the 2.3 field `quota_rule`, so per-user quotas have no effect (6813745).
-  - `quota_storage_grace = 100M` is a fixed size, not the old 10% per user (1642feb).
-  - `quota_status_toolarge` is not set. In 2.4.2 it is empty, so Postfix accepts messages larger than the whole quota (05e5a8d).
-  - The 26.04 ManageSieve config opens port 2000 on all interfaces (fc8b984).
-  - The fail2ban dovecot jail matches nothing on 26.04 and Dovecot 2.4 (3b910e9).
+  - `99-local-sieve.conf` is copied with plain `cp`, so Dovecot sees the literal text `$STORAGE_ROOT` in its paths. User filters and vacation replies do not run (2bf1e1e).
+  - `sieve_redirect_envelope_from` sits inside the personal script block, where Dovecot ignores it. Sieve redirects keep the external sender as envelope sender and fail SPF (f7878b8).
+  - The userdb still returns the 2.3 field `quota_rule`, so per-user quotas have no effect (6526ad7).
+  - `quota_storage_grace = 100M` is a fixed size, not the old 10% per user (85e9eb7).
+  - `quota_status_toolarge` is not set. In 2.4.2 it is empty, so Postfix accepts messages larger than the whole quota (728fe54).
+  - The 26.04 ManageSieve config opens port 2000 on all interfaces (c929f6f).
+  - The fail2ban dovecot jail matches nothing on 26.04 and Dovecot 2.4 (8bbeb60).
 
 ### Postfix
 
 - The only Postfix change: `smtpd_tls_dh1024_param_file` points to the new `dh4096.pem`. No other Postfix 3.10 adjustments were made.
-- Limitation: Dovecot's quota-status policy now answers `quota_status_success = OK` and `quota_status_nouser = "REJECT Unknown user"`. Postfix asks this service before it resolves aliases, so mail to aliases, catch-alls and domain aliases would be rejected. `OK` also skips the remaining recipient restrictions. Our fork went back to `DUNNO` (6813745).
+- Limitation: Dovecot's quota-status policy now answers `quota_status_success = OK` and `quota_status_nouser = "REJECT Unknown user"`. Postfix asks this service before it resolves aliases, so mail to aliases, catch-alls and domain aliases would be rejected. `OK` also skips the remaining recipient restrictions. Our fork went back to `DUNNO` (6526ad7).
 
 ### Spam
 
 - The `dovecot-antispam` plugin no longer exists for Dovecot 2.4. It is replaced by IMAPSieve: `report-spam.sieve` and `report-ham.sieve` run when a message is moved into or out of Spam/Junk, and pipe it to the new wrappers `sa-learn-spam.sh` and `sa-learn-ham.sh` in `/usr/lib/dovecot/sieve`. `sa-learn-pipe.sh` is removed.
 - spampd options move from `/etc/default/spampd` to `/etc/spampd.cfg` (`maxsize=2000`, `local-only=0`). `CRON=1` is now written to `/etc/default/spamd` instead of `/etc/default/spamassassin`.
 - Limitations the PR left (all fixed in our fork):
-  - The sa-learn wrappers and sieve files have CRLF line endings. The shebang `#!/bin/bash\r` fails, so spam/ham learning never runs (600d4ed, plus `.gitattributes` in b4e792f).
+  - The sa-learn wrappers and sieve files have CRLF line endings. The shebang `#!/bin/bash\r` fails, so spam/ham learning never runs (f7878b8, plus `.gitattributes` in a3e55c6).
   - spampd 2.62 reads `local-only=0` as "local-only on", so DNSBL, URIBL, Pyzor, Razor and DKIM checks are off.
   - SpamAssassin 4.0 ignores `CRON=1`, so rule updates never run.
-  - The spamd daemon, which MIAB does not use, stays enabled (df7b5cc).
-  - Moving a message from Spam to Trash subfolders or to Junk is learned wrongly (600d4ed).
+  - The spamd daemon, which MIAB does not use, stays enabled (ecc169a).
+  - Moving a message from Spam to Trash subfolders or to Junk is learned wrongly (f7878b8).
 
 ### DNS
 
 - DSA is removed from the SSHFP records (OpenSSH 10 has no DSA), and `ssh-keyscan` no longer asks for `dsa`.
 - When `ssh-keyscan` fails, the SSHFP records are now skipped instead of aborting the whole DNS update. Before this, creating the first user returned HTTP 500 before the user got admin rights (Gwerlas, 615c104).
-- Limitation: removing DSA also renumbered the remaining algorithms (ECDSA becomes 2, Ed25519 becomes 3). These numbers are assigned by IANA, so the signed zone would publish wrong SSHFP records. Our fork restored the IANA numbers (478a546).
-- Limitation: OpenSSH 10 throttles repeated connections that never log in (`PerSourcePenalties`). The SSHFP records therefore come and go. Our fork reads the host keys sshd actually serves instead (2800a86, 2755ab2).
+- Limitation: removing DSA also renumbered the remaining algorithms (ECDSA becomes 2, Ed25519 becomes 3). These numbers are assigned by IANA, so the signed zone would publish wrong SSHFP records. Our fork restored the IANA numbers (142abba).
+- Limitation: OpenSSH 10 throttles repeated connections that never log in (`PerSourcePenalties`). The SSHFP records therefore come and go. Our fork reads the host keys sshd actually serves instead (2c7e109, 3e77095).
 
 ### Web / PHP-FPM / nginx
 
 - The PHP-FPM socket and service names change from `php8.0-fpm` to `php8.5-fpm` in `nginx-top.conf`, `backup.py` and `owncloud-restore.sh`.
 - `listen 443 ssl http2;` becomes `listen 443 ssl;` plus `http2 on;`, the syntax current nginx versions expect.
-- The nginx DH parameters and `setup/ssl.sh` switch from a 2048-bit `dh2048.pem` to a newly generated 4096-bit `dh4096.pem`. Limitation: generating 4096-bit parameters adds minutes to every fresh install, and existing boxes already have `dh2048.pem`. Our fork reverted this (8fc67b2).
-- Limitation: Nextcloud's `.mjs` ES modules are not served as JavaScript. Fixed in our fork (a0a98fd).
+- The nginx DH parameters and `setup/ssl.sh` switch from a 2048-bit `dh2048.pem` to a newly generated 4096-bit `dh4096.pem`. Limitation: generating 4096-bit parameters adds minutes to every fresh install, and existing boxes already have `dh2048.pem`. Our fork reverted this (e602241).
+- Limitation: Nextcloud's `.mjs` ES modules are not served as JavaScript. Fixed in our fork (44ce759).
 
 ### Nextcloud chain
 
@@ -587,9 +587,9 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 - The timezone is read with `timedatectl` instead of `/etc/timezone`, which 26.04 no longer has.
 - The opcache settings are written to `cli/php.ini` instead of `cli/conf.d/10-opcache.ini`.
 - Limitations the PR left (all fixed in our fork):
-  - The old steps to Nextcloud 21–26 remain, but they need PHP 8.1 or older, which 26.04 cannot provide (cfbbe7a).
-  - Setup runs with `set -e`, so a failed `occ upgrade` aborts setup before the retry. Nextcloud then stays in maintenance mode and php-fpm stays stopped, which also takes Roundcube and Z-Push down (20cee15).
-  - The opcache settings only reach the CLI, not PHP-FPM (20cee15).
+  - The old steps to Nextcloud 21–26 remain, but they need PHP 8.1 or older, which 26.04 cannot provide (9327323).
+  - Setup runs with `set -e`, so a failed `occ upgrade` aborts setup before the retry. Nextcloud then stays in maintenance mode and php-fpm stays stopped, which also takes Roundcube and Z-Push down (6a15bcf).
+  - The opcache settings only reach the CLI, not PHP-FPM (6a15bcf).
   - The commit "Placeholder for Nextcloud 35" is mislabelled; it is actually the 33 → 34 step.
 
 ### Roundcube
@@ -597,22 +597,22 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 - Roundcube moves from 1.6.19 to 1.7.4, and the CardDAV plugin from 4.4.3 to 5.1.3.
 - The nginx `/mail/` location now points to Roundcube 1.7's `public_html/` docroot, uses `try_files` and a nested PHP location.
 - Limitations the PR left (all fixed in our fork):
-  - The CardDAV preset still uses the 4.x keys `url` and `preemptive_auth`. The 5.x plugin drops them silently, so Nextcloud contacts never appear in Roundcube (562bd6e).
-  - Roundcube 1.7 serves its assets as `static.php/<path>`. These only work because PHP's default `cgi.fix_pathinfo=1` happens to cover them (17fad3e).
+  - The CardDAV preset still uses the 4.x keys `url` and `preemptive_auth`. The 5.x plugin drops them silently, so Nextcloud contacts never appear in Roundcube (9b97bb9).
+  - Roundcube 1.7 serves its assets as `static.php/<path>`. These only work because PHP's default `cgi.fix_pathinfo=1` happens to cover them (12b0d72).
   - The html5_notifier icon path does not fit the new docroot.
 
 ### Z-Push
 
 - Z-Push moves from 2.7.6 to 2.7.7, the same version and hash as v78. The timezone is read with `timedatectl` instead of `/etc/timezone`.
-- Limitation: this also affects upstream v78. In 2.7.7 the autodiscover config does not define `DAV_SSL_VERIFY`, so autodiscover requests fail with HTTP 500 (fixed in our fork, c9d2f92). `MBSTRING_OVERLOAD` is also missing on PHP 8 (fixed in our fork, 73baad3).
+- Limitation: this also affects upstream v78. In 2.7.7 the autodiscover config does not define `DAV_SSL_VERIFY`, so autodiscover requests fail with HTTP 500 (fixed in our fork, 4e28dfe). `MBSTRING_OVERLOAD` is also missing on PHP 8 (fixed in our fork, 09b9610).
 
 ### Management / Python
 
 - `ssl_certificates.py` no longer uses `datetime.utcnow()`, which Python 3.12+ deprecates. It now uses `datetime.now(timezone.utc).replace(tzinfo=None)`.
 - `mailinabox.service` and `munin.service` are now enabled with `systemctl enable <path>` instead of `systemctl link` + `unmask`.
 - Limitations the PR left (all fixed in our fork):
-  - rsyslog on 26.04 writes RFC 3339 timestamps, which `mail_log.py` does not parse, so the usage report loses all Postfix lines (253c257).
-  - Python 3.14 warns about a `return` inside `finally` in `daemon.py` (f0e19bc).
+  - rsyslog on 26.04 writes RFC 3339 timestamps, which `mail_log.py` does not parse, so the usage report loses all Postfix lines (3d541ac).
+  - Python 3.14 warns about a `return` inside `finally` in `daemon.py` (1c7dacc).
 
 ### Backup
 
@@ -621,14 +621,14 @@ names a limitation, the fix is listed above and in BUGS-fork.md.
 
 ### Tools / other
 
-- `tools/owncloud-restore.sh` only swaps `php8.0-fpm` for `php8.5-fpm`. Limitation: `PHP_VER` is never defined, and the script cannot restore a pre-chain backup whose Nextcloud 27 code will not run on PHP 8.5. Fixed in our fork (476fe7e).
-- Limitation: nsd still logs to `/var/log/nsd.log`, which its systemd sandbox does not let it write. Our fork switched it to syslog (1562989).
+- `tools/owncloud-restore.sh` only swaps `php8.0-fpm` for `php8.5-fpm`. Limitation: `PHP_VER` is never defined, and the script cannot restore a pre-chain backup whose Nextcloud 27 code will not run on PHP 8.5. Fixed in our fork (7e56f5a).
+- Limitation: nsd still logs to `/var/log/nsd.log`, which its systemd sandbox does not let it write. Our fork switched it to syslog (c42df47).
 
-### Merge of v78 into the PR head (d7044d6)
+### Merge of v78 into the PR head (d817620)
 
 - v78 itself only changes two things on top of v77: Z-Push 2.7.7 (#2608) and Roundcube 1.6.20 (#2611), plus its CHANGELOG entry and the bootstrap tag.
 - Z-Push 2.7.7 merged without a conflict: the PR had already made the same version and hash change, and the PR's `timedatectl` edits stay as they were.
 - `setup/bootstrap.sh` took v78's `TAG=v77 → v78`. That only touches the 22.04 branch; a 26.04 branch was added later in our fork.
 - `CHANGELOG.md` took the upstream "Version 78 (October 22, 2026)" entry unchanged.
 - The one conflict was Roundcube, in `setup/webmail.sh`: v78 has 1.6.20, the PR has 1.7.4. The merge took neither and used 1.7.5, the 1.7 security release that matches 1.6.20 (SHA1 `396b2fa…`, later re-pinned as SHA256). The PR's CardDAV 5.1.3 was kept.
-- Apart from these, the merged tree is identical to the PR head (`git diff c6118db d7044d6` shows only these three files).
+- Apart from these, the merged tree is identical to the PR head (`git diff c6118db d817620` shows only these three files).
