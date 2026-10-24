@@ -38,7 +38,7 @@ We will not tolerate harassment. Harassment is any unwelcome or hostile behavior
 
 We will remove, edit, or reject comments, commits, code, wiki edits, issues, and other contributions that are not consistent with this Code of Conduct. We may ban, temporarily or permanently, any contributor for violating this code, when appropriate.
 
-Instances of abusive, harassing, or otherwise unacceptable behavior in this fork's repository may be reported to the maintainer of this fork, [@LM1337](https://github.com/LM1337), or through GitHub's "Report content" function. (In the upstream Mail-in-a-Box project, contact its project lead, [Joshua Tauberer](https://razor.occams.info/).) All reports will be treated confidentially, impartially, consistently, and swiftly.
+Instances of abusive, harassing, or otherwise unacceptable behavior in this fork's repository may be reported to the maintainer of this fork, [@LM1337](https://github.com/LM1337) at [LM1337@networkx.eu](mailto:LM1337@networkx.eu), or through GitHub's "Report content" function. (In the upstream Mail-in-a-Box project, contact its project lead, [Joshua Tauberer](https://razor.occams.info/).) All reports will be treated confidentially, impartially, consistently, and swiftly.
 
 Because the need for confidentiality for all parties involved in an enforcement action outweighs the goals of openness, limited information will be shared with the Mail-in-a-Box community regarding enforcement actions that have taken place.
 

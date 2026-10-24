@@ -14,7 +14,8 @@ receive fixes.
 
 Report it privately through
 [GitHub private vulnerability reporting](https://github.com/LM1337/Mail-in-a-box-26/security/advisories/new)
-(the "Report a vulnerability" button on the Security tab). Please include the
+(the "Report a vulnerability" button on the Security tab), or by email to
+[LM1337@networkx.eu](mailto:LM1337@networkx.eu). Please include the
 release tag or commit, the Ubuntu release, and steps to reproduce. You get an
 answer there; fixes are published as a new release tag with a note in
 CHANGELOG-fork.md.

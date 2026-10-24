@@ -49,8 +49,8 @@ version check is disabled in the privacy setting).
   Remove passwords, keys and your domain names first.
 * **Security vulnerabilities: do not open a public issue.** Report them
   privately through
-  [GitHub private vulnerability reporting](https://github.com/LM1337/Mail-in-a-box-26/security/advisories/new),
-  see [SECURITY.md](.github/SECURITY.md). Vulnerabilities that also affect
+  [GitHub private vulnerability reporting](https://github.com/LM1337/Mail-in-a-box-26/security/advisories/new)
+  or by email to [LM1337@networkx.eu](mailto:LM1337@networkx.eu), see [SECURITY.md](.github/SECURITY.md). Vulnerabilities that also affect
   upstream Mail-in-a-Box v78 should additionally be reported to upstream as
   described in its [security guide](security.md).
 
@@ -109,7 +109,8 @@ und Upgrade an Ort und Stelle derselben Maschine
 [README-fork.md](README-fork.md).
 
 Sicherheitslücken bitte nicht öffentlich melden, sondern über die private
-Meldefunktion von GitHub (siehe [SECURITY.md](.github/SECURITY.md)).
+Meldefunktion von GitHub oder per Mail an
+[LM1337@networkx.eu](mailto:LM1337@networkx.eu) (siehe [SECURITY.md](.github/SECURITY.md)).
 
 Dank an Joshua Tauberer und alle, die an Mail-in-a-Box mitgearbeitet haben,
 sowie an David Blythe (writeDavid) für die 26.04-Portierung. Lizenz: CC0 1.0
