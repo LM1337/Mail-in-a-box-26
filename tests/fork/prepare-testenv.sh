@@ -30,7 +30,8 @@
 #   BLOCK_V6    production IPv6 addresses to block outbound, e.g. "2001:db8::1"
 #               (may be set to "" when there are none)
 #
-# Usage: sudo TESTENV_FILE=/tmp/testenv.env bash tests/fork/prepare-testenv.sh
+# Usage: sudo TESTENV_FILE=/root/testenv.env bash tests/fork/prepare-testenv.sh
+#        (the file must be owned by root, mode 600; it is parsed, not sourced)
 set -euo pipefail
 # ufw translates its output via Python gettext, which reads LANGUAGE before
 # LC_ALL; force untranslated output so the "ufw status" parsing below works.
@@ -39,9 +40,24 @@ unset LANGUAGE
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
 if [ -n "${TESTENV_FILE:-}" ]; then
-	[ -r "$TESTENV_FILE" ] || { echo "TESTENV_FILE $TESTENV_FILE not readable" >&2; exit 1; }
-	# shellcheck disable=SC1090
-	. "$TESTENV_FILE"
+	# The file is read, never sourced (this runs as root): it must be a regular
+	# file owned by root and not writable by anyone else, and only the four
+	# keys below are taken from it, each a space-separated list of IPs.
+	[ -f "$TESTENV_FILE" ] && [ ! -L "$TESTENV_FILE" ] \
+		|| { echo "TESTENV_FILE $TESTENV_FILE is not a regular file" >&2; exit 1; }
+	case "$(stat -c '%u %a' "$TESTENV_FILE")" in
+		"0 600" | "0 400") ;;
+		*) echo "TESTENV_FILE $TESTENV_FILE must be owned by root with mode 600" >&2; exit 1 ;;
+	esac
+	while IFS='=' read -r key value; do
+		case "$key" in JUMP_HOST | PEERS | BLOCK_V4 | BLOCK_V6) ;; *) continue ;; esac
+		value=${value%\"}
+		value=${value#\"}
+		value=${value%\'}
+		value=${value#\'}
+		[[ $value =~ ^[0-9A-Fa-f.:\ ]*$ ]] || { echo "TESTENV_FILE: $key is not a list of IP addresses" >&2; exit 1; }
+		printf -v "$key" '%s' "$value"
+	done < "$TESTENV_FILE"
 fi
 : "${JUMP_HOST:?JUMP_HOST must be set (see the header of this script)}"
 : "${PEERS:?PEERS must be set (see the header of this script)}"
