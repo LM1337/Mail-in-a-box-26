@@ -18,6 +18,15 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
 
 ### New
 
+* Logo and favicon for the fork: the source files are in `branding/` (CC0,
+  with `branding/README.md` on colours and use). The control panel has a
+  favicon and shows the icon next to the box name; setup copies the files to
+  `/usr/local/lib/mailinabox/vendor/assets/branding/` (served as
+  `/admin/assets/branding/`). On the web domains of the box, `/favicon.ico`
+  falls back to the fork's icon when the web root has no `favicon.ico` of its
+  own. The default page for new boxes (`conf/www_default.html`) shows the
+  icon; an existing `index.html` stays as it is. The README header shows the
+  wordmark.
 * Tools: `tools/upgrade-in-place-to-2604.sh` has two more hook stages for
   services of the operator that use the mail (e.g. a docker compose stack
   with IMAP logins): `/etc/mailinabox/upgrade-2604.d/before/*.sh` run right

@@ -9,6 +9,12 @@
 
         <meta name="robots" content="noindex, nofollow">
 
+        <link rel="icon" href="/admin/assets/branding/icon.svg" sizes="any" type="image/svg+xml">
+        <link rel="icon" href="/admin/assets/branding/favicon.ico" sizes="16x16 32x32 48x48">
+        <link rel="icon" href="/admin/assets/branding/favicon-32.png" sizes="32x32" type="image/png">
+        <link rel="icon" href="/admin/assets/branding/favicon-16.png" sizes="16x16" type="image/png">
+        <link rel="apple-touch-icon" href="/admin/assets/branding/apple-touch-icon.png">
+
         <link rel="stylesheet" href="/admin/assets/bootstrap/css/bootstrap.min.css">
         <style>
             body {
@@ -63,6 +69,14 @@
               margin-bottom: 1em;
             }
 
+            .navbar-brand > img.navbar-brand-icon {
+              display: inline-block; /* Bootstrap makes .navbar-brand > img a block */
+              width: 20px;
+              height: 20px;
+              margin: -2px 8px 0 0;
+              vertical-align: middle;
+            }
+
             .if-logged-in { display: none; }
             .if-logged-in-admin { display: none; }
 
@@ -105,7 +119,7 @@
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
           </button>
-          <a class="navbar-brand" href="#">{{hostname}}</a>
+          <a class="navbar-brand" href="#"><img class="navbar-brand-icon" src="/admin/assets/branding/icon.svg" alt="" width="20" height="20">{{hostname}}</a>
         </div>
         <div class="navbar-collapse collapse">
           <ul class="nav navbar-nav">

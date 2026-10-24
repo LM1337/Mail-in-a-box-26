@@ -104,6 +104,13 @@ unzip -q /tmp/bootstrap.zip -d $assets_dir
 mv $assets_dir/bootstrap-$bootstrap_version-dist $assets_dir/bootstrap
 rm -f /tmp/bootstrap.zip
 
+# The fork's favicons and icon (from branding/), served as /admin/assets/branding/ and as
+# the fallback /favicon.ico of the box's web domains (see conf/nginx-alldomains.conf).
+mkdir -p $assets_dir/branding
+cp branding/icon.svg branding/favicon.ico branding/favicon-16.png branding/favicon-32.png \
+	branding/apple-touch-icon.png $assets_dir/branding/
+chmod a+r $assets_dir/branding/*
+
 # Create an init script to start the management daemon and keep it
 # running after a reboot.
 # Set a long timeout since some commands take a while to run, matching

@@ -1,5 +1,12 @@
-Mail-in-a-Box for Ubuntu 26.04 (unofficial fork)
-================================================
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/logo-wordmark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="branding/logo-wordmark.svg">
+    <img src="branding/logo-wordmark.svg" alt="Mail-in-a-box-26" width="372" height="80">
+  </picture>
+</h1>
+
+<p align="center"><b>Mail-in-a-Box for Ubuntu 26.04 (unofficial fork)</b></p>
 
 An unofficial fork of [Mail-in-a-Box](https://github.com/mail-in-a-box/mailinabox)
 v78 that runs on **Ubuntu 26.04 LTS** with current versions of its software.
