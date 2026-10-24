@@ -1819,15 +1819,17 @@ def c_fail2ban_adaptive_toggle(ctx):
     orig = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]["adaptive"]
     seen = []
     try:
-        steps = [("0", "False"), ("1", "True")]
+        # Off, a restarted jail has no bantime.increment at all ("None", as
+        # with upstream's configuration); "False" would be a leftover value.
+        steps = [("0", ("None", "False")), ("1", ("True",))]
         for value, want in (steps if orig else steps[::-1]):
             j = post(value)
             if not j.get("restarted"):
                 raise Fail("adaptive=%s: jails not restarted (%s)" % (value, j))
             got = increment()
             seen.append(got)
-            if got != want:
-                raise Fail("adaptive=%s: sshd bantime.increment is %s, expected %s" % (value, got, want))
+            if got not in want:
+                raise Fail("adaptive=%s: sshd bantime.increment is %s, expected %s" % (value, got, " or ".join(want)))
     finally:
         post("1" if orig else "0")
     return "increment %s, restored adaptive=%s" % (" -> ".join(seen), orig)
