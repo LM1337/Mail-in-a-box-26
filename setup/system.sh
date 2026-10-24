@@ -506,9 +506,11 @@ rm -f /etc/resolv.conf
 tools/editconf.py /etc/systemd/resolved.conf DNSStubListener=no
 echo "nameserver 127.0.0.1" > /etc/resolv.conf
 
-# Restart the DNS services.
+# Restart the DNS services. The unit of the bind9 package is named.service;
+# bind9.service is only its alias, a link that exists while named is enabled,
+# so a disabled named could not be enabled (or restarted) by that name (B67).
 
-restart_service bind9
+restart_service named
 systemctl restart systemd-resolved
 
 # ### Fail2Ban Service
