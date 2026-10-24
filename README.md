@@ -126,7 +126,7 @@ Mail-in-a-Box v78.
 
 ### Quick start (fresh Ubuntu 26.04)
 
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 This installs the current release tag. The box's status checks compare the
 installed version with the latest release of this repository (unless the

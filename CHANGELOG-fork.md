@@ -14,7 +14,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Project home on GitHub, adaptive fail2ban with the control panel page System >
 Intrusion Protection, Nextcloud sharing within the mail domain, tmux for both
 tools, and the fixes from the in-place upgrade of a production box with rc3
-(B57-B60), B61 to B64.
+(B57-B60), B61 to B65.
 
 ### New
 
@@ -242,6 +242,14 @@ tools, and the fixes from the in-place upgrade of a production box with rc3
   its transaction until the garbage collector ran, often for minutes, and
   every other change in the control panel failed with "database is locked"
   (HTTP 500) until then (B64).
+* Setup: the documented command is now
+  `sudo bash -c "$(curl -fsSL .../setup/bootstrap.sh)"`. With upstream's
+  `curl ... | sudo bash`, sudo-rs (the sudo of Ubuntu 26.04) stopped setup's
+  first dialog box, and an interactive install or update hung without
+  showing anything. bootstrap.sh run that way now stops before changing
+  anything and prints the working command; with `NONINTERACTIVE=1`, as root
+  or with sudo.ws the pipe still works (B65). The hints with
+  `git remote set-url` start with `sudo`.
 
 ### Upgrade note
 

@@ -2,7 +2,10 @@
 #########################################################
 # This script is intended to be run like this:
 #
-#   curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+#   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+#
+# ("curl ... | sudo bash" works as root, with sudo.ws, or with NONINTERACTIVE=1;
+# see below for sudo-rs.)
 #
 # This is the Ubuntu 26.04 fork of Mail-in-a-Box (see README-fork.md),
 # https://github.com/LM1337/Mail-in-a-box-26
@@ -61,6 +64,25 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 
+# sudo-rs, the sudo of Ubuntu 26.04, runs the command in a terminal of its own.
+# When sudo's own input is not a terminal, as in "curl ... | sudo bash", it
+# stops full-screen programs such as dialog: setup's first dialog box would
+# hang without being shown. Say so before anything changes.
+if [ -z "${NONINTERACTIVE:-}" ] && [ ! -t 0 ]; then
+	case "$(readlink -f "/proc/$PPID/exe" 2> /dev/null)" in
+		*/cargo/bin/sudo | */sudo-rs)
+			echo "Setup asks its questions in dialog boxes, but sudo-rs (the sudo of Ubuntu 26.04)"
+			echo "stops them when this script comes through a pipe into sudo. Run it like this instead"
+			echo "(variables such as TAG=... go after sudo):"
+			echo
+			echo "  sudo bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)\""
+			echo
+			echo "Or give NONINTERACTIVE=1 and the answers (see README-fork.md, Installation)."
+			exit 1
+			;;
+	esac
+fi
+
 # Clone the Mail-in-a-Box repository if it doesn't exist.
 if [ ! -d "$HOME/mailinabox" ]; then
 	if [ ! -f /usr/bin/git ]; then
@@ -101,11 +123,11 @@ if [ "${ORIGIN_CMP,,}" != "${SOURCE_CMP,,}" ]; then
 	if [ -f tools/migrate-to-2604.sh ]; then
 		# This fork (rc1 to rc3 were cloned from the fork's previous home).
 		echo "To update it from $SOURCE, point it there once and run this command again:"
-		echo "  git -C $HOME/mailinabox remote set-url origin $SOURCE"
+		echo "  sudo git -C $HOME/mailinabox remote set-url origin $SOURCE"
 		echo "(To keep using $ORIGIN instead, give SOURCE=$ORIGIN to bash.)"
 	else
 		echo "To upgrade this box in place use tools/upgrade-in-place-to-2604.sh, see README-fork.md."
-		echo "To use this checkout anyway: git -C $HOME/mailinabox remote set-url origin $SOURCE"
+		echo "To use this checkout anyway: sudo git -C $HOME/mailinabox remote set-url origin $SOURCE"
 	fi
 	exit 1
 fi

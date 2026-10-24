@@ -33,15 +33,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-64 bugs: 1 critical, 11 high, 31 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63 and B64 in the test runs of rc4.
+65 bugs: 1 critical, 12 high, 31 medium, 21 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
 | PR #2603 | 26 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 15 |
+| 26.04 change | 16 |
 | Fork | 4 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
@@ -115,6 +115,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B62](#b62) | medium | fail2ban | Control panel and Roundcube filters take a host from text written by a client, so a client can get a third party banned | Upstream | yes | yes | rc4 |
 | [B63](#b63) | low | Management | API call system/latest-upstream-version fails with HTTP 500 and a traceback when the latest version cannot be determined | Upstream | yes | yes | rc4 |
 | [B64](#b64) | medium | Management | A failed write to users.sqlite keeps the database locked until garbage collection, other control panel changes fail | 26.04 change | no | yes | rc4 |
+| [B65](#b65) | high | Setup | 'curl ... \| sudo bash' hangs at setup's first dialog box: sudo-rs stops it | 26.04 change | no | yes | rc4 |
 
 ## Details
 
@@ -869,6 +870,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (Python 3.10), PR #2603 yes. Origin: 26.04 change (Python 3.14).
 * **Evidence:** 26.04 test box: `POST /admin/mail/users/add` for an existing user (HTTP 400), then `sqlite3 users.sqlite "BEGIN IMMEDIATE"` fails with "database is locked" for more than two minutes; the smoke test's second run on the same box failed `provision-test-accounts` and `admin-api-tmp-user-alias` with HTTP 500. A minimal script (connect, failing INSERT, return) leaves the database locked with Python 3.12 and 3.14 and frees it with Python 3.10; `gc.collect()` frees it in all. With the fix, the same three API errors leave the database writable.
 * **Found by:** test run (rc4); **commit:** see `git log --grep B64`; **fixed in:** v78-r2604.0-rc4
+
+### B65
+
+**'curl ... | sudo bash' hangs at setup's first dialog box: sudo-rs stops it** (high, Setup)
+
+* **Symptom:** An interactive install or update with the documented command `curl -s .../setup/bootstrap.sh | sudo bash` prints "Installing packages needed for setup..." (or the update lines) and then nothing; keys do nothing. Setup waits forever in its first dialog box ("Hello and thanks for deploying a Mail-in-a-Box!"). Nothing has been changed by setup at that point; in the test the stopped processes were ended from another shell (kill -INT, then -CONT).
+* **Cause:** Ubuntu 26.04's `sudo` is sudo-rs. It runs the command in a pseudo terminal of its own, and when its own standard input is not a terminal (here the pipe from curl) it stops full-screen programs such as dialog: the dialog process and setup/start.sh are in state T (stopped), and nothing reaches the screen. Simple reads from /dev/tty (the tools' y/N questions) are not affected. Ubuntu 22.04's sudo 1.9.9 does not use a pseudo terminal, so upstream's `curl ... | sudo bash` works there.
+* **Fix:** The documentation and the header of setup/bootstrap.sh use `sudo bash -c "$(curl -fsSL .../setup/bootstrap.sh)"`, which keeps sudo's input on the terminal. bootstrap.sh stops before it changes anything, with that command, when it runs interactively with its input from a pipe under sudo-rs (parent process /usr/lib/cargo/bin/sudo). `NONINTERACTIVE=1`, a root shell (`sudo -i`, then `curl ... | bash`) and sudo.ws keep working with the pipe.
+* **Affects:** v78 no (22.04), PR #2603 yes (upstream's command on 26.04). Origin: 26.04 change (sudo-rs).
+* **Evidence:** 26.04 test box with sudo-rs 0.2.13, in tmux and over a plain `ssh -tt`: `cat t.sh | sudo bash` with `t.sh` = `dialog --msgbox x 6 30; echo RC=$?` shows nothing and the dialog stays stopped after Enter; the same with `sudo.ws`, with `sudo bash -c "$(cat t.sh)"` and with `sudo bash -c 'cat t.sh | bash'` shows the box and ends with RC=0 on Enter. The update of the rc3 test box with `curl ... | sudo SOURCE=... TAG=... bash` hung like this (ps: `dialog` and `setup/start.sh` in state T+). A `printf q > /dev/tty; read a < /dev/tty` through the same pipe works.
+* **Found by:** test run (rc4); **commit:** see `git log --grep B65`; **fixed in:** v78-r2604.0-rc4
 
 ## Not counted above
 

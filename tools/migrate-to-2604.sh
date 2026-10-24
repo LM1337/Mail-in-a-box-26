@@ -1310,7 +1310,7 @@ check_origin() { # DIR SOURCE
 	same_repo "$o" "$2" && return 0
 	die "$1 is a checkout of ${o:-an unknown repository}, not of $2.
 Point it there once and run the command again:
-  git -C $1 remote set-url origin $2
+  sudo git -C $1 remote set-url origin $2
 (To keep using ${o:-it} instead, set SOURCE=${o:-...}.)"
 }
 

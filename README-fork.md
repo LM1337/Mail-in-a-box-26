@@ -53,7 +53,7 @@ Installation
 
 On a fresh Ubuntu 26.04 machine:
 
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 The environment variables `SOURCE` and `TAG` choose another repository or
 tag. They must be given to `bash` after `sudo` (sudo does not pass on the
@@ -61,11 +61,17 @@ environment, and `TAG=main curl ...` only sets it for curl). Without `TAG`,
 bootstrap.sh installs the current release tag. `TAG=main` installs the
 development state of the branch `main`, for testing only:
 
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo TAG=main bash
+	sudo TAG=main bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 Setup can run without questions with `NONINTERACTIVE=1` and
 `PRIMARY_HOSTNAME`, `PUBLIC_IP`, `PUBLIC_IPV6`, `EMAIL_ADDR`/`EMAIL_PW` (first
 user, only on an empty box), given the same way.
+
+Upstream's form `curl ... | sudo bash` does not work for an interactive
+setup on Ubuntu 26.04: its sudo (sudo-rs) stops setup's dialog boxes when
+the script comes through a pipe, and setup hangs without showing anything.
+bootstrap.sh then stops with the command above. The pipe still works with
+`NONINTERACTIVE=1`, and as root without sudo.
 
 Auf einer frischen Ubuntu-26.04-Maschine genügt der erste Befehl oben. Mit
 `SOURCE` und `TAG` lassen sich ein anderes Repository oder ein anderer Tag
@@ -73,7 +79,13 @@ wählen. Die Variablen gehören hinter `sudo` vor `bash` (sudo reicht die
 Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Ohne `TAG`
 installiert bootstrap.sh den aktuellen Release-Tag; `TAG=main` holt den
 Entwicklungsstand des Zweigs `main`, nur zum Testen:
-`curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
+`sudo TAG=main bash -c "$(curl -fsSL .../setup/bootstrap.sh)"`.
+
+Die Upstream-Form `curl ... | sudo bash` taugt unter Ubuntu 26.04 nicht für
+ein Setup mit Rückfragen: Dessen sudo (sudo-rs) hält die Dialogfenster des
+Setups an, wenn das Skript über eine Pipe kommt, und das Setup hängt, ohne
+etwas anzuzeigen. bootstrap.sh bricht dann mit dem Befehl oben ab. Mit
+`NONINTERACTIVE=1` und als root ohne sudo funktioniert die Pipe weiterhin.
 
 
 Updating the fork / Fork aktualisieren
@@ -93,7 +105,7 @@ with "is a checkout of ..., not of https://github.com/LM1337/Mail-in-a-box-26".
 Point the checkout to GitHub once, then run the bootstrap command:
 
 	sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 The status checks of rc1 to rc3 look for new releases at the previous home;
 they may keep reporting such a box as up to date, so check the
@@ -115,7 +127,7 @@ https://github.com/LM1337/Mail-in-a-box-26“ an. Den Checkout einmal auf
 GitHub umstellen, danach den Bootstrap-Befehl aufrufen:
 
 	sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 Die Statusprüfungen von rc1 bis rc3 suchen neue Releases unter der früheren
 Adresse; sie melden eine solche Box womöglich weiter als aktuell, deshalb die
@@ -1143,7 +1155,7 @@ environment. If that does not work, restore by hand and run setup:
 	sudo useradd -m user-data
 	sudo PASSPHRASE="$(head -n 1 secret_key.txt | tr -d '\r')" duplicity restore --force file:///path/to/encrypted /home/user-data
 	sudo install -D -m 600 secret_key.txt /home/user-data/backup/secret_key.txt
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 	sudo chown -R user-data:user-data /home/user-data/www && sudo chown user-data:user-data /home/user-data /home/user-data/mailinabox.version
 
 ### Deutsch
@@ -1555,5 +1567,5 @@ das nicht, von Hand einspielen und das Setup starten:
 	sudo useradd -m user-data
 	sudo PASSPHRASE="$(head -n 1 secret_key.txt | tr -d '\r')" duplicity restore --force file:///pfad/zu/encrypted /home/user-data
 	sudo install -D -m 600 secret_key.txt /home/user-data/backup/secret_key.txt
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 	sudo chown -R user-data:user-data /home/user-data/www && sudo chown user-data:user-data /home/user-data /home/user-data/mailinabox.version
