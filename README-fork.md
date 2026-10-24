@@ -31,8 +31,9 @@ On a fresh Ubuntu 26.04 machine:
 
 The environment variables `SOURCE` and `TAG` choose another repository or
 tag. They must be given to `bash` after `sudo` (sudo does not pass on the
-environment, and `TAG=main curl ...` only sets it for curl). Until the first
-release tag exists, use the branch `main`:
+environment, and `TAG=main curl ...` only sets it for curl). Without `TAG`,
+bootstrap.sh installs the current release tag. `TAG=main` installs the
+development state of the branch `main`, for testing only:
 
 	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo TAG=main bash
 
@@ -43,8 +44,9 @@ user, only on an empty box), given the same way.
 Auf einer frischen Ubuntu-26.04-Maschine genügt der erste Befehl oben. Mit
 `SOURCE` und `TAG` lassen sich ein anderes Repository oder ein anderer Tag
 wählen. Die Variablen gehören hinter `sudo` vor `bash` (sudo reicht die
-Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Solange es
-noch keinen Release-Tag gibt, den Zweig `main` nehmen:
+Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Ohne `TAG`
+installiert bootstrap.sh den aktuellen Release-Tag; `TAG=main` holt den
+Entwicklungsstand des Zweigs `main`, nur zum Testen:
 `curl -s .../setup/bootstrap.sh | sudo TAG=main bash`.
 
 
@@ -252,11 +254,11 @@ setup points `/usr/local/bin/mailinabox` and the nightly cron job to that
 directory and runs them as root.
 
 Without a clone (the tool clones the fork into `/root/mailinabox` itself,
-like `bootstrap.sh`). `TAG` and `SOURCE` go after `sudo`; until the release
-tag exists, the tool falls back to the branch `main`:
+like `bootstrap.sh`, at the current release tag). `TAG` and `SOURCE` go
+after `sudo`:
 
 	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/migrate-to-2604.sh \
-	  | sudo TAG=main bash -s -- --from root@old.example.com
+	  | sudo bash -s -- --from root@old.example.com
 
 For big boxes, copy the data ahead of time and switch over later:
 
@@ -528,7 +530,7 @@ environment. If that does not work, restore by hand and run setup:
 	sudo useradd -m user-data
 	sudo PASSPHRASE="$(head -n 1 secret_key.txt | tr -d '\r')" duplicity restore --force file:///path/to/encrypted /home/user-data
 	sudo install -D -m 600 secret_key.txt /home/user-data/backup/secret_key.txt
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo TAG=main bash
+	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
 	sudo chown -R user-data:user-data /home/user-data/www && sudo chown user-data:user-data /home/user-data /home/user-data/mailinabox.version
 
 ### Deutsch
@@ -620,11 +622,11 @@ Benutzers: Das Setup verweist `/usr/local/bin/mailinabox` und den nächtlichen
 Cron-Job auf dieses Verzeichnis und führt sie als root aus.
 
 Ohne Klon (das Werkzeug klont den Fork wie `bootstrap.sh` selbst nach
-`/root/mailinabox`). `TAG` und `SOURCE` stehen hinter `sudo`; solange es den
-Release-Tag noch nicht gibt, nimmt das Werkzeug den Zweig `main`:
+`/root/mailinabox`, beim aktuellen Release-Tag). `TAG` und `SOURCE` stehen
+hinter `sudo`:
 
 	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/migrate-to-2604.sh \
-	  | sudo TAG=main bash -s -- --from root@alt.example.com
+	  | sudo bash -s -- --from root@alt.example.com
 
 Bei großen Boxen die Daten vorab kopieren und später umschalten:
 
@@ -922,5 +924,5 @@ das nicht, von Hand einspielen und das Setup starten:
 	sudo useradd -m user-data
 	sudo PASSPHRASE="$(head -n 1 secret_key.txt | tr -d '\r')" duplicity restore --force file:///pfad/zu/encrypted /home/user-data
 	sudo install -D -m 600 secret_key.txt /home/user-data/backup/secret_key.txt
-	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo TAG=main bash
+	curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
 	sudo chown -R user-data:user-data /home/user-data/www && sudo chown user-data:user-data /home/user-data /home/user-data/mailinabox.version

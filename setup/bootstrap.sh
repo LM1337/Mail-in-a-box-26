@@ -2,11 +2,15 @@
 #########################################################
 # This script is intended to be run like this:
 #
-#   curl https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
+#   curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh | sudo bash
 #
-# This is the Ubuntu 26.04 fork of Mail-in-a-Box (see README-fork.md).
+# This is the Ubuntu 26.04 fork of Mail-in-a-Box (see README-fork.md),
+# https://github.com/LM1337/Mail-in-a-box-26
 #
 #########################################################
+
+# The fork's repository (bootstrap.sh compares the checkout's origin with it).
+DEFAULT_SOURCE=https://github.com/LM1337/Mail-in-a-box-26
 
 if [ -z "$TAG" ]; then
 	# If a version to install isn't explicitly given as an environment
@@ -67,7 +71,7 @@ if [ ! -d "$HOME/mailinabox" ]; then
 	fi
 
 	if [ "$SOURCE" == "" ]; then
-		SOURCE=https://github.com/LM1337/Mail-in-a-box-26
+		SOURCE=$DEFAULT_SOURCE
 	fi
 
 	echo "Downloading Mail-in-a-Box $TAG. . ."
@@ -85,9 +89,12 @@ cd "$HOME/mailinabox" || exit
 
 # An existing checkout of upstream Mail-in-a-Box does not have this fork's tags
 # (In-Place 5). Say so instead of failing with "Update failed".
-if [ "$SOURCE" == "" ]; then SOURCE=https://github.com/LM1337/Mail-in-a-box-26; fi
+if [ "$SOURCE" == "" ]; then SOURCE=$DEFAULT_SOURCE; fi
+# GitHub treats the owner and repository names case-insensitively.
 ORIGIN=$(git config --get remote.origin.url || true)
-if [ "${ORIGIN%.git}" != "${SOURCE%.git}" ]; then
+ORIGIN_CMP=${ORIGIN%.git}
+SOURCE_CMP=${SOURCE%.git}
+if [ "${ORIGIN_CMP,,}" != "${SOURCE_CMP,,}" ]; then
 	echo "$HOME/mailinabox is a checkout of $ORIGIN, not of $SOURCE."
 	echo "To upgrade this box in place use tools/upgrade-in-place-to-2604.sh, see README-fork.md."
 	echo "To use this checkout anyway: git -C $HOME/mailinabox remote set-url origin $SOURCE"

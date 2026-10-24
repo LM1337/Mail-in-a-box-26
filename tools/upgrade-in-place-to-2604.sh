@@ -103,6 +103,8 @@ MOTD_FILE=/etc/motd
 MOTD_BEGIN="### begin $SCRIPT_NAME"
 MOTD_END="### end $SCRIPT_NAME"
 DEFAULT_SOURCE=https://github.com/LM1337/Mail-in-a-box-26
+# Raw files of the branch main (GitHub serves them from another host).
+DEFAULT_RAW=https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main
 DEFAULT_TAG=v78-r2604.0-rc3 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5        # keep in sync with setup/functions.sh
@@ -786,7 +788,7 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 	local script=$1 d=$2 source=${SOURCE:-$DEFAULT_SOURCE} tag=${TAG:-$DEFAULT_TAG}
 	shift 2
 	[ -z "${UPGRADE_REEXEC:-}" ] || die "Could not find tools/$script in $d."
-	local how="curl -so $script $DEFAULT_SOURCE/raw/branch/main/tools/$script && sudo bash $script"
+	local how="curl -so $script $DEFAULT_RAW/tools/$script && sudo bash $script"
 	command -v git > /dev/null || install_packages git
 	if [ -d "$d/.git" ]; then
 		# From an earlier run: bring it to the tag (it may be older).
@@ -1455,7 +1457,7 @@ Nothing was changed. '$(start_command | sed 's/$/ --check/')' lists them again."
 
 start_command() {
 	local c=$SELF
-	if [ -z "$SELF_FILE" ]; then c="$DEFAULT_SOURCE/raw/branch/main/tools/$SCRIPT_NAME (saved to a file)"; else c=$SELF_FILE; fi
+	if [ -z "$SELF_FILE" ]; then c="$DEFAULT_RAW/tools/$SCRIPT_NAME (saved to a file)"; else c=$SELF_FILE; fi
 	echo "$c$(resume_flags | sed 's/^/ /' | tr '\n' ' ' | sed 's/ $//')"
 }
 
