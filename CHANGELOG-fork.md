@@ -52,7 +52,18 @@ New, from the update of a production box from rc3 to rc6:
 * The backup before an update (incremental backup, plus /etc and Docker
   stacks, encrypted onto the backup target and verified) and the record of
   the state before and after, as tools of the fork instead of an admin's own
-  scripts.
+  scripts. They run in the test scenarios too, so they are tested before
+  an admin uses them.
+* The comparison of the states before and after marks the changes that the
+  release notes announce as expected (for example the quota check in front
+  of greylisting in `smtpd_recipient_restrictions`), so only unexpected
+  changes stand out.
+* An active mail check after an update, instead of waiting for real
+  traffic: the box sends a marked mail to an external probe address that
+  the admin sets (one that forwards or answers it back), and the check waits
+  for the mail to come back over port 25. That covers outbound delivery,
+  inbound delivery, spam filter, Sieve and storage in one round trip. Without
+  a probe address the check says it was skipped.
 * An update of an existing box does not show the welcome dialog of a new
   installation ("only install this on a brand new Ubuntu installation").
 * Setup reloads nginx instead of restarting it where a reload is enough
