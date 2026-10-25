@@ -119,6 +119,8 @@ TMUX_SESSION=upgrade-2604
 # The environment variables this script and setup read (passed into that session).
 MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE)
 MUX_TERM=
+MUX_TTY=
+MUX_RAW_TTY=
 # Keep the old configuration files during the release upgrades (removed again in finish).
 APT_OVERRIDE=/etc/apt/apt.conf.d/99-upgrade-in-place-to-2604
 MOTD_FILE=/etc/motd
@@ -429,12 +431,16 @@ session_check() {
 	if trap -p HUP | grep -q "''"; then return 0; fi
 	if ! (: < /dev/tty) 2> /dev/null; then return 0; fi
 	if [ -n "$CHECK_ONLY" ] && [ -z "$NO_TMUX" ]; then
+		# Through curl | bash the run uses the copy of the release tag. rc1 to
+		# rc3 are older than run_in_multiplexer.
 		if [ -z "$SELF_FILE" ]; then
-			# Through curl | bash the run uses the copy of the release tag, which
-			# may be older than this feature.
-			say "Through curl | bash the command runs the copy of ${TAG:-$DEFAULT_TAG}. If that release does not"
-			say "start tmux by itself yet, start the command inside tmux: tmux new -s $TMUX_SESSION"
-			return 0
+			case "${TAG:-$DEFAULT_TAG}" in
+				v78-r2604.0-rc[123])
+					say "Through curl | bash the command runs the copy of ${TAG:-$DEFAULT_TAG}, which does not start"
+					say "tmux by itself. Start the command inside tmux: tmux new -s $TMUX_SESSION"
+					return 0
+					;;
+			esac
 		fi
 		say "Started from this terminal, the command runs itself in the tmux session $TMUX_SESSION"
 		say "(tmux is installed if needed; reattach after a disconnect with: sudo tmux attach -t $TMUX_SESSION)."
@@ -511,31 +517,69 @@ mux_term() {
 	done
 }
 
-# Attach this terminal (also when stdin is the curl pipe). tmux refuses the
-# name /dev/tty, so the terminal's own device. screen -d -r: a client of a
-# dropped SSH connection may still count as attached.
-# Not through "curl ... | sudo bash" when sudo runs the command in a terminal
-# of its own (sudo-rs on 26.04, use_pty of sudo 1.9.14+ on 24.04): the client
-# shows nothing there. Return 1, so that the caller names the attach command.
-mux_attach() { # TOOL
-	local t sid
-	if [ ! -t 0 ]; then
-		sid=$(ps -o sid= -p $$ 2> /dev/null | tr -d ' ' || true)
-		case "$(ps -o comm= -p "${sid:-0}" 2> /dev/null || true)" in
-			sudo | sudo.ws | sudo-rs)
-				say "This terminal cannot show the session: sudo runs this command in a terminal of its"
-				say "own, and its input is the curl pipe."
-				return 1
-				;;
-		esac
+# The terminal to attach (MUX_TTY), and the operator's terminal to put into
+# raw mode meanwhile (MUX_RAW_TTY). With a terminal as stdin, that terminal.
+# Through "curl ... | sudo bash" (stdin is the pipe), sudo with use_pty (22.04,
+# 24.04) and sudo-rs (26.04) run this script in a terminal of sudo's own. Both
+# pass its output on, but not the keys: classic sudo does not read the
+# operator's terminal while stdin is a pipe, so attach that terminal (that of
+# the first parent process on another terminal). sudo-rs does read it, and a
+# client there would lose keys to it; it passes them on to its own terminal
+# when the operator's terminal is in raw mode. Without a terminal (cron,
+# nohup, ssh without -t) both stay empty.
+mux_tty() {
+	local t mine p sid
+	MUX_TTY='' MUX_RAW_TTY=''
+	if [ -t 0 ]; then
+		t=$(tty 2> /dev/null || true)
+		if [ -c "$t" ] && [ "$t" != /dev/tty ]; then MUX_TTY=$t; fi
+		return 0
 	fi
-	t=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
-	case "$t" in '' | '?') t=/dev/tty ;; *) t=/dev/$t ;; esac
+	(: <> /dev/tty) 2> /dev/null || return 0
+	mine=$(ps -o tty= -p $$ 2> /dev/null | tr -d ' ' || true)
+	case "$mine" in '' | '?') return 0 ;; esac
+	MUX_TTY=/dev/$mine
+	# Only when sudo itself has the pipe as stdin; with a terminal as its stdin
+	# (sudo -i, then curl | bash) sudo passes the keys on.
+	sid=$(ps -o sid= -p $$ 2> /dev/null | tr -d ' ' || true)
+	case "$(ps -o comm= -p "${sid:-0}" 2> /dev/null || true)" in sudo | sudo.ws | sudo-rs) ;; *) return 0 ;; esac
+	case "$(readlink "/proc/$sid/fd/0" 2> /dev/null || true)" in /dev/pts/* | /dev/tty*) return 0 ;; esac
+	p=$$
+	while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+		t=$(ps -o tty= -p "$p" 2> /dev/null | tr -d ' ' || true)
+		if [ -n "$t" ] && [ "$t" != '?' ] && [ "$t" != "$mine" ]; then break; fi
+		t=''
+		p=$(ps -o ppid= -p "$p" 2> /dev/null | tr -d ' ' || true)
+	done
+	[ -n "$t" ] && [ -c "/dev/$t" ] || return 0
+	if "/proc/$sid/exe" --version 2> /dev/null | grep -q sudo-rs; then
+		MUX_RAW_TTY=/dev/$t
+	else
+		MUX_TTY=/dev/$t
+	fi
+}
+
+# Attach this terminal (also when stdin is the curl pipe, B71). tmux refuses
+# the name /dev/tty, so the terminal's own device, opened for reading and
+# writing: tmux draws on the descriptor of its stdin, and on one opened only
+# for reading (rc4 and rc5) it drew nothing. screen -d -r: a client of a
+# dropped SSH connection may still count as attached. Returns 1 without a
+# terminal, so that the caller names the attach command.
+mux_attach() { # TOOL
+	local rc=0 saved=''
+	mux_tty
+	[ -n "$MUX_TTY" ] || return 1
+	if [ -n "$MUX_RAW_TTY" ]; then
+		saved=$(stty -g < "$MUX_RAW_TTY" 2> /dev/null || true)
+		stty raw -echo < "$MUX_RAW_TTY" 2> /dev/null || true
+	fi
 	# shellcheck disable=SC2094 # a terminal, not a file
 	case "$1" in
 		tmux) TERM=${MUX_TERM:-${TERM:-}} tmux attach-session -t "=$TMUX_SESSION" ;;
 		screen) TERM=${MUX_TERM:-${TERM:-}} screen -d -r "$TMUX_SESSION" ;;
-	esac < "$t" > "$t" 2>&1
+	esac 0<> "$MUX_TTY" 1>&0 2>&0 || rc=$?
+	if [ -n "$saved" ]; then stty "$saved" < "$MUX_RAW_TTY" 2> /dev/null || true; fi
+	return "$rc"
 }
 
 # Start the session; the window stays open after the command until Enter is

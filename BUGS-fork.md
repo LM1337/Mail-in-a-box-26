@@ -122,6 +122,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | rc5 |
 | [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | rc5 |
 | [B70](#b70) | low | Tools | In-place upgrade from 22.04 warns that ssh.service is disabled and advises to enable it, although ssh.socket starts it | Fork | no | no | rc6 |
+| [B71](#b71) | low | Tools | The terminal attached to the tool's tmux session shows nothing; through "curl \| sudo bash" it is not attached at all | Fork | no | no | rc6 |
 
 ## Details
 
@@ -944,6 +945,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc5, the check of B67). Only boxes that come from 22.04: a box that starts on 24.04 already has ssh.service disabled before the upgrade. `tools/migrate-to-2604.sh` has no such check.
 * **Evidence:** rc5 T4 (22.04 test VM, from the published tag): the warning and the line in `etc-report.txt`, with `ssh.socket` enabled and active after the upgrade. The new check run against the unit list of that run before the upgrade on a fresh 26.04 box lists nothing (the old check: ssh.service); with units added to that list by hand it still lists rsync, nftables and chrony-wait, but not iscsid (started by iscsid.socket).
 * **Found by:** in-place test; **commit:** see `git log --grep B70`; **fixed in:** v78-r2604.0-rc6
+
+### B71
+
+**The terminal attached to the tool's tmux session shows nothing; through "curl | sudo bash" it is not attached at all** (low, Tools)
+
+* **Symptom:** Started as documented, `curl ... | sudo bash -s -- ...`, both tools start themselves in tmux, but print "Could not attach this terminal. The run goes on in the tmux session upgrade-2604" (or `migrate-2604`) and return to the shell: the operator does not see the run. Started from a file (`sudo bash tools/upgrade-in-place-to-2604.sh`), the terminal is attached, but stays blank until the run ends; the keys work (Ctrl-b d detaches). The run itself goes on in both cases. `--check` through `curl | bash` also advised to start the command inside tmux, which the release does by itself.
+* **Cause:** mux_attach opened the terminal for the tmux client only for reading (`< "$t" > "$t"`). tmux draws on the descriptor of the client's stdin, so it drew nothing (tmux 3.2a, 3.4 and 3.6 alike). rc4 then took the blank terminal for a limit of sudo's own terminal (use_pty of sudo on 22.04 and 24.04, sudo-rs on 26.04) and gave up when stdin is a pipe. There is a second limit there: with stdin a pipe, classic sudo passes the output of its terminal on but not the keys, and sudo-rs passes the keys on only while the operator's terminal is in raw mode.
+* **Fix:** mux_attach opens the terminal for reading and writing. When stdin is a pipe and sudo itself has the pipe as stdin, it attaches the operator's terminal (that of sudo's own process) with classic sudo; with sudo-rs it attaches sudo's terminal and puts the operator's terminal into raw mode while attached (and back afterwards). Without a terminal (cron, nohup, `ssh` without `-t`) the tools run without tmux, as before. `--check` warns about a release without the automatic tmux only for rc1 to rc3. Same in both tools.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux; "not attached at all" since rc4's last commit, the same for rc5).
+* **Evidence:** rc5 T4: the terminal of `curl ... | sudo bash -s -- --yes --no-backup-check` printed the message and returned. On a 26.04 test box, with the tools' own tmux functions, a pseudo terminal over `ssh -tt` and a ticker as the run: the rc5 code drew nothing in all start forms (curl pipe or file, sudo-rs or classic sudo 1.9.17 with use_pty, tmux 3.2a, 3.4 and 3.6); the new code drew the run and detached with Ctrl-b d in 36 of 36 runs (both tools; curl pipe, file and `sudo bash -c "curl | bash"`; sudo-rs and classic sudo), and the terminal was back in line mode afterwards. Attaching the operator's terminal under sudo-rs lost keys to sudo-rs in 3 of 5 runs, hence the raw mode there.
+* **Found by:** in-place test; **commit:** see `git log --grep B71`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

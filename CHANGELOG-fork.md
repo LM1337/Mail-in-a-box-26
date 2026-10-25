@@ -19,6 +19,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `ssh.socket` starts it. Units that are started another way (an enabled
   socket, path or timer, a new name, a running unit that pulls them in)
   are left out of the check (B70).
+* Tools: the terminal that the tools attach to their tmux session shows
+  the run. It stayed blank in rc4 and rc5 (the terminal was opened only for
+  reading), and through `curl ... | sudo bash` the tools did not attach it
+  at all ("Could not attach this terminal"). Now they attach it in all
+  these forms, with sudo on 22.04 and 24.04 and with sudo-rs on 26.04; Ctrl-b
+  d detaches. `--check` no longer advises to start the command inside tmux,
+  except for a `TAG` of rc1 to rc3 (B71).
 
 ## v78-r2604.0-rc5 (2026-10-24)
 
