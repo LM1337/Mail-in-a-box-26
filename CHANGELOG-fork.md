@@ -11,6 +11,57 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Planned
+
+From the rc6 list ("Planned for rc7" below), still open:
+
+* The admin panel setting for Munin's alerts.
+* A shorter SSH outage during the release upgrades, or a live note.
+* A deterministic order of the OpenDKIM tables.
+* The `(sd-pam)` rule in `tests/fork/log-audit-allow.txt`.
+* The full test matrix T1 to T5b on the release head, T6 before a final
+  release.
+
+New, from the update of a production box from rc3 to rc6:
+
+* API test (`tests/fork/smoke.py`, group `api`, in every scenario): the
+  management API as `api/mailinabox.yml` documents it.
+  * Auth: `POST /admin/login` with the admin's credentials gives an API
+    key; the key works; requests without credentials or with a wrong
+    password get 401. Only two failed attempts, far below the
+    `miab-management` jail's limit.
+  * Read-only: every documented GET (and the read-only POSTs
+    `system/status`, `system/latest-upstream-version`) answers 200 with
+    the documented content type, and JSON answers have the documented
+    shape: version, updates, privacy, backup status and config, SSL status,
+    DNS zones, zone files, custom records, dump, secondary nameserver, mail
+    users, domains and aliases (`format=json`), web domains, MFA status.
+  * One write round trip with marked test data: add a user, set its
+    password, add and remove the admin privilege, add and remove an alias,
+    add and remove a custom TXT record, remove the user. The lists of
+    users, aliases and custom DNS records must be the same afterwards.
+  * Not called: reboot, package updates, SSL provisioning and install, web
+    update, backup config writes, MFA enable.
+  * A static check without a box: every route in `management/daemon.py`
+    is documented in `api/mailinabox.yml`, and every documented path has a
+    route.
+* Log audit on a production box: `--baseline before.json` reports only the
+  classes that are new against an audit from before the update. An
+  optional allowlist for the usual Internet noise (UFW blocks, scanners,
+  password guessing on 587).
+* The backup before an update (incremental backup, plus /etc and Docker
+  stacks, encrypted onto the backup target and verified) and the record of
+  the state before and after, as tools of the fork instead of an admin's own
+  scripts.
+* An update of an existing box does not show the welcome dialog of a new
+  installation ("only install this on a brand new Ubuntu installation").
+* Setup reloads nginx instead of restarting it where a reload is enough
+  (Ubuntu's unit allows 5 s for a graceful stop; long-polling ActiveSync
+  and CalDAV clients are cut). Allowlist rules for the restart window
+  (Z-Push CardDAV errors, upstream resets) and for the probe of
+  `/server-status` and `/nginx_status` by `munin-node-configure`.
+* Check the size of the journal now that Dovecot logs through syslog.
+
 ## v78-r2604.0-rc6 (2026-10-25)
 
 Fixes from the in-place test from 22.04 of rc5, from the test runs of rc6
