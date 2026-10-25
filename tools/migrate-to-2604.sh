@@ -3260,12 +3260,18 @@ check_summary() {
 	section "Result of the check"
 	local b all=()
 	all=("${CHECK_BLOCKERS[@]}")
-	for b in "${NET_BLOCKERS[@]}"; do all+=("$b (blocks the switch-over; --skip-network-checks)"); done
+	if [ -z "$SKIP_NETWORK_CHECKS" ]; then
+		for b in "${NET_BLOCKERS[@]}"; do all+=("$b (blocks the switch-over; --skip-network-checks)"); done
+	fi
 	session_check
+	if [ -n "$SKIP_NETWORK_CHECKS" ] && [ ${#NET_BLOCKERS[@]} -gt 0 ]; then
+		say "Ignored because of --skip-network-checks (the switch-over does not stop on them):"
+		for b in "${NET_BLOCKERS[@]}"; do say "  - $b"; done
+	fi
 	if [ ${#all[@]} -eq 0 ]; then
 		say "No blockers found. Nothing was changed on either machine."
 		say "Start the migration with:"
-		say "  $SELF --from $FROM${SSH_KEY:+ --ssh-key $SSH_KEY}${SSH_PORT:+ --ssh-port $SSH_PORT}"
+		say "  $SELF --from $FROM${SSH_KEY:+ --ssh-key $SSH_KEY}${SSH_PORT:+ --ssh-port $SSH_PORT}${SKIP_NETWORK_CHECKS:+ --skip-network-checks}"
 		exit 0
 	fi
 	say "These must be fixed first:"

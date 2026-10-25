@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 and B76 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B76 and B77 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -34,8 +34,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-76 bugs: 1 critical, 13 high, 32 medium, 30 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76 in the migration test T2 of rc6.
+77 bugs: 1 critical, 13 high, 32 medium, 31 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76 and B77 in the migration test T2 of rc6.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 18 |
-| Fork | 11 |
+| Fork | 12 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -128,6 +128,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B74](#b74) | low | Dovecot | Every setup run adds another commented copy of each SSL setting to 10-ssl.conf | PR #2603 | no | yes | rc6 |
 | [B75](#b75) | low | System | logrotate.service fails every day on boxes upgraded in place to 26.04: cloud-init's old logrotate file stays | 26.04 change | no | no | rc6 |
 | [B76](#b76) | low | Tools | The migration tool's Spamhaus checks follow the resolver's search domain and can report a wildcard address | Fork | no | no | rc6 |
+| [B77](#b77) | low | Tools | "migrate-to-2604.sh --check --skip-network-checks" still lists the skipped network checks as blockers and exits 1 | Fork | no | no | rc6 |
 
 ## Details
 
@@ -1016,6 +1017,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (the migration tool, since rc1). setup/network-checks.sh of upstream uses `host` the same way, but the tool runs setup with `SKIP_NETWORK_CHECKS=1`.
 * **Evidence:** rc6 T2 (fresh 26.04 test box with `search` set to a domain with a wildcard record): `--check` printed "Spamhaus ZEN: unexpected answer" with the wildcard's IPv6 address. On that box `getent -s dns hosts` returned the wildcard address with the search domain appended for the box's reversed IP, for 2.0.0.127 and for the DBL name; with the trailing dot it returned 127.255.255.254 (Spamhaus refuses the public resolver) for all three.
 * **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B76`; **fixed in:** v78-r2604.0-rc6
+
+### B77
+
+**"migrate-to-2604.sh --check --skip-network-checks" still lists the skipped network checks as blockers and exits 1** (low, Tools)
+
+* **Symptom:** With `--skip-network-checks`, `--check` still ends with "These must be fixed first:" and the blocked outbound port 25 (or a Spamhaus listing), and exits with code 1. The real run with the same options does not stop on them, so the check and the run disagree.
+* **Cause:** check_summary() added the network blockers to the list of blockers without looking at `--skip-network-checks`; only phase stop-old honoured the option.
+* **Fix:** With `--skip-network-checks`, `--check` lists them under "Ignored because of --skip-network-checks" and does not count them as blockers; the command it suggests keeps the option. Without the option nothing changes.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (the migration tool, since rc1).
+* **Evidence:** rc6 T2: `--check ... --skip-network-checks` on a test box with port 25 blocked listed the port as the only blocker and exited 1; the run with the same options started.
+* **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B77`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

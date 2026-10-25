@@ -59,6 +59,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   append the resolver's search domain to the names they look up. With a
   wildcard record in that domain they reported "unexpected answer" with
   the wildcard's address (B76).
+* Tools: `tools/migrate-to-2604.sh --check --skip-network-checks` lists
+  the skipped network checks (port 25, Spamhaus) as ignored, not as
+  blockers, and no longer exits with code 1 because of them. The run with
+  the same options never stopped on them (B77).
 
 ### Changed
 
