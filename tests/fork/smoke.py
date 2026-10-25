@@ -2917,8 +2917,16 @@ def c_api_write_roundtrip(ctx):
         admin_api(ctx, "DELETE", "dns/custom/%s/TXT" % qname)
         admin_api(ctx, "POST", "mail/aliases/remove", form={"address": alias})
         r = admin_api(ctx, "POST", "mail/users/remove", form={"email": user})
+        # Also when a step above failed: its archived mailbox would stay as an
+        # inactive account. An error here must not hide the step's own.
+        try:
+            mailbox = remove_test_mailbox(ctx, user)
+        except Exception as e:
+            mailbox = e
     api_expect(r, 200, "text/html", "users/remove")
-    steps.append("user removed, " + remove_test_mailbox(ctx, user))
+    if isinstance(mailbox, Exception):
+        raise mailbox
+    steps.append("user removed, " + mailbox)
     after = api_snapshot(ctx)
     if not ctx.remote.available():
         # without --ssh the archived mailbox of the test user stays

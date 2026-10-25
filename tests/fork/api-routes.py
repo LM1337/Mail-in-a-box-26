@@ -11,6 +11,9 @@ no box needed.
   * Every documented operation is in exactly one of the lists of the API
     test (tests/fork/smoke.py, group "api"): API_READ_ONLY, API_WRITES or
     API_NOT_CALLED. A new endpoint therefore needs a test or a reason.
+    This checks the lists only: smoke.py calls each entry of API_READ_ONLY
+    in a loop, but API_WRITES is a declaration of what its write checks
+    (c_api_*) call; that they really call it is not verified here.
   * The content type that the API test expects for a read-only endpoint is
     the one documented for its 200 answer.
 
