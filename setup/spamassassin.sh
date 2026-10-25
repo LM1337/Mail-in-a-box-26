@@ -78,27 +78,29 @@ else
 fi
 tools/editconf.py /etc/spampd.cfg -s \
 	relayport=10026 \
-	pid=/run/spampd/spampd.pid
+	pid=/run/spampd.pid
 
-# spampd writes its PID file as root and removes it when it stops, but by then
-# it runs as user spampd and cannot delete files in /run ("Couldn't unlink
-# /run/spampd.pid [Permission denied]"), so a stale PID file stayed behind
-# (B81). Keep the PID file in a directory that belongs to spampd, and remove
-# a stale one before each start. (RuntimeDirectory= cannot be used: systemd
-# gives that directory to the unit's user, root, at the start of spampd.)
-SPAMPD_DROPIN=/etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf
+# spampd (Net::Server) writes its PID file as root and tries to remove it when
+# it stops, but by then it runs as user spampd and cannot delete files in /run:
+# each stop logs "Couldn't unlink /run/spampd.pid [Permission denied]" and the
+# file stays (B81). systemd removes it after each stop instead, as root. The
+# PID file stays in the root-owned /run: a directory that spampd could write
+# to would let a compromised spampd plant a symlink there, which root then
+# follows when it writes and chowns the PID file at the next start.
+SPAMPD_DROPIN=/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf
 SPAMPD_DROPIN_TEXT="[Service]
-ExecStartPre=/usr/bin/install -d -o spampd -g spampd -m 0755 /run/spampd
-ExecStartPre=/usr/bin/rm -f /run/spampd/spampd.pid
-PIDFile=/run/spampd/spampd.pid"
+ExecStopPost=/usr/bin/rm -f /run/spampd.pid"
 if [ "$(cat "$SPAMPD_DROPIN" 2> /dev/null)" != "$SPAMPD_DROPIN_TEXT" ]; then
 	mkdir -p "$(dirname "$SPAMPD_DROPIN")"
 	echo "$SPAMPD_DROPIN_TEXT" > "$SPAMPD_DROPIN"
 	systemctl daemon-reload
 fi
-# A spampd started with the old location stops quietly at the restart below
-# when its PID file is gone (it only removes a file that exists).
-rm -f /run/spampd.pid
+# A test version of the fork kept the PID file in /run/spampd, owned by spampd.
+# Remove its drop-in; the directory goes after the restart below.
+if [ -e /etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf ]; then
+	rm -f /etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf
+	systemctl daemon-reload
+fi
 
 # Spamassassin normally wraps spam as an attachment inside a fresh
 # email with a report about the message. This also protects the user
@@ -224,6 +226,7 @@ chmod 770 "$STORAGE_ROOT/mail/spamassassin"
 
 # Kick services.
 restart_service spampd
+rm -rf /run/spampd
 restart_service dovecot
 
 # Fetch current rules once now instead of waiting for the first 06:00 timer run

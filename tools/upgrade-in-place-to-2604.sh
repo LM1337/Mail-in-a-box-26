@@ -1707,7 +1707,7 @@ detect_extensions() {
 			# Written by setup/mail-postfix.sh and setup/spamassassin.sh of this fork.
 			case "$f" in
 				/etc/systemd/system/postfix.service.d/mailinabox-stale-db.conf) continue ;;
-				/etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf) continue ;;
+				/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf) continue ;;
 			esac
 			if [ -e "$f" ]; then EXT_BLOCK+=("$f (systemd drop-in)"); fi
 		done
