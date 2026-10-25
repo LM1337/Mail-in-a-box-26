@@ -479,7 +479,15 @@ Everything is in `tests/fork/`:
   phase of `tools/upgrade-in-place-to-2604.sh` (`[in-place:release_2404]`,
   from the tool's state file); the noise of the old releases and the release
   upgrades is allowed only with that prefix. For the old box of a migration,
-  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`.
+  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`. `--since`
+  also takes the short forms `-30m`, `-24h`, `-2d`. With `--baseline
+  BEFORE.json` (the `--json` report of an earlier run, e.g. before an
+  update) a class that was in it is listed as KNOWN with both counts and
+  does not count; only new classes are UNKNOWN. `--internet` adds
+  `log-audit-allow-internet.txt`, the usual noise of a box on the Internet
+  (firewall blocks, scanners, password guessing, TLS errors of bad clients,
+  spam that Postfix rejects, DNS errors of other zones), for production
+  boxes only; the test scenarios do not use it.
 * Mails that you send to a box under test yourself (vacation triggers,
   delivery checks after a reboot) must be test mails, or the manifest
   comparison counts them as new. Send them with `smoke.py --send-test-mail
