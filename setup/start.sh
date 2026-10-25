@@ -48,6 +48,7 @@ if [ -f /etc/mailinabox.conf ]; then
 	# into variables with a DEFAULT_ prefix. Straight from the file, not
 	# through a fixed name in /tmp that another user could have created
 	# first, so that root would source that user's file (B89).
+	# shellcheck source=/dev/null # generated from /etc/mailinabox.conf
 	source <(sed s/^/DEFAULT_/ /etc/mailinabox.conf)
 else
 	FIRST_TIME_SETUP=1
