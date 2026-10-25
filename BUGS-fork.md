@@ -35,15 +35,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-80 bugs: 1 critical, 13 high, 33 medium, 33 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80 by the log audit of the certification runs of rc6.
+81 bugs: 1 critical, 13 high, 33 medium, 34 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B81 by the log audit of the certification runs of rc6.
 
 | Origin | Count |
 |---|---|
 | Upstream | 21 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 18 |
+| 26.04 change | 19 |
 | Fork | 12 |
 
 22 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80). They are candidates for
@@ -133,6 +133,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B78](#b78) | low | Postfix | After a Postfix restart at the wrong moment, every start of Postfix delays the first SMTP greetings by 100 seconds | Upstream | yes | yes | rc6 |
 | [B79](#b79) | low | Setup | setup stops with "Could not get lock" when apt-daily or unattended-upgrades runs at the same time | Upstream | yes | yes | rc6 |
 | [B80](#b80) | medium | Munin | Munin never sends its alerts: no contact is defined, and there is no "mail" command | Upstream | yes | yes | rc6 |
+| [B81](#b81) | low | Spam | spampd cannot remove its PID file when it stops, a stale one stays in /run | 26.04 change | no | yes | rc6 |
 
 ## Details
 
@@ -1065,6 +1066,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream (the same lines in v78).
 * **Evidence:** All rc6 certification boxes logged the warning every 5 minutes. On a fresh rc6 test box with the fix, a temporary warning limit of 1 % for the root file system (a drop-in in `/etc/munin/munin-conf.d/`) made munin-limits send one mail, which reached the administrator's mailbox through the administrator@ alias; a second run without a change sent none; removing the limit sent one recovery mail, and the run after it none. The warning no longer appears. `smoke.py` checks the contact (`munin-alert-contact`).
 * **Found by:** log audit; **commit:** see `git log --grep B80`; **fixed in:** v78-r2604.0-rc6
+
+### B81
+
+**spampd cannot remove its PID file when it stops, a stale one stays in /run** (low, Spam)
+
+* **Symptom:** Each stop or restart of spampd logs `Couldn't unlink "/run/spampd.pid" [Permission denied]`, and `/run/spampd.pid` stays with the old process ID. Should a later process get that ID, Net::Server would refuse to start spampd.
+* **Cause:** The 26.04 package runs spampd 2.62 with `/etc/spampd.cfg` (`pid /run/spampd.pid`, `user spampd`). Net::Server writes the PID file as root and removes it at the stop, when it runs as user spampd, which cannot delete files in `/run`.
+* **Fix:** setup/spamassassin.sh sets `pid /run/spampd/spampd.pid` and adds a systemd drop-in, `/etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf`, that creates `/run/spampd` for user spampd and removes a stale PID file before each start (`RuntimeDirectory=` does not work here: systemd gives that directory to root, the unit's user, at the start). The old `/run/spampd.pid` is removed before setup restarts spampd, so the restart of the update is quiet as well. The in-place tool does not count the drop-in as a local extension.
+* **Affects:** v78 no (spampd 2.53 of 22.04), PR #2603 yes. Origin: 26.04 change.
+* **Evidence:** rc6 certification runs: the message at every stop on the fresh, migrated, updated and upgraded boxes. With the fix on a test box, `/run/spampd/spampd.pid` belongs to spampd and is replaced at each restart, and restarts log nothing.
+* **Found by:** log audit; **commit:** see `git log --grep B81`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

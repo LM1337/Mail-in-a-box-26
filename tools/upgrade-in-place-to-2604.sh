@@ -1700,8 +1700,11 @@ detect_extensions() {
 		/etc/systemd/system/dovecot.socket.d /etc/systemd/system/php*-fpm.service.d; do
 		[ -d "$d" ] || continue
 		for f in "$d"/*; do
-			# Written by setup/mail-postfix.sh of this fork.
-			if [ "$f" = /etc/systemd/system/postfix.service.d/mailinabox-stale-db.conf ]; then continue; fi
+			# Written by setup/mail-postfix.sh and setup/spamassassin.sh of this fork.
+			case "$f" in
+				/etc/systemd/system/postfix.service.d/mailinabox-stale-db.conf) continue ;;
+				/etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf) continue ;;
+			esac
 			if [ -e "$f" ]; then EXT_BLOCK+=("$f (systemd drop-in)"); fi
 		done
 	done

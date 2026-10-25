@@ -24,6 +24,9 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   (there is no `mail` command). Only a change of state (ok, warning,
   critical, unknown) is mailed, one mail per run: `always_send`, which
   repeated a warning every 5 minutes, is gone (B80).
+* Spam: spampd keeps its PID file in `/run/spampd/`, which belongs to it,
+  so it can remove the file when it stops; before, each stop logged
+  "Couldn't unlink /run/spampd.pid" and left the file behind (B81).
 
 ### Changed
 

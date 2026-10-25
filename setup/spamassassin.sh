@@ -77,7 +77,28 @@ else
 	sed -i '1i maxsize 2000\nno-local-only' /etc/spampd.cfg
 fi
 tools/editconf.py /etc/spampd.cfg -s \
-	relayport=10026
+	relayport=10026 \
+	pid=/run/spampd/spampd.pid
+
+# spampd writes its PID file as root and removes it when it stops, but by then
+# it runs as user spampd and cannot delete files in /run ("Couldn't unlink
+# /run/spampd.pid [Permission denied]"), so a stale PID file stayed behind
+# (B81). Keep the PID file in a directory that belongs to spampd, and remove
+# a stale one before each start. (RuntimeDirectory= cannot be used: systemd
+# gives that directory to the unit's user, root, at the start of spampd.)
+SPAMPD_DROPIN=/etc/systemd/system/spampd.service.d/mailinabox-pidfile.conf
+SPAMPD_DROPIN_TEXT="[Service]
+ExecStartPre=/usr/bin/install -d -o spampd -g spampd -m 0755 /run/spampd
+ExecStartPre=/usr/bin/rm -f /run/spampd/spampd.pid
+PIDFile=/run/spampd/spampd.pid"
+if [ "$(cat "$SPAMPD_DROPIN" 2> /dev/null)" != "$SPAMPD_DROPIN_TEXT" ]; then
+	mkdir -p "$(dirname "$SPAMPD_DROPIN")"
+	echo "$SPAMPD_DROPIN_TEXT" > "$SPAMPD_DROPIN"
+	systemctl daemon-reload
+fi
+# A spampd started with the old location stops quietly at the restart below
+# when its PID file is gone (it only removes a file that exists).
+rm -f /run/spampd.pid
 
 # Spamassassin normally wraps spam as an attachment inside a fresh
 # email with a report about the message. This also protects the user
