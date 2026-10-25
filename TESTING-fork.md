@@ -179,10 +179,12 @@ fix (`--redo-from verify`). The release commit changes only the release tag
 in the scripts and the documentation. T4 ran the published tool from GitHub,
 which checked out the tag `v78-r2604.0-rc5` itself.
 
-#### Findings of rc5 T4 (open)
+#### Findings of rc5 T4
 
 The T4 run passed, but it showed things an operator upgrading from 22.04
-will run into:
+will run into. rc6 fixes 1 (B70), 4 (B71) and 5 (B72); for 2 and 3 the tool
+now says before each release upgrade what to expect, and README-fork.md
+describes it. 6 is not changed.
 
 1. **False warning about `ssh.service`.** Phase verify prints "Enabled before
    the upgrade, disabled now (they do not start after a reboot):

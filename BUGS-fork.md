@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3, B68 in rc4.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -28,14 +28,14 @@ reproduced on a box, the evidence line says so.
   * *audit*: five code auditors, each finding confirmed by a verifier.
   * *late review*: a review before rc2.
   * *test run*: the T1/T2 smoke tests on VMs.
-  * *in-place test*: T3, the in-place upgrade of a copy of a production box.
+  * *in-place test*: T3, the in-place upgrade of a copy of a production box, and T4, the in-place upgrade of the 22.04 test box.
   * *production upgrade*: the in-place upgrade of a production box with rc3.
   * *update test*: the update of a copy of that production box from rc3 to rc4, and the fresh rc4 test box.
 
 ## Summary
 
-69 bugs: 1 critical, 13 high, 32 medium, 23 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4.
+72 bugs: 1 critical, 13 high, 32 medium, 26 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 27 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
-| Fork | 6 |
+| Fork | 9 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
