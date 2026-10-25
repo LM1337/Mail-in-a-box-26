@@ -200,6 +200,7 @@ def mail_users_add():
 def get_mail_users_quota():
 	email = request.values.get('email', '')
 	quota = get_mail_quota(email, env)
+	if isinstance(quota, tuple): return quota # error, e.g. not a user (B88)
 
 	if request.values.get('text'):
 		return quota
@@ -213,7 +214,7 @@ def get_mail_users_quota():
 @authorized_personnel_only
 def mail_users_quota():
 	try:
-		return set_mail_quota(request.form.get('email', ''), request.form.get('quota'), env)
+		return set_mail_quota(request.form.get('email', ''), request.form.get('quota', ''), env)
 	except ValueError as e:
 		return (str(e), 400)
 
