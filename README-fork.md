@@ -146,6 +146,13 @@ Right after the update:
 * Check that the services are enabled: `systemctl is-enabled dovecot postfix`
   must say `enabled` twice. A box upgraded in place with rc3 had Dovecot
   disabled (B67); setup of later releases enables it again.
+* **Munin mails the administrator.** From rc6 on, Munin's alerts work:
+  each change of state of a watched value (warning, critical, back to ok)
+  is mailed to administrator@ of the box's name. Make sure that address
+  reaches someone.
+* **fail2ban after the log rotation.** From rc6 on, `systemctl is-active
+  mailinabox-dovecot-log-reopen.path` must say `active`: it keeps fail2ban's
+  Dovecot jails working after the weekly rotation of `mail.log` (B85).
 
 ### Deutsch
 
@@ -207,6 +214,14 @@ Gleich nach dem Update:
   postfix` muss zweimal `enabled` sagen. Auf einer mit rc3 an Ort und Stelle
   aktualisierten Box war Dovecot ausgeschaltet (B67); setup späterer
   Releases schaltet es wieder ein.
+* **Munin schreibt dem Administrator.** Ab rc6 funktionieren die Warnungen
+  von Munin: Jeder Zustandswechsel eines überwachten Werts (Warnung,
+  kritisch, wieder in Ordnung) geht per Mail an administrator@ des
+  Box-Namens. Sicherstellen, dass diese Adresse jemanden erreicht.
+* **fail2ban nach der Log-Rotation.** Ab rc6 muss `systemctl is-active
+  mailinabox-dovecot-log-reopen.path` `active` sagen: Die Unit hält die
+  Dovecot-Jails von fail2ban nach der wöchentlichen Rotation von `mail.log`
+  funktionsfähig (B85).
 
 
 Setup output / Ausgaben von setup

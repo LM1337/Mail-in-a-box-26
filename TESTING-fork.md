@@ -115,7 +115,9 @@ report. The groups:
   (`--peer-ssh`), never the jump host.
 
 The number of checks grew from release to release (49 in the first runs, 73
-in the rc5 in-place runs), and it depends on the mode and on `--fail2ban`.
+in the rc5 in-place runs, 75 in the final rc6 update run with
+`munin-alert-contact` and `fail2ban-log-rotation`), and it depends on the
+mode and on `--fail2ban`.
 The counts below are not comparable between releases.
 
 Checked by hand in the in-place and update runs, not by the smoke test:
@@ -136,7 +138,12 @@ the in-place tool reports it.
 | rc3 | 2026-10-23 | not run | not run | 53/55 (T3b) | 55/55 | – |
 | rc4 | 2026-10-24 | 60/60 | not run | 56/58 (T3c, pre-merge branch) | 58/58 (T4b, pre-merge branch) | 68/71, from the published tag 69/71 |
 | rc5 | 2026-10-24 | 62/62 | not run | 67/73 | 67/73 (from the published tag) | 67/73 (T5b, from rc3) |
-| rc6 | 2026-10-25 | 62/62 | 73/73 | 73/73 (first run 71/73) | 73/73 | 73/73 (T5b, from rc3; first run 71/73) |
+| rc6 | 2026-10-25 | 62/62 ¹ | 73/73 ¹ | 73/73 ¹ | 73/73 ¹ | 75/75 (T5b, from rc3, on the release head `47d91e8`) |
+
+¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
+not repeated on the release head (see "rc6 certification" below). The
+earlier rc6 development runs had the same counts (T3 and T5b after a first
+run of 71/73).
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -257,6 +264,93 @@ steps on a box that comes through a release upgrade. T2 ran before B79,
 whose code path T1 and the T5b runs cover. The release commit changes only
 the release tag in the scripts and the documentation.
 
+#### rc6 certification
+
+After the release commit `9858546` came `tests/fork/log-audit.sh`
+(`33f056b`) and with it the certification runs: every scenario again, each
+followed by a log audit of the box under test. The runs of the first round
+shared one hypervisor (T1, T2, T4 and T5b started within two minutes, T3
+25 minutes later), so the disk was busy; that is where the longer SSH and
+sudo times below come from.
+
+| Run | Commit | Result |
+|---|---|---|
+| T1 (fresh 26.04) | `33f056b` | install exit 0 in 2085 s; two reboots, SSH back after 21 and 19 s; smoke 62/62 after each reboot |
+| T2 (22.04 → fresh 26.04) | `33f056b` | "All checks passed"; setup on the new machine 2451 s; reboot, SSH back after 22 s; smoke 73/73 (and 21/21 for the logins and the migrated data right after the reboot) |
+| T3 (24.04 copy, in place) | `33f056b` | "All checks passed"; mail offline 1 h 19 min, 1 reboot; new SSH logins failed for about 14 minutes, `/usr/bin/sudo` was missing for about 26 minutes; a reboot after the run, SSH back after 21 s; smoke 73/73 |
+| T4 (22.04 → 24.04 → 26.04, in place) | `33f056b` | "All checks passed"; mail offline 2 h 04 min, 2 reboots; new SSH logins failed for about 36 minutes (22.04 → 24.04) and about 10 minutes (24.04 → 26.04), `/usr/bin/sudo` was missing for about 19 minutes; a reboot after the run, SSH back after 20 s; smoke 73/73 (and 7/7 for the logins and enabled services right after the reboot) |
+| T5b (rc3 → rc6) | `33f056b` | two update runs, exit 0 in 144 s and 109 s; reboot, SSH back after 21 s; smoke 73/73 |
+
+The log audit of every one of these runs had classes that were not on the
+allowlist of `33f056b`. Each class was checked: the defects became B80
+(Munin sent no alerts), B81 (spampd's PID file), B82 (cron during setup),
+B83 (nsd not restarted) and B84 (the tools' tmux scope); the harmless ones
+went into `tests/fork/log-audit-allow.txt` with their reason (`e6634bf`,
+`c7fd0bb`).
+
+The fixes were then tested on the update path T5b, the path of the boxes
+that already run the fork, from the same snapshot (the 24.04 copy upgraded
+in place with rc3) with the fresh 26.04 test box as peer:
+
+| Run | Commit | Result |
+|---|---|---|
+| T5b | `12b4dc2` | two update runs, exit 0 in 133 s and 107 s; smoke 74/74 (with the new `munin-alert-contact`) |
+| T5b | `c7fd0bb` | two update runs, exit 0 in 141 s and 105 s; smoke 71/74: `fail2ban-imap`, `-pop3` and `-managesieve` failed ("no ban after 26 failed logins"). logrotate.timer had rotated `mail.log` during the smoke test, and Dovecot wrote into `mail.log.1`: this is B85 |
+| T5b, final | `9152190`, then `47d91e8` | update run 1 to `9152190`: exit 0 in 116 s; reboot, SSH back after 24 s; smoke 74/75. The one FAIL was the new check `fail2ban-log-rotation`, which did not parse its own output ("unexpected output: dovecot=/var/log/mail.log rsyslog=1 owner=syslog:adm 640", that is, Dovecot and rsyslog did write the new file); `47d91e8` fixes the regex in `smoke.py` and changes nothing else. Update run 2 (`9152190`, 88 s), reboot (SSH back after 25 s), update run 3 to `47d91e8` (103 s). Smoke 75/75, with `fail2ban-log-rotation` (a forced rotation, then the bans on IMAP, POP3 and ManageSieve against the rotated log). Runs 2 and 3 changed in `/etc` and the web apps only what upstream changes on every run: the minute of the nightly job, the order of the OpenDKIM `KeyTable` and `SigningTable`, Roundcube's `des_key`, and the time stamps of the favicon files (same content). Log audit since the start of run 1: 0 UNKNOWN, 59 allowed classes; one class needed a new rule in the lab's own list, `(sd-pam)` "pam_systemd(systemd-user:session): Varlink call io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession" at the reboot, which moves into the repository's allowlist with rc7 |
+
+B85 was also checked by hand on that box. Without the fix (`c7fd0bb`): a
+forced rotation, then 26 failed IMAP logins from the peer; all 26 lines
+went into `mail.log.1` and the `dovecot` jail found none. With the final
+form of the fix, installed by hand: two forced rotations within a minute;
+each time the new `mail.log` was created by rsyslog (syslog:adm 0640), got
+all 26 login lines and rsyslog's lines, and the jails `dovecot` and
+`miab-slow-dovecot` banned the peer. With a symlink in place of `mail.log`,
+the helper exited 1 with its warning and did not reopen Dovecot's log. A
+first version of the fix (`594cec9`), whose helper created and chowned the
+file as root in `/var/log`, was replaced by `9152190` before the release;
+its T5b run was stopped and is not counted.
+
+Targeted check of B84 on the 26.04 test box at `47d91e8` (systemd 259):
+both tools pass `bash -n`; the scope lines taken from the tools start a
+scope whose description and transient file carry the new text, and a
+daemon-reload logs no "Missing '='" or "Unknown key". The resume script,
+generated by the in-place tool with a state directory, `TAG` and `SOURCE`
+that contain spaces, quotes and `$`, started the tool with unchanged path,
+arguments and environment in all three forms (tmux, `exec` in a scope,
+plain `exec`), and the scope had the description "Mail-in-a-Box upgrade to
+Ubuntu 26.04 (resumed after a reboot)". As a control, the `exec` line of
+`33f056b` with the new description failed with a syntax error.
+`upgrade-in-place-to-2604.sh --check` exited 0. Limits: systemd 259 does not
+log the messages even for the old scope line, so the 22.04 case (systemd
+249) is covered only by the T4 run on `33f056b`, which showed the messages,
+not by a run with the fix; `migrate-to-2604.sh --check` got only as far as
+the SSH login to the old box.
+
+**Not repeated on the release head.** At the maintainer's decision, T1 to
+T4 were not run again on `47d91e8`: rc7 is already in progress, and the
+full matrix (T1 to T5b, and T6 on the Internet before a final release)
+runs again for it. Further runs of T1, T2 and T4 on intermediate commits
+(`12b4dc2`, `c7fd0bb`) were stopped early and are not counted. What changed after `33f056b`, by path:
+
+* **Setup** (used by T1, T2 and T5b, and by the setup phase of T3 and
+  T4): B80 (`setup/munin.sh`, `management/munin_notify.sh`), B81
+  (`setup/spamassassin.sh`), B82 (`setup/start.sh`), B83 (`setup/dns.sh`),
+  B85 (`setup/mail-dovecot.sh`, `management/dovecot_log_reopen.sh`, the
+  path and service units, a comment in `conf/fail2ban/jails.conf`). Run on
+  the release head by T5b only; not on a fresh install, a migration or a
+  box that comes through a release upgrade.
+* **`tools/migrate-to-2604.sh`** (T2): the scope description of B84 and a
+  comment about cron. Covered by the targeted B84 check, not by a T2 run.
+* **`tools/upgrade-in-place-to-2604.sh`** (T3, T4): the scope and the
+  resume scope descriptions and `printf %q` in the resume script (B84);
+  `detect_extensions` leaves out the fork's spampd drop-in; the texts with
+  the SSH, sudo and release upgrade times. Covered by the targeted B84
+  check and `--check`, not by a T3 or T4 run.
+* **Tests and documentation only:** `tests/fork/log-audit.sh` and its
+  allowlists, `smoke.py` (`munin-alert-contact`, `fail2ban-log-rotation`,
+  `services-enabled` on SysV services), `prepare-testenv.sh`, README-fork.md,
+  TESTING-fork.md, BUGS-fork.md, CHANGELOG-fork.md.
+
 #### Open findings of rc6
 
 Not fixed in rc6:
@@ -264,8 +358,11 @@ Not fixed in rc6:
 1. The `--check` plan of `tools/upgrade-in-place-to-2604.sh` does not say
    that new SSH logins and sudo fail for a while; the tool says it only
    during the run, and the docs describe it.
-2. The durations in that note come from test runs: the tool says about 7
-   minutes for SSH and 12 for sudo, T3 measured about 8.5 and 15.
+2. The durations in that note come from test runs, and they vary with the
+   load of the disk: the tool now says 20 to 40 and 10 to 15 minutes for
+   SSH and 12 to 25 minutes for sudo; the certification runs measured up to
+   36 and 14 minutes for SSH and 26 minutes for sudo (see below). rc7 is to
+   shorten the SSH outage or announce its end in the run.
 3. `migrate-to-2604.sh --check` proposes a start command with `--from` and
    `--skip-network-checks`, but without the other options given (such as
    `--public-ip`). This was so before rc6.

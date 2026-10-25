@@ -11,52 +11,33 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-Fixes from the log audit and the smoke tests of the certification runs of
-rc6; they go into v78-r2604.0-rc6 before it is tagged. Munin sends its
-alerts (B80), and fail2ban's Dovecot jails no longer go blind after the
-weekly rotation of mail.log (B85).
+## v78-r2604.0-rc6 (2026-10-25)
 
-### Fixed
+Fixes from the in-place test from 22.04 of rc5, from the test runs of rc6
+and from the log audit and smoke tests of its certification runs. Security:
+after the weekly rotation of `mail.log` the fail2ban jails for IMAP, POP3
+and ManageSieve banned nobody until Dovecot restarted; Dovecot now follows
+the rotation. Munin's alerts reach the administrator for the first time.
+The tools show their run in the terminal, also through `curl | sudo bash`,
+and say that SSH logins, sudo and `tmux attach` fail for a while in the
+release upgrades. Setup waits for the apt lock of Ubuntu's daily jobs,
+pauses cron while it runs, restarts nsd when its configuration changed,
+and no longer grows `10-ssl.conf`; logrotate works again on boxes upgraded
+in place, Postfix no longer delays its greeting after an unlucky restart,
+and spampd leaves no stale PID file. Roundcube and Nextcloud show the
+fork's favicon. New test tool: `tests/fork/log-audit.sh`.
 
-* Munin: alerts reach the administrator. munin.conf defines the contact
-  before the host tree (after the `[host]` line munin-limits did not find
-  it and logged "Missing configuration options for contact admin" every 5
-  minutes), and its command `/usr/local/lib/mailinabox/munin-notify` sends
-  the alert with `/usr/sbin/sendmail` to administrator@PRIMARY_HOSTNAME
-  (there is no `mail` command). Only a change of state (ok, warning,
-  critical, unknown) is mailed, one mail per run: `always_send`, which
-  repeated a warning every 5 minutes, is gone. Munin no longer graphs the
-  veth interfaces of containers (Docker), whose names change at each start
-  of the container and whose old plugins would report "unknown" (B80).
-* Spam: systemd removes spampd's PID file after each stop; spampd itself
-  cannot (it logs "Couldn't unlink /run/spampd.pid"), and the stale file
-  stayed behind. The PID file stays in the root-owned `/run`: an earlier
-  version of this fix on the branch, which moved it into a directory owned
-  by spampd, would have let a compromised spampd take over root's write of
-  the file, and setup undoes it on boxes that ran it (B81).
-* Setup: cron is stopped while setup runs and started again at its end,
-  also when setup fails. Cron jobs no longer run against half-configured
-  services, and their mail to root no longer bounces on a new box before
-  setup has written the root@ alias (B82).
-* DNS: setup restarts nsd when it changed nsd.conf, so that a new address
-  of the box and the logging to syslog take effect without a reboot (B83).
-* Tools: the tmux scope of both tools has a description; on 22.04 systemd
-  complained about the old one at every daemon-reload (B84).
-* Dovecot: after a rotation of `/var/log/mail.log` Dovecot writes the new
-  file at once. It wrote into `mail.log.1` until its next restart (usually
-  the nightly backup), and in that time the fail2ban jails `dovecot` and
-  `miab-slow-dovecot` banned nobody. A path unit
-  (`mailinabox-dovecot-log-reopen.path`) has Dovecot reopen its log after
-  each rotation, once rsyslog has created the new file (B85).
+### New
 
-### Changed
-
-* Tools: the notes of `tools/upgrade-in-place-to-2604.sh` before each
-  release upgrade give the times of all test runs: new SSH logins fail for
-  20 to 40 minutes from 22.04 to 24.04 and 10 to 15 minutes from 24.04 to
-  26.04, and `sudo` is missing for 12 to 25 minutes; the longer times on a
-  busy disk. A release upgrade takes 20 to 90 minutes. README-fork.md gives
-  the measured times.
+* Roundcube and Nextcloud show the fork's favicon (`branding/favicon.ico`).
+  Roundcube: setup sets `skin_logo` (`elastic:[favicon]`) and puts the file
+  into Roundcube's directory; a replaced `favicon.ico` of the Elastic skin
+  and other skins are left alone. Nextcloud: setup sets only the favicon of
+  the theming app (name, logo, colours and background stay); a favicon that
+  an administrator uploaded under Administration > Theming is kept, and
+  setup only replaces the one it set itself. `FAVICON=off` in
+  `/etc/mailinabox.conf` turns both off and removes the fork's favicon from
+  Nextcloud again. See README-fork.md, "Favicons".
 * Tests: `tests/fork/log-audit.sh` (as root on the box, read-only) collects
   the warnings and errors since a point in time (`--since`, default the last
   boot) from the journal, `systemctl --failed` and the logs of the services
@@ -70,58 +51,9 @@ weekly rotation of mail.log (B85).
   (`[in-place:release_2604]`), so that the allowlist accepts the noise of
   the old releases and the release upgrades only there.
   `tests/fork/log-audit-allow-old-box.txt` adds what the old box logs when
-  the migration tool stops it. TESTING-fork.md describes it.
-* Tests: `tests/fork/smoke.py --fail2ban` rotates `mail.log` once before
-  the attacks (`fail2ban-log-rotation`) and checks that Dovecot and rsyslog
-  write the new file, so a jail that a rotation made blind fails (B85).
-* Tests: `tests/fork/smoke.py` checks Munin's alert contact
-  (`munin-alert-contact`), and `services-enabled` no longer reports a SysV
-  service of 22.04 (postgrey) as not enabled. `prepare-testenv.sh` writes
-  its SpamAssassin file with mode 644 also under a umask of 077 (the IMAP
-  processes could not read it).
-
-### Upgrade note
-
-* Setup installs and starts `mailinabox-dovecot-log-reopen.path` (B85) and
-  restarts Dovecot, which then writes the current `mail.log`. Nothing to do
-  by hand. On a box whose `mail.log` was rotated since Dovecot's last
-  restart, the Dovecot lines of that time are in `mail.log.1`.
-* After the update Munin mails the next change of state. A value that is
-  in warning or critical already is not mailed until its state changes;
-  `/var/lib/munin/limits` lists the states. The mails come from and go to
-  administrator@PRIMARY_HOSTNAME.
-
-### Planned for rc7
-
-* An admin panel setting for Munin's alerts: to administrator@PRIMARY_HOSTNAME
-  (the default), to another address, or off; warning and critical or only
-  critical; a button that sends a test mail.
-
-## v78-r2604.0-rc6 (2026-10-25)
-
-Fixes from the in-place test from 22.04 of rc5 and from the test runs of
-rc6: the tools show their run in the terminal, also through `curl | sudo
-bash` (B71), phase verify no longer warns about `ssh.service` (B70), the
-last tmux window closes by itself (B72), and the tool says that SSH logins,
-sudo and `tmux attach` fail for a while in the release upgrades (B73).
-Setup no longer stops on the apt lock of Ubuntu's daily jobs (B79), no
-longer grows `10-ssl.conf` (B74), fixes logrotate on boxes upgraded in
-place (B75), and Postfix no longer delays its greeting after an unlucky
-restart (B78); two fixes for the checks of `migrate-to-2604.sh` (B76, B77).
-Roundcube and Nextcloud show the fork's favicon, and the smoke test ignores
-marked test mails.
-
-### New
-
-* Roundcube and Nextcloud show the fork's favicon (`branding/favicon.ico`).
-  Roundcube: setup sets `skin_logo` (`elastic:[favicon]`) and puts the file
-  into Roundcube's directory; a replaced `favicon.ico` of the Elastic skin
-  and other skins are left alone. Nextcloud: setup sets only the favicon of
-  the theming app (name, logo, colours and background stay); a favicon that
-  an administrator uploaded under Administration > Theming is kept, and
-  setup only replaces the one it set itself. `FAVICON=off` in
-  `/etc/mailinabox.conf` turns both off and removes the fork's favicon from
-  Nextcloud again. See README-fork.md, "Favicons".
+  the migration tool stops it. The allowlist holds every class of the rc6
+  certification runs that was checked as harmless, with its reason; the
+  defects it found are B80 to B84. TESTING-fork.md describes it.
 
 ### Fixed
 
@@ -173,18 +105,69 @@ marked test mails.
   or unattended-upgrades runs at the same time (for example some minutes
   after a boot). It waits up to 10 minutes for the dpkg and apt locks
   before each apt-get call (B79).
+* Munin: alerts reach the administrator. munin.conf defines the contact
+  before the host tree (after the `[host]` line munin-limits did not find
+  it and logged "Missing configuration options for contact admin" every 5
+  minutes), and its command `/usr/local/lib/mailinabox/munin-notify`
+  (from `management/munin_notify.sh`) sends the alert with
+  `/usr/sbin/sendmail` to administrator@PRIMARY_HOSTNAME (there is no
+  `mail` command). Only a change of state (ok, warning, critical, unknown)
+  is mailed, one mail per run: `always_send`, which would have repeated a
+  warning every 5 minutes, is gone. Munin no longer graphs the veth
+  interfaces of containers (Docker), whose names change at each start of
+  the container and whose old plugins would report "unknown" for ever
+  (B80).
+* Spam: systemd removes spampd's PID file after each stop, as root
+  (drop-in `/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf`
+  with `ExecStopPost`); spampd itself cannot (it logs "Couldn't unlink
+  /run/spampd.pid"), and the stale file stayed behind. The PID file stays
+  in the root-owned `/run`. A first version of this fix, replaced before
+  the release, moved it into a directory owned by spampd, which would have
+  let a compromised spampd redirect root's write of the file with a
+  symlink; setup removes that version's drop-in and `/run/spampd` from
+  boxes that ran it (B81).
+* Setup: cron is stopped while setup runs and started again at its end,
+  also when setup fails. Cron jobs no longer run against half-configured
+  services, and their mail to root no longer bounces on a new box before
+  setup has written the root@ alias. A cron that the tools stopped stays
+  stopped (B82).
+* DNS: setup restarts nsd when it changed nsd.conf, so that a new address
+  of the box and the logging to syslog take effect without a reboot (B83).
+* Tools: the tmux scopes of both tools, and the scope in which the in-place
+  tool continues after a reboot, have a description; on 22.04 systemd
+  complained about the old one (the multi-line command) at every
+  daemon-reload. The resume script quotes the scope command with
+  `printf %q`, so the description with its spaces reaches systemd-run as
+  one argument (B84).
+* Dovecot: after a rotation of `/var/log/mail.log` Dovecot writes the new
+  file. It wrote into `mail.log.1` until its next restart (usually the
+  nightly backup), and in that time the fail2ban jails `dovecot` and
+  `miab-slow-dovecot` banned nobody: password guessing on IMAP, POP3 and
+  ManageSieve went unpunished. The path unit
+  `mailinabox-dovecot-log-reopen.path` watches `mail.log.1` and starts
+  `/usr/local/lib/mailinabox/dovecot-log-reopen` (from
+  `management/dovecot_log_reopen.sh`): it logs one line so that rsyslog
+  creates the new `mail.log` itself, and runs `doveadm log reopen` only if
+  that file is a regular file of rsyslog's user (`$FileOwner`), not a
+  symlink and with one link; otherwise it logs a warning and fails, which
+  shows in `systemctl --failed`. It does no file operation of its own in
+  `/var/log`. A first version, replaced before the release, created and
+  chowned the file as root in `/var/log`, which a symlink could have
+  redirected. Upstream bug since 2016 (B85).
 
 ### Changed
 
 * Tools: before each release upgrade `tools/upgrade-in-place-to-2604.sh`
-  says that new SSH logins fail for a while (in the 22.04 test run about 19
-  minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to 26.04) and,
-  from 24.04 to 26.04, that `sudo` is missing for a while because sudo-rs
-  replaces it: attach before and keep the connection open; if a login fails,
-  wait, do not reboot. It also says so before a reboot after which a release
-  upgrade starts by itself, and in the motd while one is to come.
-  README-fork.md ("Logging in during the release upgrades") and README.md
-  describe it.
+  says that new SSH logins fail for a while and, from 24.04 to 26.04, that
+  `sudo` is missing for a while because sudo-rs replaces it: attach before
+  and keep the connection open; if a login fails, wait, do not reboot. It
+  also says so before a reboot after which a release upgrade starts by
+  itself, and in the motd while one is to come. It gives the times of all
+  test runs: new SSH logins fail for 20 to 40 minutes from 22.04 to 24.04
+  and 10 to 15 minutes from 24.04 to 26.04, `sudo` is missing for 12 to 25
+  minutes, the longer times on a busy disk; a release upgrade takes 20 to
+  90 minutes. README-fork.md ("Logging in during the release upgrades")
+  gives the measured times, README.md describes it.
 * Tests: `tests/fork/smoke.py` marks every mail it sends with the header
   `X-Miab-Test: 1`. The manifest comparison (`mig-folders-<user>`,
   `mig-pop3-uidl-<user>`) ignores marked mails and the automatic replies
@@ -195,6 +178,14 @@ marked test mails.
   for the testers' own checks. `seed-legacy.sh` leaves the same mails out of
   the manifest. Manifests of earlier `seed-legacy.sh` runs still work.
   TESTING-fork.md describes it.
+* Tests: `tests/fork/smoke.py --fail2ban` rotates `mail.log` once before
+  the attacks (`fail2ban-log-rotation`) and checks that Dovecot and rsyslog
+  write the new file, so a jail that a rotation made blind fails (B85).
+* Tests: `tests/fork/smoke.py` checks Munin's alert contact
+  (`munin-alert-contact`), and `services-enabled` no longer reports a SysV
+  service of 22.04 (postgrey) as not enabled. `prepare-testenv.sh` writes
+  its SpamAssassin file with mode 644 also under a umask of 077 (the IMAP
+  processes could not read it).
 
 ### Upgrade note
 
@@ -204,6 +195,27 @@ marked test mails.
   and
   `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`.
   The first one is needed for rc1 to rc3 and changes nothing on rc4 and rc5.
+* Munin mails administrator@PRIMARY_HOSTNAME (from and to that address) on
+  each change of state of a watched value: one mail when a value reaches
+  warning or critical, one when it is back to ok. A value that is in
+  warning or critical already is not mailed until its state changes;
+  `/var/lib/munin/limits` lists the states. Make sure that address reaches
+  someone (it is an alias of the first administrator by default). A
+  setting to change the address or turn the alerts off is planned for rc7.
+* Setup installs and starts `mailinabox-dovecot-log-reopen.path` (B85) and
+  restarts Dovecot, which then writes the current `mail.log`. Nothing to do
+  by hand. On a box whose `mail.log` was rotated since Dovecot's last
+  restart, the Dovecot lines of that time are in `mail.log.1`. Check after
+  the update: `systemctl is-active mailinabox-dovecot-log-reopen.path` says
+  `active`; after the next rotation `systemctl --failed` lists nothing.
+* Setup adds the systemd drop-in
+  `/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf` (B81)
+  and sets `pid /run/spampd.pid` in `/etc/spampd.cfg`. The in-place tool
+  does not count this drop-in (nor Postfix's `mailinabox-stale-db.conf`)
+  as a local extension.
+* Cron is paused while setup runs (B82): cron jobs that would fall into
+  the minutes of an update run are skipped, not run later. The nightly job
+  between 01:00 and 01:59 is not affected unless you update at that time.
 * After the update Roundcube and Nextcloud show the fork's favicon. A
   favicon that an administrator uploaded in Nextcloud and a replaced
   favicon of Roundcube's Elastic skin are kept. To keep the old favicons,
@@ -219,6 +231,25 @@ marked test mails.
   README-fork.md ("In-place upgrade to 26.04") first: attach to the run
   before each release upgrade and keep the connection; if a new login
   fails, wait, do not reboot.
+
+### Planned for rc7
+
+* An admin panel setting for Munin's alerts: to administrator@PRIMARY_HOSTNAME
+  (the default), to another address, or off; warning and critical or only
+  critical; a button that sends a test mail.
+* A shorter SSH outage during the release upgrades, or at least a live
+  note: for example a fallback sshd on another port while the SSH server is
+  replaced (as do-release-upgrade offers when it runs interactively), and a
+  message in the run when SSH logins work again.
+* A deterministic order of the OpenDKIM tables (`KeyTable`,
+  `SigningTable`), so that a setup run without changes leaves them alone.
+* A rule in `tests/fork/log-audit-allow.txt` for `(sd-pam)`'s
+  "pam_systemd(systemd-user:session): Varlink call
+  io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession"
+  at a reboot, seen in the final rc6 run.
+* The full test matrix T1 to T5b again on the release head, and T6 (on the
+  Internet: Let's Encrypt, delivery to other providers) before a final
+  release.
 
 ## v78-r2604.0-rc5 (2026-10-24)
 
