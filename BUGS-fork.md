@@ -35,8 +35,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-84 bugs: 1 critical, 13 high, 33 medium, 37 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6.
+85 bugs: 1 critical, 13 high, 34 medium, 37 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b.
 
 | Origin | Count |
 |---|---|
@@ -46,7 +46,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | 26.04 change | 19 |
 | Fork | 13 |
 
-24 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83). They are candidates for
+25 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -137,6 +137,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B82](#b82) | low | Setup | Cron jobs run while setup runs; their mail to root bounces before the root alias exists | Upstream | yes | yes | rc6 |
 | [B83](#b83) | low | DNS | nsd keeps its old listen addresses and logging after setup changed nsd.conf | Upstream | yes | yes | rc6 |
 | [B84](#b84) | low | Tools | On 22.04 systemd complains about the tools' tmux scope at every daemon-reload | Fork | no | no | rc6 |
+| [B85](#b85) | medium | Dovecot | After the weekly rotation of mail.log Dovecot writes into mail.log.1, and fail2ban's Dovecot jails see no failed login | Upstream | yes | yes | rc6 |
 
 ## Details
 
@@ -1114,6 +1115,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux). The messages appear only on 22.04; `tools/migrate-to-2604.sh` runs on 26.04, where only the description was the script.
 * **Evidence:** rc6 T4 (22.04 test box): 3382 such lines from 09:32 until the reboot into 24.04, all for the scope `upgrade-2604-<PID>`.
 * **Found by:** log audit; **commit:** see `git log --grep B84`; **fixed in:** v78-r2604.0-rc6
+
+### B85
+
+**After the weekly rotation of mail.log Dovecot writes into mail.log.1, and fail2ban's Dovecot jails see no failed login** (medium, Dovecot)
+
+* **Symptom:** After logrotate has rotated `/var/log/mail.log`, Dovecot's lines (logins, failed logins, LMTP deliveries) no longer appear in `mail.log` but in `mail.log.1`, until Dovecot restarts. In that time the fail2ban jails `dovecot` and `miab-slow-dovecot` ban nobody: password guessing on IMAP, POP3 and ManageSieve goes unpunished. The mail log report (`management/mail_log.py`), the failed-login part of the admin's fail2ban report and `tests/fork/log-audit.sh` miss those lines in `mail.log` as well. In the smoke test of the rc6 certification run of T5b, 26 failed logins each on IMAP, POP3 and ManageSieve from the peer banned nobody (fail2ban-imap, -pop3, -managesieve FAIL).
+* **Cause:** Since upstream commit fac8477 (2016, "Configured Dovecot to log into its own logfile", together with `logpath = /var/log/mail.log` for the fail2ban jail) Dovecot writes `/var/log/mail.log` itself (`log_path`) and keeps the file open. logrotate rotates `mail.log` with the rsyslog entry of the rsyslog package, whose postrotate only sends rsyslog a HUP. Dovecot is not told and goes on writing into the renamed file. The nightly backup stops and starts Dovecot, which then opens the new file. If Dovecot reopened its log before rsyslog had written its first line, it would create `mail.log` as root with mode 0600, and rsyslog (user syslog) could no longer write it (seen in the test: rsyslog suspended its mail.log action).
+* **Impact:** The Dovecot jails are blind from each weekly rotation (logrotate.timer: daily at midnight with up to 1 hour random delay; `mail.log` weekly) until the next Dovecot restart, on a box usually the nightly backup (`/etc/cron.d/mailinabox-nightly`, about 01:00-02:00): about one to two hours per week. Longer when logrotate runs after the nightly job, e.g. when logrotate.timer catches up after a boot (`Persistent=true`), when no backup runs, or when the backup fails before it stops Dovecot: then up to a day or more.
+* **Fix:** `setup/mail-dovecot.sh` installs `mailinabox-dovecot-log-reopen.path`, which watches `/var/log/mail.log.1`; logrotate renames `mail.log` to it. The path unit starts `mailinabox-dovecot-log-reopen.service`, which runs `/usr/local/lib/mailinabox/dovecot-log-reopen` (from `management/dovecot_log_reopen.sh`): after 3 seconds (the rotation and the HUP of rsyslog are over), it creates the new `mail.log` if needed, gives it the owner, group and mode that rsyslog uses (`$FileOwner`, `$FileGroup`, `$FileCreateMode` of `/etc/rsyslog.conf`, by default syslog:adm 0640), runs `doveadm log reopen` and checks the owner and mode once more. This covers every rotation, by logrotate.timer or by hand. Dovecot keeps `log_path`, so the line format that the fail2ban filters, `mail_log.py`, the fail2ban report and the log audit parse stays the same. Not chosen: Dovecot logging through syslog changes that format for all of them, and its bursts (dozens of failed logins in seconds) would pass rsyslog's and journald's rate limits; an edit of `/etc/logrotate.d/rsyslog` would be undone by the rsyslog package (conffile), and a second logrotate entry for `mail.log` is an error.
+* **Affects:** v78 yes, PR #2603 yes, all versions of the fork up to rc6. Origin: Upstream (fac8477, 2016).
+* **Evidence:** rc6 T5b on 205: logrotate.timer caught up at 13:04:40 during the smoke test; from then until Dovecot restarted at 13:16:36 `mail.log.1` got 271 Dovecot lines and no rsyslog line, the new `mail.log` only rsyslog's lines; all 81 failed logins came from the peer (rip=10.20.0.11, not ignored), and `fail2ban-regex` matched them. Control by hand: `logrotate -f` of the rsyslog entry, then 26 failed IMAP logins from the peer: all 26 lines in `mail.log.1`, the `dovecot` jail found none. With the fix: the same steps, Dovecot and rsyslog write the new `mail.log` (syslog:adm 0640), and the jails ban. `tests/fork/smoke.py --fail2ban` now rotates `mail.log` once before the attacks (`fail2ban-log-rotation`), so a blind jail fails the test.
+* **Found by:** smoke test (rc6 T5b, fail2ban); **commit:** see `git log --grep B85`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

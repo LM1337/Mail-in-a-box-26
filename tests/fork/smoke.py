@@ -2337,6 +2337,52 @@ def f2b_prepare(ctx):
     return "attack source %s, ssh source %s" % (attack_src or "unknown", ssh_src)
 
 
+F2B_ROTATE_SCRIPT = r"""
+set -u
+tok=$1
+# One rotation of rsyslog's logs, as the weekly logrotate run does it (with the su line of logrotate.conf).
+su=$(grep -m1 '^su ' /etc/logrotate.conf || echo 'su root adm')
+logger -p mail.info "smoke-before-rotation-$tok"; sleep 1
+ino=$(stat -c %i /var/log/mail.log)
+conf=$(mktemp /root/smoke-rotate.XXXXXX)
+printf '%s\ninclude /etc/logrotate.d/rsyslog\n' "$su" > "$conf"
+logrotate -f "$conf"; rc=$?; rm -f "$conf"
+[ $rc = 0 ] || { echo "logrotate rc=$rc"; exit 1; }
+[ ! -e /var/log/mail.log ] || [ "$(stat -c %i /var/log/mail.log)" != "$ino" ] || { echo "mail.log was not rotated"; exit 1; }
+logger -p mail.info "smoke-rotation-$tok"
+for i in $(seq 40); do
+	w=$(for p in $(pgrep -f 'dovecot/log'); do ls -l /proc/$p/fd 2> /dev/null | grep -o '/var/log/mail\.log[^ ]*'; done | sort -u | tr '\n' ' ')
+	r=$(grep -c "smoke-rotation-$tok" /var/log/mail.log 2> /dev/null)
+	[ "$w" = "/var/log/mail.log " ] && [ "${r:-0}" -ge 1 ] && break
+	sleep 0.5
+done
+echo "dovecot=${w:-none} rsyslog=${r:-0} owner=$(stat -c '%U:%G %a' /var/log/mail.log 2> /dev/null)"
+"""
+
+
+def c_fail2ban_log_rotation(ctx):
+    # The jails read /var/log/mail.log. After a rotation of it Dovecot (log_path)
+    # must write the new file at once, and rsyslog too; otherwise the Dovecot
+    # jails see no failed login until Dovecot restarts (B85). So rotate once
+    # before the attacks: a jail that went blind after a rotation then fails.
+    if not getattr(ctx, "f2b", None):
+        raise Skip("fail2ban preparation skipped")
+    rc, out, err = ctx.remote.run("bash -c %s smoke %s" % (shlex.quote(F2B_ROTATE_SCRIPT), ctx.tok), sudo=True, timeout=120)
+    out = out.strip()
+    if rc != 0:
+        raise Fail("rotation of mail.log failed: %s %s" % (out[:200], err.strip()[:200]))
+    m = re.search(r"dovecot=(\S*) ?rsyslog=(\d+) owner=(.*)$", out)
+    if not m:
+        raise Fail("unexpected output: %s" % out[:200])
+    dov, rs, owner = m.group(1), int(m.group(2)), m.group(3)
+    if dov != "/var/log/mail.log":
+        raise Fail("20 s after a rotation Dovecot still writes %s, not the new /var/log/mail.log "
+                   "(the Dovecot jails would see no failed login, B85)" % (dov or "nothing"))
+    if rs < 1:
+        raise Fail("rsyslog did not write the new /var/log/mail.log after the rotation (owner %s)" % owner)
+    return "rotated; Dovecot and rsyslog write the new mail.log (%s)" % owner
+
+
 def c_fail2ban_adaptive_toggle(ctx):
     # Turning adaptive banning off must take effect in the running jails (a
     # plain "fail2ban-client reload" left bantime.increment on), and on again.
@@ -2647,6 +2693,7 @@ def main():
             # first protocol they can ban the source before the fast jail.
             dovecot = ["dovecot", "miab-slow-dovecot"]
             smtp = ["postfix-sasl", "miab-slow-smtp"]
+            run_check("fail2ban-log-rotation", c_fail2ban_log_rotation, ctx)
             run_check("fail2ban-imap", c_fail2ban, ctx, "imap", dovecot, 993)
             run_check("fail2ban-pop3", c_fail2ban, ctx, "pop3", dovecot, 995)
             run_check("fail2ban-managesieve", c_fail2ban, ctx, "managesieve", dovecot, 4190)

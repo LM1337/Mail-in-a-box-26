@@ -1,0 +1,9 @@
+[Unit]
+Description=Reopen Dovecot's log file after a rotation of /var/log/mail.log (Mail-in-a-Box)
+Documentation=file:///usr/local/lib/mailinabox/dovecot-log-reopen
+# Started by mailinabox-dovecot-log-reopen.path, possibly several times per rotation.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/mailinabox/dovecot-log-reopen

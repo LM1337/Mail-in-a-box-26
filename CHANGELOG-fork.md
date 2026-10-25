@@ -11,8 +11,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-Fixes from the log audit of the certification runs of rc6; they go into
-v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
+Fixes from the log audit and the smoke tests of the certification runs of
+rc6; they go into v78-r2604.0-rc6 before it is tagged. Munin sends its
+alerts (B80), and fail2ban's Dovecot jails no longer go blind after the
+weekly rotation of mail.log (B85).
 
 ### Fixed
 
@@ -40,6 +42,12 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   of the box and the logging to syslog take effect without a reboot (B83).
 * Tools: the tmux scope of both tools has a description; on 22.04 systemd
   complained about the old one at every daemon-reload (B84).
+* Dovecot: after a rotation of `/var/log/mail.log` Dovecot writes the new
+  file at once. It wrote into `mail.log.1` until its next restart (usually
+  the nightly backup), and in that time the fail2ban jails `dovecot` and
+  `miab-slow-dovecot` banned nobody. A path unit
+  (`mailinabox-dovecot-log-reopen.path`) has Dovecot reopen its log after
+  each rotation and gives the new file rsyslog's owner and mode (B85).
 
 ### Changed
 
@@ -63,6 +71,9 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   the old releases and the release upgrades only there.
   `tests/fork/log-audit-allow-old-box.txt` adds what the old box logs when
   the migration tool stops it. TESTING-fork.md describes it.
+* Tests: `tests/fork/smoke.py --fail2ban` rotates `mail.log` once before
+  the attacks (`fail2ban-log-rotation`) and checks that Dovecot and rsyslog
+  write the new file, so a jail that a rotation made blind fails (B85).
 * Tests: `tests/fork/smoke.py` checks Munin's alert contact
   (`munin-alert-contact`), and `services-enabled` no longer reports a SysV
   service of 22.04 (postgrey) as not enabled. `prepare-testenv.sh` writes
@@ -71,6 +82,10 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
 
 ### Upgrade note
 
+* Setup installs and starts `mailinabox-dovecot-log-reopen.path` (B85) and
+  restarts Dovecot, which then writes the current `mail.log`. Nothing to do
+  by hand. On a box whose `mail.log` was rotated since Dovecot's last
+  restart, the Dovecot lines of that time are in `mail.log.1`.
 * After the update Munin mails the next change of state. A value that is
   in warning or critical already is not mailed until its state changes;
   `/var/lib/munin/limits` lists the states. The mails come from and go to

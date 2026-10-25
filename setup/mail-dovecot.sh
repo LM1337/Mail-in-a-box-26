@@ -281,3 +281,17 @@ ufw_allow sieve
 
 # Restart services.
 restart_service dovecot
+
+# Dovecot writes /var/log/mail.log itself (log_path above) and keeps the file
+# open. logrotate's rsyslog entry only tells rsyslog to reopen it, so after the
+# weekly rotation Dovecot went on writing into mail.log.1 until it restarted,
+# and the fail2ban jails dovecot and miab-slow-dovecot, which read mail.log,
+# saw none of its failed logins (B85). A path unit watches for the rotation and
+# has Dovecot reopen its log, after giving the new mail.log rsyslog's owner and
+# mode (see management/dovecot_log_reopen.sh). Not an edit of
+# /etc/logrotate.d/rsyslog: that file belongs to the rsyslog package.
+mkdir -p /usr/local/lib/mailinabox
+install -o root -g root -m 0755 management/dovecot_log_reopen.sh /usr/local/lib/mailinabox/dovecot-log-reopen
+cp --remove-destination conf/mailinabox-dovecot-log-reopen.service /lib/systemd/system/mailinabox-dovecot-log-reopen.service
+install_unit mailinabox-dovecot-log-reopen.path
+hide_output systemctl restart mailinabox-dovecot-log-reopen.path

@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for the rotation of /var/log/mail.log, for Dovecot (Mail-in-a-Box)
+Documentation=file:///usr/local/lib/mailinabox/dovecot-log-reopen
+
+# logrotate renames mail.log to mail.log.1 (and the old mail.log.1 to mail.log.2).
+[Path]
+PathChanged=/var/log/mail.log.1
+Unit=mailinabox-dovecot-log-reopen.service
+
+[Install]
+WantedBy=paths.target

@@ -107,7 +107,12 @@ report. The groups:
   full-text search (IMAP SEARCH BODY and `doveadm fts lookup`, from rc3).
 * **fail2ban** (opt-in, `--fail2ban`): failed logins from the peer get it
   banned on IMAP, POP3, ManageSieve, 587 and 465, then it is unbanned; from
-  rc4 also turning adaptive banning off reaches the running jails.
+  rc4 also turning adaptive banning off reaches the running jails. From rc6
+  the group first rotates `mail.log` once (`logrotate -f` of the rsyslog
+  entry, `fail2ban-log-rotation`) and checks that Dovecot and rsyslog write
+  the new file; the attacks then run against the rotated log, so a jail that
+  a rotation made blind fails (B85). Use a lab address of the peer
+  (`--peer-ssh`), never the jump host.
 
 The number of checks grew from release to release (49 in the first runs, 73
 in the rc5 in-place runs), and it depends on the mode and on `--fail2ban`.
