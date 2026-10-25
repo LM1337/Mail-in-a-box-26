@@ -159,6 +159,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B105](#b105) | low | Tests | Any local account can fake the setup marks in the journal, and the log audit then accepts its messages as setup noise | Fork | no | no | rc7 |
 | [B106](#b106) | medium | Tools | update-check.sh does not find the checkout of a box in /mailinabox: no status checks before the update, and the backup stops | Fork | no | no | rc7 |
 | [B107](#b107) | medium | Tools | update-check.sh mailcheck reports FAILED when the mail comes back over TLS | Fork | no | no | rc7 |
+| [B108](#b108) | medium | Tools | update-check.sh after never says OK: every setup run moves the nightly job to another minute | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1356,6 +1357,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The in-place test T3 and the update test T5b of rc7, with a test address on the peer box of the test network that answers over port 25: the stored answer had the Received header above (ESMTPS), the pattern gave no match in Python, and the same header without the TLS comments matched. With the fix, `mailcheck` on the T3 box: "from ... with ESMTPS (postfix/smtpd, port 25)" and "RESULT: OK".
 * **Found by:** rc7 certification (T3, T5b); **commit:** see `git log --grep B107`; **fixed in:** v78-r2604.0-rc7
+
+### B108
+
+**update-check.sh after never says OK: every setup run moves the nightly job to another minute** (medium, Tools)
+
+* **Symptom:** After an update that changed nothing else, `tools/update-check.sh after` lists `crontabs.txt - /etc/cron.d/mailinabox-nightly <hash>` and `+ /etc/cron.d/mailinabox-nightly <another hash>` as UNEXPECTED and ends with "RESULT: CHANGED".
+* **Cause:** setup/management.sh writes the nightly job (backup and status checks) with a new random minute between 01:00 and 01:59 on every run, as upstream does (README-fork.md says so), and `tools/expected-changes/any.txt` had no rule for it.
+* **Fix:** A rule in `any.txt` for that file.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The update test T5b of rc7 (rc6 to rc7, two setup runs): the checksum of the file changed before the update, after the first and after the second run. The records of that update, replayed with the version lines of a tag (the test installed a branch), gave 2 unexpected changes, both of this file, and with the rule "RESULT: OK - 0 unexpected, 5 expected changes".
+* **Found by:** rc7 certification (T5b); **commit:** see `git log --grep B108`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

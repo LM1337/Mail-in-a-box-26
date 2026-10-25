@@ -335,6 +335,9 @@ in-place tool's copy to an rsync target (all fixed).
   directory that `/usr/local/bin/mailinabox` changes into, as long as it is
   root's own. `before` recorded no version and no status checks there and
   said "0 errors", and `backup` stopped (B106).
+* Tools: `tools/update-check.sh after` expects the new minute of the
+  nightly job, which setup picks at random on every run; an update that
+  changed nothing else ended with "RESULT: CHANGED" (B108).
 
 ### Changed
 
