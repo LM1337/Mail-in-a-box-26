@@ -55,6 +55,28 @@ used).
     (Sieve) and the storage. Without a probe address it says "skipped". The
     mail carries no secrets.
   README-fork.md ("Updating the fork") describes it.
+* Tools: during each release upgrade, `tools/upgrade-in-place-to-2604.sh`
+  runs a fallback SSH server on port 1022 (`UPGRADE_SSH_FALLBACK_PORT=PORT`,
+  or `off`). Cause of the SSH outage: the maintainer scripts of
+  openssh-server stop `ssh.socket` and `ssh.service` when the new package
+  is unpacked and start them again only when it is configured, near the end
+  of the dpkg run; nothing listens on port 22 in between. The fallback runs
+  from a private copy of the old sshd (and of sshd-session and sshd-auth
+  where they exist), so the package cannot replace it underneath. It
+  accepts only public keys, only of the administrators (members of the
+  groups sudo and admin, and root if `PermitRootLogin` allows keys;
+  `UPGRADE_SSH_FALLBACK_USERS` names others), whose keys it copies (read as
+  the user) into a root-owned directory, keeps the AllowUsers, AllowGroups,
+  DenyUsers, DenyGroups and the algorithms of the running sshd, and allows no
+  forwarding. ufw lets the port through (rate limited) only while it runs.
+  It is stopped, and the port closed, when port 22 answers again after the
+  release upgrade and on every way out of the tool (also after Ctrl-C);
+  while port 22 does not answer it stays until the next reboot, and the next
+  run removes it and its ufw rule. `--ssh-fallback-test` starts it for 10
+  minutes before an upgrade, to try a login on its port.
+* Tools: `tools/upgrade-in-place-to-2604.sh` says in the run when the release
+  upgrade has stopped the SSH server on port 22 and when port 22 answers
+  again (its SSH banner), with the minutes in between.
 * Tests: `tests/fork/log-audit.sh --baseline BEFORE.json` compares with the
   `--json` report of an earlier run: a class that was in it is listed as
   KNOWN, with both counts, and does not count; only new classes are
@@ -72,6 +94,17 @@ used).
 * Tests: `tests/fork/log-audit.sh --since` also takes the short forms `-90s`,
   `-30m`, `-24h`, `-2d` and `-1w`; `date -d` fails on them ("-24h" reads the
   "h" as a time zone).
+* Tools: the messages before a release upgrade (and in the motd) name the
+  fallback SSH server and how to reach it. The help of
+  `tools/upgrade-in-place-to-2604.sh` describes it.
+
+### Upgrade note
+
+* The fallback SSH server of the in-place tool listens on port 1022 during
+  each release upgrade. If a firewall of the provider must let it through,
+  open it there before the upgrade and try it with
+  `sudo /root/mailinabox/tools/upgrade-in-place-to-2604.sh --ssh-fallback-test`.
+  `UPGRADE_SSH_FALLBACK_PORT=off` turns it off.
 
 ## BUGS-fork.md
 

@@ -115,9 +115,16 @@ RESUME_UNIT=mailinabox-upgrade-2604-resume.service
 RESUME_UNIT_FILE=/etc/systemd/system/$RESUME_UNIT
 RESUME_SCRIPT=$STATE_DIR/resume.sh
 RESUME_MAX=8
+# The fallback SSH server during the release upgrades (see ssh_fallback_start):
+# its private copy of sshd, the keys it accepts, the port this tool opened in
+# ufw (until it is closed again).
+FALLBACK_DIR=$STATE_DIR/ssh-fallback
+FALLBACK_KEYS_DIR=/etc/ssh/upgrade-2604-fallback-keys
+FALLBACK_UFW_MARK=$STATE_DIR/ssh-fallback-ufw
 TMUX_SESSION=upgrade-2604
 # The environment variables this script and setup read (passed into that session).
-MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
+MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC
+	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
@@ -179,6 +186,8 @@ STORAGE_ROOT=
 MIAB_DIR=
 SELF=$STATE_DIR/$SCRIPT_NAME
 SELF_FILE=
+FALLBACK_STARTED=
+SSH_WATCH_PID=
 
 # ---------------------------------------------------------------------------
 # Output. Keep in sync with tools/migrate-to-2604.sh (blocker differs: it
@@ -278,6 +287,9 @@ Control:
                           services again, resume the backups
   --finish                accept a final check with differences: start the
                           remaining services, resume the backups
+  --ssh-fallback-test     before the upgrade: start the fallback SSH server of
+                          the release upgrades (see below) for 10 minutes, to
+                          try a login on its port from where you work
   -h, --help              show this help
 
 Environment: SOURCE and TAG choose the repository and tag of this fork that
@@ -288,6 +300,15 @@ wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
 86400) the age in seconds the last backup may have, UPGRADE_BACKUP_WAIT
 (default 7200) how many seconds to wait for a Mail-in-a-Box backup that is
 running (e.g. the nightly one) before anything is stopped.
+
+During each release upgrade the SSH server on port 22 is down for a while
+(10-40 minutes). Meanwhile a fallback SSH server listens on port 1022
+(UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
+administrators (members of the groups sudo and admin, and root if
+PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
+others), with the AllowUsers/AllowGroups/DenyUsers/DenyGroups of sshd_config.
+ufw lets its port through only while it runs. The run says when port 22
+answers again.
 EOF
 }
 
@@ -365,6 +386,13 @@ on_err() {
 
 on_exit() {
 	local rc=$?
+	# The fallback SSH server first, also when the terminal is gone (Ctrl-C
+	# ends tee as well: writing must not end this handler).
+	trap '' PIPE
+	{
+		ssh_watch_stop
+		if [ -n "$FALLBACK_STARTED" ]; then ssh_fallback_stop if-ssh-works; fi
+	} || true
 	if [ -n "$LOCKED" ] && [ "$(cat "$STATE_DIR/pid" 2> /dev/null || true)" = "$$" ]; then rm -f "$STATE_DIR/pid"; fi
 	[ "$rc" != 0 ] || return 0
 	[ -z "$CHECK_ONLY" ] || return 0
@@ -1139,6 +1167,7 @@ backup_pids() { local_bash "$BACKUP_PIDS_SCRIPT"; }
 # BACKUP_WAIT seconds. Only before anything is stopped, so Ctrl-C is safe.
 # Sets BACKUP_WAITED. Keep in sync with tools/migrate-to-2604.sh (there on
 # the old box, LABEL " on the old box").
+# shellcheck disable=SC2120 # LABEL: the copy in tools/migrate-to-2604.sh passes it
 wait_backup_done() { # [LABEL]
 	local label=${1:-} pids start fails=0
 	BACKUP_WAITED=
@@ -2002,6 +2031,10 @@ show_plan() {
 	if [ "$v" != 26.04 ]; then
 		n=$((n + 1))
 		say "$n. do-release-upgrade to Ubuntu 26.04, reboot (continues on its own)."
+		if [ "$(ssh_fallback_port)" != off ]; then
+			say "   During each release upgrade a fallback SSH server listens on port $(ssh_fallback_port) (key login of"
+			say "   the administrators; try it before with --ssh-fallback-test)."
+		fi
 	fi
 	n=$((n + 1))
 	say "$n. Clean up: pristine Dovecot 2.4 configuration, old PHP versions, the old Python"
@@ -2948,6 +2981,8 @@ release_upgrade() { # PHASE FROM TO
 	say "do-release-upgrade runs non-interactively and keeps the existing configuration files."
 	say "It takes 20-90 minutes (longer on a slow disk). Its own logs are in /var/log/dist-upgrade/."
 	release_access_note "$to"
+	ssh_fallback_start
+	ssh_watch_start
 	# No question here: the downtime has started, and the start of the upgrade
 	# was confirmed (the operator may not be watching any more).
 	state_set RELEASE_STARTED 1
@@ -2964,6 +2999,9 @@ release_upgrade() { # PHASE FROM TO
 	env "${noscreen[@]}" DEBIAN_FRONTEND=noninteractive \
 		do-release-upgrade -f DistUpgradeViewNonInteractive < /dev/null || rc=$?
 	FAILED_CMD=
+	ssh_watch_stop
+	if ssh_banner 22; then say "SSH on port 22 answers."; fi
+	ssh_fallback_stop if-ssh-works
 	cur=$(os_version)
 	if [ "$cur" = "$from" ] && sources_name "$(codename_of "$from")" && ! sources_name "$(codename_of "$to")"; then
 		# The upgrader refused before it changed anything.
@@ -2984,6 +3022,350 @@ or restore from the backups."
 	fi
 	if [ "$rc" != 0 ]; then warn "do-release-upgrade ended with exit code $rc. Checking the packages..."; fi
 	release_done "$phase" "$to"
+}
+
+# ---------------------------------------------------------------------------
+# SSH during the release upgrades.
+#
+# Why new SSH logins fail: the maintainer scripts of openssh-server (24.04's
+# 9.6 and 26.04's 10.2, generated by dh_installsystemd) stop ssh.socket and
+# ssh.service when the new package is unpacked ("preinst upgrade"), and start
+# them again only when it is configured, near the end of the dpkg run.
+# Nothing listens on port 22 in between: new connections are refused (through
+# a jump host: "Connection closed by UNKNOWN port 65535"); open connections
+# keep their sshd processes (KillMode=process). In the test runs that took
+# 19-36 minutes from 22.04 and 7-14 minutes from 24.04 (the journal: "Stopping
+# ssh.service" at the unpack of openssh-server, "Listening on ssh.socket" when
+# it was configured or when a later package started sockets.target again).
+# do-release-upgrade starts a spare sshd on port 1022 only when it runs
+# interactively over SSH; this tool runs it non-interactively.
+#
+# The fallback: a second sshd on SSH_FALLBACK_PORT (default 1022,
+# UPGRADE_SSH_FALLBACK_PORT=off turns it off) for the time of each release
+# upgrade, started from a private copy of the old binaries in $STATE_DIR (the
+# package cannot replace them underneath; the old monolithic sshd re-executes
+# its own copy for each connection, and the libraries keep their sonames). It
+# allows only public keys, of the administrators (members of the groups sudo
+# and admin, and root if PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS
+# names others), with the same AllowUsers, AllowGroups, DenyUsers and
+# DenyGroups and the same algorithms as the running sshd (sshd -T), without
+# forwarding. Their keys are copied (read as the user, not through a symlink
+# of theirs as root) into a root-owned directory, $FALLBACK_KEYS_DIR. ufw lets
+# the port through (rate limited) only while the fallback runs. Its
+# privilege separation directory /run/sshd goes away when ssh.service stops
+# (RuntimeDirectory); the watcher puts it back (in /run, root's own).
+# It is stopped when port 22 answers again after the release upgrade, and on
+# every way out of this script; if port 22 does not answer then, it is left
+# running (a reboot ends it) and the next run of this script removes it and
+# its ufw rule. Open sessions over it are not ended.
+# The watcher also reports in the run when port 22 stops answering and when it
+# answers again (the SSH banner).
+
+ssh_fallback_port() {
+	local p=${UPGRADE_SSH_FALLBACK_PORT:-}
+	if [ -n "$p" ]; then
+		case "$p" in off | no | 0) p=off ;; esac
+		if [ "$p" != off ] && { ! [[ $p =~ ^[0-9]+$ ]] || [ "$p" -lt 1 ] || [ "$p" -gt 65535 ] || [ "$p" = 22 ]; }; then
+			die "UPGRADE_SSH_FALLBACK_PORT must be a port number other than 22, or off."
+		fi
+		if [ -z "$CHECK_ONLY" ] && [ -f "$STATE_FILE" ]; then state_set SSH_FALLBACK_PORT "$p"; fi
+	else
+		p=$(state_get SSH_FALLBACK_PORT)
+	fi
+	echo "${p:-1022}"
+}
+
+# Is something listening on TCP port PORT? Only bash builtins and /proc: the
+# release upgrade replaces the tools.
+port_listening() { # PORT
+	local want f _sl local_addr _rem st
+	printf -v want '%04X' "$1"
+	for f in /proc/net/tcp /proc/net/tcp6; do
+		[ -r "$f" ] || continue
+		while read -r _sl local_addr _rem st _; do
+			if [ "$st" = 0A ] && [ "${local_addr##*:}" = "$want" ]; then return 0; fi
+		done < "$f"
+	done
+	return 1
+}
+
+# Does an SSH server answer on 127.0.0.1:PORT (its banner)? It sends an
+# identification string first, so that sshd logs no kex_exchange_identification
+# error, only that the connection was closed before the login.
+ssh_banner() { # PORT
+	(
+		exec 3<> "/dev/tcp/127.0.0.1/$1" || exit 1
+		printf 'SSH-2.0-upgrade-2604-check\r\n' >&3 || true
+		line=
+		read -r -t 10 -u 3 line || true
+		[[ $line == SSH-2.0-* ]]
+	) 2> /dev/null
+}
+
+# The administrators who may log in on the fallback.
+fallback_users() { # PERMITROOTLOGIN
+	local u list
+	if [ -n "${UPGRADE_SSH_FALLBACK_USERS:-}" ]; then
+		list=$UPGRADE_SSH_FALLBACK_USERS
+	else
+		list="$(getent group sudo admin 2> /dev/null | cut -d: -f4 | tr ',' ' ')"
+		if [ "$1" != no ]; then list="root $list"; fi
+	fi
+	for u in $list; do
+		[[ $u =~ ^[a-z_][a-z0-9_.-]*$ ]] || continue
+		getent passwd "$u" > /dev/null || continue
+		echo "$u"
+	done | sort -u
+}
+
+# The authorized keys of USER after AuthorizedKeysFile (relative to the home
+# directory; %h, %u, %U and %% expanded), read as that user.
+user_keys() { # USER FILES...
+	local u=$1 home uid f
+	shift
+	home=$(getent passwd "$u" | cut -d: -f6)
+	uid=$(id -u "$u")
+	[ -n "$home" ] || return 0
+	for f in "$@"; do
+		[ "$f" != none ] || continue
+		f=${f//%%/$'\001'}
+		f=${f//%h/$home}
+		f=${f//%u/$u}
+		f=${f//%U/$uid}
+		f=${f//$'\001'/%}
+		[[ $f == /* ]] || f=$home/$f
+		if [ "$u" = root ]; then
+			if [ -f "$f" ] && [ ! -L "$f" ]; then cat -- "$f"; fi
+		else
+			runuser -u "$u" -- cat -- "$f" 2> /dev/null || true
+		fi
+	done
+}
+
+# Start the fallback (see above). Never fatal: without it the release upgrade
+# goes on as before.
+ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
+	local until=${1:-until the release upgrade has finished} port t prl keyfiles=() users=() u n=0 key val bin out
+	port=$(ssh_fallback_port)
+	if [ "$port" = off ]; then
+		say "No fallback SSH server (UPGRADE_SSH_FALLBACK_PORT=off)."
+		return 0
+	fi
+	ssh_fallback_stop quiet
+	if port_listening "$port"; then
+		warn "Port $port is in use; no fallback SSH server during the release upgrade (UPGRADE_SSH_FALLBACK_PORT=... chooses another one)."
+		return 0
+	fi
+	[ -x /usr/sbin/sshd ] || { warn "/usr/sbin/sshd is missing; no fallback SSH server."; return 0; }
+	if ! t=$(sshd -T 2> /dev/null < /dev/null); then
+		warn "sshd -T fails; no fallback SSH server."
+		return 0
+	fi
+	prl=$(sed -n 's/^permitrootlogin //p' <<< "$t")
+	case "$prl" in yes | without-password | prohibit-password) prl=prohibit-password ;; forced-commands-only) ;; *) prl=no ;; esac
+	read -r -a keyfiles <<< "$(sed -n 's/^authorizedkeysfile //p' <<< "$t")"
+	[ ${#keyfiles[@]} -gt 0 ] || keyfiles=(.ssh/authorized_keys .ssh/authorized_keys2)
+	rm -rf "$FALLBACK_DIR" "$FALLBACK_KEYS_DIR"
+	install -d -m 700 "$FALLBACK_DIR"
+	install -d -m 755 "$FALLBACK_KEYS_DIR"
+	while IFS= read -r u; do
+		user_keys "$u" "${keyfiles[@]}" | grep -E '^[^#[:space:]]' > "$FALLBACK_KEYS_DIR/$u" || true
+		if [ -s "$FALLBACK_KEYS_DIR/$u" ]; then
+			chmod 644 "$FALLBACK_KEYS_DIR/$u"
+			users+=("$u")
+		else
+			rm -f "$FALLBACK_KEYS_DIR/$u"
+		fi
+	done < <(fallback_users "$prl")
+	if [ ${#users[@]} = 0 ]; then
+		warn "No administrator (group sudo or admin, or root) has an SSH key; no fallback SSH server."
+		rm -rf "$FALLBACK_DIR" "$FALLBACK_KEYS_DIR"
+		return 0
+	fi
+	# The old binaries, privately (9.8 and later: sshd-session and sshd-auth too).
+	cp -p /usr/sbin/sshd "$FALLBACK_DIR/sshd"
+	for bin in sshd-session sshd-auth; do
+		if [ -x "/usr/lib/openssh/$bin" ]; then cp -p "/usr/lib/openssh/$bin" "$FALLBACK_DIR/$bin"; fi
+	done
+	{
+		echo "# Written by $SCRIPT_NAME: fallback SSH server during the release upgrade."
+		echo "Port $port"
+		echo "PidFile $FALLBACK_DIR/sshd.pid"
+		echo "AuthorizedKeysFile $FALLBACK_KEYS_DIR/%u"
+		echo "AuthorizedKeysCommand none"
+		echo "AuthenticationMethods publickey"
+		echo "PubkeyAuthentication yes"
+		echo "PasswordAuthentication no"
+		echo "KbdInteractiveAuthentication no"
+		echo "HostbasedAuthentication no"
+		echo "GSSAPIAuthentication no"
+		echo "PermitEmptyPasswords no"
+		echo "PermitRootLogin $prl"
+		# Only the administrators have keys in $FALLBACK_KEYS_DIR. The
+		# original AllowUsers lines are kept as they are (more lines would
+		# add up to a longer list); without any, the administrators.
+		if ! grep -q '^allowusers ' <<< "$t"; then echo "AllowUsers ${users[*]}"; fi
+		echo "X11Forwarding no"
+		echo "AllowTcpForwarding no"
+		echo "AllowAgentForwarding no"
+		echo "AllowStreamLocalForwarding no"
+		echo "PermitTunnel no"
+		echo "GatewayPorts no"
+		echo "PermitUserEnvironment no"
+		echo "PrintMotd no"
+		echo "MaxAuthTries 3"
+		echo "Subsystem sftp internal-sftp"
+		if [ -x "$FALLBACK_DIR/sshd-session" ]; then echo "SshdSessionPath $FALLBACK_DIR/sshd-session"; fi
+		if [ -x "$FALLBACK_DIR/sshd-auth" ]; then echo "SshdAuthPath $FALLBACK_DIR/sshd-auth"; fi
+		# Kept from the running configuration.
+		while read -r key val; do
+			case "$key" in
+				hostkey | hostcertificate | usepam | ciphers | macs | kexalgorithms | hostkeyalgorithms \
+					| pubkeyacceptedalgorithms | pubkeyacceptedkeytypes | casignaturealgorithms | requiredrsasize \
+					| logingracetime | maxstartups | loglevel | syslogfacility | strictmodes)
+					echo "$key $val"
+					;;
+				allowusers | allowgroups | denyusers | denygroups | trustedusercakeys | revokedkeys | authorizedprincipalsfile)
+					[ "$val" = none ] || echo "$key $val"
+					;;
+			esac
+		done <<< "$t"
+	} > "$FALLBACK_DIR/sshd_config"
+	chmod 600 "$FALLBACK_DIR/sshd_config"
+	if ! out=$("$FALLBACK_DIR/sshd" -t -f "$FALLBACK_DIR/sshd_config" 2>&1 < /dev/null); then
+		warn "The fallback SSH server's configuration does not pass sshd -t; none during the release upgrade:
+$(sed 's/^/  /' <<< "$out")"
+		rm -rf "$FALLBACK_DIR" "$FALLBACK_KEYS_DIR"
+		return 0
+	fi
+	if ! "$FALLBACK_DIR/sshd" -f "$FALLBACK_DIR/sshd_config" < /dev/null; then
+		warn "The fallback SSH server did not start; none during the release upgrade."
+		rm -rf "$FALLBACK_DIR" "$FALLBACK_KEYS_DIR"
+		return 0
+	fi
+	FALLBACK_STARTED=1
+	while [ $n -lt 10 ] && ! ssh_banner "$port"; do
+		sleep 1
+		n=$((n + 1))
+	done
+	if [ $n -ge 10 ]; then
+		warn "The fallback SSH server does not answer on port $port; stopped."
+		ssh_fallback_stop quiet
+		return 0
+	fi
+	if command -v ufw > /dev/null && ufw status 2> /dev/null | grep -q '^Status: active'; then
+		echo "$port" > "$FALLBACK_UFW_MARK"
+		if ! ufw limit "$port/tcp" comment "$SCRIPT_NAME: fallback SSH during the release upgrade" > /dev/null; then
+			warn "Could not open port $port in ufw; the fallback SSH server is only reachable where the firewall allows it."
+		fi
+	fi
+	say "Fallback SSH server on port $port $until: key login for"
+	say "the administrators (${users[*]}), no passwords. If a new login on port 22 fails meanwhile:"
+	say "  ssh -p $port ${SUDO_USER:-${users[0]}}@${PRIMARY_HOSTNAME:-$(hostname -f)}"
+	say "(a firewall of the provider must let port $port through). Logins there log as usual."
+}
+
+# Stop the fallback, close its ufw rule and remove its files. "if-ssh-works"
+# leaves it running while port 22 does not answer (that would lock out).
+ssh_fallback_stop() { # [quiet|if-ssh-works]
+	local pid alive='' port msgs=() m
+	pid=$(cat "$FALLBACK_DIR/sshd.pid" 2> /dev/null || true)
+	if [[ $pid =~ ^[0-9]+$ ]] && [ "$(readlink "/proc/$pid/exe" 2> /dev/null || true)" = "$FALLBACK_DIR/sshd" ]; then alive=1; fi
+	if [ "${1:-}" = if-ssh-works ] && [ -n "$alive" ] && ! ssh_banner 22; then
+		warn "SSH on port 22 does not answer. The fallback SSH server on port $(ssh_fallback_port) keeps running
+until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall rule." || true
+		return 0
+	fi
+	# First everything, then the messages (the terminal may be gone: Ctrl-C).
+	if [ -n "$alive" ]; then
+		kill "$pid" 2> /dev/null || true
+		msgs+=("Stopped the fallback SSH server (open sessions over it stay).")
+	fi
+	port=$(cat "$FALLBACK_UFW_MARK" 2> /dev/null || true)
+	if [[ $port =~ ^[0-9]+$ ]]; then
+		if ufw delete limit "$port/tcp" > /dev/null 2>&1; then
+			rm -f "$FALLBACK_UFW_MARK"
+			msgs+=("Closed port $port in ufw again.")
+		else
+			msgs+=("WARNING: Could not remove the ufw rule for port $port (ufw delete limit $port/tcp); the next run tries again.")
+		fi
+	else
+		rm -f "$FALLBACK_UFW_MARK"
+	fi
+	rm -rf "$FALLBACK_KEYS_DIR" "$FALLBACK_DIR"
+	FALLBACK_STARTED=
+	for m in "${msgs[@]+"${msgs[@]}"}"; do
+		if [ "${1:-}" != quiet ] || [[ $m == WARNING:* ]]; then say "$m" || true; fi
+	done
+	return 0
+}
+
+# Watch port 22 while the release upgrade runs (in the background), and keep
+# the fallback's /run/sshd.
+ssh_watch_start() {
+	local port
+	port=$(ssh_fallback_port)
+	(
+		trap - ERR EXIT
+		set +e
+		p22_down='' since=0
+		# Builtins only where it loops: the release upgrade replaces date and
+		# sleep (coreutils). read -t on a pipe that never delivers is the pause.
+		exec {pause_fd}<> <(:)
+		while :; do
+			if [ -f "$FALLBACK_DIR/sshd.pid" ] && [ ! -d /run/sshd ] && [ ! -L /run/sshd ]; then
+				mkdir -m 0755 /run/sshd 2> /dev/null
+			fi
+			if [ -z "$p22_down" ] && ! port_listening 22; then
+				p22_down=1 since=$SECONDS
+				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on port 22: new logins fail until\n' -1
+				if [ -f "$FALLBACK_DIR/sshd.pid" ]; then
+					echo "  it is back (usually 10-40 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
+				else
+					echo "  it is back (usually 10-40 minutes). Open connections stay. Do not reboot."
+				fi
+			elif [ -n "$p22_down" ] && port_listening 22 && ssh_banner 22; then
+				p22_down=
+				printf '\n%(%H:%M:%S)T SSH on port 22 answers again (after %d min): new logins work.\n' -1 $(((SECONDS - since + 59) / 60))
+			fi
+			read -r -t 10 -u "$pause_fd" _
+		done
+	) &
+	SSH_WATCH_PID=$!
+}
+
+ssh_watch_stop() {
+	if [ -n "$SSH_WATCH_PID" ]; then
+		kill "$SSH_WATCH_PID" 2> /dev/null || true
+		wait "$SSH_WATCH_PID" 2> /dev/null || true
+		SSH_WATCH_PID=
+	fi
+}
+
+# Leftovers of a run that ended without its cleanup (a reboot, kill -9).
+ssh_fallback_cleanup_stale() {
+	if [ -e "$FALLBACK_KEYS_DIR" ] || [ -e "$FALLBACK_DIR" ] || [ -e "$FALLBACK_UFW_MARK" ]; then
+		ssh_fallback_stop if-ssh-works
+	fi
+}
+
+# --ssh-fallback-test: the fallback and the watcher for a few minutes, without
+# an upgrade, to try a login on its port (a firewall of the provider).
+do_ssh_fallback_test() {
+	local secs=${UPGRADE_SSH_FALLBACK_TEST_SECONDS:-600}
+	[ "$(ssh_fallback_port)" != off ] || die "UPGRADE_SSH_FALLBACK_PORT=off: there is no fallback to test."
+	if [ -n "$(active_run_pid)" ] || downtime_active; then
+		die "An upgrade is in progress; --ssh-fallback-test is for before it."
+	fi
+	[[ $secs =~ ^[0-9]+$ ]] || die "UPGRADE_SSH_FALLBACK_TEST_SECONDS wants seconds."
+	section "Fallback SSH server: test for $(fmt_dur "$secs")"
+	ssh_fallback_start "for $(fmt_dur "$secs") (a test)"
+	[ -n "$FALLBACK_STARTED" ] || die "The fallback SSH server did not start (see above)."
+	ssh_watch_start
+	say "Try a login on port $(ssh_fallback_port) now (from where you work). Ctrl-C ends the test earlier."
+	sleep "$secs" || true
+	ssh_watch_stop
+	ssh_fallback_stop
 }
 
 # What the operator runs into during a release upgrade. In the test runs
@@ -3019,6 +3401,12 @@ release_access_text() { # TO now|reboot
 			echo "goes on. Keep this connection open."
 		fi
 		echo "If a new login fails, wait a few minutes and try again. Do not reboot."
+	fi
+	local fb
+	fb=$(ssh_fallback_port)
+	if [ "$fb" != off ]; then
+		echo "Meanwhile a fallback SSH server listens on port $fb (key login of the administrators):"
+		echo "  ssh -p $fb USER@${PRIMARY_HOSTNAME:-$(hostname -f 2> /dev/null || hostname)}"
 	fi
 	if [ "$1" = 26.04 ]; then
 		echo "sudo is missing for a while (12 to 26 minutes in the test runs) while sudo-rs replaces it:"
@@ -3934,6 +4322,7 @@ do_status() {
 
 do_rollback() {
 	[ -f "$STATE_FILE" ] || die "There is no upgrade to roll back ($STATE_FILE is missing)."
+	ssh_fallback_cleanup_stale
 	STORAGE_ROOT=$(state_get STORAGE_ROOT)
 	if [ "$(state_get RELEASE_STARTED)" = 1 ]; then
 		die "A release upgrade has started on this machine ($(state_get OLD_OS_VERSION) -> $(os_version) now).
@@ -4000,6 +4389,7 @@ mail_plugins (/etc/dovecot/conf.d/20-imap.conf, 20-pop3.conf): install it, or re
 
 do_finish() {
 	[ "$(state_get VERIFY_RAN)" = 1 ] || die "Run the upgrade up to the final check first."
+	ssh_fallback_cleanup_stale
 	if phase_is_done finish; then
 		say "The upgrade is already finished ($(state_get FINISHED_AT))."
 		return 0
@@ -4066,6 +4456,7 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 	fi
 
 	pending_reboot
+	ssh_fallback_cleanup_stale
 	requiesce
 
 	if ! phase_is_done quiesce; then
@@ -4162,6 +4553,7 @@ main() {
 			--rollback) COMMAND=rollback; shift ;;
 			--status) COMMAND=status; shift ;;
 			--finish) COMMAND=finish; shift ;;
+			--ssh-fallback-test) COMMAND=ssh_fallback_test; shift ;;
 			# Internal: set by the resume unit after a reboot.
 			--resumed) RESUMED=1 ASSUME_YES=1; shift ;;
 			-h | --help) usage; exit 0 ;;
@@ -4170,6 +4562,7 @@ main() {
 	done
 
 	[ "$(id -u)" = 0 ] || die "This must be run as root. Did you leave out sudo?"
+	ssh_fallback_port > /dev/null # dies on a bad UPGRADE_SSH_FALLBACK_PORT
 	# Absolute path of this script, before leaving the working directory.
 	if [[ ${BASH_SOURCE[0]:-} == *.sh ]] && [ -f "${BASH_SOURCE[0]}" ]; then
 		SELF_FILE=$(readlink -f "${BASH_SOURCE[0]}")
@@ -4180,6 +4573,12 @@ main() {
 
 	if [ "$COMMAND" = status ]; then
 		do_status
+		return 0
+	fi
+	if [ "$COMMAND" = ssh_fallback_test ]; then
+		(umask 077 && mkdir -p "$STATE_DIR")
+		chmod 700 "$STATE_DIR"
+		do_ssh_fallback_test
 		return 0
 	fi
 

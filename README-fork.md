@@ -959,6 +959,24 @@ as well). After a reboot it starts before you can attach. If a new login
 fails or `sudo` is missing, wait a few minutes and try again. Do not reboot: a release upgrade stopped in the
 middle can leave the machine unbootable.
 
+Why: openssh-server stops `ssh.socket` and `ssh.service` when the new
+package is unpacked and starts them again only when it is configured, near
+the end; nothing listens on port 22 in between. From rc7 on, the tool runs a
+**fallback SSH server on port 1022** for the time of each release upgrade
+(`UPGRADE_SSH_FALLBACK_PORT=PORT` chooses another port, `off` turns it off):
+`ssh -p 1022 you@box`. It runs from a private copy of the old sshd, accepts
+only keys, and only of the administrators (members of the groups sudo and
+admin, and root if `PermitRootLogin` allows keys;
+`UPGRADE_SSH_FALLBACK_USERS="..."` names others), keeps the AllowUsers,
+AllowGroups, DenyUsers and DenyGroups of `sshd_config` and allows no
+forwarding. ufw lets the port through only while it runs; a firewall of the
+provider must allow it too. Try it before the upgrade with
+`--ssh-fallback-test` (10 minutes). The run says when port 22 stops
+answering and when it answers again. The fallback is stopped when port 22
+works again, also when the tool stops with an error; while port 22 does not
+answer it stays until the next reboot, and the next run removes it and its
+firewall rule.
+
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
 get it replaced by the fork's configuration; the existing indexes are used.
@@ -1095,6 +1113,25 @@ sich anhängen kann. Scheitert eine neue Anmeldung oder fehlt `sudo`, einige Min
 warten und es erneut versuchen. Nicht neu starten: ein mitten im Lauf
 abgebrochenes Release-Upgrade kann die Maschine so hinterlassen, dass sie
 nicht mehr startet.
+
+Der Grund: openssh-server hält `ssh.socket` und `ssh.service` an, wenn das
+neue Paket entpackt wird, und startet sie erst wieder, wenn es eingerichtet
+wird, gegen Ende; dazwischen hört niemand auf Port 22. Ab rc7 lässt das
+Werkzeug für die Dauer jedes Release-Upgrades einen **Ersatz-SSH-Server auf
+Port 1022** laufen (`UPGRADE_SSH_FALLBACK_PORT=PORT` wählt einen anderen
+Port, `off` schaltet ihn ab): `ssh -p 1022 name@box`. Er läuft aus einer
+eigenen Kopie des alten sshd, nimmt nur Schlüssel an, und nur die der
+Administratoren (Mitglieder der Gruppen sudo und admin, und root, wenn
+`PermitRootLogin` Schlüssel erlaubt; `UPGRADE_SSH_FALLBACK_USERS="..."` nennt
+andere), behält AllowUsers, AllowGroups, DenyUsers und DenyGroups aus
+`sshd_config` und erlaubt keine Weiterleitungen. ufw lässt den Port nur
+durch, solange er läuft; eine Firewall des Anbieters muss ihn ebenfalls
+erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`
+ausprobieren (10 Minuten). Der Lauf meldet, wann Port 22 nicht mehr
+antwortet und wann wieder. Der Ersatz-Server wird beendet, sobald Port 22
+wieder geht, auch wenn das Werkzeug mit einem Fehler abbricht; solange Port 22
+nicht antwortet, bleibt er bis zum nächsten Neustart, und der nächste Lauf
+entfernt ihn und seine Firewall-Regel.
 
 Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
 in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand
