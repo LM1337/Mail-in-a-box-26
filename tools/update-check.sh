@@ -26,8 +26,9 @@
 # itself.
 #
 # before / after record (files in before/ and after/): the version and the
-# origin of /root/mailinabox, the units (enabled, active) and the failed
-# ones, the mail queue, the status checks (their error and warning lines),
+# origin of the Mail-in-a-Box checkout (/root/mailinabox, or the directory
+# that /usr/local/bin/mailinabox names, e.g. /mailinabox), the units
+# (enabled, active) and the failed ones, the mail queue, the status checks (their error and warning lines),
 # the warnings of doveconf and postconf, key settings of
 # Postfix and Dovecot, the Nextcloud status, Munin's alert contact and
 # limits, Docker containers, crontabs, mailname and hosts, fail2ban jails,
@@ -117,7 +118,7 @@ Steps:
                 of the last 24 hours (--since) as the baseline
   backup        Mail-in-a-Box backup now (management/backup.py; mail stops
                 for its run, as in the nightly backup), then an encrypted
-                archive of /etc, /root/mailinabox, the crontabs, Z-Push,
+                archive of /etc, the checkout, the crontabs, Z-Push,
                 Munin, Nextcloud's code and the Docker stacks you name, copied
                 next to the backups (rsync targets) and verified
   after         record the state again (after/), compare it with before/:
@@ -239,6 +240,29 @@ find_self_repo() {
 	[[ $f == *.sh ]] && [ -f "$f" ] || return 0
 	d=$(cd "$(dirname "$f")/.." && pwd)
 	if [ -f "$d/tests/fork/log-audit.sh" ]; then SELF_REPO=$d; fi
+}
+
+# The checkout of Mail-in-a-Box on this box: the directory that
+# /usr/local/bin/mailinabox (written by setup: "cd DIR", then setup/start.sh)
+# changes into, else /root/mailinabox, else the checkout this script runs
+# from. Upstream boxes installed with an older bootstrap.sh have /mailinabox
+# (B106). Only a git checkout of root's own (no symlink, not writable by
+# others, also the directories above it) counts: status_checks.py and
+# backup.py run from it as root.
+find_miab_dir() {
+	local d c
+	d=$(sed -nE 's|^cd (/[A-Za-z0-9._/-]+)$|\1|p' /usr/local/bin/mailinabox 2> /dev/null | head -n 1 || true)
+	for c in "$d" /root/mailinabox; do
+		[ -n "$c" ] && [ -d "$c/.git" ] && [ -f "$c/management/status_checks.py" ] || continue
+		if ! root_only_path "$c"; then
+			warn "$c is not root's own (or a directory above it is not); not used as the Mail-in-a-Box checkout."
+			continue
+		fi
+		MIAB_DIR=$c
+		return 0
+	done
+	if [ -n "$SELF_REPO" ]; then MIAB_DIR=$SELF_REPO; fi
+	return 0
 }
 
 # A file of this fork (path relative to the repository), downloaded from the
@@ -469,7 +493,11 @@ summary_of() { # DIR
 	say "Version:        $(sed -n 's/^miab //p' "$d/version.txt") ($(sed -n 's/^origin //p' "$d/version.txt"))"
 	n=$(grep -c . "$d/failed.txt" || true)
 	say "Failed units:   ${n:-0}$( [ "${n:-0}" = 0 ] || echo " ($(tr '\n' ' ' < "$d/failed.txt"))")"
-	say "Status checks:  $(grep -c '^✖' "$d/status.txt" || true) errors, $(grep -c '^?' "$d/status.txt" || true) warnings"
+	if grep -q '^(no ' "$d/status.txt"; then
+		say "Status checks:  not run $(head -n 1 "$d/status.txt")"
+	else
+		say "Status checks:  $(grep -c '^✖' "$d/status.txt" || true) errors, $(grep -c '^?' "$d/status.txt" || true) warnings"
+	fi
 	say "Mail queue:     $(sed -n 's/^messages in the queue: //p' "$d/queue.txt")"
 }
 
@@ -808,7 +836,7 @@ do_backup() {
 	postconf -n > "$out/meta/postconf-n.txt" 2> /dev/null || true
 	systemctl list-unit-files --no-legend --no-pager > "$out/meta/unit-files.txt" 2> /dev/null || true
 	git -C "$MIAB_DIR" describe --tags --always > "$out/meta/miab-version.txt" 2> /dev/null || true
-	for p in etc root/mailinabox var/spool/cron var/lib/z-push var/lib/munin usr/local/lib/owncloud; do
+	for p in etc "${MIAB_DIR#/}" var/spool/cron var/lib/z-push var/lib/munin usr/local/lib/owncloud; do
 		if [ -e "/$p" ]; then paths+=("$p"); fi
 	done
 	for p in "${OPT_DOCKER_DIRS[@]+"${OPT_DOCKER_DIRS[@]}"}"; do paths+=("${p#/}"); done
@@ -1081,7 +1109,7 @@ main() {
 	umask 077
 	cd /
 	load_conf
-	if [ ! -d "$MIAB_DIR/.git" ] && [ -n "$SELF_REPO" ]; then MIAB_DIR=$SELF_REPO; fi
+	find_miab_dir
 	case "$COMMAND" in
 		before) do_before ;;
 		backup) do_backup ;;

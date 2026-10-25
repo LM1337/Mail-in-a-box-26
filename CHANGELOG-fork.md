@@ -330,6 +330,11 @@ in-place tool's copy to an rsync target (all fixed).
   an answer that came in over TLS. Postfix puts the TLS session and
   "(No client certificate requested)" between the client and "by", and
   the check said FAILED for a round trip that had worked (B107).
+* Tools: `tools/update-check.sh` finds the checkout of a box that has it in
+  `/mailinabox` (an upstream box before the in-place upgrade): from the
+  directory that `/usr/local/bin/mailinabox` changes into, as long as it is
+  root's own. `before` recorded no version and no status checks there and
+  said "0 errors", and `backup` stopped (B106).
 
 ### Changed
 

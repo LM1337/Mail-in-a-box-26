@@ -157,6 +157,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B103](#b103) | medium | Tools | Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped | Fork | no | no | rc7 |
 | [B104](#b104) | medium | Tools | update-check.sh backup fails with two or more Docker volumes, after the Mail-in-a-Box backup | Fork | no | no | rc7 |
 | [B105](#b105) | low | Tests | Any local account can fake the setup marks in the journal, and the log audit then accepts its messages as setup noise | Fork | no | no | rc7 |
+| [B106](#b106) | medium | Tools | update-check.sh does not find the checkout of a box in /mailinabox: no status checks before the update, and the backup stops | Fork | no | no | rc7 |
 | [B107](#b107) | medium | Tools | update-check.sh mailcheck reports FAILED when the mail comes back over TLS | Fork | no | no | rc7 |
 
 ## Details
@@ -1333,6 +1334,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (the setup marks are new in rc7, never in a tag). Origin: Fork.
 * **Evidence:** On the fresh-install test box: a line with that identifier from root and one from the account nobody; `journalctl SYSLOG_IDENTIFIER=mailinabox-setup` listed both, with `_UID=0` only root's (test lines with another text, so that they mark no setup run).
 * **Found by:** rc7 review; **commit:** see `git log --grep B105`; **fixed in:** v78-r2604.0-rc7
+
+### B106
+
+**update-check.sh does not find the checkout of a box in /mailinabox: no status checks before the update, and the backup stops** (medium, Tools)
+
+* **Symptom:** On a box whose Mail-in-a-Box checkout is `/mailinabox` (installed with an older upstream bootstrap.sh; such a box is upgraded with `tools/upgrade-in-place-to-2604.sh`), `tools/update-check.sh before` records "miab unknown" and "(no /root/mailinabox/management/status_checks.py)" and still says "Status checks: 0 errors, 0 warnings". `backup` stops with "ERROR: /root/mailinabox/management/backup.py is missing", and with `--no-miab-backup` the system archive leaves out the checkout.
+* **Cause:** The tool took `/root/mailinabox` as the checkout and otherwise only its own checkout, which it does not have when it runs through `curl ... | bash`. The summary counted the lines of a record that had none.
+* **Fix:** The checkout is the directory that `/usr/local/bin/mailinabox` (written by setup: `cd DIR`) changes into, else `/root/mailinabox`, else the tool's own checkout. It must be a git checkout of root's own (no symbolic link, not writable by group or others, also the directories above it), because `management/status_checks.py` and `management/backup.py` run from it as root. The system archive takes that directory. Without status checks the summary says "not run".
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The in-place test T3 of rc7 (a copy of a production box on 24.04 with upstream v74 in `/mailinabox`): `before` and `backup` as above. With the fix, `before` through a pipe on the 22.04 test box with v74 in `/mailinabox` recorded `miab v74`, its origin, and 30 errors and 4 warnings of the status checks.
+* **Found by:** rc7 certification (T3); **commit:** see `git log --grep B106`; **fixed in:** v78-r2604.0-rc7
 
 ### B107
 
