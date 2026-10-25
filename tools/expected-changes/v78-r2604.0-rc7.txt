@@ -14,6 +14,14 @@ postconf.txt - ^smtpd_recipient_restrictions = permit_sasl_authenticated,permit_
 crontabs.txt ~ ^/etc/cron\.d/mailinabox-nextcloud # rc4: setup adds tools/nextcloud-share-scope.sh --cron (every 5 minutes) to Nextcloud's cron file
 mailinabox-conf.txt + ^NEXTCLOUD_SHARE_SCOPE=(domain|all)$ # rc4: setup records the Nextcloud sharing scope (default domain)
 fail2ban.txt + ^jail miab-slow- # rc4: the adaptive fail2ban jails for slow password guessing
+mailname.txt ~ ^mailname: \S+$ # rc4 (B60): setup writes PRIMARY_HOSTNAME to /etc/mailname (it kept the name the machine had when Postfix was installed)
+mailname.txt ~ ^hosts: 127\.0\.1\.1\s # rc4 (B60): setup comments out a 127.0.1.1 line of /etc/hosts that names neither PRIMARY_HOSTNAME nor its first label, and names the box there
+
+# --- rc5
+units.txt - ^dovecot disabled # rc5 (B67): a box upgraded in place with rc3 had Dovecot disabled; setup's restart_service enables a disabled unit
+units.txt + ^dovecot enabled # rc5 (B67): see the line above
+units.txt - ^mailinabox\.service unknown # rc5 (B69): "systemctl is-enabled mailinabox" failed ("Too many levels of symbolic links"), so its state was unknown
+units.txt + ^mailinabox\.service enabled # rc5 (B69): setup installs the unit with install_unit and enables it by name
 
 # --- rc6
 doveconf.txt - ^log_path = /var/log/mail\.log$ # rc6 (B85): Dovecot no longer writes mail.log itself

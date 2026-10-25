@@ -338,6 +338,10 @@ in-place tool's copy to an rsync target (all fixed).
 * Tools: `tools/update-check.sh after` expects the new minute of the
   nightly job, which setup picks at random on every run; an update that
   changed nothing else ended with "RESULT: CHANGED" (B108).
+* Tools: the expected changes of rc7 include those of rc4 and rc5 that the
+  state record shows (`/etc/mailname` and `/etc/hosts`, B60; Dovecot and
+  `mailinabox.service` enabled again, B67 and B69), for updates from rc1 to
+  rc3 (B109).
 
 ### Changed
 

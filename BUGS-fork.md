@@ -160,6 +160,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B106](#b106) | medium | Tools | update-check.sh does not find the checkout of a box in /mailinabox: no status checks before the update, and the backup stops | Fork | no | no | rc7 |
 | [B107](#b107) | medium | Tools | update-check.sh mailcheck reports FAILED when the mail comes back over TLS | Fork | no | no | rc7 |
 | [B108](#b108) | medium | Tools | update-check.sh after never says OK: every setup run moves the nightly job to another minute | Fork | no | no | rc7 |
+| [B109](#b109) | low | Tools | The expected changes of rc7 miss changes of rc4 and rc5, so an update from rc1 to rc3 lists them as unexpected | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1368,6 +1369,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The update test T5b of rc7 (rc6 to rc7, two setup runs): the checksum of the file changed before the update, after the first and after the second run. The records of that update, replayed with the version lines of a tag (the test installed a branch), gave 2 unexpected changes, both of this file, and with the rule "RESULT: OK - 0 unexpected, 5 expected changes".
 * **Found by:** rc7 certification (T5b); **commit:** see `git log --grep B108`; **fixed in:** v78-r2604.0-rc7
+
+### B109
+
+**The expected changes of rc7 miss changes of rc4 and rc5, so an update from rc1 to rc3 lists them as unexpected** (low, Tools)
+
+* **Symptom:** `tools/update-check.sh after` of an update from rc3 lists as UNEXPECTED: the new `/etc/mailname` and the new 127.0.1.1 line of `/etc/hosts` (B60, rc4), Dovecot from disabled to enabled (B67, rc5) and `mailinabox.service` from unknown to enabled (B69, rc5).
+* **Cause:** `tools/expected-changes/v78-r2604.0-rc7.txt` covers the updates from all earlier releases, but its rc4 rules missed B60, and it had no rules for rc5.
+* **Fix:** Rules for these changes.
+* **Affects:** the development of rc7 only (never in a tag); only updates from rc1 to rc3 show them. Origin: Fork.
+* **Evidence:** The update test T5b of rc7, from rc3 directly to rc7: 10 unexpected changes, of them these 6 lines (the others came from installing a branch instead of a tag). The same lines, compared with the new rules: 0 unexpected.
+* **Found by:** rc7 certification (T5b); **commit:** see `git log --grep B109`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 
