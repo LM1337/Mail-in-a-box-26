@@ -127,6 +127,34 @@ the tag it installs, with `--force`). To clean up, delete the old tags:
 `git fetch --tags` for this: the checkout is shallow, and it would download
 the history behind every upstream tag of the repository.
 
+**Checks around the update** (rc7 and later, `tools/update-check.sh`, as
+root; through `curl ... | sudo bash -s -- STEP` without a checkout). Before
+the update, `before` records the state of the box (version, services,
+status checks, Postfix and Dovecot settings, Nextcloud, Munin, Docker,
+crontabs, listening ports, ...) and runs `tests/fork/log-audit.sh` as a
+baseline; `backup` runs a Mail-in-a-Box backup and puts an encrypted archive
+of `/etc`, `/root/mailinabox`, the crontabs, Z-Push, Munin, Nextcloud's code
+and the Docker stacks you name (`--docker-dir`, `--docker-volume`,
+`--postgres` for a pg_dump) next to the backups (rsync targets; verified by
+checksum) or in `/root/update-check`. After the update, `after` records the
+state again and lists each change as EXPECTED (announced by the releases in
+between, `tools/expected-changes/`) or UNEXPECTED, and runs the log audit
+against the baseline: only new message classes count (`--internet` accepts
+the usual noise of a public box). `mailcheck` sends a marked test mail to
+an address of another provider that sends it back (forward or automatic
+answer; `--probe ADDRESS` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) and
+waits for it to come back over port 25: outbound, inbound, spam filter,
+folder and storage in one round trip. Without a probe address it is skipped.
+
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	(the update)
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+Everything lands in `/root/update-check/<stamp>/` (only root can read it).
+`--help` lists the options.
+
 Right after the update:
 
 * **Allowlist your own networks.** From rc4 on, adaptive banning and the
@@ -195,6 +223,37 @@ Zum Aufräumen die alten Tags löschen:
 („not found“ für einen Tag, den es nicht gibt, ist in Ordnung). Nicht
 `git fetch --tags` dafür nehmen: Der Checkout ist flach (shallow) und würde
 die Historie hinter jedem Upstream-Tag des Repositorys herunterladen.
+
+**Prüfungen rund um das Update** (ab rc7, `tools/update-check.sh`, als
+root; ohne Checkout über `curl ... | sudo bash -s -- SCHRITT`). Vor dem
+Update hält `before` den Zustand der Box fest (Version, Dienste,
+Statusprüfungen, Einstellungen von Postfix und Dovecot, Nextcloud, Munin,
+Docker, Crontabs, offene Ports, ...) und lässt `tests/fork/log-audit.sh` als
+Vergleichsbasis laufen; `backup` macht eine Mail-in-a-Box-Sicherung und legt
+ein verschlüsseltes Archiv von `/etc`, `/root/mailinabox`, den Crontabs,
+Z-Push, Munin, dem Code von Nextcloud und den genannten Docker-Stacks
+(`--docker-dir`, `--docker-volume`, `--postgres` für einen pg_dump) neben die
+Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
+`/root/update-check`. Nach dem Update hält `after` den Zustand erneut fest,
+führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
+`tools/expected-changes/`) oder UNEXPECTED auf und lässt das Log-Audit gegen
+die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
+(`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin).
+`mailcheck` schickt eine markierte Testmail an eine Adresse bei einem
+anderen Anbieter, die sie zurückschickt (Weiterleitung oder automatische
+Antwort; `--probe ADRESSE` oder `PROBE_ADDRESS=` in `/etc/mailinabox.conf`),
+und wartet, bis sie über Port 25 zurückkommt: Versand, Empfang,
+Spamfilter, Ordner und Ablage in einem Durchgang. Ohne Probe-Adresse wird
+der Schritt übersprungen.
+
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	(das Update)
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
+`--help` zeigt die Optionen.
 
 Gleich nach dem Update:
 
@@ -903,7 +962,8 @@ What it does, in phases that continue on their own after each reboot:
    block the upgrade until you pass `--keep-local`.
 2. **snapshot**: a system archive (`/etc` as it was, the code outside the
    data directory, package lists), encrypted with the backup key and copied
-   next to the backups (for an rsync target: `<target>-system/`). Then mail,
+   next to the backups (for an rsync target: `<target>-system/`; for backups
+   on the machine itself it stays in `/root/upgrade-2604`). Then mail,
    web, cron and the update timers are stopped and masked, so they stay off
    across reboots. **Mail is offline from here.** Then a fresh Mail-in-a-Box
    backup (so it holds all mail) and counts and key fingerprints. With
@@ -978,6 +1038,24 @@ as well). After a reboot it starts before you can attach. If a new login
 fails or `sudo` is missing, wait a few minutes and try again. Do not reboot: a release upgrade stopped in the
 middle can leave the machine unbootable.
 
+Why: openssh-server stops `ssh.socket` and `ssh.service` when the new
+package is unpacked and starts them again only when it is configured, near
+the end; nothing listens on port 22 in between. From rc7 on, the tool runs a
+**fallback SSH server on port 1022** for the time of each release upgrade
+(`UPGRADE_SSH_FALLBACK_PORT=PORT` chooses another port, `off` turns it off):
+`ssh -p 1022 you@box`. It runs from a private copy of the old sshd, accepts
+only keys, and only of the administrators (members of the groups sudo and
+admin, and root if `PermitRootLogin` allows keys;
+`UPGRADE_SSH_FALLBACK_USERS="..."` names others), keeps the AllowUsers,
+AllowGroups, DenyUsers and DenyGroups of `sshd_config` and allows no
+forwarding. ufw lets the port through only while it runs; a firewall of the
+provider must allow it too. Try it before the upgrade with
+`--ssh-fallback-test` (10 minutes). The run says when port 22 stops
+answering and when it answers again. The fallback is stopped when port 22
+works again, also when the tool stops with an error; while port 22 does not
+answer it stays until the next reboot, and the next run removes it and its
+firewall rule.
+
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
 get it replaced by the fork's configuration; the existing indexes are used.
@@ -1032,7 +1110,8 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 2. **snapshot**: ein Systemarchiv (`/etc` im alten Zustand, der Code
    außerhalb des Datenverzeichnisses, Paketlisten), mit dem Backup-Schlüssel
    verschlüsselt und neben die Sicherungen gelegt (bei einem rsync-Ziel:
-   `<ziel>-system/`). Danach werden Mail, Web, Cron und die Update-Timer
+   `<ziel>-system/`; bei Sicherungen auf der Maschine selbst bleibt es in
+   `/root/upgrade-2604`). Danach werden Mail, Web, Cron und die Update-Timer
    angehalten und maskiert, damit sie auch über Neustarts hinweg aus bleiben.
    **Ab hier ist die Mail aus.** Dann eine frische Mail-in-a-Box-Sicherung
    (damit sie alle Mails enthält) sowie Zählungen und
@@ -1114,6 +1193,25 @@ sich anhängen kann. Scheitert eine neue Anmeldung oder fehlt `sudo`, einige Min
 warten und es erneut versuchen. Nicht neu starten: ein mitten im Lauf
 abgebrochenes Release-Upgrade kann die Maschine so hinterlassen, dass sie
 nicht mehr startet.
+
+Der Grund: openssh-server hält `ssh.socket` und `ssh.service` an, wenn das
+neue Paket entpackt wird, und startet sie erst wieder, wenn es eingerichtet
+wird, gegen Ende; dazwischen hört niemand auf Port 22. Ab rc7 lässt das
+Werkzeug für die Dauer jedes Release-Upgrades einen **Ersatz-SSH-Server auf
+Port 1022** laufen (`UPGRADE_SSH_FALLBACK_PORT=PORT` wählt einen anderen
+Port, `off` schaltet ihn ab): `ssh -p 1022 name@box`. Er läuft aus einer
+eigenen Kopie des alten sshd, nimmt nur Schlüssel an, und nur die der
+Administratoren (Mitglieder der Gruppen sudo und admin, und root, wenn
+`PermitRootLogin` Schlüssel erlaubt; `UPGRADE_SSH_FALLBACK_USERS="..."` nennt
+andere), behält AllowUsers, AllowGroups, DenyUsers und DenyGroups aus
+`sshd_config` und erlaubt keine Weiterleitungen. ufw lässt den Port nur
+durch, solange er läuft; eine Firewall des Anbieters muss ihn ebenfalls
+erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`
+ausprobieren (10 Minuten). Der Lauf meldet, wann Port 22 nicht mehr
+antwortet und wann wieder. Der Ersatz-Server wird beendet, sobald Port 22
+wieder geht, auch wenn das Werkzeug mit einem Fehler abbricht; solange Port 22
+nicht antwortet, bleibt er bis zum nächsten Neustart, und der nächste Lauf
+entfernt ihn und seine Firewall-Regel.
 
 Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
 in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand

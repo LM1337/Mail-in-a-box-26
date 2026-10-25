@@ -502,7 +502,23 @@ Everything is in `tests/fork/`:
   phase of `tools/upgrade-in-place-to-2604.sh` (`[in-place:release_2404]`,
   from the tool's state file); the noise of the old releases and the release
   upgrades is allowed only with that prefix. For the old box of a migration,
-  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`.
+  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`. `--since`
+  also takes the short forms `-30m`, `-24h`, `-2d`. With `--baseline
+  BEFORE.json` (the `--json` report of an earlier run, e.g. before an
+  update) a class that was in it is listed as KNOWN with both counts and
+  does not count; only new classes are UNKNOWN. `--internet` adds
+  `log-audit-allow-internet.txt`, the usual noise of a box on the Internet
+  (firewall blocks, scanners, password guessing, TLS errors of bad clients,
+  spam that Postfix rejects, DNS errors of other zones), for production
+  boxes only; the test scenarios do not use it.
+* `tools/update-check.sh` (`before`, `backup`, `after`, `mailcheck`) records
+  the state of a box before and after an update, compares it (with the
+  expected changes of `tools/expected-changes/`) and runs `log-audit.sh`
+  against the baseline; see "Updating the fork" in README-fork.md. In a
+  test lab without an external probe address, `mailcheck --probe` with an
+  address of the box itself only exercises the code path: the reply has to
+  be sent back over port 25 by hand (or by a small script of the lab), so
+  outbound delivery and DKIM are only checked locally.
 * Mails that you send to a box under test yourself (vacation triggers,
   delivery checks after a reboot) must be test mails, or the manifest
   comparison counts them as new. Send them with `smoke.py --send-test-mail

@@ -1,0 +1,25 @@
+# Expected changes of every update, for tools/update-check.sh after (used
+# with the lists of the releases in this directory, <version>.txt).
+#
+# One rule per line: FILE SIGN REGEX # REASON
+#   FILE    a file of the state record (before/ and after/: version.txt,
+#           units.txt, postconf.txt, doveconf.txt, munin.txt, ...), or * for
+#           any file
+#   SIGN    + a line that is new after the update, - a line that is gone,
+#           ~ either
+#   REGEX   a Python regular expression, searched in the line; it must not
+#           contain " # " (write [#] instead)
+#   REASON  mandatory: why the change is expected (the release and the
+#           CHANGELOG entry or bug ID)
+# A changed value of a key (postconf.txt: "key = value") is one line gone and
+# one new: write a rule for each, the new one as narrow as the release notes
+# allow. Empty lines and lines starting with "#" are comments.
+
+# --- every update
+version.txt ~ ^miab v78-r2604\.0 # the update itself: the new version of /root/mailinabox
+version.txt + ^origin https://github\.com/LM1337/Mail-in-a-box-26(\.git)?$ # "Updating the fork" in README-fork.md: rc1 to rc3 change the origin to the fork's repository (git remote set-url)
+version.txt - ^origin # the old origin, see the line above
+failed.txt - . # a unit that had failed before and no longer has (setup restarts the services); not a regression
+status.txt - . # a status check error or warning from before is gone; not a regression
+config-warnings.txt - . # a warning of doveconf or postconf from before is gone; not a regression
+listening.txt ~ ^tcp \S+:22 (sshd|systemd)$ # port 22 belongs to systemd (ssh.socket) until the first connection starts sshd

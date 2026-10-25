@@ -1,0 +1,40 @@
+# Additions for a log audit of a box on the Internet (tests/fork/log-audit.sh
+# --internet): what scanners, password guessers, spam senders, misconfigured
+# mail servers and DNS servers make any public mail server log. Not for the
+# tests (the test network has none of it), and not a reason to look away: a
+# class here that suddenly comes thousands of times is still worth a look
+# (fail2ban, Status Checks). Same format as log-audit-allow.txt. Keep the
+# rules narrow: they must not accept the box's own failures (a TLS or milter
+# error of the box itself, a rejected mail of a real sender because of a
+# wrong restriction).
+
+# --- firewall
+^kernel: \[UFW (LIMIT )?BLOCK\] IN=\S+ OUT= # ufw drops a packet to a closed port (port scans); Mail-in-a-Box opens only its own ports
+^kernel: TCP: request_sock_TCP(vN)?: Possible SYN flooding on port N\. (Sending cookies|Dropping request)\. Check SNMP counters\.$ # a burst of connections (scanner, SYN flood); the kernel answers with SYN cookies
+
+# --- password guessing (fail2ban bans the sources)
+^postfix/(submission|smtps)/smtpd: warning: \S*\[<ip>\]: SASL (LOGIN|PLAIN) authentication failed: # password guessing on ports 465 and 587; jails postfix-sasl and miab-slow-postfix-sasl
+^sshd(-session|-auth)?: (error: )?(maximum authentication attempts exceeded for .* from <ip> port N sshN \[preauth\]|PAM: Authentication failure for (illegal user )?\S+ from <ip>)$ # password guessing on SSH; jail sshd
+IMAP Error: Login failed for .* against localhost from <ip>(\(X-Forwarded-For: [^)]*\))?\. AUTHENTICATE PLAIN: Authentication failed\. # Roundcube: a wrong password on the webmail login (also guessing); jail roundcube
+^nextcloud\[core\] level 2: (Login failed: .* \(Remote IP: <ip>\)|Bruteforce attempt from "?<ip>"? detected for action "?[a-z_]+"?\.)$ # Nextcloud: a wrong password (also guessing), and Nextcloud's own brute force throttle; jail nextcloud
+\[FATAL\] \[[^\]]*\] Exception: \(AuthenticationRequiredException\) - Access denied\. Username or password incorrect$ # Z-Push: an ActiveSync login with a wrong password
+
+# --- scanners and broken clients (TLS, SSH, HTTP)
+^postfix/(smtpd|submission/smtpd|smtps/smtpd): SSL_accept error from \S*\[<ip>\]: (-?N|lost connection|Connection reset by peer|Connection timed out)$ # a client that opens a TLS connection and gives up or speaks no TLS (scanners); the box's own check of port 465 is in log-audit-allow.txt
+^postfix/(smtpd|submission/smtpd|smtps/smtpd): warning: TLS library problem: error:[0-9A-Fa-fN<>a-z]+:SSL routines::(unsupported protocol|no shared cipher|wrong version number|http request|version too low|no suitable signature algorithm|bad key share|unexpected eof while reading|record layer failure|tlsv1 alert [a-z ]+|sslv3 alert [a-z ]+|packet length too long|unknown protocol|bad packet length|no shared signature algorithms|invalid alert|unsafe legacy renegotiation disabled): # a client with old or broken TLS (scanners, old devices)
+^postfix/(smtpd|submission/smtpd): warning: non-SMTP command from \S*\[<ip>\]: # a scanner speaks HTTP or something else to the mail port
+^postfix/(smtpd|submission/smtpd): warning: Illegal address syntax from \S*\[<ip>\] in (MAIL|RCPT) command: # a broken or hostile client
+^(imap|pop3|managesieve|submission)-login: (Error: |Warning: )?.*SSL_accept\(\) failed: # Dovecot: a client with old or broken TLS (scanners)
+^sshd(-session|-auth)?: (error: )?(kex_exchange_identification: (Connection closed by remote host|read: Connection reset by peer|client sent invalid protocol identifier.*|banner line contains invalid characters)|banner exchange: Connection from <ip> port N: (invalid format|could not read protocol version|Connection timed out|Broken pipe|Connection reset by peer)|Unable to negotiate with <ip> port N: no matching [a-z ]+ found\..*|fatal: Timeout before authentication for <ip> port N|Protocol major versions differ.*)$ # SSH scanners and clients that give up before the login
+^sshd: (error: )?(beginning MaxStartups throttling|drop connection #N from \[<ip>\]:N on \[<ip>\]:N past MaxStartups|exited MaxStartups throttling after .*)$ # many parallel SSH connections (scanners); sshd throttles them
+\[(error|crit|warn)\] N#N: \*N (open\(\) "[^"]*/www/[^"]*" failed \(N: (No such file or directory|Not a directory)\)|"[^"]*/www/[^"]*" is not found \(N: No such file or directory\)|directory index of "[^"]*/www/[^"]*" is forbidden|access forbidden by rule|FastCGI sent in stderr: "Primary script unknown" while reading response header from upstream|client sent invalid (method|request)( while reading client request line)?|client sent plain HTTP request to HTTPS port while reading client request headers),? client: <ip>, server: # nginx: a scanner asks for paths that are not there (wp-login.php, .env, .git, .php files); only in the web roots ($STORAGE_ROOT/www), so that a missing file of the box's own code (admin panel, webmail, Nextcloud) still shows
+\[(crit|error|info)\] N#N: \*N SSL_do_handshake\(\) failed \(SSL: error:[^)]*\) while SSL handshaking, client: <ip>, server: # nginx: a client with old or broken TLS (scanners)
+^nextcloud\[core\] level 2: Trusted domain error\. "<ip>" tried to access using "[^"]*" as host\.$ # Nextcloud: a scanner asks for the box's IP address instead of its name
+
+# --- mail servers that do not follow the rules (Postfix rejects or warns)
+^postfix/smtpd: warning: (hostname \S+ does not resolve to address <ip>(: (Name or service not known|Temporary failure in name resolution|No address associated with hostname))?|<ip>: (address not listed for hostname \S+|hostname \S+ verification failed: .*))$ # reverse DNS of the sending server does not match its name; Postfix calls it "unknown" and goes on
+^postfix/smtpd: NOQUEUE: reject: (RCPT|MAIL|DATA) from \S*\[<ip>\]: N N\.N\.N .*(Client host \[<ip>\] blocked using zen\.spamhaus\.org|Sender address rejected: (Domain not found|need fully-qualified address)|Recipient address rejected: (User unknown in virtual mailbox table|Greylisted, see https?://postgrey\.schweikert\.ch/help/\S+)|Relay access denied|Helo command rejected: (need fully-qualified hostname|Host not found|Invalid name)|blocked using dbl\.spamhaus\.org); # Postfix refuses spam sources (Spamhaus ZEN and DBL), mail to addresses that do not exist, relaying and broken senders, and greylists unknown senders (they retry)
+
+# --- DNS servers of others (the box's own resolver, bind9)
+^named: .*(DNS format error from <ip>#N resolving .*|FORMERR resolving '[^']+': <ip>#N|(timed out|connection refused|network unreachable|host unreachable) resolving '[^']+': <ip>#N|unexpected RCODE \(?[A-Z]+\)? resolving '[^']+': <ip>#N|lame server resolving '[^']+' \(in '[^']+'\?\): <ip>#N)$ # a remote DNS server answers badly or not at all; the resolver tries the next one
+^named: .*(no valid signature found|verify failed due to bad signature|insecurity proof failed|got insecure response; parent indicates it should be secure|broken trust chain|bad cache hit) # DNSSEC errors of other zones; the resolver answers SERVFAIL for them, as it should

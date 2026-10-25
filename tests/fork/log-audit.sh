@@ -40,12 +40,23 @@
 # contain " # " (write [#] instead). Empty lines and lines starting with "#"
 # are comments. --allow replaces the default list, --allow-extra adds a list
 # (e.g. one for the local additions of a test lab); both can be repeated.
+# --internet adds log-audit-allow-internet.txt (next to this script): the
+# usual noise of a box on the Internet (firewall blocks, scanners, password
+# guessing, TLS errors of bad clients), for a production box; the tests do
+# not use it.
+#
+# Baseline: --baseline BEFORE.json takes the --json report of an earlier run
+# (e.g. before an update, see tools/update-check.sh). A class that was in it
+# (UNKNOWN or allowed) is listed as KNOWN with both counts and is not an
+# UNKNOWN; only the classes that are new against the baseline count.
 #
 # Usage (as root on the box):
 #   tests/fork/log-audit.sh [--since TIME] [--allow FILE]... [--allow-extra FILE]...
+#                           [--internet] [--baseline BEFORE.json]
 #                           [--json OUT] [--setup-log FILE]... [--examples N]
 #   TIME: anything "date -d" understands ("2026-10-25 08:15", "-2 hours",
-#         "@1793000000"), or "boot" (the default: since the last boot; files
+#         "24 hours ago", "@1793000000"), the short forms -90s, -30m, -24h,
+#         -2d and -1w, or "boot" (the default: since the last boot; files
 #         that changed since then are read, lines older than it are skipped).
 #         For a test, give the time the scenario started.
 #   --setup-log FILE  also read a saved setup output (lines without time stamps
@@ -60,6 +71,8 @@ usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "${BASH_SOURCE[0
 SINCE=boot
 ALLOW=()
 ALLOW_EXTRA=()
+INTERNET=
+BASELINE=
 JSON_OUT=
 EXAMPLES=2
 SETUP_LOGS=()
@@ -68,6 +81,8 @@ while [ $# -gt 0 ]; do
 		--since) SINCE=${2:?--since needs a value}; shift 2 ;;
 		--allow) ALLOW+=("${2:?--allow needs a file}"); shift 2 ;;
 		--allow-extra) ALLOW_EXTRA+=("${2:?--allow-extra needs a file}"); shift 2 ;;
+		--internet) INTERNET=1; shift ;;
+		--baseline) BASELINE=${2:?--baseline needs a file}; shift 2 ;;
 		--json) JSON_OUT=${2:?--json needs a file}; shift 2 ;;
 		--setup-log) SETUP_LOGS+=("${2:?--setup-log needs a file}"); shift 2 ;;
 		--examples) EXAMPLES=${2:?--examples needs a number}; shift 2 ;;
@@ -88,7 +103,19 @@ if [ ${#ALLOW[@]} = 0 ]; then
 		exit 2
 	fi
 fi
+if [ -n "$INTERNET" ]; then
+	if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/log-audit-allow-internet.txt" ]; then
+		ALLOW+=("$(dirname "${BASH_SOURCE[0]}")/log-audit-allow-internet.txt")
+	else
+		echo "log-audit.sh: --internet: no log-audit-allow-internet.txt next to the script, give --allow-extra FILE." >&2
+		exit 2
+	fi
+fi
 ALLOW+=("${ALLOW_EXTRA[@]+"${ALLOW_EXTRA[@]}"}")
+if [ -n "$BASELINE" ] && [ ! -r "$BASELINE" ]; then
+	echo "log-audit.sh: cannot read the baseline $BASELINE." >&2
+	exit 2
+fi
 for f in "${ALLOW[@]}"; do
 	if [ ! -r "$f" ]; then
 		echo "log-audit.sh: cannot read the allowlist $f." >&2
@@ -101,7 +128,18 @@ if [ "$SINCE" = boot ]; then
 	SINCE_EPOCH=$(awk '/^btime /{print $2}' /proc/stat)
 	SINCE_LABEL="last boot"
 else
-	if ! SINCE_EPOCH=$(date -d "$SINCE" +%s 2>/dev/null); then
+	# The short forms (-24h): date -d reads "h" as a time zone and fails.
+	since_d=$SINCE
+	if [[ $SINCE =~ ^-([0-9]+)[[:space:]]*(s|m|min|h|d|w)$ ]]; then
+		case "${BASH_REMATCH[2]}" in
+			s) since_d="${BASH_REMATCH[1]} seconds ago" ;;
+			m | min) since_d="${BASH_REMATCH[1]} minutes ago" ;;
+			h) since_d="${BASH_REMATCH[1]} hours ago" ;;
+			d) since_d="${BASH_REMATCH[1]} days ago" ;;
+			w) since_d="${BASH_REMATCH[1]} weeks ago" ;;
+		esac
+	fi
+	if ! SINCE_EPOCH=$(date -d "$since_d" +%s 2>/dev/null); then
 		echo "log-audit.sh: cannot parse --since \"$SINCE\"." >&2
 		exit 2
 	fi
@@ -118,7 +156,7 @@ fi
 LA_ALLOW=$(printf '%s\n' "${ALLOW[@]}")
 export LA_SINCE_EPOCH=$SINCE_EPOCH LA_SINCE_LABEL=$SINCE_LABEL LA_ALLOW \
 	LA_JSON=$JSON_OUT LA_EXAMPLES=$EXAMPLES LA_STORAGE_ROOT=$STORAGE_ROOT \
-	LA_HOSTNAME=$PRIMARY_HOSTNAME
+	LA_HOSTNAME=$PRIMARY_HOSTNAME LA_BASELINE=$BASELINE
 LA_SETUP_LOGS=$(printf '%s\n' "${SETUP_LOGS[@]+"${SETUP_LOGS[@]}"}")
 export LA_SETUP_LOGS
 export LC_ALL=C.UTF-8
@@ -160,6 +198,22 @@ try:
 except SystemExit as e:
     print(e, file=sys.stderr)
     sys.exit(2)
+
+# The classes of an earlier report (--baseline), without the phase prefix,
+# with their counts there.
+BASELINE_FILE = os.environ.get("LA_BASELINE", "")
+BASELINE = {}
+BASELINE_LABEL = ""
+if BASELINE_FILE:
+    try:
+        with open(BASELINE_FILE, encoding="utf-8") as f:
+            b = json.load(f)
+        for item in b.get("unknown", []) + b.get("allowed", []) + b.get("known", []):
+            BASELINE[RE_TAG.sub("", item["class"], count=1)] = int(item.get("count", 0))
+        BASELINE_LABEL = "%s since %s" % (b.get("host", "?"), b.get("since_label", "?"))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        print("log-audit.sh: cannot read the baseline %s: %s" % (BASELINE_FILE, e), file=sys.stderr)
+        sys.exit(2)
 
 # ------------------------------------------------------------ normalizing
 
@@ -677,6 +731,15 @@ def main():
                 break
         else:
             unknown.append(item)
+    known = []
+    if BASELINE_FILE:
+        for item in unknown:
+            plain = RE_TAG.sub("", item["class"], count=1)
+            if plain in BASELINE:
+                item["baseline_count"] = BASELINE[plain]
+                known.append(item)
+        unknown = [i for i in unknown if "baseline_count" not in i]
+    known.sort(key=lambda i: (-i["count"], i["class"]))
     unknown.sort(key=lambda i: (-i["count"], i["class"]))
     allowed.sort(key=lambda i: (i["allow_index"], -i["count"]))
     for item in allowed:
@@ -686,6 +749,8 @@ def main():
     w("log-audit on %s since %s (%s)\n" % (HOSTNAME, os.environ["LA_SINCE_LABEL"],
                                            time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(SINCE))))
     w("allowlist: %s (%d rules)\n" % (", ".join(ALLOW_FILES), len(RULES)))
+    if BASELINE_FILE:
+        w("baseline: %s (%s, %d classes)\n" % (BASELINE_FILE, BASELINE_LABEL, len(BASELINE)))
     if INPLACE_STARTS:
         w("in-place upgrade phases (prefix [in-place:PHASE]): %s, until %s\n" % (
             ", ".join("%s %s" % (ph, time.strftime("%H:%M:%S", time.localtime(t))) for t, ph in INPLACE_STARTS),
@@ -699,12 +764,18 @@ def main():
         w("  [%d] %s\n      sources: %s\n" % (item["count"], item["class"], src))
         if "reason" in item:
             w("      reason: %s (%s:%d)\n" % (item["reason"], os.path.basename(item["allow_file"]), item["allow_line"]))
+        if "baseline_count" in item:
+            w("      in the baseline: %d lines\n" % item["baseline_count"])
         for ex in item["examples"]:
             w("      e.g. %s\n" % ex)
 
-    w("\nUNKNOWN (%d classes):\n" % len(unknown))
+    w("\nUNKNOWN (%d classes%s):\n" % (len(unknown), ", new against the baseline" if BASELINE_FILE else ""))
     for item in unknown:
         show(item)
+    if BASELINE_FILE:
+        w("\nKNOWN from the baseline, not on the allowlist (%d classes):\n" % len(known))
+        for item in known:
+            show(item)
     w("\nALLOWED (%d classes):\n" % len(allowed))
     for item in allowed:
         show(item)
@@ -712,8 +783,9 @@ def main():
     if unused:
         w("\nAllowlist rules without a match here (%d): lines %s\n"
           % (len(unused), ", ".join("%s:%d" % (os.path.basename(r["file"]), r["line"]) for r in unused)))
-    w("\nRESULT: %s - %d unknown, %d allowed classes\n"
-      % ("OK" if not unknown else "UNKNOWN", len(unknown), len(allowed)))
+    w("\nRESULT: %s - %d unknown, %s%d allowed classes\n"
+      % ("OK" if not unknown else "UNKNOWN", len(unknown),
+         "%d known from the baseline, " % len(known) if BASELINE_FILE else "", len(allowed)))
 
     out = os.environ.get("LA_JSON")
     if out:
@@ -721,7 +793,8 @@ def main():
                   "allowlist": ALLOW_FILES, "sources": source_stats,
                   "inplace_phases": [{"phase": ph, "start": t} for t, ph in INPLACE_STARTS],
                   "inplace_setup_start": INPLACE_END,
-                  "unknown": unknown, "allowed": allowed,
+                  "baseline": BASELINE_FILE or None,
+                  "unknown": unknown, "known": known, "allowed": allowed,
                   "unused_rules": [{"file": r["file"], "line": r["line"], "regex": r["regex"]} for r in unused],
                   "result": "OK" if not unknown else "UNKNOWN"}
         with open(out, "w", encoding="utf-8") as f:
