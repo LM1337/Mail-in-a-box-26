@@ -30,6 +30,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the tmux window closes by itself 60 seconds after a successful run,
   instead of waiting for Enter forever; after a failure it stays open (B72).
 
+### Changed
+
+* Tools: before each release upgrade `tools/upgrade-in-place-to-2604.sh`
+  says that new SSH logins fail for a while (in the 22.04 test run about 19
+  minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to 26.04) and,
+  from 24.04 to 26.04, that `sudo` is missing for a while because sudo-rs
+  replaces it: attach before and keep the connection open; if a login fails,
+  wait, do not reboot. README-fork.md ("Logging in during the release
+  upgrades") and README.md describe it.
+
 ## v78-r2604.0-rc5 (2026-10-24)
 
 Fixes from the update of a copy of a production box from rc3 to rc4: Dovecot

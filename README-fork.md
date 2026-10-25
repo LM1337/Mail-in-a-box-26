@@ -798,6 +798,18 @@ during the release upgrade or after a reboot.
 `--status` shows where it stands; running the command again continues.
 `--cleanup-only` removes leftovers of the old releases afterwards.
 
+**Logging in during the release upgrades.** While do-release-upgrade
+replaces the SSH server, new SSH logins fail for a while (in the 22.04 test
+run about 19 minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to
+26.04). Connections that are open stay open, and the upgrade goes on in
+tmux. From 24.04 to 26.04, `sudo` is also missing for about 12 minutes,
+while sudo-rs replaces it: `sudo tmux attach -t upgrade-2604` then fails
+with "command not found". The tool says so before each release upgrade. To
+watch the run, attach before it starts and keep that connection open (a
+root shell opened before with `sudo -i` works as well). If a new login fails
+or `sudo` is missing, wait a few minutes and try again. Do not reboot: a
+release upgrade stopped in the middle can leave the machine unbootable.
+
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
 get it replaced by the fork's configuration; the existing indexes are used.
@@ -910,6 +922,20 @@ Sicherung. Die Konsole des Anbieters sollte bereitliegen, weil SSH während
 des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.
 `--status` zeigt den Stand; ein erneuter Aufruf setzt fort. `--cleanup-only`
 räumt danach die Reste der alten Releases weg.
+
+**Anmelden während der Release-Upgrades.** Solange do-release-upgrade den
+SSH-Server ersetzt, schlagen neue SSH-Anmeldungen eine Weile fehl (im
+Testlauf von 22.04 etwa 19 Minuten von 22.04 auf 24.04 und etwa 7 Minuten
+von 24.04 auf 26.04). Offene Verbindungen bleiben bestehen, und das Upgrade
+läuft in tmux weiter. Von 24.04 auf 26.04 fehlt außerdem `sudo` für etwa
+12 Minuten, weil sudo-rs es ersetzt: `sudo tmux attach -t upgrade-2604`
+scheitert dann mit „command not found“. Das Werkzeug weist vor jedem
+Release-Upgrade darauf hin. Wer zusehen will, hängt sich vorher an und lässt
+diese Verbindung offen (eine vorher mit `sudo -i` geöffnete Root-Shell geht
+auch). Scheitert eine neue Anmeldung oder fehlt `sudo`, einige Minuten
+warten und es erneut versuchen. Nicht neu starten: ein mitten im Lauf
+abgebrochenes Release-Upgrade kann die Maschine so hinterlassen, dass sie
+nicht mehr startet.
 
 Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
 in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand

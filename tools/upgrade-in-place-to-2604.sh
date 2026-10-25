@@ -223,7 +223,9 @@ reboots, a box already release-upgraded to 24.04 (Mail-in-a-Box v7x) with one
 reboot. Nextcloud must be 26 or later. Run it as root. Started from a
 terminal outside tmux or screen, it runs itself in the tmux session
 "upgrade-2604" (it installs tmux if needed) and attaches to it: if the SSH
-connection drops, log in again and run "sudo tmux attach -t upgrade-2604".
+connection drops, log in again and run "sudo tmux attach -t upgrade-2604"
+(during a release upgrade new logins and sudo can fail for a while: wait, do
+not reboot).
 Mail is offline from phase "snapshot" on (after the system archive, before
 the fresh backup; with --skip-miab-backup or backups turned off from phase
 "quiesce") until setup has finished (typically 1-3 hours). After each reboot the upgrade continues on its own;
@@ -2917,6 +2919,7 @@ release_upgrade() { # PHASE FROM TO
 	section "Release upgrade: Ubuntu $from -> $to"
 	say "do-release-upgrade runs non-interactively and keeps the existing configuration files."
 	say "It takes 20-60 minutes. Its own logs are in /var/log/dist-upgrade/."
+	release_access_note "$to"
 	# No question here: the downtime has started, and the start of the upgrade
 	# was confirmed (the operator may not be watching any more).
 	state_set RELEASE_STARTED 1
@@ -2953,6 +2956,32 @@ or restore from the backups."
 	fi
 	if [ "$rc" != 0 ]; then warn "do-release-upgrade ended with exit code $rc. Checking the packages..."; fi
 	release_done "$phase" "$to"
+}
+
+# What the operator runs into during a release upgrade. In the 22.04 test
+# run new SSH logins failed for about 19 minutes from 22.04 to 24.04 (while
+# openssh-server was unpacked but not yet configured) and for about 7 minutes
+# from 24.04 to 26.04, and /usr/bin/sudo was missing for about 12 minutes
+# while sudo-rs replaced sudo. Open connections and the run in tmux go on.
+release_access_note() { # TO
+	local mins=20
+	if [ "$1" = 26.04 ]; then mins=10; fi
+	say
+	say "During the release upgrade new SSH logins can fail for a while (about $mins minutes on a test"
+	say "box), while the SSH server is replaced. Connections that are open stay open, and the upgrade"
+	if [ -n "$RESUMED" ] || in_multiplexer; then
+		say "goes on in tmux. To watch it, attach now (sudo tmux attach -t $TMUX_SESSION) and keep that"
+		say "connection open."
+	else
+		say "goes on. Keep this connection open."
+	fi
+	say "If a new login fails, wait a few minutes and try again. Do not reboot."
+	if [ "$1" = 26.04 ]; then
+		say "sudo is missing for about 15 minutes while sudo-rs replaces it: \"sudo tmux attach\" then"
+		say "fails with \"command not found\". Wait until it is back, or use a root shell opened before"
+		say "(sudo -i)."
+	fi
+	say
 }
 
 phase_release_2404() { release_upgrade release_2404 22.04 24.04; }
