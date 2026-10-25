@@ -41,8 +41,9 @@ EOF
 install -o root -g root -m 0755 management/munin_notify.sh /usr/local/lib/mailinabox/munin-notify
 
 # The Debian installer touches these files and chowns them to www-data:adm for use with spawn-fcgi
-chown munin /var/log/munin/munin-cgi-html.log
-chown munin /var/log/munin/munin-cgi-graph.log
+# /var/log/munin belongs to munin, so a file there may be a symbolic link that munin
+# made: -h changes the owner of the link itself and never of what it points to (B86).
+chown -h munin /var/log/munin/munin-cgi-html.log /var/log/munin/munin-cgi-graph.log
 
 # ensure munin-node knows the name of this machine
 # and reduce logging level to warning
