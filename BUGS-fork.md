@@ -162,6 +162,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B108](#b108) | medium | Tools | update-check.sh after never says OK: every setup run moves the nightly job to another minute | Fork | no | no | rc7 |
 | [B109](#b109) | low | Tools | The expected changes of rc7 miss changes of rc4 and rc5, so an update from rc1 to rc3 lists them as unexpected | Fork | no | no | rc7 |
 | [B110](#b110) | low | Tools | update-check.sh after judges an in-place upgrade or a migration from upstream by the lists of the fork's updates | Fork | no | no | rc7 |
+| [B111](#b111) | low | Tools | The test of the fallback SSH server leaves an empty /root/upgrade-2604 | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1392,6 +1393,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The in-place test T3 of rc7: "RESULT: CHANGED - 56 unexpected, 24 expected", every unexpected change one of the release upgrade or of the step from v74.
 * **Found by:** rc7 certification (T3); **commit:** see `git log --grep B110`; **fixed in:** v78-r2604.0-rc7
+
+### B111
+
+**The test of the fallback SSH server leaves an empty /root/upgrade-2604** (low, Tools)
+
+* **Symptom:** After `tools/upgrade-in-place-to-2604.sh --ssh-fallback-test` on a box that never ran the tool, an empty directory `/root/upgrade-2604` (root, mode 0700) is left.
+* **Cause:** The test creates the tool's state directory for the files of the fallback and removed only those files afterwards.
+* **Fix:** The test removes the state directory again when it made it and it is empty (`rmdir`, which removes neither a symbolic link nor a directory with files).
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The in-place test T3 of rc7. With the fix, on the fresh-install test box: after a test of 30 s neither `/root/upgrade-2604` nor the ufw rule for port 1022 nor files of the fallback were left.
+* **Found by:** rc7 certification (T3); **commit:** see `git log --grep B111`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

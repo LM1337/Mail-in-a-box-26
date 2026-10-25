@@ -346,6 +346,8 @@ in-place tool's copy to an rsync target (all fixed).
   or a migration from upstream Mail-in-a-Box by the lists of the fork's
   updates: it lists the changes and says "RESULT: NOT JUDGED" (exit code
   3) when the Ubuntu release changed or the box came from upstream (B110).
+* Tools: `--ssh-fallback-test` of the in-place tool no longer leaves an
+  empty `/root/upgrade-2604` behind (B111).
 
 ### Changed
 

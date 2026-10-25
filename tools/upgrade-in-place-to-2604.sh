@@ -4700,9 +4700,14 @@ main() {
 		return 0
 	fi
 	if [ "$COMMAND" = ssh_fallback_test ]; then
+		local had_state=
+		if [ -e "$STATE_DIR" ] || [ -L "$STATE_DIR" ]; then had_state=1; fi
 		(umask 077 && mkdir -p "$STATE_DIR")
 		chmod 700 "$STATE_DIR"
 		do_ssh_fallback_test
+		# The state directory, if it was made only for the test and is empty
+		# again (B111). rmdir removes neither a link nor a directory with files.
+		if [ -z "$had_state" ]; then rmdir "$STATE_DIR" 2> /dev/null || true; fi
 		return 0
 	fi
 
