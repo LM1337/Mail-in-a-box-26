@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57 and B67 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -34,8 +34,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-72 bugs: 1 critical, 13 high, 32 medium, 26 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5.
+73 bugs: 1 critical, 13 high, 32 medium, 27 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 27 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
-| Fork | 9 |
+| Fork | 10 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -124,6 +124,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B70](#b70) | low | Tools | In-place upgrade from 22.04 warns that ssh.service is disabled and advises to enable it, although ssh.socket starts it | Fork | no | no | rc6 |
 | [B71](#b71) | low | Tools | The terminal attached to the tool's tmux session shows nothing; through "curl \| sudo bash" it is not attached at all | Fork | no | no | rc6 |
 | [B72](#b72) | low | Tools | After the last reboot of the in-place upgrade the tmux window waits for Enter forever | Fork | no | no | rc6 |
+| [B73](#b73) | low | Tools | During the release upgrade to 26.04 "tmux attach" cannot reach the in-place upgrade until the reboot, although the tool advises it | Fork | no | no | rc6 |
 
 ## Details
 
@@ -968,6 +969,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux). Only `tools/upgrade-in-place-to-2604.sh`; `tools/migrate-to-2604.sh` does not reboot.
 * **Evidence:** rc4 T4b and rc5 T4: the window with "Press Enter to close this window" was still open after the run. On a 26.04 test box, the window of the new resume script closed 61 seconds after a run with exit code 0 and was still open 70 seconds after a run with exit code 1.
 * **Found by:** in-place test; **commit:** see `git log --grep B72`; **fixed in:** v78-r2604.0-rc6
+
+### B73
+
+**During the release upgrade to 26.04 "tmux attach" cannot reach the in-place upgrade until the reboot, although the tool advises it** (low, Tools)
+
+* **Symptom:** A few minutes into the release upgrade from 24.04 to 26.04, `sudo tmux attach -t upgrade-2604` (with sudo.ws or sudo-rs while `/usr/bin/sudo` is missing) prints "open terminal failed: not a terminal" and returns. It stays so until the reboot after the release upgrade. The tool and README-fork.md advised to wait when a login or sudo fails and then attach, and the motd and the reboot message offer `tail -f /root/upgrade-2604/upgrade.log`, which a user other than root cannot read. The run itself goes on, and a client attached before stays attached.
+* **Cause:** The release upgrade replaces tmux 3.4 by tmux 3.6 while the 3.4 server of the run keeps running. The 3.6 client cannot attach to the 3.4 server. The old binary is deleted, and its copy under `/proc/PID/exe` no longer starts with the new libtinfo ("version `NCURSES6_TINFO_6.4.current' not found"). From 22.04 to 24.04 the new client (3.4) attaches to the old server (3.2a).
+* **Fix:** Before the release upgrade to 26.04, before a reboot after which it starts by itself, and in the motd the tool says that a new `tmux attach` cannot reach the run from a few minutes after the start until the reboot, and to follow the log with `sudo tail -f /root/upgrade-2604/upgrade.log` instead. The other log hints say `sudo tail -f` as well. README-fork.md and README.md describe it. No second tmux is kept: a copy of the old binary would need the old C library and libtinfo next to it.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (the in-place tool since rc3). Only `tools/upgrade-in-place-to-2604.sh`; `tools/migrate-to-2604.sh` has no release upgrade.
+* **Evidence:** rc6 T3 (copy of a 24.04 production box): tmux 3.4 was replaced by 3.6a at 5 min 40 s into the release upgrade (dpkg.log); a new attach over `ssh -tt` with sudo.ws and with sudo-rs failed with "open terminal failed: not a terminal" after that, `/proc/PID/exe attach` failed with the libtinfo error, and the session was reachable again after the reboot. On a 26.04 test box with the 22.04 and 24.04 tmux binaries and their own libraries: a 3.6 client fails against a 3.4 server and against a 3.2a server, a 3.4 client attaches to a 3.2a server and to a 3.4 server.
+* **Found by:** in-place test; **commit:** see `git log --grep B73`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

@@ -868,13 +868,18 @@ run about 19 minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to
 26.04). Connections that are open stay open, and the upgrade goes on in
 tmux. From 24.04 to 26.04, `sudo` is also missing for about 12 minutes,
 while sudo-rs replaces it: `sudo tmux attach -t upgrade-2604` then fails
-with "command not found". The tool says so before each release upgrade, and
-before a reboot after which a release upgrade starts by itself (from 22.04
-the second one always does). To watch a release upgrade that starts without
-a reboot, attach before it starts and keep that connection open (a root
-shell opened before with `sudo -i` works as well). After a reboot it starts
-before you can attach. If a new login fails or `sudo` is missing, wait a few
-minutes and try again. Do not reboot: a release upgrade stopped in the
+with "command not found". In the same release upgrade tmux 3.6 replaces
+tmux 3.4 a few minutes after the start. From then until the reboot a new
+`tmux attach` cannot reach the run ("open terminal failed: not a
+terminal"); a client attached before stays attached. Follow the log
+instead: `sudo tail -f /root/upgrade-2604/upgrade.log`. After the reboot
+`sudo tmux attach -t upgrade-2604` works again. The tool says so before
+each release upgrade, and before a reboot after which a release upgrade
+starts by itself (from 22.04 the second one always does). To watch a
+release upgrade that starts without a reboot, attach before it starts and
+keep that connection open (a root shell opened before with `sudo -i` works
+as well). After a reboot it starts before you can attach. If a new login
+fails or `sudo` is missing, wait a few minutes and try again. Do not reboot: a release upgrade stopped in the
 middle can leave the machine unbootable.
 
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
@@ -997,8 +1002,14 @@ Testlauf von 22.04 etwa 19 Minuten von 22.04 auf 24.04 und etwa 7 Minuten
 von 24.04 auf 26.04). Offene Verbindungen bleiben bestehen, und das Upgrade
 läuft in tmux weiter. Von 24.04 auf 26.04 fehlt außerdem `sudo` für etwa
 12 Minuten, weil sudo-rs es ersetzt: `sudo tmux attach -t upgrade-2604`
-scheitert dann mit „command not found“. Das Werkzeug weist vor jedem
-Release-Upgrade darauf hin, und vor einem Neustart, nach dem ein
+scheitert dann mit „command not found“. Im selben Release-Upgrade ersetzt
+tmux 3.6 einige Minuten nach dem Start tmux 3.4. Von da an bis zum Neustart
+erreicht ein neues `tmux attach` den Lauf nicht mehr („open terminal
+failed: not a terminal“); ein vorher angehängter Client bleibt angehängt.
+Stattdessen dem Protokoll folgen: `sudo tail -f
+/root/upgrade-2604/upgrade.log`. Nach dem Neustart geht `sudo tmux attach
+-t upgrade-2604` wieder. Das Werkzeug weist vor jedem Release-Upgrade
+darauf hin, und vor einem Neustart, nach dem ein
 Release-Upgrade von selbst beginnt (von 22.04 aus beginnt das zweite immer
 so). Wer ein Release-Upgrade ohne vorherigen Neustart verfolgen will, hängt
 sich vorher an und lässt diese Verbindung offen (eine vorher mit `sudo -i`

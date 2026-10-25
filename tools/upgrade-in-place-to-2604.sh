@@ -230,7 +230,7 @@ Mail is offline from phase "snapshot" on (after the system archive, before
 the fresh backup; with --skip-miab-backup or backups turned off from phase
 "quiesce") until setup has finished (typically 1-3 hours). After each reboot the upgrade continues on its own;
 follow it with "sudo tmux attach -t upgrade-2604" or
-"tail -f /root/upgrade-2604/upgrade.log".
+"sudo tail -f /root/upgrade-2604/upgrade.log".
 Running the command again continues an interrupted upgrade.
 
 Have the provider's console (VNC, KVM or serial) at hand: if the network
@@ -2749,7 +2749,7 @@ $MOTD_BEGIN
 $how
 If SSH does not come back after a reboot, use the provider's console (VNC/KVM).
   follow it:  sudo tmux attach -t $TMUX_SESSION (detach: Ctrl-b d)
-          or  tail -f $LOG_FILE
+          or  sudo tail -f $LOG_FILE
   state:      $SELF --status
 $MOTD_END
 EOF
@@ -2813,7 +2813,7 @@ reboot_and_resume() {
 	say "The upgrade continues on its own after the reboot ($RESUME_UNIT)."
 	say "Log in again in a few minutes and follow it with:"
 	say "  sudo tmux attach -t $TMUX_SESSION     (detach: Ctrl-b d)"
-	say "  tail -f $LOG_FILE"
+	say "  sudo tail -f $LOG_FILE"
 	local next line
 	if next=$(next_release); then
 		while IFS= read -r line; do say "$line"; done < <(release_access_text "$next" reboot)
@@ -2974,6 +2974,11 @@ or restore from the backups."
 # openssh-server was unpacked but not yet configured) and for about 7 minutes
 # from 24.04 to 26.04, and /usr/bin/sudo was missing for about 12 minutes
 # while sudo-rs replaced sudo. Open connections and the run in tmux go on.
+# From 24.04 to 26.04 tmux 3.6 replaces tmux 3.4 a few minutes in; the new
+# client cannot attach to the running 3.4 server ("open terminal failed: not
+# a terminal") and the old binary no longer runs with the new libraries, so
+# until the reboot only clients attached before stay attached (B73). From
+# 22.04 to 24.04 the 3.4 client attaches to the 3.2a server.
 # WHEN: now (the release upgrade starts now) or reboot (it starts by itself
 # after this reboot, before anyone can attach). Also in the motd.
 release_access_text() { # TO now|reboot
@@ -3000,10 +3005,17 @@ release_access_text() { # TO now|reboot
 	if [ "$1" = 26.04 ]; then
 		echo "sudo is missing for a while (about 12 minutes in a test run) while sudo-rs replaces it:"
 		if [ "$2" = reboot ]; then
-			echo "\"sudo tmux attach\" then fails with \"command not found\". Wait until it is back."
+			echo "sudo then fails with \"command not found\". Wait until it is back."
 		else
-			echo "\"sudo tmux attach\" then fails with \"command not found\". Wait until it is back, or use a"
-			echo "root shell opened before (sudo -i)."
+			echo "sudo then fails with \"command not found\". Wait until it is back, or use a root shell"
+			echo "opened before (sudo -i)."
+		fi
+		# After a reboot the resumed run is in the tool's tmux session.
+		if [ "$2" = reboot ] || [ -n "${TMUX:-}" ]; then
+			echo "A few minutes after the start tmux 3.6 replaces tmux 3.4. From then until the reboot a new"
+			echo "\"tmux attach\" cannot reach a tmux session started before (\"open terminal failed: not a"
+			echo "terminal\"); clients attached before stay attached. Follow the log instead:"
+			echo "  sudo tail -f $LOG_FILE"
 		fi
 	fi
 }

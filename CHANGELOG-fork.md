@@ -41,6 +41,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Tools: after the last reboot of `tools/upgrade-in-place-to-2604.sh`
   the tmux window closes by itself 60 seconds after a successful run,
   instead of waiting for Enter forever; after a failure it stays open (B72).
+* Tools: `tools/upgrade-in-place-to-2604.sh` says that from a few minutes
+  into the release upgrade to 26.04 until the reboot a new `tmux attach`
+  cannot reach the run ("open terminal failed: not a terminal": tmux 3.6
+  replaces tmux 3.4), and to follow the log with `sudo tail -f
+  /root/upgrade-2604/upgrade.log` instead. Before, it advised to wait and
+  attach again. The log hints say `sudo tail -f` (B73).
 
 ### Changed
 
