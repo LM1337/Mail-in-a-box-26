@@ -172,7 +172,7 @@ chown -R spampd:spampd "$STORAGE_ROOT/mail/spamassassin"
 # would stop Dovecot from starting on a box upgraded in place (In-Place 2).
 rm -f /etc/dovecot/conf.d/99-local-spampd.conf /usr/local/bin/sa-learn-pipe.sh
 if dpkg-query -W -f='${db:Status-Abbrev}' dovecot-antispam 2>/dev/null | grep -q '^[ih]i'; then
-	hide_output apt-get -y purge dovecot-antispam
+	apt_get_quiet purge dovecot-antispam
 fi
 
 # Install the IMAPSieve sieve scripts and sa-learn shell wrappers

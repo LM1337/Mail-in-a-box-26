@@ -9,8 +9,8 @@ source /etc/mailinabox.conf # load global vars
 # will use nginx. Use autoremove to remove any Apache dependencies.
 if [ -f /usr/sbin/apache2 ]; then
 	echo "Removing apache..."
-	hide_output apt-get -y purge apache2 apache2-*
-	hide_output apt-get -y --purge autoremove
+	apt_get_quiet purge 'apache2' 'apache2-*'
+	apt_get_quiet --purge autoremove
 fi
 
 # Install nginx and a PHP FastCGI daemon.

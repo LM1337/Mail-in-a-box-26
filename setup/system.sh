@@ -144,7 +144,7 @@ fi
 
 if [ ! -f /usr/bin/add-apt-repository ]; then
 	echo "Installing add-apt-repository..."
-	hide_output apt-get update
+	apt_get_quiet update
 	apt_install software-properties-common
 fi
 
@@ -177,7 +177,7 @@ hide_output add-apt-repository -y ppa:duplicity-team/duplicity-release-git
 # Everything else (php8.5-*, libgd3, PECL modules ...) must keep coming from
 # Ubuntu, so the repo is pinned below.
 echo "Installing ppa prereqs..."
-hide_output apt-get update --allow-releaseinfo-change
+apt_get_quiet update --allow-releaseinfo-change
 apt_install lsb-release ca-certificates curl gnupg
 SURY_KEY_FPR=15058500A0235D97F5D10063B188E2B695BD4743 # DEB.SURY.ORG Automatic Signing Key
 SURY_TMP=$(mktemp -d)
@@ -214,7 +214,7 @@ EOF
 # PPAs so we can install those packages later.
 
 echo "Updating system packages..."
-hide_output apt-get update --allow-releaseinfo-change
+apt_get_quiet update --allow-releaseinfo-change
 
 # Boxes set up before the pin above got php8.5-*, libgd3 and some PECL modules
 # from sury, whose versions sort higher than Ubuntu's. A pin never downgrades

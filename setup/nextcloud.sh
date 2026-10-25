@@ -68,7 +68,7 @@ user_external_hash=f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c
 # 5.4 Go to Administration > Logs and ensure no new errors are shown
 
 # Clear prior packages and install dependencies from apt.
-apt-get purge -qq -y owncloud* # we used to use the package manager
+apt_get_quiet purge 'owncloud*' # we used to use the package manager
 
 apt_install curl php"${PHP_VER}" php"${PHP_VER}"-fpm \
 	php"${PHP_VER}"-cli php"${PHP_VER}"-sqlite3 php"${PHP_VER}"-gd php"${PHP_VER}"-imap php"${PHP_VER}"-curl \
@@ -638,7 +638,7 @@ EOF
 
 # Cleanup Legacy PHP Version
 echo "Cleaning up legacy php version"
-hide_output apt-get purge -y "php${PHP_LEGACY_VER}*"
+apt_get_quiet purge "php${PHP_LEGACY_VER}*"
 rm -rf /etc/php/"$PHP_LEGACY_VER"
 
 # Enable PHP modules and restart PHP.

@@ -11,6 +11,7 @@ if [ -z "${NONINTERACTIVE:-}" ]; then
 	# the system python3 and needs email_validator and idna.
 	if [ ! -f /usr/bin/dialog ] || ! python3 -I -c 'import email_validator, idna' 2>/dev/null; then
 		echo "Installing packages needed for setup..."
+		wait_for_apt_locks
 		apt-get -q -q update
 		apt_get_quiet install dialog python3 python3-email-validator python3-idna python3-dnspython || exit 1
 	fi

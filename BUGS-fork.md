@@ -34,18 +34,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-78 bugs: 1 critical, 13 high, 32 medium, 32 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6.
+79 bugs: 1 critical, 13 high, 32 medium, 33 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6.
 
 | Origin | Count |
 |---|---|
-| Upstream | 19 |
+| Upstream | 20 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 18 |
 | Fork | 12 |
 
-20 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78). They are candidates for
+21 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -130,6 +130,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B76](#b76) | low | Tools | The migration tool's Spamhaus checks follow the resolver's search domain and can report a wildcard address | Fork | no | no | rc6 |
 | [B77](#b77) | low | Tools | "migrate-to-2604.sh --check --skip-network-checks" still lists the skipped network checks as blockers and exits 1 | Fork | no | no | rc6 |
 | [B78](#b78) | low | Postfix | After a Postfix restart at the wrong moment, every start of Postfix delays the first SMTP greetings by 100 seconds | Upstream | yes | yes | rc6 |
+| [B79](#b79) | low | Setup | setup stops with "Could not get lock" when apt-daily or unattended-upgrades runs at the same time | Upstream | yes | yes | rc6 |
 
 ## Details
 
@@ -1040,6 +1041,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream (the package default and the restarts of setup). Not reproduced on 22.04, which has the same default and Berkeley DB 5.3.
 * **Evidence:** rc6 T2 (migration to a fresh 26.04 test box): setup restarted Postfix 60 ms after tlsmgr had started to open the cache (journal), and `__db.smtp_scache.db` stayed from that moment. After that, every restart of Postfix gave the first port 25 connection its greeting after 100 seconds, with the errors above. With the file removed, the greeting came at once; with the file put back and the drop-in in place, a start removed it and the greeting came at once.
 * **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B78`; **fixed in:** v78-r2604.0-rc6
+
+### B79
+
+**setup stops with "Could not get lock" when apt-daily or unattended-upgrades runs at the same time** (low, Setup)
+
+* **Symptom:** setup (a fresh install or an update with `setup/bootstrap.sh`) stops in the middle with "FAILED: apt-get ... install ..." and "E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process N (apt-get)" or "E: Unable to lock directory /var/lib/apt/lists/". The steps after it do not run. Running setup again finishes it.
+* **Cause:** Ubuntu's apt-daily, apt-daily-upgrade and unattended-upgrades start by themselves, for example some minutes after a boot, and hold the dpkg or apt locks for a while. setup called apt-get without waiting, and apt-get gives up at once when a lock is taken.
+* **Fix:** `apt_get_quiet` in setup/functions.sh waits up to 10 minutes until the dpkg locks, the lock of the package lists and the lock of the download cache are free, and passes `DPkg::Lock::Timeout=600` to apt-get. That option alone only covers the dpkg locks. The other apt-get calls of setup (`update`, `purge`) go through `apt_get_quiet` as well.
+* **Affects:** v78 yes, PR #2603 yes. Origin: Upstream.
+* **Evidence:** rc6 update test after T1: setup on the copy of a production box (started about 30 minutes after a boot) stopped at "Installing Munin" with the lock error above; the journal showed apt-daily.service starting at that second. On a 26.04 test box with a lock held by a test process, `apt-get install` failed at once without the option and waited with it; `apt-get update` failed at once with and without the option while the lock of the package lists was held.
+* **Found by:** update test; **commit:** see `git log --grep B79`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

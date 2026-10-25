@@ -48,7 +48,43 @@ function apt_get_quiet {
 	# Although we could pass -qq to apt-get to make output quieter, many packages write to stdout
 	# and stderr things that aren't really important. Use our hide_output function to capture
 	# all of that and only show it if there is a problem (i.e. if apt_get returns a failure exit status).
-	DEBIAN_FRONTEND=noninteractive hide_output apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" "$@"
+	#
+	# apt-daily, apt-daily-upgrade and unattended-upgrades run by themselves, for
+	# example shortly after a boot. apt-get fails at once when one of them holds
+	# a lock, so wait for them first (B79).
+	wait_for_apt_locks
+	DEBIAN_FRONTEND=noninteractive hide_output apt-get -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" "$@"
+}
+
+function wait_for_apt_locks {
+	# Wait (at most 10 minutes) until no other package run holds the dpkg or apt
+	# locks. DPkg::Lock::Timeout covers only the dpkg locks, not the locks of the
+	# package lists and of the download cache. The test lock is released at once.
+	local i
+	command -v python3 > /dev/null || return 0
+	for i in $(seq 120); do
+		if python3 -I - <<- 'PY' 2> /dev/null; then
+			import fcntl, os, sys
+			for f in ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lists/lock", "/var/cache/apt/archives/lock"):
+			    try:
+			        fd = os.open(f, os.O_WRONLY)
+			    except OSError:
+			        continue
+			    try:
+			        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+			        fcntl.lockf(fd, fcntl.LOCK_UN)
+			    except OSError:
+			        sys.exit(1)
+			    finally:
+			        os.close(fd)
+			PY
+			return 0
+		fi
+		if [ "$i" = 1 ]; then echo "Waiting for another package run (apt-daily, unattended-upgrades) to finish..."; fi
+		sleep 5
+	done
+	echo "apt/dpkg is still locked after 10 minutes. Run setup again when it is free." >&2
+	exit 1
 }
 
 function apt_install {

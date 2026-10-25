@@ -69,6 +69,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (`/var/lib/postfix/__db.smtp_scache.db`), and every later start stumbled
   over it. A systemd drop-in of setup removes such files before each start
   (B78).
+* Setup: setup no longer stops with "Could not get lock" when apt-daily
+  or unattended-upgrades runs at the same time (for example some minutes
+  after a boot). It waits up to 10 minutes for the dpkg and apt locks
+  before each apt-get call (B79).
 
 ### Changed
 
