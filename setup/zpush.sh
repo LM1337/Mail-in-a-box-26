@@ -32,14 +32,16 @@ elif [[ $VERSION != $(cat /usr/local/lib/z-push/version) ]]; then
 	needs_update=1 #NODOC
 fi
 if [ $needs_update == 1 ]; then
-	# Download
-	wget_verify "https://github.com/Z-Hub/Z-Push/archive/refs/tags/$VERSION.zip" $TARGETHASH /tmp/z-push.zip
+	# Download into a directory of root's own, not under a fixed name in /tmp
+	# that another local user could create first (B97).
+	ZPUSH_TMP=$(mktemp -d)
+	wget_verify "https://github.com/Z-Hub/Z-Push/archive/refs/tags/$VERSION.zip" $TARGETHASH "$ZPUSH_TMP/z-push.zip"
 
 	# Extract into place.
-	rm -rf /usr/local/lib/z-push /tmp/z-push
-	unzip -q /tmp/z-push.zip -d /tmp/z-push
-	mv /tmp/z-push/*/src /usr/local/lib/z-push
-	rm -rf /tmp/z-push.zip /tmp/z-push
+	rm -rf /usr/local/lib/z-push
+	unzip -q "$ZPUSH_TMP/z-push.zip" -d "$ZPUSH_TMP/z-push"
+	mv "$ZPUSH_TMP"/z-push/*/src /usr/local/lib/z-push
+	rm -rf "$ZPUSH_TMP"
 
 	# Create admin and top scripts with PHP_VER  
 	rm -f /usr/sbin/z-push-{admin,top}

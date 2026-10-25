@@ -5,7 +5,9 @@
 # of tests/fork/smoke.py with "smoke test". A rule that starts with
 # "^\[in-place:PHASE\]" only accepts what the box logged in that phase of
 # tools/upgrade-in-place-to-2604.sh (the old releases and the release
-# upgrades, before setup); the other rules apply in every phase. Started from
+# upgrades, before setup), and one that starts with "^\[setup\]" only what
+# it logged during a run of setup/start.sh (between its marks in the
+# journal); the other rules apply in every phase. Started from
 # what the rc6 test runs logged (fresh install, update from rc3, migration
 # from v74 on 22.04, in-place upgrades from 22.04 and 24.04), each class
 # checked.
@@ -44,6 +46,10 @@
 ^nextcloud\[no app in context\] level 2: Skipping updater backup clean-up - could not find updater backup folder /home/user-data/owncloud/updater-[^/]+/backups$ # the job after a Nextcloud upgrade cleans the web updater's backups; Mail-in-a-Box upgrades Nextcloud itself and never uses the web updater
 ^\[N\] \[WARN\] \[#unknown\] FileStateMachine->GetStateVersion\(\): Failed on reading filename '/var/lib/z-push/users' - attempt: N$ # first install: "z-push-admin -a fixstates" in setup/zpush.sh reads the state file that is still empty
 ^\[N\] \[FATAL\] \[#unknown\] FileStateMachine->GetStateVersion\(\): Unable to read filename '/var/lib/z-push/users' after N attempts$ # first install, see the line above
+^\[N\] \[(WARN|FATAL)\] \[<user>\] FileStateMachine->LinkUserDevice\(\): (Failed on reading filename '/var/lib/z-push/users' - attempt: N|Unable to read filename '/var/lib/z-push/users' after N attempts)$ # the first ActiveSync device of the box: Z-Push reads its list of users and devices before it has written it, then writes it
+^\[setup\] \[error\] N#N: \*N (recv\(\) failed \(N: Connection reset by peer\)|upstream prematurely closed (connection|FastCGI stdout)) while reading response header from upstream, client: <ip>, server: <hostname>, request: "POST /Microsoft-Server-ActiveSync\?Cmd=(Ping|Sync)&[^"]*", upstream: "fastcgi://unix:/(var/)?run/php/phpN\.N-fpm\.sock:", host: "[^"]*"$ # setup restarts PHP-FPM (web.sh, webmail.sh, nextcloud.sh, zpush.sh), which ends the long poll (Ping, Sync with Wait) of an ActiveSync client; the client gets 502 and polls again
+^\[setup\] \[N\] \[ERROR\] \[<user>\] BackendCardDAV->ChangesSink(Initialize)? - Error (resyncing vcards: .*|getting the changes|doing the initial sync for '[^']*': .*|initializing the sink for '[^']*')$ # setup restarts nginx or PHP-FPM while Z-Push's long poll checks the address book over CardDAV (127.0.0.1:443); the poll fails once, the client polls again (from the Z-Push 2.7.7 source, not reproduced since setup reloads nginx)
+^\[setup\] \[error\] N#N: \*N open\(\) "\S+/www/default/(server-status|nginx_status)" failed \(N: No such file or directory\), client: <ip>, server: <hostname>, request: "GET /(server-status\?auto|nginx_status) HTTP/N\.N", host: "(localhost|<hostname>)"$ # setup/munin.sh: munin-node-configure probes the apache and nginx plugins with GET /server-status?auto and /nginx_status on localhost and follows the redirect to HTTPS; the box serves neither page (404), so these plugins stay off
 ^\[N\] \[FATAL\] \[#unknown\] Exception: \(AuthenticationRequiredException\) - Access denied\. Please send authorisation information$ # an ActiveSync request without credentials gets 401 (clients and probes ask without them first)
 ^dpkg: warning: while removing phpN\.N-[a-z0-9]+, directory '/etc/php/N\.N(/mods-available)?' not empty so not removed$ # setup/nextcloud.sh purges the PHP of the Nextcloud upgrade steps in one apt run; the directory goes with the last package (it is gone afterwards)
 
@@ -100,6 +106,7 @@
 ^kernel: audit: type=N audit\(N\.N:N\): apparmor="DENIED" operation="(capable|sendmsg)" class="(cap|file)" profile="systemd-detect-virt" (pid=N comm="systemd-detect-" capability=N capname="perfmon"|name="/att/systemd-detect-virt/run/systemd/(journal/socket|notify)" pid=N comm="systemd-detect-" requested_mask="w" denied_mask="w" fsuid=N ouid=N)$ # Ubuntu 26.04: the AppArmor profile of systemd-detect-virt, run by chrony.service when chrony starts for the first time; chrony runs
 ^kernel: kauditd_printk_skb: N callbacks suppressed$ # kernel rate limit of the audit messages above
 ^adduser: The user `syslog' is already a member of `adm'\.$ # rsyslog's postinst on a package upgrade
+^\(sd-pam\): pam_systemd\(systemd-user:session\): Varlink call io\.systemd\.Login\.ReleaseSession failed: io\.systemd\.Login\.NoSuchSession$ # reboot with an open SSH login (systemd 259): logind has already ended the session when the user manager of that login stops and releases it
 
 # --- virtual machine (QEMU/KVM) hardware
 ^kernel: shpchp N:N:N\.N: (Slot initialization failed|pci_hp_register failed with error -N)$ # virtual machine: PCI hotplug bridge of QEMU

@@ -146,7 +146,7 @@ fi
 chown -R "$STORAGE_USER" "$STORAGE_ROOT/www"
 
 # Start services.
-restart_service nginx
+reload_nginx
 restart_service php"$PHP_VER"-fpm
 
 # Open ports.

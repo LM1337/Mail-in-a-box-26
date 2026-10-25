@@ -16,11 +16,16 @@ if [ -z "${NONINTERACTIVE:-}" ]; then
 		apt_get_quiet install dialog python3 python3-email-validator python3-idna python3-dnspython || exit 1
 	fi
 
-	message_box "Mail-in-a-Box Installation" \
-		"Hello and thanks for deploying a Mail-in-a-Box!
-		\n\nI'm going to ask you a few questions.
-		\n\nTo change your answers later, just run 'sudo mailinabox' from the command line.
-		\n\nNOTE: You should only install this on a brand new Ubuntu installation 100% dedicated to Mail-in-a-Box. Mail-in-a-Box will, for example, remove apache2."
+	# The welcome of a new installation, with its warning to install only on a
+	# brand new Ubuntu, is not for an update of an existing box (start.sh found
+	# /etc/mailinabox.conf). The questions below still come as before.
+	if [ -n "${FIRST_TIME_SETUP:-}" ]; then
+		message_box "Mail-in-a-Box Installation" \
+			"Hello and thanks for deploying a Mail-in-a-Box!
+			\n\nI'm going to ask you a few questions.
+			\n\nTo change your answers later, just run 'sudo mailinabox' from the command line.
+			\n\nNOTE: You should only install this on a brand new Ubuntu installation 100% dedicated to Mail-in-a-Box. Mail-in-a-Box will, for example, remove apache2."
+	fi
 fi
 
 # The box needs a name.
