@@ -39,6 +39,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   replaces it: attach before and keep the connection open; if a login fails,
   wait, do not reboot. README-fork.md ("Logging in during the release
   upgrades") and README.md describe it.
+* Tests: `tests/fork/smoke.py` marks every mail it sends with the header
+  `X-Miab-Test: 1`. The manifest comparison (`mig-folders-<user>`,
+  `mig-pop3-uidl-<user>`) ignores marked mails and the automatic replies
+  and bounces to them, and says how many it ignored; any other missing or
+  new mail, and a seeded mail that is there twice, is a FAIL. Before, every
+  mail sent to the box since the manifest was a FAIL (the 6 known FAILs of
+  the rc5 runs). `smoke.py --send-test-mail FROM TO` sends a marked mail
+  for the testers' own checks. Manifests of earlier `seed-legacy.sh` runs
+  still work. TESTING-fork.md describes it.
 
 ## v78-r2604.0-rc5 (2026-10-24)
 

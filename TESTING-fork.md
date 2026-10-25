@@ -232,14 +232,19 @@ Dovecot disabled (B67); setup of rc5 enables it again.
 
 These FAIL or SKIP results are expected and do not count as defects:
 
-* **`mig-pop3-uidl-<user>` and `mig-folders-<user>`** compare each mailbox
-  with the manifest written before the upgrade. Mails sent to the box before
-  the smoke test (push test mails, mails that trigger the vacation reply, the
-  replies themselves, the test mails of the reboot check in rc5 T4) are
-  counted as new: "0 missing, 2 new (have 8, want 6)",
-  "INBOX: 8 msgs != 6". Nothing is missing in these runs. This gave 2 FAILs
+* **`mig-pop3-uidl-<user>` and `mig-folders-<user>` up to rc5** compared
+  each mailbox with the manifest written before the upgrade, so mails sent
+  to the box before the smoke test (push test mails, mails that trigger the
+  vacation reply, the replies themselves, the test mails of the reboot check
+  in rc5 T4) counted as new: "0 missing, 2 new (have 8, want 6)",
+  "INBOX: 8 msgs != 6". Nothing was missing in these runs. This gave 2 FAILs
   (alice) in rc3 T3b, rc4 T3c and T5, and 6 FAILs (alice, bob, carol) in the
-  rc5 runs, where vacation replies were triggered on purpose.
+  rc5 runs, where vacation replies were triggered on purpose. From rc6 the
+  smoke test marks its own mails (header `X-Miab-Test: 1`) and ignores marked
+  mails and the automatic replies and bounces to them; it reports how many
+  it ignored. Testers send their own mails with `smoke.py --send-test-mail`
+  (see below). Any other missing or new mail, and a seeded mail that is
+  there twice, is a FAIL.
 * **`nextcloud-share-scope`** skips its admin part when the box's admin
   account is not in the Nextcloud group `admin`. That was the case in the
   test runs; the check still passes.
@@ -263,6 +268,12 @@ Everything is in `tests/fork/`:
   never a production box. Run it as root after every install or upgrade.
 * `smoke.py` runs the checks. `tests/fork/smoke.py --help` lists the options;
   the header of the script has the typical runs for T1, T2 and the baseline.
+* Mails that you send to a box under test yourself (vacation triggers,
+  delivery checks after a reboot) must be test mails, or the manifest
+  comparison counts them as new. Send them with `smoke.py --send-test-mail
+  FROM TO` (`--via 587` or `465` submits as FROM, `--via 25` sends over
+  port 25, from `--peer-ssh` if given), or add the header `X-Miab-Test: 1`
+  to them.
 
 Configuration:
 

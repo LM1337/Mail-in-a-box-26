@@ -46,6 +46,23 @@ examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
 
+Test mails: every mail this script sends has the header "X-Miab-Test: 1" and
+a Message-ID @smoketest.invalid. The manifest comparison (mig-folders-*,
+mig-pop3-uidl-*) ignores these mails and the automatic replies and bounces
+to them (Auto-Submitted, with In-Reply-To, References or the returned
+message pointing to a test mail), and reports how many it ignored. Any other
+mail that is missing or new, and a seeded mail that is there twice, is a
+FAIL. Send your own mails to a box under test (vacation triggers, delivery
+checks after a reboot) the same way, or add the header to them:
+
+    tests/fork/smoke.py --host 192.0.2.11 --hostname box.legacy.example.net \\
+        --jump legacy-box --send-test-mail bob@seed2.example.net \\
+        carol@legacy.example.net --via 587
+
+  --via 587 or 465 submits as FROM (TEST_USER_PW), --via 25 (the default)
+  sends over port 25, from --peer-ssh if given. --test-subject sets the
+  subject.
+
 Passwords are read from --env-file / the environment and never printed. The
 env file (KEY=VALUE lines) defaults to $MIAB_TEST_ENV, else to
 tests/fork/credentials.env (ignored by git). Keys: TEST_USER_PW, FRESH_ADMIN,
@@ -76,6 +93,9 @@ import sys
 import time
 import urllib.parse
 import uuid
+from collections import Counter
+from email import message_from_bytes
+from email.policy import compat32
 from email.utils import formatdate
 
 if "MOVE" not in imaplib.Commands:
@@ -676,11 +696,18 @@ class Ctx:
     pass
 
 
+# Every mail of a test carries TEST_HEADER and a Message-ID in TEST_MSGID_DOMAIN
+# (mkmsg; --send-test-mail for the testers' own mails). The manifest
+# comparison ignores these mails and the automatic replies to them.
+TEST_HEADER = "X-Miab-Test"
+TEST_MSGID_DOMAIN = "smoketest.invalid"
+
+
 def mkmsg(frm, to, subject, sid, body=None, extra=None):
     lines = ["From: %s" % frm, "To: %s" % to, "Subject: %s" % subject,
              "Date: %s" % formatdate(localtime=True),
-             "Message-ID: <%s.%s@smoketest.invalid>" % (sid, uuid.uuid4().hex),
-             "X-Smoke-Id: %s" % sid, "MIME-Version: 1.0",
+             "Message-ID: <%s.%s@%s>" % (sid, uuid.uuid4().hex, TEST_MSGID_DOMAIN),
+             "X-Smoke-Id: %s" % sid, "%s: 1" % TEST_HEADER, "MIME-Version: 1.0",
              "Content-Type: text/plain; charset=utf-8"]
     lines += extra or []
     if body is None:
@@ -745,22 +772,6 @@ def uid_search(M, folder, *criteria, readonly=True):
     return data[0].split()
 
 
-def message_ids(M, folder):
-    typ, _ = M.select(qmb(folder), readonly=True)
-    if typ != "OK":
-        return []
-    typ, data = M.search(None, "ALL")
-    if typ != "OK" or not data[0]:
-        return []
-    typ, data = M.fetch(b"1:*", "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
-    ids = []
-    for item in data:
-        if isinstance(item, tuple):
-            m = re.search(rb"<([^>]+)>", item[1])
-            ids.append(m.group(1).decode(errors="replace") if m else "")
-    return sorted(ids)
-
-
 def pop3_uidls(ctx, user):
     P = ctx.net.pop3()
     try:
@@ -773,6 +784,178 @@ def pop3_uidls(ctx, user):
             P.quit()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# mailbox comparison with the manifest, test-aware
+# ---------------------------------------------------------------------------
+
+MSGID_RE = re.compile(r"<([^<>\s]+)>")
+
+
+def parse_mail(raw):
+    """A message (or only its header) as email.message.Message."""
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8", "replace")
+    return message_from_bytes(raw, policy=compat32)
+
+
+def mail_id(msg):
+    m = MSGID_RE.search(str(msg.get("Message-ID", "")))
+    return m.group(1) if m else ""
+
+
+def is_marked(msg):
+    return str(msg.get(TEST_HEADER, "")).strip() == "1"
+
+
+def mail_refs(msg):
+    """Message-IDs a mail refers to: In-Reply-To, References and, in a
+    delivery report (bounce), the Message-ID of the returned message."""
+    refs = MSGID_RE.findall(str(msg.get("In-Reply-To", "")) + " " + str(msg.get("References", "")))
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = part.get_content_type()
+            if ct in ("message/rfc822", "message/rfc822-headers", "text/rfc822-headers"):
+                payload = part.get_payload()
+                if isinstance(payload, list):
+                    for inner in payload:
+                        refs += MSGID_RE.findall(str(inner.get("Message-ID", "")))
+                else:
+                    raw = payload if isinstance(payload, str) else ""
+                    refs += MSGID_RE.findall(" ".join(re.findall(r"(?im)^message-id:\s*(.*)$", raw)))
+    return refs
+
+
+def test_mail_reason(msg, marked_ids):
+    """Why a mail is a test mail ("marked", "auto-reply"), or None."""
+    if is_marked(msg):
+        return "marked"
+    auto = str(msg.get("Auto-Submitted", "")).strip().lower()
+    if auto.startswith("auto-replied") or auto.startswith("auto-generated"):
+        for ref in mail_refs(msg):
+            if ref in marked_ids or ref.lower().endswith("@" + TEST_MSGID_DOMAIN):
+                return "auto-reply"
+    return None
+
+
+def needs_body(msg):
+    """Whether the whole message is needed to classify it (a bounce)."""
+    return bool(str(msg.get("Auto-Submitted", "")).strip()) and msg.get_content_maintype() == "multipart"
+
+
+def compare_mails(want_ids, want_count, mails, marked_ids):
+    """Compare the mails of a folder with the manifest. mails: Message objects.
+    Test mails are ignored; anything else that is missing or extra, and a
+    seeded mail that is there twice, is a problem.
+    Returns (problems, ignored {reason: count})."""
+    ignored, kept = Counter(), []
+    for msg in mails:
+        reason = test_mail_reason(msg, marked_ids)
+        if reason:
+            ignored[reason] += 1
+        else:
+            kept.append(msg)
+    problems = []
+    have = Counter(mail_id(m) for m in kept)
+    if want_ids is not None:
+        want = Counter(want_ids)
+        missing = want - have
+        extra = have - want
+        dup = {i: n for i, n in extra.items() if i in want}
+        new = {i: n for i, n in extra.items() if i not in want}
+        if missing:
+            problems.append("%d missing (e.g. %s)" % (sum(missing.values()), sorted(missing)[:2]))
+        if dup:
+            problems.append("%d duplicates of seeded mails (e.g. %s)" % (sum(dup.values()), sorted(dup)[:2]))
+        if new:
+            subjects = [str(m.get("Subject", ""))[:40] for m in kept if mail_id(m) in new][:2]
+            problems.append("%d new, not test mails (e.g. %s)" % (sum(new.values()), subjects))
+    else:
+        if len(kept) != want_count:
+            problems.append("%d msgs != %s (%d test mails ignored)" % (len(kept), want_count, sum(ignored.values())))
+        dup = {i: n for i, n in have.items() if i and n > 1}
+        if dup:
+            problems.append("%d mails with the same Message-ID (e.g. %s)" % (sum(dup.values()), sorted(dup)[:2]))
+    return problems, ignored
+
+
+def ignored_text(ignored):
+    n = sum(ignored.values())
+    if not n:
+        return "no test mails"
+    return "%d test mail%s ignored (%s)" % (n, "" if n == 1 else "s", ", ".join("%d %s" % (v, k) for k, v in sorted(ignored.items())))
+
+
+def fetch_mails(M, folder):
+    """The mails of a folder (headers; whole message for possible bounces)."""
+    typ, _ = M.select(qmb(folder), readonly=True)
+    if typ != "OK":
+        return None
+    typ, data = M.uid("SEARCH", "ALL")
+    if typ != "OK" or not data or not data[0]:
+        return []
+    out = []
+    typ, data = M.uid("FETCH", b",".join(data[0].split()).decode(), "(BODY.PEEK[HEADER])")
+    for item in data or []:
+        if not isinstance(item, tuple):
+            continue
+        msg = parse_mail(item[1])
+        if needs_body(msg):
+            m = re.search(rb"UID (\d+)", item[0])
+            if m:
+                typ, full = M.uid("FETCH", m.group(1).decode(), "(BODY.PEEK[])")
+                for f in full or []:
+                    if isinstance(f, tuple):
+                        msg = parse_mail(f[1])
+                        break
+        out.append(msg)
+    return out
+
+
+def marked_ids(ctx):
+    """Message-IDs of the marked test mails in all mailboxes of the manifest
+    (an automatic reply lands in another mailbox than the mail it answers)."""
+    if getattr(ctx, "marked_ids", None) is None:
+        ids = set()
+        for user, info in sorted(ctx.manifest.get("users", {}).items()):
+            try:
+                M = imap_login(ctx, user)
+            except Exception:
+                continue
+            try:
+                for folder in list_folders(M):
+                    for msg in fetch_mails(M, folder) or []:
+                        if is_marked(msg) and mail_id(msg):
+                            ids.add(mail_id(msg))
+            finally:
+                M.logout()
+        ctx.marked_ids = ids
+    return ctx.marked_ids
+
+
+def pop3_mails(ctx, user, uidls):
+    """{uidl: Message} for the given POP3 UIDLs (TOP, which does not mark them read)."""
+    P = ctx.net.pop3()
+    out = {}
+    try:
+        P.user(user)
+        P.pass_(ctx.user_pw)
+        _resp, lines, _ = P.uidl()
+        num = {}
+        for line in lines:
+            n, u = line.decode().split(None, 1)
+            num[u] = n
+        for u in uidls:
+            if u in num:
+                _resp, body, _ = P.top(num[u], 300)
+                out[u] = parse_mail(b"\r\n".join(body) + b"\r\n")
+    finally:
+        try:
+            P.quit()
+        except Exception:
+            pass
+    return out
 
 
 def sa_magic(ctx):
@@ -969,18 +1152,45 @@ def c_mig_pop3(ctx, user):
         raise Skip("manifest has no POP3 UIDLs for " + user)
     have = pop3_uidls(ctx, user)
     if have == want:
-        return "%d UIDLs identical" % len(have)
-    if sorted(x.lower() for x in have) == sorted(x.lower() for x in want):
+        return "%d UIDLs identical, no test mails" % len(have)
+    if sorted(have) != sorted(want) and sorted(x.lower() for x in have) == sorted(x.lower() for x in want):
         raise Fail("UIDLs differ only in letter case (e.g. %s vs %s): POP3 clients would re-download everything; "
                    "pop3_uidl_format must reproduce 2.3's %%08Xu%%08Xv (upper-case hex)" % (have[:1], want[:1]))
-    missing = len(set(want) - set(have))
-    extra = len(set(have) - set(want))
-    raise Fail("UIDLs differ: %d missing, %d new (have %d, want %d); sample have=%s want=%s"
-               % (missing, extra, len(have), len(want), have[:2], want[:2]))
+    wanted = set(want)
+    new = [u for u in have if u not in wanted]
+    mails = pop3_mails(ctx, user, new)
+    seeded = set(ctx.manifest["users"][user].get("folders", {}).get("INBOX", {}).get("message_ids") or [])
+    ignored, dup, other = Counter(), [], []
+    for u in new:
+        msg = mails.get(u)
+        reason = test_mail_reason(msg, marked_ids(ctx)) if msg is not None else None
+        if reason:
+            ignored[reason] += 1
+        elif msg is not None and mail_id(msg) in seeded:
+            dup.append(u)
+        else:
+            other.append(u)
+    kept = [u for u in have if u in wanted or u in dup or u in other]
+    missing = [u for u in want if u not in set(have)]
+    if kept == want:
+        return "%d UIDLs identical, %s" % (len(want), ignored_text(ignored))
+    problems = []
+    if missing:
+        problems.append("%d missing" % len(missing))
+    if dup:
+        problems.append("%d duplicates of seeded mails" % len(dup))
+    if other:
+        problems.append("%d new, not test mails" % len(other))
+    if not problems:
+        problems.append("order differs")
+    raise Fail("UIDLs differ: %s (have %d, want %d, %s); sample have=%s want=%s"
+               % (", ".join(problems), len(have), len(want), ignored_text(ignored), have[:2], want[:2]))
 
 
 def c_mig_folders(ctx, user):
     want = ctx.manifest["users"][user].get("folders", {})
+    marked = marked_ids(ctx)
+    ignored = Counter()
     M = imap_login(ctx, user)
     try:
         problems = []
@@ -990,20 +1200,21 @@ def c_mig_folders(ctx, user):
                 problems.append("missing folder %s" % folder)
                 continue
             st = folder_status(M, folder) or {}
-            if st.get("messages") != info.get("messages"):
-                problems.append("%s: %s msgs != %s" % (folder, st.get("messages"), info.get("messages")))
+            mails = fetch_mails(M, folder)
+            if mails is None:
+                problems.append("%s: cannot select" % folder)
                 continue
-            if info.get("message_ids") is not None:
-                ids = message_ids(M, folder)
-                if ids != sorted(info["message_ids"]):
-                    problems.append("%s: Message-ID set differs" % folder)
+            p, ign = compare_mails(info.get("message_ids"), info.get("messages"), mails, marked)
+            ignored.update(ign)
+            problems += ["%s: %s" % (folder, x) for x in p]
             if info.get("uidvalidity") and st.get("uidvalidity") != info["uidvalidity"]:
                 problems.append("%s: UIDVALIDITY %s != %s (IMAP clients resync)" % (folder, st.get("uidvalidity"), info["uidvalidity"]))
     finally:
         M.logout()
     if problems:
-        raise Fail("; ".join(problems))
-    return "%d folders match (%s)" % (len(want), ", ".join("%s=%d" % (k, v.get("messages", 0)) for k, v in want.items()))
+        raise Fail("; ".join(problems) + "; " + ignored_text(ignored))
+    return "%d folders match (%s), %s" % (len(want), ", ".join("%s=%d" % (k, v.get("messages", 0)) for k, v in want.items()),
+                                          ignored_text(ignored))
 
 
 def c_mig_sieve(ctx):
@@ -2177,6 +2388,24 @@ def c_fail2ban(ctx, proto, jails, port):
     return "banned %s in %s (probe after: %s), unbanned" % (ips, sorted({j for j, _ in new}), res["probe_after"])
 
 
+def send_test_mail(ctx):
+    """--send-test-mail FROM TO: one marked test mail, for the testers' own mails
+    (vacation triggers, delivery tests after a reboot)."""
+    frm, to = ctx.args.send_test_mail
+    sid = "test-%s" % ctx.tok
+    data = mkmsg(frm, to, ctx.args.test_subject or "test mail %s" % ctx.tok, sid)
+    msgid = mail_id(parse_mail(data))
+    if ctx.args.via == "25":
+        res = smtp_batch(ctx, [{"id": "t", "from": frm, "rcpt": to, "data": data}])
+        code, text = res["t"][0], res["t"][1]
+        how = "port 25 from " + (ctx.args.peer_ssh or "here")
+    else:
+        code, text = submit(ctx, int(ctx.args.via), frm, frm, to, data)
+        how = "submission %s as %s" % (ctx.args.via, frm)
+    print("%s: %s %s, Message-ID <%s>" % (how, code, redact(str(text))[:120], msgid))
+    return 0 if code == 250 else 1
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -2186,7 +2415,7 @@ def main():
                                  epilog=__doc__)
     ap.add_argument("--host", required=True, help="IP of the box as reachable from here / the jump host / the peer")
     ap.add_argument("--hostname", required=True, help="PRIMARY_HOSTNAME (TLS SNI, HTTP Host, SSHFP owner)")
-    ap.add_argument("--mode", required=True, choices=["fresh", "migrated"])
+    ap.add_argument("--mode", choices=["fresh", "migrated"], help="required, except with --send-test-mail")
     ap.add_argument("--manifest", help="seed manifest JSON (required for --mode migrated)")
     ap.add_argument("--domain", help="primary mail domain (default: manifest, else hostname without first label)")
     ap.add_argument("--seed2", help="second seed domain (default SEED2_DOMAIN, else seed2.example.net)")
@@ -2216,8 +2445,16 @@ def main():
     ap.add_argument("--only", default="", help="comma list of groups to run")
     ap.add_argument("--no-cleanup", action="store_true")
     ap.add_argument("--report", help="write the JSON report to this file as well")
+    ap.add_argument("--send-test-mail", nargs=2, metavar=("FROM", "TO"),
+                    help="only send one test mail (marked, so that the manifest comparison ignores it and its "
+                         "automatic replies), then exit")
+    ap.add_argument("--via", choices=["25", "465", "587"], default="25",
+                    help="--send-test-mail: port 25 (from --peer-ssh if given) or submission as FROM (TEST_USER_PW)")
+    ap.add_argument("--test-subject", help="--send-test-mail: the subject")
     args = ap.parse_args()
 
+    if not args.mode and not args.send_test_mail:
+        ap.error("--mode is required")
     if args.mode == "migrated" and not args.manifest:
         ap.error("--mode migrated needs --manifest")
     skip = {g for g in args.skip.split(",") if g}
@@ -2261,7 +2498,7 @@ def main():
     ctx.tok = uuid.uuid4().hex[:10]
     ctx.remote = Remote(args.ssh)
     SECRETS.update({ctx.user_pw, ctx.admin_pw or ""})
-    if not ctx.user_pw:
+    if not ctx.user_pw and not (args.send_test_mail and args.via == "25"):
         print("TEST_USER_PW missing (env or --env-file %s)" % args.env_file, file=sys.stderr)
         return 2
 
@@ -2272,6 +2509,11 @@ def main():
     except Exception as e:
         print("cannot set up network path: %s" % redact(e), file=sys.stderr)
         return 2
+    if args.send_test_mail:
+        try:
+            return send_test_mail(ctx)
+        finally:
+            ctx.net.close()
 
     if want("admin") or want("provision") or want("migrated") or want("dns"):
         print("== admin")
