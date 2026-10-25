@@ -34,6 +34,13 @@
 # allowlist rules that start with "^\[in-place" accept such classes only with
 # that prefix; the other rules apply in every phase.
 #
+# Setup runs: what the box logs while setup/start.sh runs (between its marks
+# "Mail-in-a-Box setup started" and "... ended" in the journal, identifier
+# mailinabox-setup; a run without an end lasts until the next start) gets the
+# prefix "[setup]", outside the phases above. Rules that start with
+# "^\[setup\]" accept a class only there, e.g. connections that setup's
+# restarts of the services cut.
+#
 # Allowlist (default: log-audit-allow.txt next to this script): one Python
 # regular expression per line, searched in the message class as the report
 # prints it, then " # " and the reason (mandatory). The regex itself must not
@@ -147,11 +154,11 @@ def load_allow(path, rules):
             sys.exit("log-audit.sh: %s:%d: empty regex or reason" % (path, n))
         try:
             rules.append({"file": path, "line": n, "regex": rx, "re": re.compile(rx), "reason": reason, "hits": 0,
-                          "tagged": rx.startswith(r"^\[in-place")})
+                          "tagged": rx.startswith((r"^\[in-place", r"^\[setup\]"))})
         except re.error as e:
             sys.exit("log-audit.sh: %s:%d: bad regex: %s" % (path, n, e))
 
-RE_TAG = re.compile(r"^\[in-place:[a-z0-9_]+\] ")
+RE_TAG = re.compile(r"^\[(?:in-place:[a-z0-9_]+|setup)\] ")
 ALLOW_FILES = [p for p in os.environ["LA_ALLOW"].split("\n") if p]
 RULES = []
 try:
@@ -289,15 +296,19 @@ def inplace_phases():
 INPLACE_STARTS, INPLACE_END = inplace_phases()
 
 def phase_tag(ts):
-    if ts is None or not INPLACE_STARTS or ts < INPLACE_STARTS[0][0]:
+    if ts is None:
         return ""
-    if INPLACE_END is not None and ts >= INPLACE_END:
-        return ""
-    label = ""
-    for t, ph in INPLACE_STARTS:
-        if ts >= t:
-            label = ph
-    return "in-place:" + label if label else ""
+    if INPLACE_STARTS and ts >= INPLACE_STARTS[0][0] and (INPLACE_END is None or ts < INPLACE_END):
+        label = ""
+        for t, ph in INPLACE_STARTS:
+            if ts >= t:
+                label = ph
+        if label:
+            return "in-place:" + label
+    for start, end in SETUP_RUNS:
+        if start <= ts and (end is None or ts <= end):
+            return "setup"
+    return ""
 
 # Section headings of upgrade.log (section() of the tool) -> phase; other
 # headings end the tagged part. "Rebooting: ..." keeps the phase before it.
@@ -375,6 +386,26 @@ def jmsg(e):
     if isinstance(m, list):
         m = bytes(m).decode("utf-8", "replace")
     return m or ""
+
+def setup_runs():
+    """[(start, end or None)] of the runs of setup/start.sh, from its marks in
+    the journal; a run that started before --since starts at --since."""
+    runs = []
+    for e in journal(["SYSLOG_IDENTIFIER=mailinabox-setup"]):
+        ts = int(e.get("__REALTIME_TIMESTAMP", "0")) // 1000000
+        msg = jmsg(e)
+        if msg.startswith("Mail-in-a-Box setup started"):
+            if runs and runs[-1][1] is None:
+                runs[-1][1] = ts
+            runs.append([ts, None])
+        elif msg.startswith("Mail-in-a-Box setup ended"):
+            if runs and runs[-1][1] is None:
+                runs[-1][1] = ts
+            else:
+                runs.append([SINCE, ts])
+    return [tuple(r) for r in runs]
+
+SETUP_RUNS = setup_runs()
 
 def scan_journal():
     seen, n = set(), 0
@@ -690,6 +721,10 @@ def main():
         w("in-place upgrade phases (prefix [in-place:PHASE]): %s, until %s\n" % (
             ", ".join("%s %s" % (ph, time.strftime("%H:%M:%S", time.localtime(t))) for t, ph in INPLACE_STARTS),
             time.strftime("%H:%M:%S", time.localtime(INPLACE_END)) if INPLACE_END else "now"))
+    if SETUP_RUNS:
+        w("setup runs (prefix [setup]): %s\n" % ", ".join("%s-%s" % (
+            time.strftime("%H:%M:%S", time.localtime(a)), time.strftime("%H:%M:%S", time.localtime(b)) if b else "now")
+            for a, b in SETUP_RUNS))
     w("\nSources:\n")
     for s in source_stats:
         w("  %-32s %-10s %d\n" % (s["source"], s["status"], s["lines"]))
@@ -721,6 +756,7 @@ def main():
                   "allowlist": ALLOW_FILES, "sources": source_stats,
                   "inplace_phases": [{"phase": ph, "start": t} for t, ph in INPLACE_STARTS],
                   "inplace_setup_start": INPLACE_END,
+                  "setup_runs": [{"start": a, "end": b} for a, b in SETUP_RUNS],
                   "unknown": unknown, "allowed": allowed,
                   "unused_rules": [{"file": r["file"], "line": r["line"], "regex": r["regex"]} for r in unused],
                   "result": "OK" if not unknown else "UNKNOWN"}

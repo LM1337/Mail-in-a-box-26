@@ -15,10 +15,24 @@ source setup/preflight.sh
 # root@ alias at its end (B82). Stop cron for the run and start it again when
 # setup ends, also when it fails. A cron that is already stopped (the
 # in-place upgrade and migration tools stop it themselves) is left alone.
+#
+# The start and the end of the run are marked in the journal (identifier
+# mailinabox-setup): tests/fork/log-audit.sh accepts what the restarts of the
+# services make clients and services log (cut connections) only in between.
+logger -t mailinabox-setup "Mail-in-a-Box setup started" 2> /dev/null || true
+SETUP_STOPPED_CRON=
 if systemctl is-active --quiet cron.service 2> /dev/null; then
 	systemctl stop cron.service
-	trap 'systemctl start cron.service 2> /dev/null || true' EXIT
+	SETUP_STOPPED_CRON=1
 fi
+function setup_ended {
+	local rc=$?
+	if [ -n "$SETUP_STOPPED_CRON" ]; then
+		systemctl start cron.service 2> /dev/null || true
+	fi
+	logger -t mailinabox-setup "Mail-in-a-Box setup ended (exit code $rc)" 2> /dev/null || true
+}
+trap setup_ended EXIT
 
 # Ensure Python reads/writes files in UTF-8. If the machine
 # triggers some other locale in Python, like ASCII encoding,

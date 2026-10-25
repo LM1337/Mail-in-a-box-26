@@ -21,6 +21,17 @@ BUGS-fork.md, to be merged into them when the strands come together.
   installed one (a package upgrade that left the old process running). The
   management daemon's web update already reloaded.
 
+### New
+
+* Setup marks its start and end in the journal ("Mail-in-a-Box setup
+  started", "Mail-in-a-Box setup ended (exit code N)", identifier
+  `mailinabox-setup`). `tests/fork/log-audit.sh` prefixes what the box logs
+  in between with `[setup]` (outside the phases of an in-place upgrade),
+  and allowlist rules that start with `^\[setup\]` accept a class only
+  there: connections that setup's restarts of the services cut are normal
+  during setup and a finding at any other time. The report names the setup
+  runs (`setup_runs` in the JSON report).
+
 ### Fixed
 
 * Setup: an update no longer runs as root what another local user put into
