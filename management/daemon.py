@@ -200,6 +200,7 @@ def mail_users_add():
 def get_mail_users_quota():
 	email = request.values.get('email', '')
 	quota = get_mail_quota(email, env)
+	if isinstance(quota, tuple): return quota # error, e.g. not a user (B88)
 
 	if request.values.get('text'):
 		return quota
@@ -213,7 +214,7 @@ def get_mail_users_quota():
 @authorized_personnel_only
 def mail_users_quota():
 	try:
-		return set_mail_quota(request.form.get('email', ''), request.form.get('quota'), env)
+		return set_mail_quota(request.form.get('email', ''), request.form.get('quota', ''), env)
 	except ValueError as e:
 		return (str(e), 400)
 
@@ -746,6 +747,44 @@ def fail2ban_report():
 		return json_response(failed_login_report(env))
 	except Exception as e:
 		return (str(e), 500)
+
+# Munin's alerts (recipient and level of munin-limits' mails, see munin_admin.py)
+
+@app.route('/system/munin/alerts', methods=["GET"])
+@authorized_personnel_only
+def munin_alerts_get():
+	from munin_admin import status
+	return json_response(status(env))
+
+@app.route('/system/munin/alerts', methods=["POST"])
+@authorized_personnel_only
+def munin_alerts_set():
+	# Form fields recipient (admin, custom, off), address (for custom) and
+	# level (warning, critical); fields that are not sent keep their value.
+	from munin_admin import update_settings, status
+	values = { k: request.form[k] for k in ("recipient", "address", "level") if k in request.form }
+	try:
+		result = update_settings(env, values)
+	except ValueError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	ret = status(env)
+	ret.update({ "status": "ok", "changed": result["changed"] })
+	return json_response(ret)
+
+@app.route('/system/munin/alerts/test', methods=["POST"])
+@authorized_personnel_only
+def munin_alerts_test():
+	# One test notification through munin-notify, to the stored recipient.
+	from munin_admin import send_test
+	try:
+		to = send_test(env)
+	except ValueError as e:
+		return (str(e), 400)
+	except RuntimeError as e:
+		return (str(e), 500)
+	return json_response({ "status": "ok", "to": to })
 
 # MUNIN
 

@@ -1,12 +1,66 @@
 <h2>Munin Monitoring</h2>
 
 <style>
+#munin-alerts .help-block { margin-bottom: 0; }
+#munin-alerts-address { font-family: monospace; }
 </style>
 
 <p>Opening munin in a new tab... You may need to allow pop-ups for this site.</p>
 
+<p><a href="#" onclick="munin_open(); return false;">Open Munin again</a></p>
+
+<h3>Alerts</h3>
+
+<p>Munin watches the disks, memory, load and services of this box. When a watched value reaches its warning or critical limit, or is back to normal, Munin sends one mail for each change (not every five minutes while a warning lasts).</p>
+
+<div id="munin-alerts-warnings"></div>
+
+<form id="munin-alerts" class="form-horizontal" role="form" onsubmit="munin_alerts_save(); return false;" oninput="munin_alerts_changed();" onchange="munin_alerts_changed();">
+  <div class="form-group">
+    <label for="munin-alerts-recipient" class="col-sm-2 control-label">Send alerts to</label>
+    <div class="col-sm-5">
+      <select class="form-control" id="munin-alerts-recipient">
+        <option value="admin" id="munin-alerts-admin-option">Standard (administrator@{{hostname}})</option>
+        <option value="custom">Custom address</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-group" id="munin-alerts-address-group">
+    <label for="munin-alerts-address" class="col-sm-2 control-label">Address</label>
+    <div class="col-sm-5">
+      <input type="text" inputmode="email" class="form-control" id="munin-alerts-address" placeholder="name@example.com" maxlength="254" autocomplete="off" spellcheck="false">
+      <p class="help-block small">A plain address: letters, digits and <tt>_ + - .</tt> before the @, no name or quotes.</p>
+    </div>
+  </div>
+  <div class="form-group">
+    <label for="munin-alerts-level" class="col-sm-2 control-label">Level</label>
+    <div class="col-sm-5">
+      <select class="form-control" id="munin-alerts-level">
+        <option value="warning">Warning and critical</option>
+        <option value="critical">Critical only</option>
+      </select>
+      <p class="help-block small">&ldquo;Critical only&rdquo; mails only the changes of plugins with a critical value and lists only those values; warnings and the return to normal are not mailed.</p>
+    </div>
+  </div>
+  <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-10">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" class="btn btn-default" id="munin-alerts-test" onclick="munin_alerts_test(); return false;">Send test mail</button>
+      <p class="help-block small" id="munin-alerts-status"></p>
+    </div>
+  </div>
+</form>
+
 <script>
+var munin_alerts_state = null;
+
 function show_munin() {
+  munin_open();
+  munin_alerts_load();
+}
+
+function munin_open() {
   // Set the cookie.
   api(
     "/munin",
@@ -16,5 +70,98 @@ function show_munin() {
       // Redirect.
       window.open("/admin/munin/index.html", "_blank");
     });
+}
+
+function munin_alerts_error(title) {
+  return function(text, xhr) {
+    if (xhr && xhr.status == 403) return; // handled by api()
+    show_modal_error(title, $("<p/>").text(text || "Something went wrong, sorry."));
+  };
+}
+
+function munin_alerts_load() {
+  api(
+    "/system/munin/alerts",
+    "GET",
+    { },
+    function(r) {
+      munin_alerts_render(r);
+    },
+    munin_alerts_error("Munin Alerts"));
+}
+
+function munin_alerts_render(r) {
+  munin_alerts_state = r;
+  $('#munin-alerts-admin-option').text("Standard (" + r.default_address + ")");
+  $('#munin-alerts-recipient').val(r.recipient);
+  $('#munin-alerts-address').val(r.address);
+  $('#munin-alerts-level').val(r.level);
+  var w = $('#munin-alerts-warnings').html("");
+  (r.warnings || []).forEach(function(t) {
+    w.append($("<div class='alert alert-warning'/>").text(t));
+  });
+  if (!r.config_current)
+    w.append($("<div class='alert alert-warning'/>").text("/etc/munin/munin.conf does not match this setting. Save it again, or run setup."));
+  munin_alerts_changed();
+}
+
+function munin_alerts_values() {
+  return {
+    recipient: $('#munin-alerts-recipient').val(),
+    address: $('#munin-alerts-address').val().trim(),
+    level: $('#munin-alerts-level').val()
+  };
+}
+
+function munin_alerts_dirty() {
+  if (!munin_alerts_state) return false;
+  var v = munin_alerts_values();
+  return v.recipient != munin_alerts_state.recipient || v.level != munin_alerts_state.level
+    || (v.recipient == "custom" && v.address != munin_alerts_state.address);
+}
+
+function munin_alerts_changed() {
+  var v = munin_alerts_values();
+  $('#munin-alerts-address-group').toggle(v.recipient == "custom");
+  $('#munin-alerts-level').prop('disabled', v.recipient == "off");
+  var status = $('#munin-alerts-status');
+  // The test mail goes to the saved recipient.
+  if (!munin_alerts_state) {
+    $('#munin-alerts-test').prop('disabled', true);
+    status.text("");
+  } else if (munin_alerts_dirty()) {
+    $('#munin-alerts-test').prop('disabled', true);
+    status.text("Save the changes to send a test mail.");
+  } else if (!munin_alerts_state.to) {
+    $('#munin-alerts-test').prop('disabled', true);
+    status.text("Munin sends no alerts.");
+  } else {
+    $('#munin-alerts-test').prop('disabled', false);
+    status.text("Alerts go to " + munin_alerts_state.to + ".");
+  }
+}
+
+function munin_alerts_save() {
+  var v = munin_alerts_values();
+  if (v.recipient != "custom") delete v.address;
+  api(
+    "/system/munin/alerts",
+    "POST",
+    v,
+    function(r) {
+      munin_alerts_render(r);
+    },
+    munin_alerts_error("Munin Alerts"));
+}
+
+function munin_alerts_test() {
+  api(
+    "/system/munin/alerts/test",
+    "POST",
+    { },
+    function(r) {
+      show_modal_error("Munin Alerts", $("<p/>").text("A test mail was sent to " + r.to + ". Its subject is “Munin test notification”."));
+    },
+    munin_alerts_error("Munin Alerts"));
 }
 </script>

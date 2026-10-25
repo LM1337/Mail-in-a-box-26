@@ -10,30 +10,12 @@ echo "Installing Munin (system monitoring)..."
 apt_install munin munin-node libcgi-fast-perl
 # libcgi-fast-perl is needed by /usr/lib/munin/cgi/munin-cgi-graph
 
-# edit config
-cat > /etc/munin/munin.conf <<EOF;
-dbdir /var/lib/munin
-htmldir /var/cache/munin/www
-logdir /var/log/munin
-rundir /var/run/munin
-tmpldir /etc/munin/templates
-
-includedir /etc/munin/munin-conf.d
-
-# path dynazoom uses for requests
-cgiurl_graph /admin/munin/cgi-graph
-
-# Alerts: munin-limits mails each change of state (ok, warning, critical,
-# unknown) to administrator@$PRIMARY_HOSTNAME, one mail per run with changes.
-# The contact must come before the host tree: the lines after a [host] line
-# belong to that host, and munin-limits finds no contact there.
-contact.admin.command /usr/local/lib/mailinabox/munin-notify
-
-# a simple host tree
-[$PRIMARY_HOSTNAME]
-address 127.0.0.1
-contacts admin
-EOF
+# Write munin.conf. management/munin_admin.py makes the whole file, with the
+# contact for Munin's alerts from the admin panel's setting ("munin_alerts" in
+# settings.yaml): by default munin-limits mails each change of state to
+# administrator@$PRIMARY_HOSTNAME. The management daemon writes the same file
+# when the setting changes. (The management venv exists: management.sh ran.)
+management/munin_admin.py --setup
 
 # The command of the contact above. It sends the alert with /usr/sbin/sendmail;
 # Ubuntu has no "mail" command unless a mail client is installed. munin-limits
@@ -41,8 +23,9 @@ EOF
 install -o root -g root -m 0755 management/munin_notify.sh /usr/local/lib/mailinabox/munin-notify
 
 # The Debian installer touches these files and chowns them to www-data:adm for use with spawn-fcgi
-chown munin /var/log/munin/munin-cgi-html.log
-chown munin /var/log/munin/munin-cgi-graph.log
+# /var/log/munin belongs to munin, so a file there may be a symbolic link that munin
+# made: -h changes the owner of the link itself and never of what it points to (B86).
+chown -h munin /var/log/munin/munin-cgi-html.log /var/log/munin/munin-cgi-graph.log
 
 # ensure munin-node knows the name of this machine
 # and reduce logging level to warning

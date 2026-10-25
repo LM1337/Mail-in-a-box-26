@@ -25,17 +25,39 @@ def save_environment(env):
 
 # THE SETTINGS FILE AT STORAGE_ROOT/settings.yaml.
 
+# STORAGE_ROOT belongs to the storage user, not to root, so settings.yaml may be
+# replaced by a symbolic link there. Root writes a new file under a random name
+# (mkstemp: O_EXCL, never through a link) and renames it over the old one, and
+# reads it without following a link (B87).
+
 def write_settings(config, env):
-    import rtyaml
+    import rtyaml, stat, tempfile
     fn = os.path.join(env['STORAGE_ROOT'], 'settings.yaml')
-    with open(fn, "w", encoding="utf-8") as f:
-        f.write(rtyaml.dump(config))
+    mode = 0o600
+    try:
+        st = os.lstat(fn)
+        if stat.S_ISREG(st.st_mode):
+            mode = stat.S_IMODE(st.st_mode) # keep the mode of the old file
+    except FileNotFoundError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=env['STORAGE_ROOT'], prefix='.settings.yaml.')
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(rtyaml.dump(config))
+            os.fchmod(f.fileno(), mode)
+        os.replace(tmp, fn)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 def load_settings(env):
     import rtyaml
     fn = os.path.join(env['STORAGE_ROOT'], 'settings.yaml')
     try:
-        with open(fn, encoding="utf-8") as f:
+        with open(os.open(fn, os.O_RDONLY | os.O_NOFOLLOW), encoding="utf-8") as f:
             config = rtyaml.load(f)
         if not isinstance(config, dict): raise ValueError # caught below
         return config

@@ -45,10 +45,11 @@ if [ -f /etc/mailinabox.conf ]; then
 	setup/migrate.py --migrate || exit 1
 
 	# Load the old .conf file to get existing configuration options loaded
-	# into variables with a DEFAULT_ prefix.
-	cat /etc/mailinabox.conf | sed s/^/DEFAULT_/ > /tmp/mailinabox.prev.conf
-	source /tmp/mailinabox.prev.conf
-	rm -f /tmp/mailinabox.prev.conf
+	# into variables with a DEFAULT_ prefix. Straight from the file, not
+	# through a fixed name in /tmp that another user could have created
+	# first, so that root would source that user's file (B89).
+	# shellcheck source=/dev/null # generated from /etc/mailinabox.conf
+	source <(sed s/^/DEFAULT_/ /etc/mailinabox.conf)
 else
 	FIRST_TIME_SETUP=1
 fi
