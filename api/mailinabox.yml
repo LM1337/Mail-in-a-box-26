@@ -9,6 +9,10 @@ info:
     ([View the full HTTP specification](https://raw.githubusercontent.com/mail-in-a-box/mailinabox/api-spec/api/mailinabox.yml).)
 
     All endpoints are relative to `https://{host}/admin` and are secured with [`Basic Access` authentication](https://en.wikipedia.org/wiki/Basic_access_authentication). If you have multi-factor authentication enabled, authentication with a `user:password` combination will fail unless a valid OTP is supplied via the `x-auth-token` header. Authentication via a `user:user_key` pair is possible without the header being present.
+
+    Requests without valid administrator credentials get `401 Unauthorized`, or `403 Forbidden` when they are sent with `X-Requested-With: XMLHttpRequest` as the control panel does. Each request with wrong credentials counts as a failed login for fail2ban.
+
+    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
   contact:
     name: Mail-in-a-Box support
     url: https://mailinabox.email/
@@ -141,12 +145,10 @@ paths:
                   extra:
                     - monospace: false
                       text: 'Digest Type: 2 / SHA-25'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/version:
     get:
       tags:
@@ -167,12 +169,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemVersionResponse'
               example: v0.46
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/latest-upstream-version:
     post:
       tags:
@@ -193,12 +193,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemVersionUpstreamResponse'
               example: v0.47
-        403:
-          description: Forbidden
+        500:
+          description: The check failed (the error message).
           content:
             text/html:
               schema:
                 type: string
+        503:
+          description: The latest version could not be determined (not reachable, or no version in the answer).
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
   /system/updates:
     get:
       tags:
@@ -221,12 +231,10 @@ paths:
               example: |
                 libgnutls30 (3.5.18-1ubuntu1.4)
                 libxau6 (1:1.0.8-1ubuntu1)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/update-packages:
     post:
       tags:
@@ -250,12 +258,10 @@ paths:
                 Calculating upgrade...
                 The following packages will be upgraded:
                   cloud-init grub-common
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/privacy:
     get:
       tags:
@@ -281,12 +287,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SystemPrivacyStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - System
@@ -334,12 +338,10 @@ paths:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/reboot:
     get:
       tags:
@@ -365,12 +367,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SystemRebootStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - System
@@ -390,12 +390,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemRebootResponse'
               example: No reboot is required, so it is not allowed.
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/backup/status:
     get:
       tags:
@@ -418,12 +416,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SystemBackupStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /system/backup/config:
     get:
       tags:
@@ -443,12 +439,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SystemBackupConfigResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - System
@@ -501,24 +495,18 @@ paths:
               -u "<email>:<password>"
       responses:
         200:
-          description: Successful operation
+          description: |
+            The JSON string `"OK"`, or the reason why the configuration was
+            not accepted (also with status 200).
           content:
-            text/html:
+            application/json:
               schema:
                 $ref: '#/components/schemas/SystemBackupConfigUpdateResponse'
               example: OK
-        400:
-          description: Bad request
-          content:
-            text/html:
-              schema:
-                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /ssl/status:
     get:
       tags:
@@ -538,12 +526,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SSLStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /ssl/csr/{domain}:
     post:
       tags:
@@ -592,12 +578,10 @@ paths:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /ssl/install:
     post:
       tags:
@@ -638,12 +622,10 @@ paths:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /ssl/provision:
     post:
       tags:
@@ -664,12 +646,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SSLCertificatesProvisionResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/secondary-nameserver:
     get:
       tags:
@@ -690,12 +670,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DNSSecondaryNameserverResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - DNS
@@ -732,12 +710,10 @@ paths:
               schema:
                 type: string
                 example: Could not resolve the IP address of badhostname
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/zones:
     get:
       tags:
@@ -757,12 +733,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DNSZonesResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/zonefile/{zone}:
     parameters:
       - in: path
@@ -786,15 +760,13 @@ paths:
         200:
           description: Successful operation
           content:
-            application/json:
+            text/plain:
               schema:
                 $ref: '#/components/schemas/DNSZonefileResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/update:
     post:
       tags:
@@ -820,21 +792,19 @@ paths:
         200:
           description: Successful operation
           content:
-            application/json:
+            text/html:
               schema:
                 $ref: '#/components/schemas/DNSUpdateResponse'
-        400:
-          description: Bad request
+        500:
+          description: The update failed (the error message).
           content:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/custom:
     get:
       tags:
@@ -854,12 +824,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DNSCustomRecordsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/custom/{qname}/{rtype}:
     parameters:
       - in: path
@@ -892,12 +860,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DNSCustomRecordsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - DNS
@@ -928,12 +894,10 @@ paths:
               schema:
                 type: string
                 example: "'badhostname' does not appear to be an IPv4 or IPv6 address"
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     put:
       tags:
         - DNS
@@ -964,12 +928,10 @@ paths:
               schema:
                 type: string
                 example: "'badhostname' does not appear to be an IPv4 or IPv6 address"
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     delete:
       tags:
         - DNS
@@ -1000,12 +962,10 @@ paths:
               schema:
                 type: string
                 example: badhostname is not a domain name or a subdomain of a domain name managed by this box
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/custom/{qname}:
     parameters:
       - in: path
@@ -1032,12 +992,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DNSCustomRecordsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     post:
       tags:
         - DNS
@@ -1068,12 +1026,10 @@ paths:
               schema:
                 type: string
                 example: "'badhostname' does not appear to be an IPv4 or IPv6 address"
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     put:
       tags:
         - DNS
@@ -1104,12 +1060,10 @@ paths:
               schema:
                 type: string
                 example: "'badhostname' does not appear to be an IPv4 or IPv6 address"
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
     delete:
       tags:
         - DNS
@@ -1140,12 +1094,10 @@ paths:
               schema:
                 type: string
                 example: badhostname is not a domain name or a subdomain of a domain name managed by this box
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /dns/dump:
     get:
       tags:
@@ -1176,12 +1128,10 @@ paths:
                       qname: example2.com
                       rtype: MX
                       value: 10 box.example2.com.
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users:
     get:
       tags:
@@ -1213,12 +1163,10 @@ paths:
               example: |
                 user1@example.com
                 user2@example.com
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/add:
     post:
       tags:
@@ -1270,12 +1218,10 @@ paths:
               schema:
                 type: string
                 example: Invalid email address
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/remove:
     post:
       tags:
@@ -1312,12 +1258,10 @@ paths:
               schema:
                 type: string
                 example: That's not a user (invalid@example.com)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/privileges/add:
     post:
       tags:
@@ -1356,12 +1300,10 @@ paths:
               schema:
                 type: string
                 example: That's not a user (invalid@example.com)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/privileges/remove:
     post:
       tags:
@@ -1400,12 +1342,10 @@ paths:
               schema:
                 type: string
                 example: That's not a user (invalid@example.com)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/password:
     post:
       tags:
@@ -1444,12 +1384,10 @@ paths:
               schema:
                 type: string
                 example: Passwords must be at least eight characters
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/users/privileges:
     get:
       tags:
@@ -1476,12 +1414,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailUserPrivilegesResponse'
               example: admin
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/domains:
     get:
       tags:
@@ -1504,12 +1440,10 @@ paths:
               example: |
                 example1.com
                 example2.com
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/aliases:
     get:
       tags:
@@ -1543,12 +1477,10 @@ paths:
                 example: |
                   abuse@example.com	administrator@example.com
                   admin@example.com	administrator@example.com
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/aliases/add:
     post:
       tags:
@@ -1616,12 +1548,10 @@ paths:
               schema:
                 type: string
                 example: Invalid email address (invalid@example.com)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mail/aliases/remove:
     post:
       tags:
@@ -1658,12 +1588,10 @@ paths:
               schema:
                 type: string
                 example: That's not an alias (invalid@example)
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /web/domains:
     get:
       tags:
@@ -1685,12 +1613,10 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/WebDomain'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /web/update:
     post:
       tags:
@@ -1711,12 +1637,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/WebUpdateResponse'
               example: web updated
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mfa/status:
     post:
       tags:
@@ -1736,12 +1660,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MfaStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mfa/totp/enable:
     post:
       tags:
@@ -1775,12 +1697,10 @@ paths:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
-          content:
-            text/html:
-              schema:
-                type: string
+          $ref: '#/components/responses/Forbidden'
   /mfa/disable:
     post:
       tags:
@@ -1806,12 +1726,509 @@ paths:
             text/html:
               schema:
                 $ref: '#/components/schemas/MfaDisableSuccessResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
         403:
-          description: Forbidden
+          $ref: '#/components/responses/Forbidden'
+  /mail/users/quota:
+    get:
+      tags:
+        - Mail
+      summary: Get the quota of a mail user
+      description: |
+        Returns the quota of an existing mail user (`0`: no quota), as JSON, or
+        as plain text when the parameter `text` is given.
+      operationId: getMailUserQuota
+      parameters:
+        - in: query
+          name: email
+          required: true
+          schema:
+            $ref: '#/components/schemas/Email'
+          description: The user's email address.
+        - in: query
+          name: text
+          required: false
+          schema:
+            type: string
+          description: Any non-empty value returns the quota as plain text.
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/mail/users/quota?email=<email>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailUserQuotaResponse'
+            text/html:
+              schema:
+                type: string
+              example: 10G
+        400:
+          description: Not a user
           content:
             text/html:
               schema:
                 type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - Mail
+      summary: Set the quota of a mail user
+      description: |
+        Sets the quota of an existing mail user: a number of bytes, or with the
+        unit `M` or `G`; `0` for no quota.
+      operationId: setMailUserQuota
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MailUserSetQuotaRequest'
+            example:
+              email: user@example.com
+              quota: 10G
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/mail/users/quota" \
+              -d "email=<email>" \
+              -d "quota=<quota>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            text/html:
+              schema:
+                type: string
+              example: OK
+        400:
+          description: Bad request (not a user, invalid quota)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban:
+    get:
+      tags:
+        - System
+      summary: Get the status of the intrusion protection
+      description: |
+        Returns the status of fail2ban (fork: adaptive fail2ban): its jails with
+        their counters and current bans, the settings, their defaults and
+        limits, whether the written jail files match the settings, and the
+        address of the calling client (for the allowlist hint of the control
+        panel). With fail2ban not running, `running` is false and `error` says
+        why.
+      operationId: getFail2banStatus
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/fail2ban" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/settings:
+    get:
+      tags:
+        - System
+      summary: Get the intrusion protection settings
+      description: Returns the settings of the adaptive fail2ban, their defaults and warnings about stored values that were replaced.
+      operationId: getFail2banSettings
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/fail2ban/settings" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banSettingsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - System
+      summary: Change the intrusion protection settings
+      description: |
+        Form fields named like the settings (`adaptive`, `bantime_max`,
+        `memory`, `slow_jails`, `slow_web_jails`, `slow_maxretry`,
+        `slow_findtime`, `slow_bantime`, `allowlist`, `spray_min_ips`); fields
+        that are not sent keep their value, `reset=1` starts from the defaults.
+        Durations in seconds or with a unit (`30m`, `6h`, `2d`, `1w`), booleans
+        as `1`/`0`, the allowlist as addresses or networks separated by spaces,
+        commas or line breaks. The jail files are written and fail2ban is
+        reloaded when they change; on an error nothing is changed.
+      operationId: setFail2banSettings
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+            example:
+              spray_min_ips: '20'
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/fail2ban/settings" \
+              -d "allowlist=192.0.2.0/24" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banSettingsUpdateResponse'
+        400:
+          description: Invalid value (nothing was changed)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: fail2ban could not apply the configuration (the previous one was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/unban:
+    post:
+      tags:
+        - System
+      summary: Unban an address
+      description: |
+        Unbans `ip` in `jail`, or without a jail in all jails (recidive
+        included) and deletes its ban history.
+      operationId: fail2banUnban
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - ip
+              properties:
+                ip:
+                  type: string
+                jail:
+                  type: string
+            example:
+              ip: 192.0.2.5
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/fail2ban/unban" \
+              -d "ip=<address>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banUnbanResponse'
+        400:
+          description: Not an address, or no such jail
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: fail2ban failed
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/unban-all:
+    post:
+      tags:
+        - System
+      summary: Unban all addresses of a jail
+      description: Unbans all addresses that `jail` bans.
+      operationId: fail2banUnbanAll
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - jail
+              properties:
+                jail:
+                  type: string
+            example:
+              jail: miab-slow-smtp
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/fail2ban/unban-all" \
+              -d "jail=<jail>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  jail:
+                    type: string
+                  unbanned:
+                    type: integer
+        400:
+          description: No such jail
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: fail2ban failed
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/report:
+    get:
+      tags:
+        - System
+      summary: Get the report of failed logins
+      description: |
+        Reads the failed logins of the last hours from the logs: accounts that
+        fail from many addresses (password spraying), addresses that keep
+        failing below the ban threshold, and banned addresses that also log in
+        successfully (devices with an old password).
+      operationId: getFail2banReport
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/fail2ban/report" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banReportResponse'
+        500:
+          description: The logs could not be read
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/munin/alerts:
+    get:
+      tags:
+        - System
+      summary: Get the setting of Munin's alerts
+      description: |
+        Returns who gets Munin's alert mails (`recipient`: `admin` for
+        administrator@ of the box's name, `custom` for `address`, `off`), the
+        level (`warning`: warnings and critical values, `critical`: only
+        critical values), the resulting address `to` (null when off), and
+        whether `/etc/munin/munin.conf` matches the setting.
+      operationId: getMuninAlerts
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/munin/alerts" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MuninAlertsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - System
+      summary: Change the setting of Munin's alerts
+      description: |
+        Form fields `recipient` (`admin`, `custom`, `off`), `address` (for
+        `custom`: a plain address, ASCII letters, digits and `_ + - .` before
+        the @, no name or quotes) and `level` (`warning`, `critical`); fields
+        that are not sent keep their value. Writes `/etc/munin/munin.conf`;
+        Munin reads it on its next run.
+      operationId: setMuninAlerts
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MuninAlertsUpdateRequest'
+            examples:
+              custom:
+                summary: Critical values to another address
+                value:
+                  recipient: custom
+                  address: ops@example.com
+                  level: critical
+              off:
+                summary: No alerts
+                value:
+                  recipient: 'off'
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/munin/alerts" \
+              -d "recipient=custom" \
+              -d "address=<email>" \
+              -d "level=warning" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation (the new setting)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MuninAlertsUpdateResponse'
+        400:
+          description: Invalid value (nothing was changed)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: munin.conf could not be written (the previous setting was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/munin/alerts/test:
+    post:
+      tags:
+        - System
+      summary: Send a test alert
+      description: |
+        Sends one test notification to the saved recipient, through the same
+        command as Munin's alerts (as user munin). Its subject is "Munin test
+        notification" and it has the header `X-Miab-Test: 1`.
+      operationId: testMuninAlerts
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/munin/alerts/test" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: The mail was handed to Postfix
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - to
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  to:
+                    $ref: '#/components/schemas/Email'
+        400:
+          description: The alerts are off
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: The mail could not be sent
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /munin/:
+    get:
+      tags:
+        - System
+      summary: Start a Munin session
+      description: |
+        Sets the cookie `session` (30 minutes, HttpOnly, Secure, SameSite
+        Strict) that gives access to Munin's pages under `/admin/munin/`.
+        Those pages and graphs are not part of this API.
+      operationId: startMunin
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/munin/" -c cookies.txt \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            text/html:
+              schema:
+                type: string
+              example: OK
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
 components:
   securitySchemes:
     basicAuth:
@@ -1826,6 +2243,35 @@ components:
         password, or the `api_key` returned from the `login` operation.
 
         When using `curl`, you can supply user credentials using the `-u` or `--user` parameter.
+  responses:
+    Unauthorized:
+      description: |
+        No credentials, wrong credentials, or not an administrator. The header
+        `X-Reason` and the body give the reason, as plain text when the request
+        has no `Accept` header or `Accept: */*`, as JSON otherwise. The answer
+        has a `WWW-Authenticate` header. Each request with wrong credentials is
+        logged as a failed login, which fail2ban counts (jail
+        `miab-management`).
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: Incorrect username or password
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthErrorResponse'
+    Forbidden:
+      description: |
+        As 401, for requests with the header `X-Requested-With: XMLHttpRequest`
+        (as the control panel sends them), so that the browser does not ask
+        for a password. No `WWW-Authenticate` and no `X-Reason` header.
+      content:
+        text/plain:
+          schema:
+            type: string
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthErrorResponse'
   requestBodies:
     DNSCustomRecordRequest:
       required: true
@@ -2640,8 +3086,11 @@ components:
       enum:
         - ok
         - invalid
+        - missing-totp-token
       example: invalid
-      description: Me (user) authentication result.
+      description: |
+        Me (user) authentication result. `missing-totp-token`: the password was
+        right, but the account has MFA and the request had no `x-auth-token`.
     WebDomain:
       type: object
       required:
@@ -2725,6 +3174,337 @@ components:
           nullable: true
     MfaDisableSuccessResponse:
       type: string
+    AuthErrorResponse:
+      type: object
+      required:
+        - status
+        - reason
+      properties:
+        status:
+          type: string
+          example: error
+        reason:
+          type: string
+          example: Incorrect username or password
+    MailUserQuotaResponse:
+      type: object
+      required:
+        - email
+        - quota
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        quota:
+          type: string
+          example: 10G
+          description: The quota, `0` for no quota.
+    MailUserSetQuotaRequest:
+      type: object
+      required:
+        - email
+        - quota
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        quota:
+          type: string
+          example: 10G
+    Fail2banSettings:
+      type: object
+      properties:
+        adaptive:
+          type: boolean
+        bantime_max:
+          type: integer
+          description: Seconds.
+        memory:
+          type: integer
+          description: Seconds.
+        slow_jails:
+          type: boolean
+        slow_web_jails:
+          type: boolean
+        slow_maxretry:
+          type: integer
+        slow_findtime:
+          type: integer
+          description: Seconds.
+        slow_bantime:
+          type: integer
+          description: Seconds.
+        allowlist:
+          type: array
+          items:
+            type: string
+        spray_min_ips:
+          type: integer
+    Fail2banStatusResponse:
+      type: object
+      required:
+        - running
+        - jails
+        - settings
+        - config_current
+      properties:
+        running:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+        jails:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              kind:
+                type: string
+              banned:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ip:
+                      type: string
+                    start:
+                      type: number
+                    bantime:
+                      type: integer
+                    end:
+                      type: number
+                      nullable: true
+                    remaining:
+                      type: integer
+                      nullable: true
+              currently_failed:
+                type: integer
+              total_failed:
+                type: integer
+              currently_banned:
+                type: integer
+              total_banned:
+                type: integer
+        banned_entries:
+          type: integer
+        banned_ips:
+          type: integer
+        settings:
+          $ref: '#/components/schemas/Fail2banSettings'
+        settings_warnings:
+          type: array
+          items:
+            type: string
+        defaults:
+          $ref: '#/components/schemas/Fail2banSettings'
+        limits:
+          type: object
+        max_allowlist:
+          type: integer
+        config_current:
+          type: boolean
+        slow_jails:
+          type: array
+          items:
+            type: string
+        slow_web_jails:
+          type: array
+          items:
+            type: string
+        client:
+          type: object
+          properties:
+            ip:
+              type: string
+            own:
+              type: boolean
+            allowlisted:
+              type: boolean
+            network:
+              type: string
+              nullable: true
+    Fail2banSettingsResponse:
+      type: object
+      required:
+        - settings
+        - defaults
+        - warnings
+      properties:
+        settings:
+          $ref: '#/components/schemas/Fail2banSettings'
+        defaults:
+          $ref: '#/components/schemas/Fail2banSettings'
+        warnings:
+          type: array
+          items:
+            type: string
+    Fail2banSettingsUpdateResponse:
+      type: object
+      required:
+        - status
+        - settings
+        - changed
+      properties:
+        status:
+          type: string
+          example: ok
+        settings:
+          $ref: '#/components/schemas/Fail2banSettings'
+        changed:
+          type: boolean
+          description: The jail files changed.
+        reloaded:
+          type: boolean
+        restarted:
+          type: boolean
+        skipped_jails:
+          type: array
+          items:
+            type: string
+        unbanned_allowlisted:
+          type: array
+          items:
+            type: string
+    Fail2banUnbanResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        ip:
+          type: string
+        jail:
+          type: string
+          nullable: true
+        unbanned_from:
+          type: array
+          items:
+            type: string
+        still_banned_in:
+          type: array
+          items:
+            type: string
+        history_deleted:
+          type: boolean
+    Fail2banReportResponse:
+      type: object
+      required:
+        - failures
+        - distinct_ips
+        - scan_hours
+        - flagged_accounts
+        - persistent_total
+      properties:
+        scan_hours:
+          type: integer
+        account_hours:
+          type: integer
+        spray_min_ips:
+          type: integer
+        persistent_min_failures:
+          type: integer
+        persistent_min_hours:
+          type: integer
+        failures:
+          type: integer
+        distinct_ips:
+          type: integer
+        accounts:
+          type: array
+          items:
+            type: object
+        flagged_accounts:
+          type: array
+          items:
+            type: string
+        unknown_accounts:
+          type: array
+          items:
+            type: object
+        persistent_ips:
+          type: array
+          items:
+            type: object
+        persistent_total:
+          type: integer
+        banned_devices:
+          type: array
+          items:
+            type: object
+        seconds:
+          type: number
+    MuninAlertsRecipient:
+      type: string
+      enum:
+        - admin
+        - custom
+        - 'off'
+      description: |
+        `admin`: administrator@ of the box's name (the default), `custom`: the
+        address in `address`, `off`: no alerts.
+    MuninAlertsLevel:
+      type: string
+      enum:
+        - warning
+        - critical
+      description: |
+        `warning`: warnings and critical values (the default), `critical`:
+        only critical values.
+    MuninAlertsResponse:
+      type: object
+      required:
+        - recipient
+        - address
+        - level
+        - default_address
+        - to
+        - config_current
+        - warnings
+      properties:
+        recipient:
+          $ref: '#/components/schemas/MuninAlertsRecipient'
+        address:
+          type: string
+          description: The custom address, empty unless `recipient` is `custom`.
+        level:
+          $ref: '#/components/schemas/MuninAlertsLevel'
+        default_address:
+          $ref: '#/components/schemas/Email'
+        to:
+          type: string
+          nullable: true
+          description: The address the alerts go to, null when they are off.
+        config_current:
+          type: boolean
+          description: /etc/munin/munin.conf matches the setting.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: A stored value was invalid and the defaults are used.
+    MuninAlertsUpdateRequest:
+      type: object
+      properties:
+        recipient:
+          $ref: '#/components/schemas/MuninAlertsRecipient'
+        address:
+          type: string
+        level:
+          $ref: '#/components/schemas/MuninAlertsLevel'
+    MuninAlertsUpdateResponse:
+      allOf:
+        - $ref: '#/components/schemas/MuninAlertsResponse'
+        - type: object
+          required:
+            - status
+            - changed
+          properties:
+            status:
+              type: string
+              example: ok
+            changed:
+              type: boolean
+              description: /etc/munin/munin.conf was written.
     LogoutResponse:
       type: object
       properties:
