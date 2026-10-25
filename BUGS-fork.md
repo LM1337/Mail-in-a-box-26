@@ -31,21 +31,22 @@ reproduced on a box, the evidence line says so.
   * *in-place test*: T3, the in-place upgrade of a copy of a production box, and T4, the in-place upgrade of the 22.04 test box.
   * *production upgrade*: the in-place upgrade of a production box with rc3.
   * *update test*: the update of a copy of that production box from rc3 to rc4, and the fresh rc4 test box.
+  * *log audit*: `tests/fork/log-audit.sh` on the boxes of the certification runs of rc6 (T1 to T5b), each warning and error classified.
 
 ## Summary
 
-79 bugs: 1 critical, 13 high, 32 medium, 33 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6.
+80 bugs: 1 critical, 13 high, 33 medium, 33 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80 by the log audit of the certification runs of rc6.
 
 | Origin | Count |
 |---|---|
-| Upstream | 20 |
+| Upstream | 21 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 18 |
 | Fork | 12 |
 
-21 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79). They are candidates for
+22 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -131,6 +132,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B77](#b77) | low | Tools | "migrate-to-2604.sh --check --skip-network-checks" still lists the skipped network checks as blockers and exits 1 | Fork | no | no | rc6 |
 | [B78](#b78) | low | Postfix | After a Postfix restart at the wrong moment, every start of Postfix delays the first SMTP greetings by 100 seconds | Upstream | yes | yes | rc6 |
 | [B79](#b79) | low | Setup | setup stops with "Could not get lock" when apt-daily or unattended-upgrades runs at the same time | Upstream | yes | yes | rc6 |
+| [B80](#b80) | medium | Munin | Munin never sends its alerts: no contact is defined, and there is no "mail" command | Upstream | yes | yes | rc6 |
 
 ## Details
 
@@ -1053,6 +1055,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** rc6 update test after T1: setup on the copy of a production box (started about 30 minutes after a boot) stopped at "Installing Munin" with the lock error above; the journal showed apt-daily.service starting at that second. On a 26.04 test box with a lock held by a test process, `apt-get install` failed at once without the option and waited with it; `apt-get update` failed at once with and without the option while the lock of the package lists was held.
 * **Found by:** update test; **commit:** see `git log --grep B79`; **fixed in:** v78-r2604.0-rc6
 
+### B80
+
+**Munin never sends its alerts: no contact is defined, and there is no "mail" command** (medium, Munin)
+
+* **Symptom:** When a value that Munin watches crosses its warning or critical limit (disk usage, for example), nobody gets a mail. `/var/log/munin/munin-limits.log` says "[WARNING] Missing configuration options for contact admin; skipping" every 5 minutes, on every box.
+* **Cause:** setup/munin.sh wrote `contacts admin` and the `contact.admin.*` lines after the `[$PRIMARY_HOSTNAME]` line of munin.conf, and every line after a host line belongs to that host. So there was no global contact "admin", and munin-limits skipped it. The contact's command `mail -s ...` would not have worked either: Ubuntu has no `mail` command unless a mail client is installed, and setup installs none. With `contact.admin.always_send warning critical` the contact would also have sent a mail every 5 minutes while a warning lasts.
+* **Fix:** setup/munin.sh defines the contact before the host tree, without `always_send`, so munin-limits mails only when a state changes (ok, warning, critical, unknown), one mail per run with all changes. Its command is `/usr/local/lib/mailinabox/munin-notify` (installed by setup from `management/munin_notify.sh`, root, mode 0755), which sends the text munin-limits pipes into it with `/usr/sbin/sendmail` to administrator@PRIMARY_HOSTNAME, with From, To, Subject ("Munin notification" and the box name), Date, Message-ID and `Auto-Submitted: auto-generated`. The recipient is set in that script only. munin.conf is written on every setup run, so updates and the in-place upgrade get the fix. A box whose limit states are all "ok" sends nothing after the update; the production box checked had 29 states, all "ok".
+* **Affects:** v78 yes, PR #2603 yes. Origin: Upstream (the same lines in v78).
+* **Evidence:** All rc6 certification boxes logged the warning every 5 minutes. On a fresh rc6 test box with the fix, a temporary warning limit of 1 % for the root file system (a drop-in in `/etc/munin/munin-conf.d/`) made munin-limits send one mail, which reached the administrator's mailbox through the administrator@ alias; a second run without a change sent none; removing the limit sent one recovery mail, and the run after it none. The warning no longer appears. `smoke.py` checks the contact (`munin-alert-contact`).
+* **Found by:** log audit; **commit:** see `git log --grep B80`; **fixed in:** v78-r2604.0-rc6
+
 ## Not counted above
 
 * Fixes to `tools/migrate-to-2604.sh` and `tests/fork/` made before they were
@@ -1064,6 +1077,7 @@ upstream pull requests, independent of the 26.04 port.
   they fix no bug of their own.
 
 ## Known limitations (not fixed)
+
 
 * **Nextcloud stays on 34.** The `user_external` app (IMAP login) has no release
   for Nextcloud 35 yet.

@@ -11,6 +11,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+Fixes from the log audit of the certification runs of rc6; they go into
+v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
+
+### Fixed
+
+* Munin: alerts reach the administrator. munin.conf defines the contact
+  before the host tree (after the `[host]` line munin-limits did not find
+  it and logged "Missing configuration options for contact admin" every 5
+  minutes), and its command `/usr/local/lib/mailinabox/munin-notify` sends
+  the alert with `/usr/sbin/sendmail` to administrator@PRIMARY_HOSTNAME
+  (there is no `mail` command). Only a change of state (ok, warning,
+  critical, unknown) is mailed, one mail per run: `always_send`, which
+  repeated a warning every 5 minutes, is gone (B80).
+
 ### Changed
 
 * Tests: `tests/fork/log-audit.sh` (as root on the box, read-only) collects
@@ -22,6 +36,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `tests/fork/log-audit-allow.txt` (one regex and its reason per line). Exit
   code 1 if a class is not on the list; `--json` writes the report.
   TESTING-fork.md describes it.
+
+### Upgrade note
+
+* After the update Munin mails the next change of state. A value that is
+  in warning or critical already is not mailed until its state changes;
+  `/var/lib/munin/limits` lists the states. The mails come from and go to
+  administrator@PRIMARY_HOSTNAME.
+
+### Planned for rc7
+
+* An admin panel setting for Munin's alerts: to administrator@PRIMARY_HOSTNAME
+  (the default), to another address, or off; warning and critical or only
+  critical; a button that sends a test mail.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 

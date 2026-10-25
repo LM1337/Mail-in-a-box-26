@@ -2115,6 +2115,31 @@ def c_root_mail(ctx):
     return "/etc/mailname ok, %s -> %s" % (root, out.strip()[:60])
 
 
+def c_munin_contact(ctx):
+    # Munin's alerts (B80): the contact "admin" is defined before the host tree
+    # (lines after a [host] line belong to that host), its command exists, and
+    # always_send (a mail every 5 minutes while a warning lasts) is not set.
+    cmd = ("awk '/^\\[/ { host = 1 } /^contact\\.admin\\./ { print (host ? \"host\" : \"global\"), $0 }' "
+           "/etc/munin/munin.conf")
+    rc, out, err = ctx.remote.run(cmd, sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("cannot read /etc/munin/munin.conf: %s" % (err or out).strip()[:120])
+    lines = [line.split(" ", 1) for line in out.splitlines() if line.strip()]
+    misplaced = [rest for where, rest in lines if where != "global"]
+    if misplaced:
+        raise Fail("contact lines inside the host tree (munin-limits ignores them): %s" % misplaced[0][:80])
+    command = [rest.split(None, 1)[1] for where, rest in lines if rest.startswith("contact.admin.command ")]
+    if not command:
+        raise Fail("no contact.admin.command, Munin sends no alerts")
+    if any(rest.startswith("contact.admin.always_send") for where, rest in lines):
+        raise Fail("contact.admin.always_send is set (a mail every run while a warning lasts)")
+    prog = command[0].split()[0]
+    rc, out, err = ctx.remote.run("test -x %s" % shlex.quote(prog))
+    if rc != 0:
+        raise Fail("the contact's command %s is missing or not executable" % prog)
+    return "contact admin -> %s" % command[0][:60]
+
+
 def c_vacation(ctx):
     f = _flow(ctx)
     if f["smtp"]["vacation"][0] != 250:
@@ -2594,6 +2619,7 @@ def main():
         run_check("imap-getquotaroot-bob", c_quotaroot, ctx)
         run_check("greylist-bypass-config", c_greylist_bypass, ctx)
         run_check("root-mail-alias", c_root_mail, ctx)
+        run_check("munin-alert-contact", c_munin_contact, ctx)
         run_check("sieve-filter-filtered", c_delivery, ctx, "filtered", "Filtered", "[filtered] mail")
         run_check("sieve-vacation-reply", c_vacation, ctx)
         run_check("sieve-vacation-no-phantom-folders", c_vacation_no_phantom_folders, ctx)

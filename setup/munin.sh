@@ -23,15 +23,22 @@ includedir /etc/munin/munin-conf.d
 # path dynazoom uses for requests
 cgiurl_graph /admin/munin/cgi-graph
 
+# Alerts: munin-limits mails each change of state (ok, warning, critical,
+# unknown) to administrator@$PRIMARY_HOSTNAME, one mail per run with changes.
+# The contact must come before the host tree: the lines after a [host] line
+# belong to that host, and munin-limits finds no contact there.
+contact.admin.command /usr/local/lib/mailinabox/munin-notify
+
 # a simple host tree
 [$PRIMARY_HOSTNAME]
 address 127.0.0.1
-
-# send alerts to the following address
 contacts admin
-contact.admin.command mail -s "Munin notification \${var:host}" administrator@$PRIMARY_HOSTNAME
-contact.admin.always_send warning critical
 EOF
+
+# The command of the contact above. It sends the alert with /usr/sbin/sendmail;
+# Ubuntu has no "mail" command unless a mail client is installed. munin-limits
+# runs it as user munin.
+install -o root -g root -m 0755 management/munin_notify.sh /usr/local/lib/mailinabox/munin-notify
 
 # The Debian installer touches these files and chowns them to www-data:adm for use with spawn-fcgi
 chown munin /var/log/munin/munin-cgi-html.log
