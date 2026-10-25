@@ -3100,7 +3100,9 @@ ssh_fallback_port() {
 		if [ "$p" != off ] && { ! [[ $p =~ ^[0-9]+$ ]] || [ "$p" -lt 1 ] || [ "$p" -gt 65535 ] || [ "$p" = 22 ]; }; then
 			die "UPGRADE_SSH_FALLBACK_PORT must be a port number other than 22, or off."
 		fi
-		if [ -z "$CHECK_ONLY" ] && [ -f "$STATE_FILE" ]; then state_set SSH_FALLBACK_PORT "$p"; fi
+		# Kept for the runs after a reboot, by the run that holds the lock
+		# (not by --status or --check).
+		if [ -n "$LOCKED" ] && [ -z "$CHECK_ONLY" ] && [ -f "$STATE_FILE" ]; then state_set SSH_FALLBACK_PORT "$p"; fi
 	else
 		p=$(state_get SSH_FALLBACK_PORT)
 	fi
