@@ -34,13 +34,13 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-73 bugs: 1 critical, 13 high, 32 medium, 27 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6.
+74 bugs: 1 critical, 13 high, 32 medium, 28 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 in the update test T5b of rc6.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
-| PR #2603 | 27 |
+| PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 17 |
 | Fork | 10 |
@@ -125,6 +125,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B71](#b71) | low | Tools | The terminal attached to the tool's tmux session shows nothing; through "curl \| sudo bash" it is not attached at all | Fork | no | no | rc6 |
 | [B72](#b72) | low | Tools | After the last reboot of the in-place upgrade the tmux window waits for Enter forever | Fork | no | no | rc6 |
 | [B73](#b73) | low | Tools | During the release upgrade to 26.04 "tmux attach" cannot reach the in-place upgrade until the reboot, although the tool advises it | Fork | no | no | rc6 |
+| [B74](#b74) | low | Dovecot | Every setup run adds another commented copy of each SSL setting to 10-ssl.conf | PR #2603 | no | yes | rc6 |
 
 ## Details
 
@@ -980,6 +981,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (the in-place tool since rc3). Only `tools/upgrade-in-place-to-2604.sh`; `tools/migrate-to-2604.sh` has no release upgrade.
 * **Evidence:** rc6 T3 (copy of a 24.04 production box): tmux 3.4 was replaced by 3.6a at 5 min 40 s into the release upgrade (dpkg.log); a new attach over `ssh -tt` with sudo.ws and with sudo-rs failed with "open terminal failed: not a terminal" after that, `/proc/PID/exe attach` failed with the libtinfo error, and the session was reachable again after the reboot. On a 26.04 test box with the 22.04 and 24.04 tmux binaries and their own libraries: a 3.6 client fails against a 3.4 server and against a 3.2a server, a 3.4 client attaches to a 3.2a server and to a 3.4 server.
 * **Found by:** in-place test; **commit:** see `git log --grep B73`; **fixed in:** v78-r2604.0-rc6
+
+### B74
+
+**Every setup run adds another commented copy of each SSL setting to 10-ssl.conf** (low, Dovecot)
+
+* **Symptom:** After each run of setup, `/etc/dovecot/conf.d/10-ssl.conf` has one more commented copy of each of the six SSL settings that setup sets (`#ssl = required`, `#ssl_server_cert_file = ...` and so on), so the file changes on every run although nothing else changed. Dovecot reads the same settings; only the file grows.
+* **Cause:** setup/mail-dovecot.sh passed the settings to `tools/editconf.py` with spaces around "=" (`"ssl = required"`). editconf.py splits at the "=" and keeps the spaces in the value, so it never finds the line it wrote before as the same setting: it comments it out and adds it again. Upstream fixed the same for Dovecot 2.3 in 2019 (commit 81176c8); the port's new 2.4 names brought the spaces back.
+* **Fix:** The settings are passed without spaces around "=". The first run with the fix writes each line once more in that form, without a new commented copy; from then on the file stays the same. Commented copies from earlier runs stay in the file; they are only comments.
+* **Affects:** v78 no (`ssl=required` and the other settings without spaces), PR #2603 yes. Origin: PR #2603.
+* **Evidence:** rc6 T5b (copy of a production box on rc3, updated with setup/bootstrap.sh): of all files in `/etc`, a second update run changed only `10-ssl.conf` in content (besides the random minute of the nightly cron job and the order of the OpenDKIM tables, both as upstream), with one more commented copy of each of the six lines. The new arguments, run twice on that file and on the 26.04 package's `10-ssl.conf`, change nothing on the second run; the old ones add a commented line per setting and run.
+* **Found by:** update test; **commit:** see `git log --grep B74`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

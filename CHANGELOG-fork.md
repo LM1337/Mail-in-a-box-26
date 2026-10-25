@@ -47,6 +47,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   replaces tmux 3.4), and to follow the log with `sudo tail -f
   /root/upgrade-2604/upgrade.log` instead. Before, it advised to wait and
   attach again. The log hints say `sudo tail -f` (B73).
+* Dovecot: setup no longer adds another commented copy of each SSL setting
+  to `/etc/dovecot/conf.d/10-ssl.conf` on every run. The settings were
+  passed to `editconf.py` with spaces around "=" (B74).
 
 ### Changed
 
