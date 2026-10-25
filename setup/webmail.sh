@@ -108,6 +108,24 @@ fi
 # for the cipher algorithm selected below.
 SECRET_KEY=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 | sed s/=//g)
 
+# The fork's favicon (branding/favicon.ico, see branding/README.md) for the
+# Elastic skin, through Roundcube's skin_logo option and a file in Roundcube's
+# directory (which static.php serves; a Roundcube update replaces the
+# directory, setup puts the file back). Not with FAVICON=off in
+# /etc/mailinabox.conf, and not when the skin's own favicon.ico was replaced
+# (its time differs from the other files of the release): Roundcube then shows
+# that one. Other skins keep their own favicons.
+RCM_FAVICON_CONFIG=
+rm -f ${RCM_DIR}/mailinabox-favicon.ico
+if [ "${FAVICON:-on}" != off ]; then
+	if [ "$(stat -c %Y ${RCM_DIR}/skins/elastic/images/favicon.ico 2> /dev/null)" = "$(stat -c %Y ${RCM_DIR}/skins/elastic/images/logo.svg 2> /dev/null)" ]; then
+		install -m 644 branding/favicon.ico ${RCM_DIR}/mailinabox-favicon.ico
+		RCM_FAVICON_CONFIG="\$config['skin_logo'] = array('elastic:[favicon]' => 'mailinabox-favicon.ico');"
+	else
+		echo "Roundcube: the favicon of the Elastic skin was replaced by hand, so it is kept."
+	fi
+fi
+
 # Create a configuration file.
 #
 # For security, temp and log files are not stored in the default locations
@@ -152,6 +170,7 @@ cat > $RCM_CONFIG <<EOF;
 /* prevent CSRF, requires php 7.3+ */
 \$config['session_samesite'] = 'Strict';
 \$config['quota_zero_as_unlimited'] = true;
+$RCM_FAVICON_CONFIG
 ?>
 EOF
 

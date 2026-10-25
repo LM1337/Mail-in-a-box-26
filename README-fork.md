@@ -462,6 +462,65 @@ Grenzen:
   zusammen mit den Freigaben an sie.
 
 
+Favicons
+--------
+
+### English
+
+The control panel, Roundcube (`/mail/`) and Nextcloud (`/cloud/`) show the
+fork's favicon (`branding/favicon.ico`, see [branding/README.md](branding/README.md)).
+Setup sets it on every run:
+
+* Roundcube: the option `skin_logo` (`elastic:[favicon]`) in
+  `/usr/local/lib/roundcubemail/config/config.inc.php` and the file
+  `mailinabox-favicon.ico` in Roundcube's directory. Only the Elastic skin;
+  other skins keep their own favicons. If the skin's own
+  `skins/elastic/images/favicon.ico` was replaced by hand, setup keeps it.
+  Setup rewrites `config.inc.php` on every run, as upstream does, so a
+  `skin_logo` added there by hand does not last.
+* Nextcloud: the favicon of the theming app, as if it were uploaded under
+  Administration > Theming. Name, logo, colours and background stay as they
+  are. Like any uploaded favicon, it replaces the app icons that Nextcloud
+  shows in the browser tab, and Nextcloud also serves it as its touch icon.
+  If an administrator uploaded a favicon there, setup keeps it; setup only
+  sets the favicon when there is none (also after the administrator removed
+  it), or when it is the one setup set before.
+
+To use your own favicon in Nextcloud, upload it under Administration >
+Theming. `FAVICON=off` in `/etc/mailinabox.conf`, then `sudo mailinabox`,
+gives Roundcube and Nextcloud their own favicons back (in Nextcloud only if
+the favicon is still the fork's). The control panel and the `/favicon.ico`
+of the web domains are not affected by it.
+
+### Deutsch
+
+Das Control Panel, Roundcube (`/mail/`) und Nextcloud (`/cloud/`) zeigen das
+Favicon des Forks (`branding/favicon.ico`, siehe
+[branding/README.md](branding/README.md)). Setup setzt es bei jedem Lauf:
+
+* Roundcube: die Option `skin_logo` (`elastic:[favicon]`) in
+  `/usr/local/lib/roundcubemail/config/config.inc.php` und die Datei
+  `mailinabox-favicon.ico` im Verzeichnis von Roundcube. Nur für den Skin
+  Elastic; andere Skins behalten ihre eigenen Favicons. Wurde die Datei
+  `skins/elastic/images/favicon.ico` des Skins von Hand ersetzt, behält
+  setup sie bei. Setup schreibt `config.inc.php` wie upstream bei jedem Lauf
+  neu, ein dort von Hand eingetragenes `skin_logo` bleibt also nicht.
+* Nextcloud: das Favicon der Theming-App, als wäre es unter Verwaltung >
+  Design hochgeladen. Name, Logo, Farben und Hintergrund bleiben, wie sie
+  sind. Wie jedes hochgeladene Favicon ersetzt es die App-Symbole, die
+  Nextcloud im Browser-Tab zeigt, und Nextcloud liefert es auch als
+  Touch-Icon aus. Hat ein Administrator dort ein Favicon hochgeladen, behält
+  setup es bei; setup setzt das Favicon nur, wenn keines gesetzt ist (auch
+  nachdem der Administrator es entfernt hat) oder wenn es das ist, das setup
+  vorher gesetzt hat.
+
+Ein eigenes Favicon für Nextcloud lädt man unter Verwaltung > Design hoch.
+`FAVICON=off` in `/etc/mailinabox.conf` und danach `sudo mailinabox` geben
+Roundcube und Nextcloud ihre eigenen Favicons zurück (in Nextcloud nur, wenn
+es noch das des Forks ist). Das Control Panel und `/favicon.ico` der
+Webdomains betrifft das nicht.
+
+
 Intrusion protection (adaptive fail2ban) / Schutz vor Anmeldeangriffen
 ---------------------------------------------------------------------
 

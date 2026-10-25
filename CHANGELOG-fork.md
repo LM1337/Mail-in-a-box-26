@@ -11,6 +11,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### New
+
+* Roundcube and Nextcloud show the fork's favicon (`branding/favicon.ico`).
+  Roundcube: setup sets `skin_logo` (`elastic:[favicon]`) and puts the file
+  into Roundcube's directory; a replaced `favicon.ico` of the Elastic skin
+  and other skins are left alone. Nextcloud: setup sets only the favicon of
+  the theming app (name, logo, colours and background stay); a favicon that
+  an administrator uploaded under Administration > Theming is kept, and
+  setup only replaces the one it set itself. `FAVICON=off` in
+  `/etc/mailinabox.conf` turns both off and removes the fork's favicon from
+  Nextcloud again. See README-fork.md, "Favicons".
+
 ### Fixed
 
 * Tools: phase verify of `tools/upgrade-in-place-to-2604.sh` no longer

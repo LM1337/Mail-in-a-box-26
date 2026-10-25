@@ -558,6 +558,45 @@ hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config
 # With NEXTCLOUD_SHARE_SCOPE=all it removes the options again.
 PHP_VER=$PHP_VER tools/nextcloud-share-scope.sh
 
+# The fork's favicon (branding/favicon.ico, see branding/README.md), set through
+# the theming app as if uploaded under Administration > Theming. Only the
+# favicon: the name, logo, colours and background stay as they are. A favicon
+# that the administrator uploaded is kept: setup sets it only when there is
+# none, or when it is the one setup set before (its SHA-256 is kept in the app
+# setting mailinabox/favicon_sha256). FAVICON=off in /etc/mailinabox.conf
+# removes the fork's favicon again.
+nextcloud_favicon() {
+	local occ=(sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ) mime file have mine ours tmp
+	if [ "$("${occ[@]}" config:app:get theming enabled 2> /dev/null)" != yes ]; then return 0; fi
+	mime=$("${occ[@]}" config:app:get theming faviconMime 2> /dev/null || true)
+	file="$("${occ[@]}" config:system:get datadirectory 2> /dev/null || true)/appdata_$("${occ[@]}" config:system:get instanceid 2> /dev/null || true)/theming/global/images/favicon"
+	have=
+	if [ -n "$mime" ] && [ -f "$file" ]; then have=$(sha256sum < "$file" | cut -d' ' -f1); fi
+	mine=$("${occ[@]}" config:app:get mailinabox favicon_sha256 2> /dev/null || true)
+	ours=$(sha256sum < branding/favicon.ico | cut -d' ' -f1)
+	if [ -n "$mime" ] && { [ -z "$mine" ] || [ "$have" != "$mine" ]; }; then
+		echo "Nextcloud: a favicon was uploaded under Administration > Theming, so it is kept."
+		return 0
+	fi
+	if [ "${FAVICON:-on}" = off ]; then
+		if [ -n "$mime" ]; then
+			hide_output "${occ[@]}" theming:config favicon --reset
+			echo "Nextcloud: removed the fork's favicon (FAVICON=off)."
+		fi
+		"${occ[@]}" config:app:delete mailinabox favicon_sha256 > /dev/null 2>&1 || true
+		return 0
+	fi
+	if [ -n "$mime" ] && [ "$have" = "$ours" ]; then return 0; fi
+	# occ runs as www-data, which cannot read the setup directory.
+	tmp=$(mktemp --suffix=.ico)
+	install -m 644 branding/favicon.ico "$tmp"
+	if hide_output "${occ[@]}" theming:config favicon "$tmp"; then
+		hide_output "${occ[@]}" config:app:set mailinabox favicon_sha256 --value "$ours"
+	fi
+	rm -f "$tmp"
+}
+nextcloud_favicon
+
 # Now set the config to read-only.
 # Do this only at the very bottom when no further occ commands are needed.
 sed -i'' "s/'config_is_read_only'\s*=>\s*false/'config_is_read_only' => true/" "$STORAGE_ROOT/owncloud/config.php"

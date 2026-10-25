@@ -55,6 +55,10 @@ The digits on the band are navy on amber (contrast 8:1).
   `/usr/local/lib/mailinabox/vendor/assets/branding/`, which nginx serves as
   `/admin/assets/branding/`; `management/templates/index.html` links them and
   shows the icon next to the box name in the navigation bar.
+* Roundcube and Nextcloud: `setup/webmail.sh` sets the favicon of the Elastic
+  skin (option `skin_logo`), `setup/nextcloud.sh` the favicon of the theming
+  app; an own favicon of the operator is kept, and `FAVICON=off` in
+  `/etc/mailinabox.conf` turns both off (see README-fork.md, "Favicons").
 * Web domains of the box: `/favicon.ico` falls back to the fork's icon when the
   domain's web root has no `favicon.ico` of its own (`conf/nginx-alldomains.conf`).
 * `conf/www_default.html`, the page a new box shows on its web domains.
