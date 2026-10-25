@@ -149,7 +149,8 @@ Right after the update:
 * **Munin mails the administrator.** From rc6 on, Munin's alerts work:
   each change of state of a watched value (warning, critical, back to ok)
   is mailed to administrator@ of the box's name. Make sure that address
-  reaches someone.
+  reaches someone. From rc7 on, System > Munin Monitoring sets another
+  address, critical only, or off (see [Munin alerts](#munin-alerts--warnungen-von-munin)).
 * **fail2ban after the log rotation.** From rc6 on, Dovecot logs through
   syslog, and rsyslog writes its lines to `mail.log` (B85):
   `doveconf -h log_path` must say `syslog`. fail2ban's Dovecot jails then
@@ -219,7 +220,9 @@ Gleich nach dem Update:
 * **Munin schreibt dem Administrator.** Ab rc6 funktionieren die Warnungen
   von Munin: Jeder Zustandswechsel eines überwachten Werts (Warnung,
   kritisch, wieder in Ordnung) geht per Mail an administrator@ des
-  Box-Namens. Sicherstellen, dass diese Adresse jemanden erreicht.
+  Box-Namens. Sicherstellen, dass diese Adresse jemanden erreicht. Ab rc7
+  stellt System > Munin Monitoring eine andere Adresse, nur kritisch oder
+  aus ein (siehe [Warnungen von Munin](#munin-alerts--warnungen-von-munin)).
 * **fail2ban nach der Log-Rotation.** Ab rc6 protokolliert Dovecot über
   syslog, und rsyslog schreibt seine Zeilen in `mail.log` (B85):
   `doveconf -h log_path` muss `syslog` sagen. Die Dovecot-Jails von
@@ -541,6 +544,81 @@ Ein eigenes Favicon für Nextcloud lädt man unter Verwaltung > Design hoch.
 Roundcube und Nextcloud ihre eigenen Favicons zurück (in Nextcloud nur, wenn
 es noch das des Forks ist). Das Control Panel und `/favicon.ico` der
 Webdomains betrifft das nicht.
+
+
+Munin alerts / Warnungen von Munin
+----------------------------------
+
+### English
+
+Munin watches the disks, memory, load and services of the box. When a
+watched value reaches its warning or critical limit, or is back to normal,
+`munin-limits` mails that change, one mail per run (every 5 minutes) with
+all changes of that run. A value that stays in warning or critical is not
+mailed again; `/var/lib/munin/limits` lists the current states.
+
+The admin panel sets who gets these mails, under System > Munin Monitoring
+(from rc7):
+
+* **Send alerts to**: Standard (administrator@ of the box's name, an alias
+  of the first administrator by default), a custom address, or Off. A
+  custom address must be a plain address: ASCII letters, digits and
+  `_ + - .` before the @, no name, quotes or spaces. The mails come from
+  administrator@ of the box's name in every case.
+* **Level**: warning and critical (the default), or critical only. Critical
+  only mails the changes of plugins that have a critical value and lists
+  only those values; warnings and the return to normal are not mailed.
+* **Send test mail** sends one notification to the saved recipient through
+  the same command as the alerts (subject "Munin test notification", header
+  `X-Miab-Test: 1`).
+
+The setting is stored as `munin_alerts` in `$STORAGE_ROOT/settings.yaml`
+and turned into `/etc/munin/munin.conf` (by the control panel when it is
+saved, and by setup on every run; Munin reads the file on its next run).
+Without the setting the file is the same as in rc6. Changes to
+`/etc/munin/munin.conf` by hand do not last; put your own Munin settings
+into `/etc/munin/munin-conf.d/`. The same through the API:
+`/system/munin/alerts` (see `api/mailinabox.yml`), or on the box:
+
+	sudo /root/mailinabox/management/munin_admin.py --print   # the munin.conf of the setting
+	sudo /root/mailinabox/management/munin_admin.py --test    # a test mail
+
+### Deutsch
+
+Munin überwacht Platten, Speicher, Last und Dienste der Box. Erreicht ein
+überwachter Wert seine Warn- oder kritische Grenze oder ist er wieder
+normal, schickt `munin-limits` eine Mail mit dieser Änderung, eine Mail je
+Lauf (alle 5 Minuten) mit allen Änderungen dieses Laufs. Ein Wert, der in
+Warnung oder kritisch bleibt, wird nicht noch einmal gemeldet;
+`/var/lib/munin/limits` listet die aktuellen Zustände.
+
+Wer diese Mails bekommt, stellt das Control Panel unter System > Munin
+Monitoring ein (ab rc7):
+
+* **Send alerts to**: Standard (administrator@ des Box-Namens, standardmäßig
+  ein Alias des ersten Administrators), eine eigene Adresse oder Off. Eine
+  eigene Adresse muss eine einfache Adresse sein: ASCII-Buchstaben, Ziffern
+  und `_ + - .` vor dem @, kein Name, keine Anführungszeichen, keine
+  Leerzeichen. Absender ist in jedem Fall administrator@ des Box-Namens.
+* **Level**: Warnung und kritisch (Standard) oder nur kritisch. Nur kritisch
+  meldet die Änderungen der Plugins mit einem kritischen Wert und listet nur
+  diese Werte; Warnungen und die Rückkehr zum Normalzustand werden nicht
+  gemeldet.
+* **Send test mail** schickt eine Benachrichtigung an den gespeicherten
+  Empfänger, über denselben Befehl wie die Warnungen (Betreff „Munin test
+  notification“, Kopfzeile `X-Miab-Test: 1`).
+
+Die Einstellung steht als `munin_alerts` in `$STORAGE_ROOT/settings.yaml`
+und wird in `/etc/munin/munin.conf` umgesetzt (vom Control Panel beim
+Speichern und von setup bei jedem Lauf; Munin liest die Datei bei seinem
+nächsten Lauf). Ohne die Einstellung ist die Datei dieselbe wie in rc6.
+Änderungen von Hand an `/etc/munin/munin.conf` bleiben nicht; eigene
+Einstellungen für Munin gehören nach `/etc/munin/munin-conf.d/`. Dasselbe
+über die API: `/system/munin/alerts` (siehe `api/mailinabox.yml`), oder auf
+der Box:
+
+	sudo /root/mailinabox/management/munin_admin.py --print   # munin.conf der Einstellung
+	sudo /root/mailinabox/management/munin_admin.py --test    # eine Testmail
 
 
 Intrusion protection (adaptive fail2ban) / Schutz vor Anmeldeangriffen

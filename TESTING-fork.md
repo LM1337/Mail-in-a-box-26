@@ -90,6 +90,29 @@ report. The groups:
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
   injected user names) and the Intrusion Protection page.
+* **api** (from rc7): the management API as `api/mailinabox.yml` documents
+  it. Auth: 401 without credentials (text or JSON by `Accept`, 403 for an
+  XMLHttpRequest) and with a wrong password, the API key works, a second
+  session's key until its logout and 401 after it; two failed logins in
+  all, far below the `miab-management` jail. Every documented read-only
+  endpoint (`API_READ_ONLY` in `smoke.py`, with the read-only POSTs
+  `system/status`, `system/latest-upstream-version`, `ssl/csr` and
+  `mfa/status`) answers 200 with the documented content type and shape. A
+  write round trip with marked test data (`smokeapi-<token>`): user,
+  password, quota, admin privilege on and off, alias, a custom TXT record
+  with POST, PUT and DELETE, privacy set to its own value, the user removed
+  and (with `--ssh`) its archived mailbox too; the lists of users, aliases
+  and custom records are the same afterwards. Munin's alert
+  setting: invalid addresses refused, `munin.conf` for each mode (with
+  `--ssh`), the test mail to alice's INBOX (deleted again), the old setting
+  and `munin.conf` restored exactly. Not called (`API_NOT_CALLED`, with the
+  reasons): reboot, package updates, SSL provisioning and install, web
+  update, backup config writes, MFA enable and disable, DNS update,
+  secondary nameserver, the fail2ban writes (group admin, group fail2ban).
+  `tests/fork/api-routes.py` (no box needed) checks that every route of
+  `management/daemon.py` is documented and every documented operation has a
+  route, that `smoke.py` calls or excludes each of them, and the content
+  types it expects.
 * **dns**: DNSSEC (RRSIG, DNSKEY), MX and DKIM for each zone, SSHFP against the
   host keys sshd serves, custom records.
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail
