@@ -1,0 +1,55 @@
+# Allowlist of tests/fork/log-audit.sh: message classes that a clean box logs.
+# One Python regex per line (searched in the class as the report prints it),
+# then " # " and the reason. Keep the regexes narrow (anchor them, name the
+# program); mark artefacts of the test network with "test network" and those
+# of tests/fork/smoke.py with "smoke test". Started from what a fresh rc6 box
+# and a box updated from rc3 to rc6 logged.
+
+# --- Mail-in-a-Box (same as upstream)
+^postfix/smtpd: warning: restriction `reject_authenticated_sender_login_mismatch' ignored: no SASL support$ # upstream: the restriction only acts where SASL is on (465/587); port 25 has none (see setup/mail-postfix.sh)
+^opendkim: <(domain|hostname)>: key data is not secure: /home/user-data is writeable and owned by uid N which is not the executing uid \(N\) or the superuser$ # upstream layout: /home/user-data belongs to user-data; OpenDKIM checks every directory of the key path, only warns and signs (the smoke test checks DKIM)
+^postfix/submission/smtpd: SSL_accept error from <hostname>\[<ip>\]: lost connection$ # status checks (management/status_checks.py) open port 465 on the box's own addresses and close it without TLS
+^(dovecot: )?master: Warning: Killed with signal N \(by pid=N uid=N code=kill\)$ # Dovecot logs the SIGTERM of every stop or restart (setup, reboot)
+^postfix/(submission/)?smtpd: warning: (connect to Milter service inet:<ip>:N: Connection refused|milter inet:<ip>:N: (read error in initial handshake|can't read SMFIC_OPTNEG reply packet header: Connection reset by peer))$ # update: mail in the seconds in which setup restarts OpenDKIM or OpenDMARC (Postfix accepts it); a milter that stays down shows in "systemctl --failed" and in the smoke test (DKIM)
+^(imap|indexer-worker): Warning: FTS Xapian: '[^']+' \(/home/user-data/mail/mailboxes/<domain>/<user>/xapian-indexes/db_<hex>_(dict|exp)\.db\) (dictionnary|expunge) does not exist\. Creating it$ # fts-xapian creates the index of a folder on its first use
+^\[ERROR\] Tuning (min|max|type) of '<munin-rrd>' to '[^']*' failed\.$ # munin-update tunes an RRD file before it creates it on the first run with a new plugin ("creating rrd-file" follows)
+^fail2ban-server: N-N-N N:N:N,N fail2ban \[N\]: ERROR (Failed during configuration: Have not found any log file for dovecot jail|Async configuration of server failed)$ # first install: setup/system.sh starts fail2ban before mail.log exists, setup/start.sh restarts it at the end
+^systemd: fail2ban\.service: (Failed with result 'exit-code'\.|Main process exited, code=exited, status=N/EXCEPTION)$ # first install, see the line above (a fail2ban that stays down shows in "systemctl --failed")
+^fail2ban\.database \[N\]: WARNING New database created\. Version 'N'$ # first start of fail2ban
+^nextcloud\[core\] level 3: User backend \\OCA\\UserExternal\\IMAP not found\.$ # setup writes the IMAP user backend into config.php before it enables user_external (first install, Nextcloud upgrade steps)
+^nextcloud\[PHP\] level 2: Undefined array key "(passwordsalt|secret)" at /usr/local/lib/owncloud/lib/private/Setup\.php#N$ # Nextcloud's installer reads both keys before it generates them (first install)
+^nextcloud\[cron\] level 2: failed to create instance of background job: OCA\\(Activity|Photos|FirstRunWizard)\\ # setup disables activity, photos and firstrunwizard; Nextcloud drops their queued jobs on the next cron run
+^\[N\] \[WARN\] \[#unknown\] FileStateMachine->GetStateVersion\(\): Failed on reading filename '/var/lib/z-push/users' - attempt: N$ # first install: "z-push-admin -a fixstates" in setup/zpush.sh reads the state file that is still empty
+^\[N\] \[FATAL\] \[#unknown\] FileStateMachine->GetStateVersion\(\): Unable to read filename '/var/lib/z-push/users' after N attempts$ # first install, see the line above
+^\[N\] \[FATAL\] \[#unknown\] Exception: \(AuthenticationRequiredException\) - Access denied\. Please send authorisation information$ # an ActiveSync request without credentials gets 401 (clients and probes ask without them first)
+
+# --- Ubuntu 26.04 packages
+^ERROR N \(HYN\): Can't connect to local MySQL server through socket '/var/run/mysqld/mysqld\.sock' \(N\)\.?$ # apt: dbconfig-common of opendmarc tries a MySQL database that Mail-in-a-Box does not use; the package is configured
+^WARNING: /etc/aliases exists, but does not have a root alias\.$ # apt: postfix postinst; Mail-in-a-Box delivers root's mail through its own alias of root@PRIMARY_HOSTNAME
+^\((cron|munin-node)\): (cron|munin-node)\.service: Referenced but unset environment variable evaluates to an empty string: (EXTRA_OPTS|DAEMON_ARGS)$ # Ubuntu unit files reference optional variables of /etc/default
+^systemd-sysv-generator: (SysV service '/etc/init\.d/(munin|grub-common)' lacks a native systemd unit file, automatically generating a unit file for compatibility\.|Please update package to include a native systemd unit file\.|⚠️ This compatibility logic is deprecated, expect removal soon\. ⚠️)$ # Ubuntu packages munin and grub-common still ship SysV scripts
+^systemd-udevd: Failed to remove file descriptor "config-serialization" from the store, ignoring: Connection refused$ # systemd: udevd restarted by a package upgrade
+^systemd-networkd: Failed to open nftables netlink socket\. IPMasquerade= and NFTSet= settings will not be applied\. Ignoring: Protocol not supported$ # systemd-networkd: the box uses neither setting
+^named: managed-keys-zone: Initializing automatic trust anchor management for zone '\.'; DNSKEY ID N is now trusted, waiving the normal N-day waiting period\.$ # bind9: first start of the resolver
+^named: success resolving '[^']+' after disabling qname minimization due to '[^']+'$ # bind9: a remote DNS server did not answer the minimized query; the resolver retried and succeeded
+^nsd: (signal received, shutting down\.\.\.|xdp: failed to detach xdp program: Operation not permitted)$ # nsd: normal stop (XDP is not in use)
+^kernel: coredump: N\(sysctl\): Unsafe core_pattern used with fs\.suid_dumpable=N: # Ubuntu: systemd-sysctl sets fs.suid_dumpable before the core dump handler sets kernel.core_pattern
+^kernel: audit: type=N audit\(N\.N:N\): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/(passwd|nsswitch\.conf)" pid=N comm="who" requested_mask="r" denied_mask="r" fsuid=N ouid=N$ # Ubuntu 26.04: the AppArmor profile of who lacks these files; munin's users plugin calls who every 5 minutes; not a mail function
+^kernel: kauditd_printk_skb: N callbacks suppressed$ # kernel rate limit of the audit messages above
+
+# --- virtual machine (QEMU/KVM) hardware
+^kernel: shpchp N:N:N\.N: (Slot initialization failed|pci_hp_register failed with error -N)$ # virtual machine: PCI hotplug bridge of QEMU
+^kernel: snd_hda_intel N:N:Nb\.N: no codecs found!$ # virtual machine: sound device without codec
+^kernel: sd N:N:N:N: Power-on or device reset occurred$ # virtual machine: virtual SCSI disk at boot
+^kernel: PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug$ # virtual machine: kernel boot message
+^kernel: workqueue: inode_switch_wbs_work_fn hogged CPU for >Nus N times, consider switching to WQ_UNBOUND$ # virtual machine: slow virtual disk during the install
+^55-scsi-sg3_id\.rules: WARNING: SCSI device (sda|srN) has no device ID, consider changing \.SCSI_ID_SERIAL_SRC in N-scsi-sgN_config\.rules$ # virtual machine: virtual disks without serial number
+^multipath: sda: failed to get (sgio|sysfs) uid: No data available$ # virtual machine: virtual disk without serial number
+^\(udev-worker\): (ens|eth)N: Could not set WakeOnLan to off, ignoring: (Operation not supported|No such device)$ # virtual machine: virtio network card
+
+# --- test network and smoke test
+^chronyd: Could not connect to \[<ip>\]:N \(N\.ntp\.ubuntu\.com\) : No route to host$ # test network: no IPv6 route to the NTP servers
+^systemd-journald: File /var/log/journal/<hex>/(system|user-N)\.journal corrupted or uncleanly shut down, renaming and replacing\.$ # test network: VM disks restored from snapshots or clones of a running VM
+^postfix/submission/smtpd: warning: unknown\[<ip>\]: SASL (LOGIN|PLAIN) authentication failed: \(reason unavailable\), sasl_username=f2btest-nouser@invalid\.example$ # smoke test: deliberate failed logins of the fail2ban test (smoke.py --fail2ban)
+^postfix/smtpd: NOQUEUE: reject: RCPT from unknown\[<ip>\]: N N\.N\.N <<user>>: Recipient address rejected: Mailbox is full; from=<oq-<hex>@<domain>> to=<<user>> proto=ESMTP helo=<smoketest\.invalid>$ # smoke test: quota check with a full mailbox
+^postfix/submission/smtpd: NOQUEUE: reject: RCPT from unknown\[<ip>\]: N N\.N\.N <<user>>: Sender address rejected: not owned by user <user>; from=<<user>> to=<<user>> proto=ESMTP helo=<smoketest\.invalid> # smoke test: sending as another user must be refused

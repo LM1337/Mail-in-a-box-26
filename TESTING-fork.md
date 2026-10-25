@@ -333,6 +333,16 @@ Everything is in `tests/fork/`:
   never a production box. Run it as root after every install or upgrade.
 * `smoke.py` runs the checks. `tests/fork/smoke.py --help` lists the options;
   the header of the script has the typical runs for T1, T2 and the baseline.
+* `log-audit.sh` audits the logs of a box under test (as root, on the box,
+  read-only): all warnings and errors since `--since TIME` (default: the last
+  boot), as message classes with counts and examples (secrets masked),
+  compared with `log-audit-allow.txt`. Each line there is a regex and,
+  after " # ", the reason; artefacts of the test network and the smoke test
+  are marked as such. Exit code 0 if every class is on the list, 1 if not
+  (`UNKNOWN`). Give the start of the scenario as `--since`, add local
+  exceptions of your lab with `--allow-extra FILE`, and `--json OUT` for the
+  report. An UNKNOWN class is a defect to fix, or, once checked as harmless,
+  a new line with its reason in the allowlist.
 * Mails that you send to a box under test yourself (vacation triggers,
   delivery checks after a reboot) must be test mails, or the manifest
   comparison counts them as new. Send them with `smoke.py --send-test-mail

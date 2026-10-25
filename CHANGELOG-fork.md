@@ -9,6 +9,20 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### Changed
+
+* Tests: `tests/fork/log-audit.sh` (as root on the box, read-only) collects
+  the warnings and errors since a point in time (`--since`, default the last
+  boot) from the journal, `systemctl --failed` and the logs of the services
+  (mail.log, nginx, PHP-FPM, fail2ban, Nextcloud, Roundcube, Z-Push, Munin,
+  apt, cloud-init, kernel, the tools' own logs), reduces them to message
+  classes, counts them and compares them with the allowlist
+  `tests/fork/log-audit-allow.txt` (one regex and its reason per line). Exit
+  code 1 if a class is not on the list; `--json` writes the report.
+  TESTING-fork.md describes it.
+
 ## v78-r2604.0-rc6 (2026-10-25)
 
 Fixes from the in-place test from 22.04 of rc5 and from the test runs of
