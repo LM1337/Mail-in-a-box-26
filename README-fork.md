@@ -141,7 +141,10 @@ checksum) or in `/root/update-check`. After the update, `after` records the
 state again and lists each change as EXPECTED (announced by the releases in
 between, `tools/expected-changes/`) or UNEXPECTED, and runs the log audit
 against the baseline: only new message classes count (`--internet` accepts
-the usual noise of a public box). `mailcheck` sends a marked test mail to
+the usual noise of a public box). The lists cover updates of this fork on
+one Ubuntu release: after an in-place upgrade or a migration from upstream
+Mail-in-a-Box, `after` lists the changes without judging them ("RESULT:
+NOT JUDGED"). `mailcheck` sends a marked test mail to
 an address of another provider that sends it back (forward or automatic
 answer; `--probe ADDRESS` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`, which
 setup keeps from rc7 on) and
@@ -245,7 +248,10 @@ Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
 führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
 `tools/expected-changes/`) oder UNEXPECTED auf und lässt das Log-Audit gegen
 die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
-(`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin).
+(`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin). Die
+Listen decken Updates dieses Forks auf einem Ubuntu-Release ab: Nach einem
+In-place-Upgrade oder einem Umzug von Upstream-Mail-in-a-Box führt `after`
+die Änderungen nur auf, ohne sie zu bewerten („RESULT: NOT JUDGED“).
 `mailcheck` schickt eine markierte Testmail an eine Adresse bei einem
 anderen Anbieter, die sie zurückschickt (Weiterleitung oder automatische
 Antwort; `--probe ADRESSE` oder `PROBE_ADDRESS=` in `/etc/mailinabox.conf`,

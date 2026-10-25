@@ -342,6 +342,10 @@ in-place tool's copy to an rsync target (all fixed).
   state record shows (`/etc/mailname` and `/etc/hosts`, B60; Dovecot and
   `mailinabox.service` enabled again, B67 and B69), for updates from rc1 to
   rc3 (B109).
+* Tools: `tools/update-check.sh after` no longer judges an in-place upgrade
+  or a migration from upstream Mail-in-a-Box by the lists of the fork's
+  updates: it lists the changes and says "RESULT: NOT JUDGED" (exit code
+  3) when the Ubuntu release changed or the box came from upstream (B110).
 
 ### Changed
 

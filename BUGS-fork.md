@@ -161,6 +161,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B107](#b107) | medium | Tools | update-check.sh mailcheck reports FAILED when the mail comes back over TLS | Fork | no | no | rc7 |
 | [B108](#b108) | medium | Tools | update-check.sh after never says OK: every setup run moves the nightly job to another minute | Fork | no | no | rc7 |
 | [B109](#b109) | low | Tools | The expected changes of rc7 miss changes of rc4 and rc5, so an update from rc1 to rc3 lists them as unexpected | Fork | no | no | rc7 |
+| [B110](#b110) | low | Tools | update-check.sh after judges an in-place upgrade or a migration from upstream by the lists of the fork's updates | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1380,6 +1381,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag); only updates from rc1 to rc3 show them. Origin: Fork.
 * **Evidence:** The update test T5b of rc7, from rc3 directly to rc7: 10 unexpected changes, of them these 6 lines (the others came from installing a branch instead of a tag). The same lines, compared with the new rules: 0 unexpected.
 * **Found by:** rc7 certification (T5b); **commit:** see `git log --grep B109`; **fixed in:** v78-r2604.0-rc7
+
+### B110
+
+**update-check.sh after judges an in-place upgrade or a migration from upstream by the lists of the fork's updates** (low, Tools)
+
+* **Symptom:** After an in-place upgrade (Ubuntu 24.04 with upstream v74 to 26.04 with the fork), `tools/update-check.sh after` lists dozens of changes as UNEXPECTED (PHP-FPM and NTP units, the Dovecot 2.4 settings, Nextcloud 26 to 34, crontabs, listening ports) and ends with "RESULT: CHANGED", although each of them belongs to the upgrade.
+* **Cause:** The lists in `tools/expected-changes/` describe the updates of this fork on one Ubuntu release, and the tool applied them to every update.
+* **Fix:** When the Ubuntu release before and after differs, or the version before is upstream Mail-in-a-Box (not a v78-r2604 release), `after` says so above the changes, lists them without judging them and ends with "RESULT: NOT JUDGED" (exit code 3; 1 if the log audit found new message classes). The help and README-fork.md say so.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The in-place test T3 of rc7: "RESULT: CHANGED - 56 unexpected, 24 expected", every unexpected change one of the release upgrade or of the step from v74.
+* **Found by:** rc7 certification (T3); **commit:** see `git log --grep B110`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

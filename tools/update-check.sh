@@ -38,11 +38,14 @@
 # with "before" and marks the changes that the releases in between announce
 # as EXPECTED (tools/expected-changes/<version>.txt, see there), the others as
 # UNEXPECTED, and runs the log audit since "before" against that baseline
-# (only new message classes count).
+# (only new message classes count). The lists cover updates of this fork on
+# one Ubuntu release: after a release upgrade or the first update from
+# upstream Mail-in-a-Box (tools/upgrade-in-place-to-2604.sh,
+# tools/migrate-to-2604.sh) the changes are listed but not judged.
 #
 # backup: management/backup.py (as the nightly backup: incremental unless a
 # full one is due; it stops Postfix, Dovecot, postgrey and PHP for its run),
-# then a tar archive of /etc, /root/mailinabox, the crontabs, /var/lib/z-push,
+# then a tar archive of /etc, the checkout, the crontabs, /var/lib/z-push,
 # /var/lib/munin, /usr/local/lib/owncloud and the Docker stack directories and
 # volumes named with --docker-dir and --docker-volume (one archive per
 # volume), and a pg_dump of each container named with --postgres. Each is
@@ -126,7 +129,10 @@ Steps:
                 between, tools/expected-changes/) or UNEXPECTED; then the log
                 audit since "before" against the baseline (only new message
                 classes count). Exit code 1 if anything unexpected or new,
-                2 if nothing is but the log audit could not run.
+                2 if nothing is but the log audit could not run, 3 if the
+                update changed the Ubuntu release or came from upstream
+                Mail-in-a-Box: the lists cover updates of this fork on one
+                Ubuntu release, so the changes are listed, not judged.
   mailcheck     mail round trip: a marked test mail to the probe address,
                 which must send it back (forward or answer); waits until it
                 is stored here and reports outbound, inbound, spam filter,
@@ -685,7 +691,23 @@ do_after() {
 	from=$(release_of "$RUN_DIR/before")
 	to=$(release_of "$RUN_DIR/after")
 	while IFS= read -r f; do rules+=("$f"); done < <(expected_rule_files "$from" "$to")
+	# The lists know the updates of this fork on one Ubuntu release, not a
+	# release upgrade or the step from upstream Mail-in-a-Box (B110).
+	local ub_before ub_after not_judged=
+	ub_before=$(sed -n 's/^ubuntu //p' "$RUN_DIR/before/version.txt")
+	ub_after=$(sed -n 's/^ubuntu //p' "$RUN_DIR/after/version.txt")
+	if [ "$ub_before" != "$ub_after" ]; then
+		not_judged="the update changed the Ubuntu release ($ub_before to $ub_after)"
+	elif [ -n "$from" ] && [[ $from != v78-r2604.* ]]; then
+		not_judged="the update came from $from (upstream Mail-in-a-Box, not a release of this fork)"
+	fi
 	section "Changes from ${from:-?} to ${to:-?}"
+	if [ -n "$not_judged" ]; then
+		say "Not judged: $not_judged. The lists of expected changes cover updates of this fork on one"
+		say "Ubuntu release; a release upgrade or the first update from upstream changes much more (packages,"
+		say "units, Dovecot 2.4, Nextcloud). The changes are listed below; UNEXPECTED there only means that"
+		say "no list names them. Read them, the report of the upgrade or migration tool and the log audit."
+	fi
 	if [ ${#rules[@]} = 0 ]; then
 		say "No list of expected changes for these versions (tools/expected-changes/): every change is unexpected."
 	else
@@ -704,6 +726,17 @@ do_after() {
 		run_log_audit "$RUN_DIR/after/log-audit" "$since" || arc=$?
 	fi
 	say
+	if [ -n "$not_judged" ] && [ "$arc" != 1 ]; then
+		say "RESULT: NOT JUDGED - $not_judged; the changes are listed in"
+		say "$RUN_DIR/after/changes.txt$([ "$arc" = 2 ] && echo ", and the log audit could not run (see the warning above)" || echo ", and the log audit found no new message class")."
+		say "Next: $SCRIPT_NAME mailcheck"
+		return 3
+	fi
+	if [ -n "$not_judged" ]; then
+		say "RESULT: look at the new log message classes ($RUN_DIR/after/log-audit.txt); the changes are"
+		say "not judged ($not_judged, $RUN_DIR/after/changes.txt). Next: $SCRIPT_NAME mailcheck"
+		return 1
+	fi
 	if [ "$rc" = 0 ] && [ "$arc" = 0 ]; then
 		say "RESULT: OK - no unexpected change, no new log message class. Next: $SCRIPT_NAME mailcheck"
 		return 0
