@@ -3131,7 +3131,10 @@ fallback_users() { # PERMITROOTLOGIN
 	if [ -n "${UPGRADE_SSH_FALLBACK_USERS:-}" ]; then
 		list=$UPGRADE_SSH_FALLBACK_USERS
 	else
-		list="$(getent group sudo admin 2> /dev/null | cut -d: -f4 | tr ',' ' ')"
+		# One group per getent call: "getent group sudo admin" exits 2 when
+		# one of them does not exist (Ubuntu has had no group admin since
+		# 12.04), which under errexit ended this function before any user.
+		list="$({ getent group sudo; getent group admin; } 2> /dev/null | cut -d: -f4 | tr ',' ' ' || true)"
 		if [ "$1" != no ]; then list="root $list"; fi
 	fi
 	for u in $list; do

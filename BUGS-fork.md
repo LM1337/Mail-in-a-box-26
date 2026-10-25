@@ -151,6 +151,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B97](#b97) | high | Setup | Setup downloads and unpacks code under fixed names in /tmp | Upstream | yes | yes | rc7 |
 | [B98](#b98) | medium | DNS | DNSSEC: the keys are copied to /tmp under their own names for signing | Upstream | yes | yes | rc7 |
 | [B99](#b99) | high | Z-Push | ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push | PR #2603 | no | yes | rc7 |
+| [B100](#b100) | high | Tools | The fallback SSH server of the in-place tool never starts on a box without the group admin | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1259,6 +1260,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (Nextcloud 27), PR #2603 yes (Nextcloud 34), the fork up to rc6. Origin: PR #2603.
 * **Evidence:** fresh 26.04 test box of the setup tests of rc7: a minimal ActiveSync 14.0 client (Provision, FolderSync, Sync, Ping) for the admin, whose address book held only Nextcloud's `default` card, got HTTP 500 for the second Sync of the contacts folder with the errors above. With the setting, a user created afterwards had no example contact; Sync answered 200 (status 1) and a Ping on the contacts folder ran its 20 s heartbeat and ended with status 1, no new line in the error log. The smoke test checks only `OPTIONS` of ActiveSync.
 * **Found by:** rc7 development (the setup tests of rc7, log audit of the restart window); **commit:** see `git log --grep B99`; **fixed in:** v78-r2604.0-rc7
+
+### B100
+
+**The fallback SSH server of the in-place tool never starts on a box without the group admin** (high, Tools)
+
+* **Symptom:** Before each release upgrade `tools/upgrade-in-place-to-2604.sh` says "No administrator (group sudo or admin, or root) has an SSH key; no fallback SSH server." although the administrators have keys, and new SSH logins fail while the release upgrade replaces OpenSSH, as before rc7.
+* **Cause:** `fallback_users` read the members with `getent group sudo admin`. getent exits 2 when one of the keys does not exist, and Ubuntu has had no group `admin` since 12.04. Under the tool's `set -euo pipefail` the failed assignment ended the process substitution that lists the users before it printed any, root included.
+* **Fix:** one `getent group` call per group, and a missing group is no error.
+* **Affects:** the development of rc7 only (the fallback is new in rc7, never in a tag). Origin: Fork.
+* **Evidence:** reproduced with the function under the tool's shell options on a machine without the group `admin`: no user and the ERR trap before the fix, the members of sudo and root after it. The lab box of the rc7 development has a group `admin` (gid 107), which is why its runs of `--ssh-fallback-test` did not show it.
+* **Found by:** rc7 review; **commit:** see `git log --grep B100`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 
