@@ -1039,7 +1039,9 @@ def c_sieve_login(ctx):
 
 # The services of Mail-in-a-Box must be enabled, or they do not start after a
 # reboot (the in-place upgrade of rc3 left Dovecot disabled, B67). The PHP-FPM
-# unit is found, so that the baseline against an old box works too.
+# unit is found, so that the baseline against an old box works too. Only the
+# state on stdout counts: for a SysV service (postgrey on 22.04) systemctl
+# prints a notice on stderr first.
 CORE_UNITS = ["postfix", "dovecot", "nginx", "spampd", "opendkim", "opendmarc", "postgrey",
               "fail2ban", "nsd", "named", "munin-node", "mailinabox", "cron"]
 UNIT_ENABLED_STATES = ("enabled", "static", "indirect", "generated", "alias")
@@ -1047,7 +1049,7 @@ UNIT_ENABLED_STATES = ("enabled", "static", "indirect", "generated", "alias")
 
 def c_services_enabled(ctx):
     cmd = ("for u in %s $(cd /lib/systemd/system && ls php*-fpm.service 2>/dev/null); do "
-           "printf '%%s ' \"${u%%.service}\"; systemctl is-enabled \"$u\" 2>&1 | head -n 1; done"
+           "printf '%%s ' \"${u%%.service}\"; systemctl is-enabled \"$u\" 2>/dev/null | head -n 1; echo; done"
            % " ".join(CORE_UNITS))
     rc, out, err = ctx.remote.run(cmd, timeout=60)
     states = {}

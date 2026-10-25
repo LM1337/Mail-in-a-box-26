@@ -52,7 +52,17 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   classes, counts them and compares them with the allowlist
   `tests/fork/log-audit-allow.txt` (one regex and its reason per line). Exit
   code 1 if a class is not on the list; `--json` writes the report.
-  TESTING-fork.md describes it.
+  During an in-place upgrade, what the box logs between stopping mail and
+  the start of setup gets the phase of the tool as a prefix
+  (`[in-place:release_2604]`), so that the allowlist accepts the noise of
+  the old releases and the release upgrades only there.
+  `tests/fork/log-audit-allow-old-box.txt` adds what the old box logs when
+  the migration tool stops it. TESTING-fork.md describes it.
+* Tests: `tests/fork/smoke.py` checks Munin's alert contact
+  (`munin-alert-contact`), and `services-enabled` no longer reports a SysV
+  service of 22.04 (postgrey) as not enabled. `prepare-testenv.sh` writes
+  its SpamAssassin file with mode 644 also under a umask of 077 (the IMAP
+  processes could not read it).
 
 ### Upgrade note
 

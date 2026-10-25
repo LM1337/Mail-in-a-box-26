@@ -342,7 +342,12 @@ Everything is in `tests/fork/`:
   (`UNKNOWN`). Give the start of the scenario as `--since`, add local
   exceptions of your lab with `--allow-extra FILE`, and `--json OUT` for the
   report. An UNKNOWN class is a defect to fix, or, once checked as harmless,
-  a new line with its reason in the allowlist.
+  a new line with its reason in the allowlist. On a box upgraded in place,
+  what it logged between stopping mail and the start of setup carries the
+  phase of `tools/upgrade-in-place-to-2604.sh` (`[in-place:release_2404]`,
+  from the tool's state file); the noise of the old releases and the release
+  upgrades is allowed only with that prefix. For the old box of a migration,
+  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`.
 * Mails that you send to a box under test yourself (vacation triggers,
   delivery checks after a reboot) must be test mails, or the manifest
   comparison counts them as new. Send them with `smoke.py --send-test-mail

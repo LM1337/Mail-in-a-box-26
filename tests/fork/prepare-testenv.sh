@@ -114,6 +114,9 @@ score DMARC_FAIL_QUARANTINE 0
 score DMARC_FAIL_REJECT 0
 score SPF_NONE 0
 CF
+# Explicit modes: the caller's umask may be 077, and the imap processes (user
+# mail) read the SpamAssassin configuration too (imapsieve's sa-learn).
+chmod 644 /etc/spamassassin/zz-miab-testenv.cf "$WL"
 systemctl restart spampd
 
 F2B_ADMIN="$(cd "$(dirname "$0")/../.." && pwd)/management/fail2ban_admin.py"

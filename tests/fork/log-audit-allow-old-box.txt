@@ -1,0 +1,9 @@
+# Additions for a log audit of the OLD box after tools/migrate-to-2604.sh has
+# stopped it (phase stop-old: the services are masked in /run and stopped).
+# Use with --allow-extra, on the old box, with --since the start of the
+# migration. Same format as log-audit-allow.txt. Started from what a v74 box
+# on Ubuntu 22.04 logged; all of it came within seconds of stop-old.
+^systemd: [A-Za-z0-9N.@_-]+\.(service|socket): (Current command vanished from the unit file, execution of the command list won't be resumed\.|Got notification message from PID N, but reception is disabled\.)$ # stop-old masks the running services in /run before it stops them
+^systemd: apt-daily(-upgrade)?\.timer: (Unit to trigger vanished\.|Failed with result 'resources'\.)$ # stop-old masks the timers and their services; the timers stay "failed" until the next reboot of the old box or --rollback
+^systemd: unit apt-daily(-upgrade)?\.timer is failed$ # see the line above
+^postgrey: Couldn't unlink "/var/run/postgrey\.pid" \[Permission denied\]$ # postgrey of 22.04/24.04 (runs as user postgrey) at the stop

@@ -1126,6 +1126,14 @@ upstream pull requests, independent of the 26.04 port.
 
 ## Known limitations (not fixed)
 
+* **Full-text search: an error once when a folder is indexed for the first
+  time.** dovecot-fts-xapian 1.9.3 keeps a small SQLite database per folder
+  and opens it without a busy timeout. When two processes create it at the
+  same moment (the indexer after a delivery and the IMAP process of the
+  same user), the second one logs `FTS Xapian: Can not execute (CREATE TABLE
+  IF NOT EXISTS dict ...) : database is locked` (or `disk I/O error`). The
+  first one creates it, and search works. Seen in the rc6 test runs; to be
+  reported to the plugin.
 
 * **Nextcloud stays on 34.** The `user_external` app (IMAP login) has no release
   for Nextcloud 35 yet.

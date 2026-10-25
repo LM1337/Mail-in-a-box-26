@@ -26,6 +26,14 @@
 #     tools/upgrade-in-place-to-2604.sh, and the logs given with --setup-log.
 #     Rotated files (.1, .N.gz) are read when they changed in the window.
 #
+# In-place upgrades: what the box logs between stopping mail and the start of
+# setup (the old releases, the release upgrades and their reboots) gets the
+# phase of tools/upgrade-in-place-to-2604.sh as a prefix of its class, e.g.
+# "[in-place:release_2604] systemd: ...", from the times in the tool's state
+# file (upgrade.log, which has no time stamps, by its section headings). The
+# allowlist rules that start with "^\[in-place" accept such classes only with
+# that prefix; the other rules apply in every phase.
+#
 # Allowlist (default: log-audit-allow.txt next to this script): one Python
 # regular expression per line, searched in the message class as the report
 # prints it, then " # " and the reason (mandatory). The regex itself must not
@@ -138,10 +146,12 @@ def load_allow(path, rules):
         if not rx or not reason:
             sys.exit("log-audit.sh: %s:%d: empty regex or reason" % (path, n))
         try:
-            rules.append({"file": path, "line": n, "regex": rx, "re": re.compile(rx), "reason": reason, "hits": 0})
+            rules.append({"file": path, "line": n, "regex": rx, "re": re.compile(rx), "reason": reason, "hits": 0,
+                          "tagged": rx.startswith(r"^\[in-place")})
         except re.error as e:
             sys.exit("log-audit.sh: %s:%d: bad regex: %s" % (path, n, e))
 
+RE_TAG = re.compile(r"^\[in-place:[a-z0-9_]+\] ")
 ALLOW_FILES = [p for p in os.environ["LA_ALLOW"].split("\n") if p]
 RULES = []
 try:
@@ -236,16 +246,83 @@ def prog_name(p):
     p = re.sub(r"\(.*?\)|<.*?>|\[.*?\]", "", p)
     return p.strip()
 
+# ------------------------------------------------- in-place upgrade phases
+# Between stopping mail and the start of setup, tools/upgrade-in-place-to-2604.sh
+# runs the old releases, the release upgrades and their reboots. What the box
+# logs then (old systemd with new unit files, dpkg, the old services) is
+# prefixed with the phase, e.g. "[in-place:release_2604] ", so that the
+# allowlist can accept it for that phase only. The times come from the tool's
+# state file; upgrade.log has no time stamps and is split by its section
+# headings instead.
+
+INPLACE_STATE = "/root/upgrade-2604/state"
+INPLACE_LOG = "/root/upgrade-2604/upgrade.log"
+
+def inplace_phases():
+    st = {}
+    try:
+        for line in open(INPLACE_STATE, encoding="utf-8", errors="replace"):
+            k, sep, v = line.rstrip("\n").partition("=")
+            if sep:
+                st[k] = v
+    except OSError:
+        return [], None
+    def num(k):
+        try:
+            return int(st.get(k, ""))
+        except ValueError:
+            return None
+    starts = []
+    q = num("QUIESCED_EPOCH") or num("START_quiesce")
+    if q is not None:
+        starts.append((q, "quiesce"))
+    for ph in ("prepare_release", "release_2404", "release_2604", "cleanup_etc"):
+        t = num("START_" + ph)
+        if t is not None:
+            starts.append((t, ph))
+    if not any(ph.startswith("release_") for _t, ph in starts):
+        return [], None
+    starts.sort()
+    end = num("START_setup")
+    return starts, end
+
+INPLACE_STARTS, INPLACE_END = inplace_phases()
+
+def phase_tag(ts):
+    if ts is None or not INPLACE_STARTS or ts < INPLACE_STARTS[0][0]:
+        return ""
+    if INPLACE_END is not None and ts >= INPLACE_END:
+        return ""
+    label = ""
+    for t, ph in INPLACE_STARTS:
+        if ts >= t:
+            label = ph
+    return "in-place:" + label if label else ""
+
+# Section headings of upgrade.log (section() of the tool) -> phase; other
+# headings end the tagged part. "Rebooting: ..." keeps the phase before it.
+INPLACE_HEADINGS = [
+    (re.compile(r"^(Pausing the backups|Stopping mail)\b"), "quiesce"),
+    (re.compile(r"^Preparing the packages for the release upgrade$"), "prepare_release"),
+    (re.compile(r"^Release upgrade: Ubuntu \S+ -> 24\.04$"), "release_2404"),
+    (re.compile(r"^Release upgrade: Ubuntu \S+ -> 26\.04$"), "release_2604"),
+    (re.compile(r"^Cleaning up for Ubuntu 26\.04 \(before setup\)$"), "cleanup_etc"),
+    (re.compile(r"^Rebooting: "), None),
+]
+RULER = "-----------------------------------------------"
+
 # ---------------------------------------------------------------- results
 
 classes = {}          # class text -> {"sources": Counter, "examples": [...]}
 source_stats = []     # [{"source", "status", "lines"}]
 
-def add(source, ident, msg, raw):
+def add(source, ident, msg, raw, tag=""):
     text = normalize(msg)
     if not text:
         return
     key = "%s: %s" % (ident, text) if ident else text
+    if tag:
+        key = "[%s] %s" % (tag, key)
     c = classes.setdefault(key, {"sources": collections.Counter(), "examples": []})
     c["sources"][source] += 1
     if len(c["examples"]) < EXAMPLES:
@@ -303,7 +380,8 @@ def scan_journal():
             seen.add(cur)
             ident = e.get("SYSLOG_IDENTIFIER") or e.get("_COMM") or e.get("_SYSTEMD_UNIT") or ""
             ts = int(e.get("__REALTIME_TIMESTAMP", "0")) // 1000000
-            add("journal", ident, msg, "%s %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)), ident, msg))
+            add("journal", ident, msg, "%s %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)), ident, msg),
+                phase_tag(ts))
             n += 1
     source_stats.append({"source": "journal", "status": "read", "lines": n})
 
@@ -425,10 +503,26 @@ def scan_file(path, label, select, syslog=False, block_start=None):
         source_stats.append({"source": label, "status": "unchanged", "lines": 0})
         return
     n = 0
+    headings = path == INPLACE_LOG
     for p in paths:
         last = None
+        section_tag, prev, prev2 = "", None, None
         try:
             for line in read_lines(p):
+                if headings:
+                    # A heading is the line between two rulers: seen when the
+                    # second ruler comes, so look two lines back.
+                    if line == RULER and prev2 == RULER and prev is not None:
+                        for rx, ph in INPLACE_HEADINGS:
+                            if rx.search(prev):
+                                if ph is not None:
+                                    section_tag = "in-place:" + ph
+                                break
+                        else:
+                            section_tag = ""
+                    elif line.startswith("=== upgrade-in-place-to-2604.sh "):
+                        section_tag = ""
+                    prev2, prev = prev, line
                 if block_start is not None:
                     m = block_start.match(line)
                     if m:
@@ -446,7 +540,7 @@ def scan_file(path, label, select, syslog=False, block_start=None):
                 if not select(line, rest):
                     continue
                 prog, msg = split_prog(rest) if syslog else ("", rest)
-                add(label, prog, msg, line)
+                add(label, prog, msg, line, section_tag if headings else phase_tag(last))
                 n += 1
         except OSError as e:
             source_stats.append({"source": p, "status": "error: %s" % e.strerror, "lines": 0})
@@ -541,8 +635,10 @@ def main():
     for key, c in classes.items():
         item = {"class": key, "count": max(c["sources"].values()), "sources": dict(c["sources"]),
                 "examples": c["examples"]}
+        # A rule without a phase prefix applies in every phase.
+        plain = RE_TAG.sub("", key, count=1)
         for r in RULES:
-            if r["re"].search(key):
+            if r["re"].search(key) or (plain != key and not r["tagged"] and r["re"].search(plain)):
                 r["hits"] += 1
                 item["reason"] = r["reason"]
                 item["allow_line"] = r["line"]
@@ -560,7 +656,12 @@ def main():
     w = sys.stdout.write
     w("log-audit on %s since %s (%s)\n" % (HOSTNAME, os.environ["LA_SINCE_LABEL"],
                                            time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(SINCE))))
-    w("allowlist: %s (%d rules)\n\nSources:\n" % (", ".join(ALLOW_FILES), len(RULES)))
+    w("allowlist: %s (%d rules)\n" % (", ".join(ALLOW_FILES), len(RULES)))
+    if INPLACE_STARTS:
+        w("in-place upgrade phases (prefix [in-place:PHASE]): %s, until %s\n" % (
+            ", ".join("%s %s" % (ph, time.strftime("%H:%M:%S", time.localtime(t))) for t, ph in INPLACE_STARTS),
+            time.strftime("%H:%M:%S", time.localtime(INPLACE_END)) if INPLACE_END else "now"))
+    w("\nSources:\n")
     for s in source_stats:
         w("  %-32s %-10s %d\n" % (s["source"], s["status"], s["lines"]))
 
@@ -589,6 +690,8 @@ def main():
     if out:
         report = {"host": HOSTNAME, "since": SINCE, "since_label": os.environ["LA_SINCE_LABEL"],
                   "allowlist": ALLOW_FILES, "sources": source_stats,
+                  "inplace_phases": [{"phase": ph, "start": t} for t, ph in INPLACE_STARTS],
+                  "inplace_setup_start": INPLACE_END,
                   "unknown": unknown, "allowed": allowed,
                   "unused_rules": [{"file": r["file"], "line": r["line"], "regex": r["regex"]} for r in unused],
                   "result": "OK" if not unknown else "UNKNOWN"}
