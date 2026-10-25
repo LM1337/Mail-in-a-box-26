@@ -26,4 +26,6 @@ dropins.txt - ^/etc/systemd/system/spampd\.service\.d/mailinabox-pidfile\.conf #
 mailinabox-conf.txt + ^FAVICON=(on|off)$ # rc6: setup records the favicon setting (default on)
 
 # --- rc7
-# (nothing of rc7 shows in the recorded state yet)
+# Nothing of rc7 shows in the recorded state: without a munin_alerts setting
+# setup writes the munin.conf of rc6 byte for byte; the OpenDKIM tables (B95)
+# and Nextcloud's dav setting (B99) are not recorded.

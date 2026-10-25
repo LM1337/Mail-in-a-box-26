@@ -11,67 +11,335 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+The plan of rc7 (from the update of a production box from rc3 to rc6):
+Munin's alerts are set in the admin panel, the management API is tested
+end to end against its documentation, and an update gets its own tools:
+the state of the box before and after, a backup before it, a comparison
+with the expected changes and an active mail check. The in-place tool runs
+a fallback SSH server while the release upgrades replace OpenSSH. Setup
+reloads nginx instead of restarting it, no longer shows the welcome dialog
+on an update, and writes the OpenDKIM tables in a fixed order. Security:
+setup no longer sources or unpacks anything as root by a fixed name in
+`/tmp` (B89, B97), and root no longer writes through symbolic links in
+directories of other accounts (B86, B87, B90, B98). The management daemon
+no longer runs out of file descriptors (B91), and ActiveSync syncs the
+contacts of new users again (B99).
+
+### New
+
+* Munin: an admin panel setting for Munin's alerts, under System > Munin
+  Monitoring: to the standard address administrator@PRIMARY_HOSTNAME, to a
+  custom address, or off; warning and critical (the default) or critical
+  only; a button that sends one test notification to the saved recipient
+  (subject "Munin test notification", header `X-Miab-Test: 1`, through the
+  same command as the alerts, as user munin). `management/munin_admin.py`
+  stores the setting as `munin_alerts` in `$STORAGE_ROOT/settings.yaml`
+  (only values that differ from the defaults) and makes the whole
+  `/etc/munin/munin.conf` from it; setup/munin.sh writes it with `--setup`,
+  the daemon when the setting is saved (only if the file differs; Munin
+  reads it on its next run). Without the setting the file is byte for byte
+  the one of rc6. Off: no contact and `contacts none`; critical only: a
+  `contact.admin.text` that leaves out the plugins without a critical
+  value, and munin-notify sends nothing for an empty text. Still no
+  `always_send`. A custom address must be a plain address (ASCII letters,
+  digits and `_ + - .` before the @, no name, quotes, spaces, line breaks
+  or shell characters): munin-limits execs the contact's command line, and
+  munin-notify checks the address again (`--to`) and passes it to sendmail
+  as a separate argument after `--`. The sender stays administrator@. API
+  (admin only): `GET`/`POST /system/munin/alerts`,
+  `POST /system/munin/alerts/test`. README-fork.md, "Munin alerts".
+* API documentation: `api/mailinabox.yml` documents every route of the
+  management daemon: the quota endpoints (`/mail/users/quota`), the Munin
+  session (`/munin/`), the intrusion protection (`/system/fail2ban`,
+  `/settings`, `/unban`, `/unban-all`, `/report`) and Munin's alerts. The
+  answers to missing or wrong credentials are documented as they are: 401
+  with `WWW-Authenticate` and `X-Reason`, as text or JSON by the `Accept`
+  header, and 403 for XMLHttpRequests (it said 403 text/html). Fixed
+  content types: `/dns/zonefile/{zone}` is text/plain, `/dns/update`
+  text/html, `POST /system/backup/config` a JSON string (also for a refused
+  configuration, with 200); `latest-upstream-version` can answer 500 and
+  503; the login status can be `missing-totp-token`.
+* Tools: `tools/update-check.sh`, the checks around an update of a box of
+  this fork, as root (also through `curl ... | sudo bash -s -- STEP`):
+  * `before` records the state of the box in
+    `/root/update-check/<stamp>/before/` (mode 0700): version and origin of
+    `/root/mailinabox`, the units (enabled, active) and the failed ones, the
+    mail queue, the error and warning lines of the status checks, the
+    warnings of doveconf and postconf, key settings of Postfix and Dovecot
+    (e.g. `smtpd_recipient_restrictions`, `log_path`), the Nextcloud status,
+    Munin's alert contact and the values that are not ok, Docker containers,
+    crontabs, mailname and hosts, fail2ban jails, systemd drop-ins, the
+    listening ports, `/etc/mailinabox.conf` and the package versions of the
+    mail services. It also runs `tests/fork/log-audit.sh` over the last 24
+    hours (`--since`) as the baseline.
+  * `backup` runs `management/backup.py` (as the nightly backup; mail stops
+    for its run) and writes an archive of `/etc`, `/root/mailinabox`, the
+    crontabs, `/var/lib/z-push`, `/var/lib/munin`, `/usr/local/lib/owncloud`
+    and the Docker stack directories and volumes named with `--docker-dir`
+    and `--docker-volume`, and a pg_dump of each container named with
+    `--postgres` (with its `POSTGRES_USER` and `POSTGRES_DB`). Everything is
+    encrypted with gpg (AES256, the passphrase of the Mail-in-a-Box backups)
+    as it is written, nothing goes to disk unencrypted. For an rsync target
+    the files are copied next to the backups
+    (`<path>-system/update-check-<stamp>/`, with the backup SSH key) and
+    compared by checksum (rsync -c, dry run); otherwise they stay in the
+    stamp directory. The backup target is read as Mail-in-a-Box reads it,
+    quoted or not.
+  * `after` records the state again and compares it with `before`: each
+    change is EXPECTED, if the releases between the two versions announce
+    it (`tools/expected-changes/<version>.txt` and `any.txt`, one rule per
+    line: file, + or -, regex, reason), or UNEXPECTED. The list for rc7
+    covers the updates from rc1 to rc6 as well: the quota check in front of
+    greylisting in `smtpd_recipient_restrictions` (rc4), `log_path=syslog`
+    of Dovecot (rc6, B85), Munin's contact (rc6, B80), the drop-ins of
+    Postfix and spampd (rc6, B78 and B81), the new keys of
+    `/etc/mailinabox.conf`. Then it runs the log audit since `before`
+    against the baseline. Exit code 1 for an unexpected change or a new
+    message class.
+  * `mailcheck` sends a marked mail (`X-Miab-Test: 1`, a unique token) from
+    administrator@PRIMARY_HOSTNAME (`--from`) to an external probe address
+    (`--probe` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) that forwards
+    or answers it, waits (`--timeout`, default 900 s) until a mail with the
+    token comes back over port 25 and is stored, and reports the outbound
+    delivery (relay, DKIM signature), the inbound delivery (port 25, the
+    Authentication-Results), the spam filter (X-Spam-Status), the folder
+    (Sieve) and the storage. Without a probe address it says "skipped". The
+    mail carries no secrets.
+  README-fork.md ("Updating the fork") describes it.
+* Tools: during each release upgrade, `tools/upgrade-in-place-to-2604.sh`
+  runs a fallback SSH server on port 1022 (`UPGRADE_SSH_FALLBACK_PORT=PORT`,
+  or `off`). Cause of the SSH outage: the maintainer scripts of
+  openssh-server stop `ssh.socket` and `ssh.service` when the new package
+  is unpacked and start them again only when it is configured, near the end
+  of the dpkg run; nothing listens on port 22 in between. The fallback runs
+  from a private copy of the old sshd (and of sshd-session and sshd-auth
+  where they exist), so the package cannot replace it underneath. It
+  accepts only public keys, only of the administrators (members of the
+  groups sudo and admin, and root if `PermitRootLogin` allows keys;
+  `UPGRADE_SSH_FALLBACK_USERS` names others), whose keys it copies (read as
+  the user) into a root-owned directory, keeps the AllowUsers, AllowGroups,
+  DenyUsers, DenyGroups and the algorithms of the running sshd, and allows no
+  forwarding. ufw lets the port through (rate limited) only while it runs.
+  It is stopped, and the port closed, when port 22 answers again after the
+  release upgrade and on every way out of the tool (also after Ctrl-C);
+  while port 22 does not answer it stays until the next reboot, and the next
+  run removes it and its ufw rule. `--ssh-fallback-test` starts it for 10
+  minutes before an upgrade, to try a login on its port.
+* Tools: `tools/upgrade-in-place-to-2604.sh` says in the run when the release
+  upgrade has stopped the SSH server on port 22 and when port 22 answers
+  again (its SSH banner), with the minutes in between.
+* Setup marks its start and end in the journal ("Mail-in-a-Box setup
+  started", "Mail-in-a-Box setup ended (exit code N)", identifier
+  `mailinabox-setup`). `tests/fork/log-audit.sh` prefixes what the box logs
+  in between with `[setup]` (outside the phases of an in-place upgrade),
+  and allowlist rules that start with `^\[setup\]` accept a class only
+  there: connections that setup's restarts of the services cut are normal
+  during setup and a finding at any other time. The report names the setup
+  runs (`setup_runs` in the JSON report).
+* Tests: `tests/fork/smoke.py` group `api` (in every scenario): `api-auth`
+  (401 without credentials, as text and JSON, 403 for an XMLHttpRequest,
+  401 for a wrong password, the API key, a second session until its logout
+  and 401 after it; two failed logins in all), `api-read-only` (29
+  documented read-only endpoints, with `system/status`,
+  `system/latest-upstream-version`, `ssl/csr` and `mfa/status`: status 200,
+  content type and shape), `api-write-roundtrip` (a marked user with
+  password, quota and the admin privilege on and off, an alias, a custom
+  TXT record with POST, PUT and DELETE, privacy set to its own value; the
+  user removed with its archived mailbox; users, aliases, custom records
+  and privacy the same afterwards) and `api-munin-alerts` (invalid
+  addresses and values refused without a change, `munin.conf` for each
+  mode, the test mail in alice's INBOX, the old setting and `munin.conf`
+  restored exactly). `API_NOT_CALLED` lists the endpoints it does not call,
+  with the reason (reboot, package updates, SSL provisioning and install,
+  web update, backup config writes, MFA enable and disable, DNS update,
+  secondary nameserver, the fail2ban writes). TESTING-fork.md describes it.
+  Run it from the box itself or from a peer: through `--jump` its two
+  failed logins come from the jump host.
+* Tests: `tests/fork/api-routes.py` (stdlib only, no box): every route of
+  `management/daemon.py` (method and path, path parameters normalised) is
+  documented in `api/mailinabox.yml` and every documented operation has a
+  route; `smoke.py` calls or excludes each documented operation exactly
+  once; the content types it expects are the documented ones. The control
+  panel page and Munin's pages behind the session cookie are listed as not
+  part of the API. Exit code 1 on drift.
+* Tests: `tests/fork/log-audit.sh --baseline BEFORE.json` compares with the
+  `--json` report of an earlier run: a class that was in it is listed as
+  KNOWN, with both counts, and does not count; only new classes are
+  UNKNOWN (the prefixes `[in-place:PHASE]` and `[setup]` are ignored for
+  the comparison). `--internet` adds
+  `tests/fork/log-audit-allow-internet.txt`, the usual noise of a box on
+  the Internet (ufw blocks, SYN floods, password guessing on SSH, SMTP
+  submission, Roundcube, Nextcloud and Z-Push, TLS and SSH errors of
+  scanners and old clients, nginx 404s in the web roots, mail that Postfix
+  rejects as spam, to unknown recipients or for relaying, greylisting,
+  reverse DNS warnings, DNS and DNSSEC errors of other zones), each rule
+  with its reason; only when asked, the test scenarios do not use it.
+* `tests/fork/log-audit-allow.txt`: rules for `(sd-pam)`'s "Varlink call
+  io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession"
+  at a reboot with an open SSH login; for Z-Push's first ActiveSync device
+  of a box (`FileStateMachine->LinkUserDevice()` reads its users file
+  before writing it); and, only during setup, for the ActiveSync long
+  polls that a restart of PHP-FPM ends (nginx "recv() failed ... while
+  reading response header from upstream" for `Cmd=Ping`/`Sync`), for
+  Z-Push's CardDAV `ChangesSink` errors when a restart hits its check of
+  the address book, and for the 404 of `/server-status?auto` and
+  `/nginx_status` that `munin-node-configure` (setup/munin.sh) probes.
+
+### Fixed
+
+* Setup: an update no longer runs as root what another local user put into
+  `/tmp`. Each run after the first wrote the settings of
+  `/etc/mailinabox.conf` to `/tmp/mailinabox.prev.conf` and sourced that
+  file as root; when a file of that name already existed (any local user,
+  and www-data, can create one), the write failed and setup sourced the
+  other user's file. It now reads the settings through a pipe, no file
+  (B89; found twice, also as B96).
+* Setup: the downloads of Nextcloud and its apps, Roundcube and its
+  plugins, Z-Push and Bootstrap, the certificate request of the first
+  self-signed certificate and the daily download of Postgrey's allowlist no
+  longer use fixed or predictable names in `/tmp`, but a directory of
+  root's own (`mktemp -d`, mode 0700). Another local user could create
+  these names first and make setup fail; for Z-Push and the Roundcube
+  plugins of git, a directory created in the right moment let them replace
+  the unpacked code before setup moved it into place (B97).
+* DNS: the management daemon copies the DNSSEC keys for signing a zone
+  into a directory of its own (mode 0700), not to `/tmp/K<domain>...`
+  under the key's name. Another local user could create these names first
+  (the key tags are public); the copy then failed and the zone was not
+  signed again, so its signatures would expire after 30 days (B98).
+* Munin: setup no longer changes the owner of what a symbolic link in
+  `/var/log/munin` points to. It ran `chown munin` as root on the CGI logs
+  there, in a directory that belongs to munin; now `chown -h` (B86).
+* Settings: the daemon and setup no longer write `settings.yaml` through a
+  symbolic link. `$STORAGE_ROOT` belongs to the storage user; root now
+  writes a new file under a random name and renames it, and reads the file
+  with `O_NOFOLLOW` (B87).
+* Tools: for backups on the machine itself (local, or a `file://` target
+  below a directory that another account may change),
+  `tools/upgrade-in-place-to-2604.sh` no longer copies the encrypted system
+  archive as root into `$STORAGE_ROOT/backup/encrypted-system/`: that path
+  runs through `$STORAGE_ROOT`, which belongs to the user-data account, so a
+  symlink there could have redirected root's mkdir and copy. The archive
+  stays in `/root/upgrade-2604`, as the tool already said to copy it off the
+  machine. A `file://` target whose path only root can change gets the copy
+  as before (B90).
+* Management: the daemon no longer runs out of file descriptors. Each API
+  call left `users.sqlite` open (1 to about 90 times per call); after a few
+  hundred calls the daemon reached its limit of 1024 open files and
+  answered every request with 500 ("unable to open database file") until
+  it was restarted. Connections now close with their cursor (B91).
+* Nextcloud/Z-Push: ActiveSync syncs the address book of new users again.
+  Nextcloud 34 puts an example contact into each new address book under the
+  name `default`, without the `.vcf` that Z-Push's CardDAV backend adds when
+  it fetches a contact; the Sync of the contacts folder then failed with a
+  PHP error (HTTP 500), so no contact reached the phone. Setup turns the
+  example contact off (`dav` `enableDefaultContact`). Users created before
+  keep their example contact: delete it in Nextcloud's Contacts (it is
+  marked "This is an example contact"), and the address book syncs (B99).
+* OpenDKIM: the `KeyTable` and `SigningTable` are written in a fixed
+  (sorted) order. The domains came from a Python set, whose order changes
+  with every process, so with more than one mail domain each setup run (the
+  management daemon, which writes them, starts anew in every run) and the
+  first DNS update after a reboot rewrote both tables and restarted
+  OpenDKIM once more, although nothing had changed. Mail sent in the moment
+  of a restart goes out without a DKIM signature (Postfix has
+  `milter_default_action=accept`) (B95).
+* API: `GET /mail/users/quota` for an address that is not a user answers
+  400 with the message instead of 200 with the error inside the JSON, and
+  `POST /mail/users/quota` without a quota answers 400 instead of 500
+  (B88).
+* Tests: `admin-api-tmp-user-alias` removes the archived mailbox of its
+  temporary user again (with `--ssh`), which every run left behind as an
+  inactive account. `munin-alert-contact` passes when the admin panel
+  turned the alerts off. `log-audit-allow.txt` accepts the two deliberate
+  failed logins of `api-auth`.
+
+### Changed
+
+* Setup: an interactive update of an existing box (`/etc/mailinabox.conf`
+  exists) no longer shows the welcome dialog of a new installation ("You
+  should only install this on a brand new Ubuntu installation"). The
+  questions that follow (hostname, and the IP addresses where they differ
+  from what the box finds) come as before; non-interactive runs are
+  unchanged.
+* nginx: setup reloads nginx (after `nginx -t`) instead of restarting it.
+  A restart gave the running requests only the unit's stop timeout (5 s on
+  Ubuntu) and cut long-polling ActiveSync, CalDAV and CardDAV clients; a
+  reload lets the old workers finish them. Setup still starts nginx when it
+  does not run and restarts it when the running binary is not the
+  installed one (a package upgrade that left the old process running). The
+  management daemon's web update already reloaded. Setup's restarts of
+  PHP-FPM (four per run) still end an ActiveSync long poll, which the
+  client then starts again.
+* Journal: checked, no change. Since rc6 Dovecot logs through syslog, so
+  its lines are in the journal too. The journal stays bounded: setup keeps
+  it for 10 days (`MaxRetentionSec=10day`, as upstream), and journald's
+  defaults on 26.04 (systemd 259) cap it at 10% of the file system, at most
+  4 GiB, and keep 15% free. Its rate limit drops lines only from the
+  journal: journald forwards syslog lines to rsyslog before it applies the
+  limit, so `/var/log/mail.log`, which fail2ban reads, keeps all of them
+  (test box: 100000 lines in a few seconds from one unit, 37500 in the
+  journal, all 100000 in the syslog file). A comment in setup/system.sh
+  says so.
+* Tools: the messages before a release upgrade (and in the motd) name the
+  fallback SSH server and how to reach it. The help of
+  `tools/upgrade-in-place-to-2604.sh` describes it.
+* Tests: `tests/fork/log-audit.sh --since` also takes the short forms `-90s`,
+  `-30m`, `-24h`, `-2d` and `-1w`; `date -d` fails on them ("-24h" reads the
+  "h" as a time zone).
+
+### Upgrade note
+
+* Munin's alerts: nothing to do. Without a setting `munin.conf` stays as in
+  rc6 (alerts of warnings and critical values to administrator@). To change
+  the address or turn them off: System > Munin Monitoring. Changes to
+  `/etc/munin/munin.conf` by hand are overwritten (as before by setup, now
+  also when the setting is saved); own Munin settings belong into
+  `/etc/munin/munin-conf.d/`.
+* The first setup run of this release writes the OpenDKIM tables once more,
+  in sorted order, and restarts OpenDKIM (B95); later runs leave them alone.
+* Users created before this release keep Nextcloud's example contact, and
+  their ActiveSync contact sync fails until it is deleted in Nextcloud's
+  Contacts (B99). Setup deletes no user data.
+* The fallback SSH server of the in-place tool listens on port 1022 during
+  each release upgrade. If a firewall of the provider must let it through,
+  open it there before the upgrade and try it with
+  `sudo /root/mailinabox/tools/upgrade-in-place-to-2604.sh --ssh-fallback-test`.
+  `UPGRADE_SSH_FALLBACK_PORT=off` turns it off.
+* Before and after the update, `tools/update-check.sh before`, `backup`,
+  `after` and `mailcheck` (see "Updating the fork" in README-fork.md) record
+  and compare the state of the box. A box on rc6 or earlier has no copy of
+  the tool yet: run `before` and `backup` through
+  `curl ... | sudo bash -s -- STEP` (it fetches its helpers from the branch
+  main), then update, then `after` and `mailcheck` from
+  `/root/mailinabox/tools/`.
+
 ### Planned
 
-From the rc6 list ("Planned for rc7" below), still open:
+Done from the rc6 list ("Planned for rc7" below) and the plan of rc7: the
+Munin alert setting, the fallback SSH server and the live note, the order
+of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
+baseline and Internet allowlist, the update tools (state, backup,
+comparison, mail check), the welcome dialog, the nginx reload with its
+allowlist rules, the journal check. Still open:
 
-* The admin panel setting for Munin's alerts.
-* A shorter SSH outage during the release upgrades, or a live note.
-* A deterministic order of the OpenDKIM tables.
-* The `(sd-pam)` rule in `tests/fork/log-audit-allow.txt`.
-* The full test matrix T1 to T5b on the release head, T6 before a final
-  release.
+* The full test matrix T1 to T5b on the release head, T6 (on the Internet:
+  Let's Encrypt, delivery to other providers) before a final release. T3
+  and T4 also run the fallback SSH server with the single-binary sshd of
+  22.04 and 24.04 (so far tried only with OpenSSH 10.2 of 26.04).
+* `tools/expected-changes/` needs a list for each release, also an empty
+  one for the final release.
 
-New, from the update of a production box from rc3 to rc6:
+Seen in the rc7 work, not done:
 
-* API test (`tests/fork/smoke.py`, group `api`, in every scenario): the
-  management API as `api/mailinabox.yml` documents it.
-  * Auth: `POST /admin/login` with the admin's credentials gives an API
-    key; the key works; requests without credentials or with a wrong
-    password get 401. Only two failed attempts, far below the
-    `miab-management` jail's limit.
-  * Read-only: every documented GET (and the read-only POSTs
-    `system/status`, `system/latest-upstream-version`) answers 200 with
-    the documented content type, and JSON answers have the documented
-    shape: version, updates, privacy, backup status and config, SSL status,
-    DNS zones, zone files, custom records, dump, secondary nameserver, mail
-    users, domains and aliases (`format=json`), web domains, MFA status.
-  * One write round trip with marked test data: add a user, set its
-    password, add and remove the admin privilege, add and remove an alias,
-    add and remove a custom TXT record, remove the user. The lists of
-    users, aliases and custom DNS records must be the same afterwards.
-  * Not called: reboot, package updates, SSL provisioning and install, web
-    update, backup config writes, MFA enable.
-  * A static check without a box: every route in `management/daemon.py`
-    is documented in `api/mailinabox.yml`, and every documented path has a
-    route.
-* Log audit on a production box: `--baseline before.json` reports only the
-  classes that are new against an audit from before the update. An
-  optional allowlist for the usual Internet noise (UFW blocks, scanners,
-  password guessing on 587).
-* The backup before an update (incremental backup, plus /etc and Docker
-  stacks, encrypted onto the backup target and verified) and the record of
-  the state before and after, as tools of the fork instead of an admin's own
-  scripts. They run in the test scenarios too, so they are tested before
-  an admin uses them.
-* The comparison of the states before and after marks the changes that the
-  release notes announce as expected (for example the quota check in front
-  of greylisting in `smtpd_recipient_restrictions`), so only unexpected
-  changes stand out.
-* An active mail check after an update, instead of waiting for real
-  traffic: the box sends a marked mail to an external probe address that
-  the admin sets (one that forwards or answers it back), and the check waits
-  for the mail to come back over port 25. That covers outbound delivery,
-  inbound delivery, spam filter, Sieve and storage in one round trip. Without
-  a probe address the check says it was skipped.
-* An update of an existing box does not show the welcome dialog of a new
-  installation ("only install this on a brand new Ubuntu installation").
-* Setup reloads nginx instead of restarting it where a reload is enough
-  (Ubuntu's unit allows 5 s for a graceful stop; long-polling ActiveSync
-  and CalDAV clients are cut). Allowlist rules for the restart window
-  (Z-Push CardDAV errors, upstream resets) and for the probe of
-  `/server-status` and `/nginx_status` by `munin-node-configure`.
-* Check the size of the journal now that Dovecot logs through syslog.
+* Setup restarts PHP-FPM four times per run, which ends ActiveSync long
+  polls; a reload (with `process_control_timeout`) would keep them.
+* The smoke test checks ActiveSync only with `OPTIONS`; a Sync of the
+  contacts folder would have caught B99.
+* Critical only (Munin's alerts) never mails the return to normal.
+* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
+  not installed (nginx 404).
+* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 

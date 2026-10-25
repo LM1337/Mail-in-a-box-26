@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B54, B76 and B77 shipped in rc1, B57, B67 and B73 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B54, B76, B77 and B90 shipped in rc1, B57, B67 and B73 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -32,21 +32,23 @@ reproduced on a box, the evidence line says so.
   * *production upgrade*: the in-place upgrade of a production box with rc3.
   * *update test*: the update of a copy of that production box from rc3 to a later release (rc4 to rc6; T5b in rc6), and the fresh rc4 test box.
   * *log audit*: `tests/fork/log-audit.sh` on the boxes of the certification runs of rc6 (T1 to T5b), each warning and error classified.
+  * *rc7 development*: the work on the changes of rc7 and their checks on a test box (new smoke test groups, setup runs, the log audit of the restart window).
+  * *rc7 review*: the review of rc7's code, of setup and of the tools against the fork's rule that root does no file operations by path in directories that another account may write (such as `/tmp`, `/var/log/<service>`, `$STORAGE_ROOT`).
 
 ## Summary
 
-85 bugs: 1 critical, 13 high, 34 medium, 37 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b.
+95 bugs: 2 critical, 16 high, 36 medium, 41 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 24 |
-| PR #2603 | 28 |
+| Upstream | 31 |
+| PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 19 |
-| Fork | 13 |
+| 26.04 change | 20 |
+| Fork | 14 |
 
-25 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85). They are candidates for
+32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -138,6 +140,17 @@ upstream pull requests, independent of the 26.04 port.
 | [B83](#b83) | low | DNS | nsd keeps its old listen addresses and logging after setup changed nsd.conf | Upstream | yes | yes | rc6 |
 | [B84](#b84) | low | Tools | On 22.04 systemd complains about the tools' tmux scope at every daemon-reload | Fork | no | no | rc6 |
 | [B85](#b85) | medium | Dovecot | After the weekly rotation of mail.log Dovecot writes into mail.log.1, and fail2ban's Dovecot jails see no failed login | Upstream | yes | yes | rc6 |
+| [B86](#b86) | medium | Munin | setup chowns through symbolic links in /var/log/munin (munin to root) | Upstream | yes | yes | rc7 |
+| [B87](#b87) | low | Management | settings.yaml is written as root through a symbolic link in the storage root | Upstream | yes | yes | rc7 |
+| [B88](#b88) | low | API | GET /mail/users/quota answers 200 with the error for a non-user, POST without quota 500 | Upstream | yes | yes | rc7 |
+| [B89](#b89) | critical | Setup | setup sources /tmp/mailinabox.prev.conf as root, a local user can plant it (local root) | Upstream | yes | yes | rc7 |
+| [B90](#b90) | low | Tools | The in-place tool copies the encrypted system archive as root through the user-data account's directory | Fork | no | no | rc7 |
+| [B91](#b91) | high | Management | The daemon leaks a users.sqlite connection per database call and runs out of file descriptors | 26.04 change | no | yes | rc7 |
+| [B95](#b95) | low | Mail | The OpenDKIM tables are rewritten in another order, and OpenDKIM restarted, without a change | Upstream | yes | yes | rc7 |
+| [B96](#b96) | - | Setup | Duplicate of B89 (found twice), not counted | Upstream | yes | yes | rc7 |
+| [B97](#b97) | high | Setup | Setup downloads and unpacks code under fixed names in /tmp | Upstream | yes | yes | rc7 |
+| [B98](#b98) | medium | DNS | DNSSEC: the keys are copied to /tmp under their own names for signing | Upstream | yes | yes | rc7 |
+| [B99](#b99) | high | Z-Push | ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push | PR #2603 | no | yes | rc7 |
 
 ## Details
 
@@ -1128,6 +1141,124 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes, the fork up to rc5. Origin: Upstream (fac8477, 2016).
 * **Evidence:** Control by hand on the T5b box at `c7fd0bb` (Dovecot with its own `log_path`): `logrotate -f` of the rsyslog entry, then 26 failed IMAP logins from the peer: Dovecot's log process wrote `mail.log.1`, all 26 lines went there, and the `dovecot` jail found none. The smoke test of the T5b run at `c7fd0bb` had the three Dovecot fail2ban FAILs above; Dovecot restarted at 13:16:39, at the start of the second update run. A production box on rc3 showed the same: after the weekly rotation Dovecot's log file descriptor pointed to `mail.log.1`. `tests/fork/smoke.py --fail2ban` rotates `mail.log` once before the attacks (`fail2ban-log-rotation`), so a blind jail fails the test. With the fix (final T5b run at `5d2d3aa`, update from rc3, see TESTING-fork.md): `fail2ban-log-rotation` passed (`log_path=syslog`, no Dovecot process holds a file in `/var/log`, rsyslog wrote the new `mail.log` as syslog:adm 0640), and then the Dovecot jails banned the peer on IMAP, POP3 and ManageSieve; `mail-log-logins` counted the IMAP and POP3 logins in the new line form; smoke 75/75. On that box: the units and the helper of the second version were not installed, and 30000 lines from one process of a service unit, sent through syslog with facility mail in 1.3 s, all reached the journal and `mail.log` (journald's default burst is scaled by the free disk space; rsyslog's `imuxsock` has no rate limit by default).
 * **Found by:** update test (the fail2ban group of the smoke test, rc6 T5b); **commit:** see `git log --grep B85`; **fixed in:** v78-r2604.0-rc6
+
+### B86
+
+**setup changes the owner of what a link in /var/log/munin points to** (medium, Munin)
+
+* **Symptom:** None in normal operation. A process running as user munin (munin-cron, the plugins it starts, the CGI graph script that the daemon runs as munin) can replace `/var/log/munin/munin-cgi-html.log` or `munin-cgi-graph.log` with a symbolic link to any file, for example `/etc/shadow`; at the next setup run (every update) that file belongs to munin.
+* **Cause:** setup/munin.sh runs `chown munin` as root on these two files, in `/var/log/munin`, a directory that belongs to munin (`munin:adm 0755`). chown follows symbolic links, and `fs.protected_symlinks` does not cover this directory (not world-writable and sticky).
+* **Fix:** `chown -h`: the owner of a link itself changes, never that of its target. A hard link to another user's file cannot be made there (`fs.protected_hardlinks`).
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream (the same lines in v78).
+* **Evidence:** from reading the code, and the owners on a fresh rc6 test box (`/var/log/munin` munin:adm 0755, `fs.protected_symlinks = 1`, `fs.protected_hardlinks = 1`). The escalation was not carried out. Setup with the fix on that box: exit 0, both logs `munin:adm 0640` as before.
+* **Found by:** rc7 development; **commit:** see `git log --grep B86`; **fixed in:** v78-r2604.0-rc7
+
+### B87
+
+**settings.yaml is written as root through a symbolic link** (low, Management)
+
+* **Symptom:** None in normal operation. Whoever can write the storage root (`$STORAGE_ROOT`, owned by the storage user `user-data`) can put a symbolic link at `settings.yaml`; the next change of a panel setting (privacy, intrusion protection, Munin's alerts) or setup then overwrites the link's target as root with the settings.
+* **Cause:** `utils.write_settings()` opened `$STORAGE_ROOT/settings.yaml` with `open(path, "w")`, which follows links; `load_settings()` read through a link as well.
+* **Fix:** write_settings() writes a new file under a random name in the same directory (`mkstemp`, `O_EXCL`, never through a link), keeps the mode of the old file (0600 for a new one) and renames it over the old file; load_settings() opens it with `O_NOFOLLOW` (a link reads as no settings).
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream. Low: nothing of Mail-in-a-Box runs as the storage user.
+* **Evidence:** from reading the code and the owners on a test box (`/home/user-data` user-data 0755, `settings.yaml` root 0600). With the fix on that box: settings saved through the panel API in all modes of Munin's alerts, the file stays root 0600, and the setting back to the default removes the key.
+* **Found by:** rc7 development; **commit:** see `git log --grep B87`; **fixed in:** v78-r2604.0-rc7
+
+### B88
+
+**The quota API answers a non-user with 200 and a missing quota with 500** (low, API)
+
+* **Symptom:** `GET /admin/mail/users/quota?email=<not a user>` answers 200 with `{"email": "...", "quota": ["That's not a user (...).", 400]}`. `POST /admin/mail/users/quota` without the field `quota` answers 500.
+* **Cause:** get_mail_quota() returns an error tuple for a non-user, and the JSON branch of the view put it into the answer (only the text branch, `text=1`, returned it as the response). The POST view passed `request.form.get('quota')`, None when missing, to validate_quota(), which calls `.strip()`.
+* **Fix:** the GET view returns the error tuple (400); the POST view passes an empty string, which validate_quota() refuses with "No quota provided." (400).
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream.
+* **Evidence:** found while documenting the endpoint for `tests/fork/api-routes.py`. With the fix on a test box: `api-write-roundtrip` gets 400 for the quota of a non-user, for `quota=1.5G` and for a missing quota, and 200 for `1G`.
+* **Found by:** rc7 development; **commit:** see `git log --grep B88`; **fixed in:** v78-r2604.0-rc7
+
+### B89
+
+**setup sources a file with a fixed name in /tmp as root: local root** (critical, Setup)
+
+* **Symptom:** None in normal operation. A local user without privileges (a shell account on the box, or a service account that can write to `/tmp`, such as www-data: Ubuntu's PHP-FPM has no private `/tmp`, so a weakness in Nextcloud, Roundcube or Z-Push is enough) creates `/tmp/mailinabox.prev.conf` with shell commands. The next time the admin runs setup on the box (`sudo mailinabox`, an update with `setup/bootstrap.sh`, the upgrade and migration tools), setup runs these commands as root. Setup prints "/tmp/mailinabox.prev.conf: Permission denied" and goes on as usual.
+* **Cause:** On every run after the first, setup/start.sh wrote `/etc/mailinabox.conf` with the prefix DEFAULT_ to `/tmp/mailinabox.prev.conf`, sourced that file and removed it. `/tmp` is writable by everyone. With `fs.protected_regular` (Ubuntu's default, 2) root may not open another user's file in the sticky `/tmp` for writing, so the copy fails, and the `source` that follows reads the other user's file; without that protection root would overwrite the file, which still belongs to the other user, who could change it between the write and the `source`.
+* **Fix:** setup sources the output of `sed` directly (process substitution, `source <(sed s/^/DEFAULT_/ /etc/mailinabox.conf)`); no file is written.
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream. Only boxes with a local user or service that an attacker controls; the first install (no `/etc/mailinabox.conf` yet) does not read the file.
+* **Evidence:** On a fresh 26.04 test box, an unprivileged user wrote `id > /root/b96-proof.txt` into `/tmp/mailinabox.prev.conf`; the three lines of setup/start.sh, run with sudo, printed "Permission denied" and wrote `uid=0(root)` into `/root/b96-proof.txt`, then removed the user's file. Setup with the fix (update runs from the same version, non-interactive with the values of `/etc/mailinabox.conf`, and interactive): exit 0, the previous answers used.
+* **Found by:** rc7 development, and independently by rc7 review (as B96); **commit:** see `git log --grep B89` and `git log --grep B96` (the same change on two branches); **fixed in:** v78-r2604.0-rc7
+
+### B90
+
+**The in-place tool copies the encrypted system archive as root through the user-data account's directory** (low, Tools)
+
+* **Symptom:** For backups on the machine itself (target `local`, or a `file://` target), phase snapshot of `tools/upgrade-in-place-to-2604.sh` ran `mkdir -p` and `cp` as root on `$STORAGE_ROOT/backup/encrypted-system/<stamp>/` (or `<target>-system/<stamp>/`). Nothing went wrong in the test runs.
+* **Cause:** `$STORAGE_ROOT` (`/home/user-data`) belongs to the user-data account (mode 0755). That account may rename `backup` and put a symlink in its place; root's `mkdir -p` and `cp` then follow it and create directories and the archive files wherever the symlink points. The same for a `file://` target below a directory that another account may write.
+* **Impact:** Low: it needs code running as user-data (the account of `$STORAGE_ROOT`, which runs the backup hooks), at the moment of the snapshot, and the content of the files is fixed (the encrypted archive and its checksum). Against the rule of the fork that root does no file operations by path in directories that another account may write.
+* **Fix:** `offsite_copy` copies to a local or `file://` target only when the target's directory and all directories above it are root's own (not symlinks, owned by root, not writable by group or others; `root_only_path`). Otherwise the encrypted archive stays in `/root/upgrade-2604` (mode 0700), and the tool says so; it already advised to copy a copy on the machine off it. `tools/update-check.sh backup` keeps its archive in `/root/update-check/<stamp>/` for such targets from the start.
+* **Affects:** the fork rc1 to rc6. Origin: Fork.
+* **Evidence:** From reading the code; `root_only_path` checked on the box replica of the update test (rc6 after T5b): `/home/user-data/backup/encrypted`, `/home/user-data/backup`, `/tmp/x` and `/var/log` are not root-only, `/root/upgrade-2604/x/y`, `/etc/ssh` and `/mnt/nonexistent/a` are.
+* **Found by:** rc7 review; **commit:** see `git log --grep B90`; **fixed in:** v78-r2604.0-rc7
+
+### B91
+
+**The management daemon leaks a users.sqlite connection per database call and runs out of file descriptors** (high, Management)
+
+* **Symptom:** After a few hundred API calls (the control panel, the status checks of the panel, scripts) the management daemon answers every request with 500; its journal shows `sqlite3.OperationalError: unable to open database file`. A restart of `mailinabox.service` helps until the next few hundred calls.
+* **Cause:** `mailconfig.open_database()` never closes the connection it opens; most callers only keep the cursor. Since Python 3.11 a sqlite3 connection is only freed by the cyclic garbage collector, which rarely gets to them in the daemon: each call left `users.sqlite` open, from 1 time (any authenticated GET, through the password check) to about 90 times (`/ssl/status`). The gunicorn worker has a limit of 1024 open files.
+* **Fix:** open_database() returns a cursor class that closes its connection when the cursor is freed, which is when the calling function returns (the cursor is in no reference cycle; all callers keep cursor and connection in local variables). An uncommitted transaction is rolled back then, as the garbage collector did before.
+* **Affects:** v78 no (Python 3.10 on 22.04 freed the connections by reference counting), PR #2603 yes, the fork up to rc6. Origin: 26.04 change (Python 3.14).
+* **Evidence:** fresh-install test box (Python 3.14): the worker held 1013 descriptors of `users.sqlite` after the panel checks and one API smoke run, and the round trip failed with 500 on `users/remove`. Per endpoint, 5 calls each: +7 descriptors for `/system/version`, +20 `/mail/users`, +55 `/dns/zones`, +185 `/web/domains`, +190 `/dns/dump`, +433 `/ssl/status`. With the fix the same 15 endpoints left +0, and after the full `--only api` and `--only admin` runs the workers held 0 descriptors of `users.sqlite`.
+* **Found by:** rc7 development (the new smoke group `api`); **commit:** `093118d`; **fixed in:** v78-r2604.0-rc7
+
+### B95
+
+**The OpenDKIM tables are rewritten in another order, and OpenDKIM restarted, without a change** (low, Mail)
+
+* **Symptom:** On a box with more than one mail domain, each run of setup and the first DNS update after each start of the management daemon (e.g. after a reboot) rewrite `/etc/opendkim/KeyTable` and `/etc/opendkim/SigningTable` with the same lines in another order and restart OpenDKIM, although no domain changed; in a setup run that is a second restart after the one of setup/dkim.sh. A comparison of `/etc` before and after an update shows both files as changed, and a mail sent in the moment of a restart goes out without a DKIM signature (Postfix passes mail on when a milter does not answer, `milter_default_action=accept`), so it can fail DMARC at the receiver.
+* **Cause:** `write_opendkim_tables()` in `management/dns_update.py` writes one line per domain in the order of `get_mail_domains()`, a Python set. The order of a set of strings depends on the hash seed, which Python chooses at random for every process (here: every start of the management daemon), so the content differs from run to run and the "did the file change" check sees a change.
+* **Fix:** The domains are sorted before the tables are written. The patterns `*@domain` never overlap (a domain contains no "@"), so the order does not change which key signs a mail. The first run with the fix writes the tables once more in sorted order; from then on they only change when the domains do.
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream.
+* **Evidence:** rc6 T5b: a second update run changed the order of both tables (noted in B74). The same set of four domains printed in four different orders with `PYTHONHASHSEED` 1 to 4. rc7, on a fresh test box with six mail domains: four setup runs after the install (three non-interactive, one interactive) left both tables byte-identical (SHA-256), and OpenDKIM was restarted once per run (by setup/dkim.sh), not by the DNS update.
+* **Found by:** update test; **commit:** see `git log --grep B95`; **fixed in:** v78-r2604.0-rc7
+
+### B96
+
+**Duplicate of [B89](#b89)** (Setup)
+
+* The setup strand of rc7 found and fixed the same bug as B89 (setup sources `/tmp/mailinabox.prev.conf` as root) independently, under this ID, and reproduced it on a test box (see the evidence of B89). Both branches made the same change; it is counted once, as B89.
+* **Found by:** rc7 review; **commit:** see `git log --grep B96`; **fixed in:** v78-r2604.0-rc7
+
+### B97
+
+**Setup downloads and unpacks code under fixed names in /tmp** (high, Setup)
+
+* **Symptom:** None in normal use. A local user without privileges who watches `/tmp` (inotify) can create a directory under the name that setup is about to use. For Z-Push, setup removes `/tmp/z-push` and then unpacks the release into it; a directory of the other user's own created in between receives the unpacked files, and its owner can replace `Z-Push-*/src` before setup moves it to `/usr/local/lib/z-push`, whose `z-push-admin.php` setup then runs as root. The Roundcube plugins (`git_clone`, `/tmp/git-clone-PID`) work the same way, with code that runs as www-data. The other names (`/tmp/nextcloud.zip`, `contacts.tgz`, `calendar.tgz`, `user_external.tgz`, `roundcube.tgz`, `carddav.tar.gz`, `bootstrap.zip`, `ssl_cert_sign_req-PID.csr`, and `postgrey_whitelist_clients` of the daily cron job) only let the other user make setup fail: root may not write into their file (`fs.protected_regular`) or follow their link (`fs.protected_symlinks`).
+* **Cause:** setup/zpush.sh, setup/nextcloud.sh, setup/webmail.sh, setup/management.sh, setup/ssl.sh, `git_clone` in setup/functions.sh and the cron job written by setup/mail-postfix.sh download, unpack and move files as root by fixed or predictable paths in `/tmp`, which everyone can write.
+* **Fix:** Each of them uses a directory of root's own from `mktemp -d` (mode 0700, random name) and removes it afterwards. `git_clone` clones into a subdirectory of it, so the plugin directory keeps its usual mode.
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream. Only during an install or update of the component (a new version), and only with a local user or service that an attacker controls.
+* **Evidence:** From reading the code; the race was not run. A fresh install of the fix on a 26.04 test box unpacked all components (smoke test), and no `mailinabox`, `z-push`, `git-clone`, `.zip` or `.tgz` entry was left in `/tmp`.
+* **Found by:** rc7 review; **commit:** see `git log --grep B97`; **fixed in:** v78-r2604.0-rc7
+
+### B98
+
+**DNSSEC: the keys are copied to /tmp under their own names for signing** (medium, DNS)
+
+* **Symptom:** A local user without privileges creates files named like the box's DNSSEC keys in `/tmp` (`K<domain>.+<algorithm>+<key tag>.private` and `.key`; domain, algorithm and key tag are in the public DNSKEY records). From then on each DNS update of that zone fails with "Permission denied" (`fs.protected_regular`), in setup and in the management daemon, and the zone is no longer signed again; its signatures expire 30 days after the last signing, and resolvers that validate DNSSEC then reject the domain. On a system without `fs.protected_regular` root writes the private key into the other user's file instead.
+* **Cause:** `sign_zone()` in `management/dns_update.py` wrote a copy of each key with the real domain name to `'/tmp/' + key name` (with umask 077, but by a fixed path in a directory that everyone can write) and removed the copies after signing.
+* **Fix:** The copies go into a `tempfile.TemporaryDirectory()` (mode 0700, random name), which is removed after signing, also when signing fails.
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc6. Origin: Upstream. Only boxes with a local user or service that an attacker controls.
+* **Evidence:** From reading the code. On a fresh 26.04 test box with the fix, setup signed the zones (`.signed` files and DS records written), and no key file was left in `/tmp`.
+* **Found by:** rc7 review; **commit:** see `git log --grep B98`; **fixed in:** v78-r2604.0-rc7
+
+### B99
+
+**ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push** (high, Z-Push)
+
+* **Symptom:** A phone that syncs a new user's contacts over ActiveSync gets HTTP 500 for the Sync of the address book, every time, and shows no contacts. `/var/log/z-push/z-push-error.log`: "Attempt to read property "vcard" on null" and "Fatal error: /usr/local/lib/z-push/backend/carddav/carddav.php:484 - Uncaught Error: Call to a member function __toString() on null" (from `BackendCardDAV->GetMessage()`). Mail and calendar sync are not affected.
+* **Cause:** The dav app of Nextcloud 34 (1.40) writes an example contact into the default address book of each new user, with the card name `default` (`ExampleContactService::createDefaultContact()`). Z-Push's CardDAV client (`include/z_carddav.php`, `get_xml_vcard()`) appends `.vcf` to every card it fetches, so it asks for `default.vcf`, gets an empty answer, and `GetMessage()` dereferences the missing card.
+* **Fix:** setup/nextcloud.sh sets `occ config:app:set dav enableDefaultContact --value false --type boolean`, so new users get no example contact. Example contacts of users created before stay (setup does not delete user data); deleting the example contact in Nextcloud's Contacts makes their address book sync.
+* **Affects:** v78 no (Nextcloud 27), PR #2603 yes (Nextcloud 34), the fork up to rc6. Origin: PR #2603.
+* **Evidence:** fresh 26.04 test box of the setup tests of rc7: a minimal ActiveSync 14.0 client (Provision, FolderSync, Sync, Ping) for the admin, whose address book held only Nextcloud's `default` card, got HTTP 500 for the second Sync of the contacts folder with the errors above. With the setting, a user created afterwards had no example contact; Sync answered 200 (status 1) and a Ping on the contacts folder ran its 20 s heartbeat and ended with status 1, no new line in the error log. The smoke test checks only `OPTIONS` of ActiveSync.
+* **Found by:** rc7 development (the setup tests of rc7, log audit of the restart window); **commit:** see `git log --grep B99`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 
