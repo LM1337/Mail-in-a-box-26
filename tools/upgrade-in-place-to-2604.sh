@@ -2154,6 +2154,24 @@ brings it back."
 	say "Backup done ($(fmt_dur $(($(date +%s) - started))))."
 }
 
+# Can only root change DIR and the directories above it (no symlink, owned by
+# root, not writable by group or others)? The parts that do not exist yet
+# are created below the first one that does.
+root_only_path() { # DIR
+	local d=$1 st
+	[[ $d == /* ]] || return 1
+	while [ ! -e "$d" ] && [ ! -L "$d" ]; do d=$(dirname "$d"); done
+	while :; do
+		[ ! -L "$d" ] && [ -d "$d" ] || return 1
+		st=$(stat -c '%u %a' "$d") || return 1
+		[ "${st%% *}" = 0 ] || return 1
+		# Neither group nor others may write (mode bits 020 and 002).
+		[ $((8#${st#* } & 8#022)) = 0 ] || return 1
+		[ "$d" != / ] || return 0
+		d=$(dirname "$d")
+	done
+}
+
 # Copy the encrypted archive to an rsync target: <path>-system/<stamp>/ on the
 # backup server, with the backup SSH key, like management/backup.py does.
 offsite_rsync() { # URL FILE... (the first FILE names the stamp)
@@ -2209,13 +2227,18 @@ offsite_copy() {
 		local | file://*)
 			if [ "$target" = local ]; then dir=$STORAGE_ROOT/backup/encrypted; else dir=${target#file://}; fi
 			dest=${dir%/}-system/$stamp
-			mkdir -p "$dest"
-			cp "$enc" "$enc.sha256" "$dest/"
-			cmp -s "$enc" "$dest/$(basename "$enc")" || die "The copy in $dest differs from $enc."
-			state_set OFFSITE_COPY "$dest/"
-			say "Copied the encrypted archive to $dest/."
-			if [[ $dest == "$STORAGE_ROOT"/* ]]; then
-				warn "That is on this machine. Copy $dest off the machine yourself if it matters."
+			# Only where no other account can change the path: below
+			# $STORAGE_ROOT (owned by the user-data account) a symlink could
+			# redirect root's mkdir and cp (B90).
+			if ! root_only_path "$(dirname "$dest")"; then
+				say "The backups are on this machine ($dir): the encrypted archive stays in $STATE_DIR."
+				say "Copy $enc off the machine yourself if it matters."
+			else
+				mkdir -p "$dest"
+				cp "$enc" "$enc.sha256" "$dest/"
+				cmp -s "$enc" "$dest/$(basename "$enc")" || die "The copy in $dest differs from $enc."
+				state_set OFFSITE_COPY "$dest/"
+				say "Copied the encrypted archive to $dest/."
 			fi
 			;;
 		off) say "Backups are turned off: the encrypted archive stays in $STATE_DIR. Copy $enc off the machine yourself." ;;

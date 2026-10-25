@@ -98,6 +98,18 @@ used).
   fallback SSH server and how to reach it. The help of
   `tools/upgrade-in-place-to-2604.sh` describes it.
 
+### Fixed
+
+* Tools: for backups on the machine itself (local, or a `file://` target
+  below a directory that another account may change),
+  `tools/upgrade-in-place-to-2604.sh` no longer copies the encrypted system
+  archive as root into `$STORAGE_ROOT/backup/encrypted-system/`: that path
+  runs through `$STORAGE_ROOT`, which belongs to the user-data account, so a
+  symlink there could have redirected root's mkdir and copy. The archive
+  stays in `/root/upgrade-2604`, as the tool already said to copy it off the
+  machine. A `file://` target whose path only root can change gets the copy
+  as before (B90).
+
 ### Upgrade note
 
 * The fallback SSH server of the in-place tool listens on port 1022 during
@@ -108,4 +120,22 @@ used).
 
 ## BUGS-fork.md
 
-No entries yet.
+Legend (Found by), new entry:
+
+  * *rc7 review*: the review of the tools for rc7 against the rule that root does no file operations by path in directories that another account may write.
+
+Overview row:
+
+| [B90](#b90) | low | Tools | The in-place tool copies the encrypted system archive as root through the user-data account's directory | Fork | no | no | rc7 |
+
+### B90
+
+**The in-place tool copies the encrypted system archive as root through the user-data account's directory** (low, Tools)
+
+* **Symptom:** For backups on the machine itself (target `local`, or a `file://` target), phase snapshot of `tools/upgrade-in-place-to-2604.sh` ran `mkdir -p` and `cp` as root on `$STORAGE_ROOT/backup/encrypted-system/<stamp>/` (or `<target>-system/<stamp>/`). Nothing went wrong in the test runs.
+* **Cause:** `$STORAGE_ROOT` (`/home/user-data`) belongs to the user-data account (mode 0755). That account may rename `backup` and put a symlink in its place; root's `mkdir -p` and `cp` then follow it and create directories and the archive files wherever the symlink points. The same for a `file://` target below a directory that another account may write.
+* **Impact:** Low: it needs code running as user-data (the account of `$STORAGE_ROOT`, which runs the backup hooks), at the moment of the snapshot, and the content of the files is fixed (the encrypted archive and its checksum). Against the rule of the fork that root does no file operations by path in directories that another account may write.
+* **Fix:** `offsite_copy` copies to a local or `file://` target only when the target's directory and all directories above it are root's own (not symlinks, owned by root, not writable by group or others; `root_only_path`). Otherwise the encrypted archive stays in `/root/upgrade-2604` (mode 0700), and the tool says so; it already advised to copy a copy on the machine off it. `tools/update-check.sh backup` keeps its archive in `/root/update-check/<stamp>/` for such targets from the start.
+* **Affects:** the fork rc1 to rc6. Origin: Fork.
+* **Evidence:** From reading the code; `root_only_path` checked on the box replica of the update test (rc6 after T5b): `/home/user-data/backup/encrypted`, `/home/user-data/backup`, `/tmp/x` and `/var/log` are not root-only, `/root/upgrade-2604/x/y`, `/etc/ssh` and `/mnt/nonexistent/a` are.
+* **Found by:** rc7 review; **commit:** see `git log --grep B90`; **fixed in:** v78-r2604.0-rc7

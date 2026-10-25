@@ -884,7 +884,8 @@ What it does, in phases that continue on their own after each reboot:
    block the upgrade until you pass `--keep-local`.
 2. **snapshot**: a system archive (`/etc` as it was, the code outside the
    data directory, package lists), encrypted with the backup key and copied
-   next to the backups (for an rsync target: `<target>-system/`). Then mail,
+   next to the backups (for an rsync target: `<target>-system/`; for backups
+   on the machine itself it stays in `/root/upgrade-2604`). Then mail,
    web, cron and the update timers are stopped and masked, so they stay off
    across reboots. **Mail is offline from here.** Then a fresh Mail-in-a-Box
    backup (so it holds all mail) and counts and key fingerprints. With
@@ -1031,7 +1032,8 @@ Ablauf in Phasen, die nach jedem Neustart von selbst weiterlaufen:
 2. **snapshot**: ein Systemarchiv (`/etc` im alten Zustand, der Code
    außerhalb des Datenverzeichnisses, Paketlisten), mit dem Backup-Schlüssel
    verschlüsselt und neben die Sicherungen gelegt (bei einem rsync-Ziel:
-   `<ziel>-system/`). Danach werden Mail, Web, Cron und die Update-Timer
+   `<ziel>-system/`; bei Sicherungen auf der Maschine selbst bleibt es in
+   `/root/upgrade-2604`). Danach werden Mail, Web, Cron und die Update-Timer
    angehalten und maskiert, damit sie auch über Neustarts hinweg aus bleiben.
    **Ab hier ist die Mail aus.** Dann eine frische Mail-in-a-Box-Sicherung
    (damit sie alle Mails enthält) sowie Zählungen und
