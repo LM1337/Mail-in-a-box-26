@@ -8,6 +8,53 @@ used).
 
 ### New
 
+* Tools: `tools/update-check.sh`, the checks around an update of a box of
+  this fork, as root (also through `curl ... | sudo bash -s -- STEP`):
+  * `before` records the state of the box in
+    `/root/update-check/<stamp>/before/` (mode 0700): version and origin of
+    `/root/mailinabox`, the units (enabled, active) and the failed ones, the
+    mail queue, the error and warning lines of the status checks, the
+    warnings of doveconf and postconf, key settings of Postfix and Dovecot
+    (e.g. `smtpd_recipient_restrictions`, `log_path`), the Nextcloud status,
+    Munin's alert contact and the values that are not ok, Docker containers,
+    crontabs, mailname and hosts, fail2ban jails, systemd drop-ins, the
+    listening ports, `/etc/mailinabox.conf` and the package versions of the
+    mail services. It also runs `tests/fork/log-audit.sh` over the last 24
+    hours (`--since`) as the baseline.
+  * `backup` runs `management/backup.py` (as the nightly backup; mail stops
+    for its run) and writes an archive of `/etc`, `/root/mailinabox`, the
+    crontabs, `/var/lib/z-push`, `/var/lib/munin`, `/usr/local/lib/owncloud`
+    and the Docker stack directories and volumes named with `--docker-dir`
+    and `--docker-volume`, and a pg_dump of each container named with
+    `--postgres` (with its `POSTGRES_USER` and `POSTGRES_DB`). Everything is
+    encrypted with gpg (AES256, the passphrase of the Mail-in-a-Box backups)
+    as it is written, nothing goes to disk unencrypted. For an rsync target
+    the files are copied next to the backups
+    (`<path>-system/update-check-<stamp>/`, with the backup SSH key) and
+    compared by checksum (rsync -c, dry run); otherwise they stay in the
+    stamp directory. The backup target is read as Mail-in-a-Box reads it,
+    quoted or not.
+  * `after` records the state again and compares it with `before`: each
+    change is EXPECTED, if the releases between the two versions announce
+    it (`tools/expected-changes/<version>.txt` and `any.txt`, one rule per
+    line: file, + or -, regex, reason), or UNEXPECTED. The list for rc7
+    covers the updates from rc1 to rc6 as well: the quota check in front of
+    greylisting in `smtpd_recipient_restrictions` (rc4), `log_path=syslog`
+    of Dovecot (rc6, B85), Munin's contact (rc6, B80), the drop-ins of
+    Postfix and spampd (rc6, B78 and B81), the new keys of
+    `/etc/mailinabox.conf`. Then it runs the log audit since `before`
+    against the baseline. Exit code 1 for an unexpected change or a new
+    message class.
+  * `mailcheck` sends a marked mail (`X-Miab-Test: 1`, a unique token) from
+    administrator@PRIMARY_HOSTNAME (`--from`) to an external probe address
+    (`--probe` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) that forwards
+    or answers it, waits (`--timeout`, default 900 s) until a mail with the
+    token comes back over port 25 and is stored, and reports the outbound
+    delivery (relay, DKIM signature), the inbound delivery (port 25, the
+    Authentication-Results), the spam filter (X-Spam-Status), the folder
+    (Sieve) and the storage. Without a probe address it says "skipped". The
+    mail carries no secrets.
+  README-fork.md ("Updating the fork") describes it.
 * Tests: `tests/fork/log-audit.sh --baseline BEFORE.json` compares with the
   `--json` report of an earlier run: a class that was in it is listed as
   KNOWN, with both counts, and does not count; only new classes are

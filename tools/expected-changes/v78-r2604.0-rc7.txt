@@ -1,0 +1,29 @@
+# Expected changes of an update to v78-r2604.0-rc7, for tools/update-check.sh
+# after. This is the first list, so it covers the updates from all earlier
+# releases of this fork (rc1 to rc6); the list of a later release only adds
+# what that release changes ("after" uses the lists of all releases after the
+# version before the update, up to the version after it, and any.txt). The
+# format is in any.txt.
+
+# --- rc3
+mailinabox-conf.txt + ^FTS=(xapian|off)$ # rc3: setup records the full-text search setting of Dovecot (default xapian)
+
+# --- rc4
+postconf.txt + ^smtpd_recipient_restrictions = permit_sasl_authenticated,permit_mynetworks,reject_rbl_client zen\.spamhaus\.org=127\.0\.0\.\[2\.\.11\],reject_unlisted_recipient,check_policy_service inet:127\.0\.0\.1:12340,check_sender_access hash:/etc/postfix/greylist_bypass_senders,check_policy_service inet:127\.0\.0\.1:10023$ # rc4: with /etc/postfix/greylist_bypass_senders, setup puts the quota check (12340) in front of the sender exceptions and postgrey (10023)
+postconf.txt - ^smtpd_recipient_restrictions = permit_sasl_authenticated,permit_mynetworks,reject_rbl_client zen\.spamhaus\.org=127\.0\.0\.\[2\.\.11\],reject_unlisted_recipient,.*check_policy_service inet:127\.0\.0\.1:10023 # rc4: the old order (postgrey before the quota check, or the sender exceptions added by hand), see the line above
+crontabs.txt ~ ^/etc/cron\.d/mailinabox-nextcloud # rc4: setup adds tools/nextcloud-share-scope.sh --cron (every 5 minutes) to Nextcloud's cron file
+mailinabox-conf.txt + ^NEXTCLOUD_SHARE_SCOPE=(domain|all)$ # rc4: setup records the Nextcloud sharing scope (default domain)
+fail2ban.txt + ^jail miab-slow- # rc4: the adaptive fail2ban jails for slow password guessing
+
+# --- rc6
+doveconf.txt - ^log_path = /var/log/mail\.log$ # rc6 (B85): Dovecot no longer writes mail.log itself
+doveconf.txt + ^log_path = syslog$ # rc6 (B85): Dovecot logs through syslog, rsyslog writes mail.log and follows its rotation
+munin.txt ~ ^contact\.admin\. # rc6 (B80): Munin's alert contact (command /usr/local/lib/mailinabox/munin-notify, without always_send), before the host tree
+munin.txt - ^munin-limits\.log: "Missing configuration options for contact" # rc6 (B80): munin-limits finds the contact
+dropins.txt + ^/etc/systemd/system/postfix\.service\.d/mailinabox-stale-db\.conf # rc6 (B78): drop-in that removes a stale TLS session cache of tlsmgr before each start of Postfix
+dropins.txt + ^/etc/systemd/system/spampd\.service\.d/mailinabox-stale-pid\.conf # rc6 (B81): drop-in that removes spampd's PID file after each stop
+dropins.txt - ^/etc/systemd/system/spampd\.service\.d/mailinabox-pidfile\.conf # rc6 (B81): setup removes the drop-in of a test version of the fix
+mailinabox-conf.txt + ^FAVICON=(on|off)$ # rc6: setup records the favicon setting (default on)
+
+# --- rc7
+# (nothing of rc7 shows in the recorded state yet)

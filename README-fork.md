@@ -127,6 +127,34 @@ the tag it installs, with `--force`). To clean up, delete the old tags:
 `git fetch --tags` for this: the checkout is shallow, and it would download
 the history behind every upstream tag of the repository.
 
+**Checks around the update** (rc7 and later, `tools/update-check.sh`, as
+root; through `curl ... | sudo bash -s -- STEP` without a checkout). Before
+the update, `before` records the state of the box (version, services,
+status checks, Postfix and Dovecot settings, Nextcloud, Munin, Docker,
+crontabs, listening ports, ...) and runs `tests/fork/log-audit.sh` as a
+baseline; `backup` runs a Mail-in-a-Box backup and puts an encrypted archive
+of `/etc`, `/root/mailinabox`, the crontabs, Z-Push, Munin, Nextcloud's code
+and the Docker stacks you name (`--docker-dir`, `--docker-volume`,
+`--postgres` for a pg_dump) next to the backups (rsync targets; verified by
+checksum) or in `/root/update-check`. After the update, `after` records the
+state again and lists each change as EXPECTED (announced by the releases in
+between, `tools/expected-changes/`) or UNEXPECTED, and runs the log audit
+against the baseline: only new message classes count (`--internet` accepts
+the usual noise of a public box). `mailcheck` sends a marked test mail to
+an address of another provider that sends it back (forward or automatic
+answer; `--probe ADDRESS` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) and
+waits for it to come back over port 25: outbound, inbound, spam filter,
+folder and storage in one round trip. Without a probe address it is skipped.
+
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	(the update)
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+Everything lands in `/root/update-check/<stamp>/` (only root can read it).
+`--help` lists the options.
+
 Right after the update:
 
 * **Allowlist your own networks.** From rc4 on, adaptive banning and the
@@ -194,6 +222,37 @@ Zum Aufräumen die alten Tags löschen:
 („not found“ für einen Tag, den es nicht gibt, ist in Ordnung). Nicht
 `git fetch --tags` dafür nehmen: Der Checkout ist flach (shallow) und würde
 die Historie hinter jedem Upstream-Tag des Repositorys herunterladen.
+
+**Prüfungen rund um das Update** (ab rc7, `tools/update-check.sh`, als
+root; ohne Checkout über `curl ... | sudo bash -s -- SCHRITT`). Vor dem
+Update hält `before` den Zustand der Box fest (Version, Dienste,
+Statusprüfungen, Einstellungen von Postfix und Dovecot, Nextcloud, Munin,
+Docker, Crontabs, offene Ports, ...) und lässt `tests/fork/log-audit.sh` als
+Vergleichsbasis laufen; `backup` macht eine Mail-in-a-Box-Sicherung und legt
+ein verschlüsseltes Archiv von `/etc`, `/root/mailinabox`, den Crontabs,
+Z-Push, Munin, dem Code von Nextcloud und den genannten Docker-Stacks
+(`--docker-dir`, `--docker-volume`, `--postgres` für einen pg_dump) neben die
+Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
+`/root/update-check`. Nach dem Update hält `after` den Zustand erneut fest,
+führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
+`tools/expected-changes/`) oder UNEXPECTED auf und lässt das Log-Audit gegen
+die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
+(`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin).
+`mailcheck` schickt eine markierte Testmail an eine Adresse bei einem
+anderen Anbieter, die sie zurückschickt (Weiterleitung oder automatische
+Antwort; `--probe ADRESSE` oder `PROBE_ADDRESS=` in `/etc/mailinabox.conf`),
+und wartet, bis sie über Port 25 zurückkommt: Versand, Empfang,
+Spamfilter, Ordner und Ablage in einem Durchgang. Ohne Probe-Adresse wird
+der Schritt übersprungen.
+
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	(das Update)
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
+`--help` zeigt die Optionen.
 
 Gleich nach dem Update:
 
