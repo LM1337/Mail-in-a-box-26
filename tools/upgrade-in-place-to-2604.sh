@@ -630,7 +630,11 @@ exit "$rc"' mux "$rc_file" "$hint" "$env_file" "$close" bash "$SELF_FILE" "$@")
 			# In a scope of its own (like the resume unit): logind must not end the
 			# tmux server with the SSH session (KillUserProcesses=yes).
 			if command -v systemd-run > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
-				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$" --)
+				# Without --description, systemd 249 (22.04) takes the multi-line
+				# command as the description and complains about the transient
+				# unit file at every daemon-reload.
+				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$"
+					"--description=Mail-in-a-Box upgrade to Ubuntu 26.04 (tmux session $TMUX_SESSION)" --)
 				"${scope[@]}" tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
 			fi
 			tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
@@ -2685,7 +2689,10 @@ export HOME=/root TERM=xterm-256color LANG=C.UTF-8 NEEDRESTART_SUSPEND=1 NEEDRES
 # In a scope of its own, outside this unit's cgroup: restarting the unit
 # (needrestart, daemon-reexec) must not kill the upgrade.
 SCOPE=()
-if command -v systemd-run > /dev/null 2>&1; then SCOPE=(systemd-run --scope --quiet --collect "--unit=upgrade-2604-$(date +%s)" --); fi
+if command -v systemd-run > /dev/null 2>&1; then
+	SCOPE=(systemd-run --scope --quiet --collect "--unit=upgrade-2604-$(date +%s)"
+		"--description=Mail-in-a-Box upgrade to Ubuntu 26.04 (resumed after a reboot)" --)
+fi
 if command -v tmux > /dev/null 2>&1; then
 	if tmux has-session -t "$SESSION" 2> /dev/null; then exit 0; fi
 	# After a successful run the window closes by itself after 60 seconds:
@@ -2695,7 +2702,8 @@ if command -v tmux > /dev/null 2>&1; then
 		"trap : INT QUIT; $CMD; rc=\$?; echo; if [ \$rc = 0 ]; then echo \"The upgrade script ended with exit code 0. Press Enter to close this window (it closes by itself after 60 seconds).\"; read -r -t 60 _; else echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _; fi; exit \$rc"
 	exit 0
 fi
-eval "exec ${SCOPE[*]} $CMD"
+if [ ${#SCOPE[@]} -gt 0 ]; then eval "exec $(printf '%q ' "${SCOPE[@]}")$CMD"; fi
+eval "exec $CMD"
 EOF
 	} > "$RESUME_SCRIPT"
 	chmod 700 "$RESUME_SCRIPT"

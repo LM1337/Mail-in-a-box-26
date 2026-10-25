@@ -553,7 +553,11 @@ exit "$rc"' mux "$rc_file" "$hint" "$env_file" "$close" bash "$SELF_FILE" "$@")
 			# In a scope of its own (like the resume unit): logind must not end the
 			# tmux server with the SSH session (KillUserProcesses=yes).
 			if command -v systemd-run > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
-				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$" --)
+				# Without --description the multi-line command becomes the scope's
+				# description (systemd 249 of 22.04 even complains about it at every
+				# daemon-reload, see tools/upgrade-in-place-to-2604.sh).
+				scope=(systemd-run --scope --quiet --collect "--unit=$TMUX_SESSION-$$"
+					"--description=Mail-in-a-Box migration to Ubuntu 26.04 (tmux session $TMUX_SESSION)" --)
 				"${scope[@]}" tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0
 			fi
 			tmux new-session -d -s "$TMUX_SESSION" "${cmd[@]}" < /dev/null && return 0

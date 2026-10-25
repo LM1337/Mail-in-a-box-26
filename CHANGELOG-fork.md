@@ -33,6 +33,8 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   setup has written the root@ alias (B82).
 * DNS: setup restarts nsd when it changed nsd.conf, so that a new address
   of the box and the logging to syslog take effect without a reboot (B83).
+* Tools: the tmux scope of both tools has a description; on 22.04 systemd
+  complained about the old one at every daemon-reload (B84).
 
 ### Changed
 

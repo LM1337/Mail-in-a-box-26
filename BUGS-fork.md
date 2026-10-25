@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B76 and B77 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B76 and B77 shipped in rc1, B57, B67 and B73 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -35,8 +35,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-83 bugs: 1 critical, 13 high, 33 medium, 36 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B83 by the log audit of the certification runs of rc6.
+84 bugs: 1 critical, 13 high, 33 medium, 37 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6.
 
 | Origin | Count |
 |---|---|
@@ -44,7 +44,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 19 |
-| Fork | 12 |
+| Fork | 13 |
 
 24 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -136,6 +136,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B81](#b81) | low | Spam | spampd cannot remove its PID file when it stops, a stale one stays in /run | 26.04 change | no | yes | rc6 |
 | [B82](#b82) | low | Setup | Cron jobs run while setup runs; their mail to root bounces before the root alias exists | Upstream | yes | yes | rc6 |
 | [B83](#b83) | low | DNS | nsd keeps its old listen addresses and logging after setup changed nsd.conf | Upstream | yes | yes | rc6 |
+| [B84](#b84) | low | Tools | On 22.04 systemd complains about the tools' tmux scope at every daemon-reload | Fork | no | no | rc6 |
 
 ## Details
 
@@ -1101,6 +1102,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only when nsd.conf changes: a new address, or the first setup run after an upgrade from a release with the old `logfile:` setting.
 * **Evidence:** rc6 certification lab: after a v74 test box got new addresses and setup ran again, nsd refused port 53 on the new address until a reboot. rc6 T3 and T4 (in-place upgrades): nsd logged to stderr from the start of the new release until the reboot after setup. On a test box with a changed nsd.conf, setup restarted nsd; with an unchanged one it did not.
 * **Found by:** log audit; **commit:** see `git log --grep B83`; **fixed in:** v78-r2604.0-rc6
+
+### B84
+
+**On 22.04 systemd complains about the tools' tmux scope at every daemon-reload** (low, Tools)
+
+* **Symptom:** From the start of `tools/upgrade-in-place-to-2604.sh` on Ubuntu 22.04 until the first reboot, the journal gets 19 to 20 lines like `/run/systemd/transient/upgrade-2604-4164.scope:12: Missing '=', ignoring line.` and "Unknown key name 'rc' in section 'Unit'" at every daemon-reload of the upgrade (more than 3000 lines in a test run). The upgrade is not affected.
+* **Cause:** The tools start their tmux session in a scope (`systemd-run --scope`) without `--description`, so systemd uses the command line as the description, here a multi-line `bash -c` script. systemd 249 (22.04) writes it into the transient unit file without escaping the line breaks and then reads the lines as settings.
+* **Fix:** Both tools give the scope a description ("Mail-in-a-Box upgrade to Ubuntu 26.04 (tmux session upgrade-2604)", the migration likewise), and so does the scope that continues the upgrade after a reboot.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux). The messages appear only on 22.04; `tools/migrate-to-2604.sh` runs on 26.04, where only the description was the script.
+* **Evidence:** rc6 T4 (22.04 test box): 3382 such lines from 09:32 until the reboot into 24.04, all for the scope `upgrade-2604-<PID>`.
+* **Found by:** log audit; **commit:** see `git log --grep B84`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 
