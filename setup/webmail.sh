@@ -43,6 +43,10 @@ PERSISTENT_LOGIN_VERSION=bde7b6840c7d91de627ea14e81cf4133cbb3c07a # version 5.3
 HTML5_NOTIFIER_VERSION=5d85947e16ea9cac4544c59666fe0ff13ba2a44a # master 2023-06-28 (0.6.4+, newest commit; last tag v0.6.4 is older)
 CARDDAV_VERSION=5.1.4
 CARDDAV_HASH=0ffa55ec6da5671d6c413a27d2511e903cd4e63de03c3e9480038844fa4625eb
+# SHA256 of skins/elastic/images/favicon.ico in Roundcube 1.7.5, for installs
+# from before setup recorded it in elastic-favicon.sha256 (see below; a new
+# VERSION is installed again and gets the record).
+ELASTIC_FAVICON_HASH=7b30e499996ec4631848d3509d803d9311f5d71999212f2f4c1ca7af8f24eb69
 
 UPDATE_KEY=$VERSION:$PERSISTENT_LOGIN_VERSION:$HTML5_NOTIFIER_VERSION:$CARDDAV_VERSION
 
@@ -76,6 +80,8 @@ if [ $needs_update == 1 ]; then
 	rm -rf /usr/local/lib/roundcubemail
 	mv /usr/local/lib/roundcubemail-$VERSION/ $RCM_DIR
 	rm -f /tmp/roundcube.tgz
+	# The skin's own favicon as released, to tell it from one replaced by hand.
+	sha256sum 2> /dev/null < ${RCM_DIR}/skins/elastic/images/favicon.ico | cut -d" " -f1 > ${RCM_DIR}/elastic-favicon.sha256 || true
 
 	# install roundcube persistent_login plugin
 	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' ${RCM_PLUGIN_DIR}/persistent_login
@@ -113,12 +119,13 @@ SECRET_KEY=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 | sed s/=//g)
 # directory (which static.php serves; a Roundcube update replaces the
 # directory, setup puts the file back). Not with FAVICON=off in
 # /etc/mailinabox.conf, and not when the skin's own favicon.ico was replaced
-# (its time differs from the other files of the release): Roundcube then shows
-# that one. Other skins keep their own favicons.
+# (its SHA256 is not the one of the release): Roundcube then shows that one.
+# Other skins keep their own favicons.
 RCM_FAVICON_CONFIG=
 rm -f ${RCM_DIR}/mailinabox-favicon.ico
 if [ "${FAVICON:-on}" != off ]; then
-	if [ "$(stat -c %Y ${RCM_DIR}/skins/elastic/images/favicon.ico 2> /dev/null)" = "$(stat -c %Y ${RCM_DIR}/skins/elastic/images/logo.svg 2> /dev/null)" ]; then
+	rcm_favicon=$(sha256sum 2> /dev/null < ${RCM_DIR}/skins/elastic/images/favicon.ico | cut -d" " -f1 || true)
+	if [ "$rcm_favicon" = "$(cat ${RCM_DIR}/elastic-favicon.sha256 2> /dev/null || echo $ELASTIC_FAVICON_HASH)" ]; then
 		install -m 644 branding/favicon.ico ${RCM_DIR}/mailinabox-favicon.ico
 		RCM_FAVICON_CONFIG="\$config['skin_logo'] = array('elastic:[favicon]' => 'mailinabox-favicon.ico');"
 	else
