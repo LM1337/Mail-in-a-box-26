@@ -2020,7 +2020,7 @@ show_plan() {
 	if fresh_backup_planned; then bk_lo=120 bk_hi=900 bk=", the fresh backup"; fi
 	local lo=$((rel * 1500 + 600 + 900 + steps * 120 + steps * oc / 50000 + bk_lo)) hi=$((rel * 4200 + 1200 + 1800 + steps * 600 + steps * oc / 10000 + bk_hi))
 	say "Expected downtime, roughly: $(fmt_dur "$lo") - $(fmt_dur "$hi")"
-	say "  ($rel release upgrade(s) of 20-60 minutes each, reboots, setup 15-30 minutes plus"
+	say "  ($rel release upgrade(s) of 20-90 minutes each, reboots, setup 15-30 minutes plus"
 	say "  $steps Nextcloud upgrade steps over $oc files$bk)."
 	if [ -n "$bk" ]; then
 		say "The fresh backup runs with mail offline: a few minutes when it is incremental, much longer"
@@ -2942,7 +2942,7 @@ release_upgrade() { # PHASE FROM TO
 	fi
 	section "Release upgrade: Ubuntu $from -> $to"
 	say "do-release-upgrade runs non-interactively and keeps the existing configuration files."
-	say "It takes 20-60 minutes. Its own logs are in /var/log/dist-upgrade/."
+	say "It takes 20-90 minutes (longer on a slow disk). Its own logs are in /var/log/dist-upgrade/."
 	release_access_note "$to"
 	# No question here: the downtime has started, and the start of the upgrade
 	# was confirmed (the operator may not be watching any more).
@@ -2982,11 +2982,12 @@ or restore from the backups."
 	release_done "$phase" "$to"
 }
 
-# What the operator runs into during a release upgrade. In the 22.04 test run
-# new SSH logins failed for about 19 minutes from 22.04 to 24.04 (while
-# openssh-server was unpacked but not yet configured) and for about 7 minutes
-# from 24.04 to 26.04, and /usr/bin/sudo was missing for about 12 minutes
-# while sudo-rs replaced sudo. Open connections and the run in tmux go on.
+# What the operator runs into during a release upgrade. In the test runs
+# new SSH logins failed for 19-36 minutes from 22.04 to 24.04 (while
+# openssh-server was unpacked but not yet configured) and for 7-14 minutes
+# from 24.04 to 26.04, and /usr/bin/sudo was missing for 12-26 minutes
+# while sudo-rs replaced sudo; the longer times on a busy disk. Open
+# connections and the run in tmux go on.
 # From 24.04 to 26.04 tmux 3.6 replaces tmux 3.4 a few minutes in; the new
 # client cannot attach to the running 3.4 server ("open terminal failed: not
 # a terminal") and the old binary no longer runs with the new libraries, so
@@ -2995,15 +2996,15 @@ or restore from the backups."
 # WHEN: now (the release upgrade starts now) or reboot (it starts by itself
 # after this reboot, before anyone can attach). Also in the motd.
 release_access_text() { # TO now|reboot
-	local mins=19 attach
-	if [ "$1" = 26.04 ]; then mins=7; fi
+	local mins="20 to 40" attach
+	if [ "$1" = 26.04 ]; then mins="10 to 15"; fi
 	if [ "$2" = reboot ]; then
 		echo "After the reboot the release upgrade to Ubuntu $1 starts by itself. While it replaces the"
-		echo "SSH server, new SSH logins can fail for a while (about $mins minutes in a test run)."
+		echo "SSH server, new SSH logins can fail for a while ($mins minutes in the test runs)."
 		echo "If a login fails, wait a few minutes and try again. Do not reboot."
 	else
-		echo "During the release upgrade new SSH logins can fail for a while (about $mins minutes in a test"
-		echo "run), while the SSH server is replaced. Connections that are open stay open, and the upgrade"
+		echo "During the release upgrade new SSH logins can fail for a while ($mins minutes in the test"
+		echo "runs), while the SSH server is replaced. Connections that are open stay open, and the upgrade"
 		if attach=$(own_session_attach); then
 			echo "goes on in the session $TMUX_SESSION. To watch it, attach now and keep that connection"
 			echo "open: $attach"
@@ -3016,7 +3017,7 @@ release_access_text() { # TO now|reboot
 		echo "If a new login fails, wait a few minutes and try again. Do not reboot."
 	fi
 	if [ "$1" = 26.04 ]; then
-		echo "sudo is missing for a while (about 12 minutes in a test run) while sudo-rs replaces it:"
+		echo "sudo is missing for a while (12 to 25 minutes in the test runs) while sudo-rs replaces it:"
 		if [ "$2" = reboot ]; then
 			echo "sudo then fails with \"command not found\". Wait until it is back."
 		else

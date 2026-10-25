@@ -863,12 +863,12 @@ during the release upgrade or after a reboot.
 `--cleanup-only` removes leftovers of the old releases afterwards.
 
 **Logging in during the release upgrades.** While do-release-upgrade
-replaces the SSH server, new SSH logins fail for a while (in the 22.04 test
-run about 19 minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to
-26.04). Connections that are open stay open, and the upgrade goes on in
-tmux. From 24.04 to 26.04, `sudo` is also missing for about 12 minutes,
-while sudo-rs replaces it: `sudo tmux attach -t upgrade-2604` then fails
-with "command not found". In the same release upgrade tmux 3.6 replaces
+replaces the SSH server, new SSH logins fail for a while (in the test runs
+19 to 36 minutes from 22.04 to 24.04 and 7 to 14 minutes from 24.04 to
+26.04, the longer times on a busy disk). Connections that are open stay
+open, and the upgrade goes on in tmux. From 24.04 to 26.04, `sudo` is also
+missing for 12 to 26 minutes, while sudo-rs replaces it:
+`sudo tmux attach -t upgrade-2604` then fails with "command not found". In the same release upgrade tmux 3.6 replaces
 tmux 3.4 a few minutes after the start. From then until the reboot a new
 `tmux attach` cannot reach the run ("open terminal failed: not a
 terminal"); a client attached before stays attached. Follow the log

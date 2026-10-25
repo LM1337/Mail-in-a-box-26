@@ -38,6 +38,12 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
 
 ### Changed
 
+* Tools: the notes of `tools/upgrade-in-place-to-2604.sh` before each
+  release upgrade give the times of all test runs: new SSH logins fail for
+  20 to 40 minutes from 22.04 to 24.04 and 10 to 15 minutes from 24.04 to
+  26.04, and `sudo` is missing for 12 to 25 minutes; the longer times on a
+  busy disk. A release upgrade takes 20 to 90 minutes. README-fork.md gives
+  the measured times.
 * Tests: `tests/fork/log-audit.sh` (as root on the box, read-only) collects
   the warnings and errors since a point in time (`--since`, default the last
   boot) from the journal, `systemctl --failed` and the logs of the services
