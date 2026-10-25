@@ -23,7 +23,9 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
   the alert with `/usr/sbin/sendmail` to administrator@PRIMARY_HOSTNAME
   (there is no `mail` command). Only a change of state (ok, warning,
   critical, unknown) is mailed, one mail per run: `always_send`, which
-  repeated a warning every 5 minutes, is gone (B80).
+  repeated a warning every 5 minutes, is gone. Munin no longer graphs the
+  veth interfaces of containers (Docker), whose names change at each start
+  of the container and whose old plugins would report "unknown" (B80).
 * Spam: systemd removes spampd's PID file after each stop; spampd itself
   cannot (it logs "Couldn't unlink /run/spampd.pid"), and the stale file
   stayed behind. The PID file stays in the root-owned `/run`: an earlier
