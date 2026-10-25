@@ -62,7 +62,8 @@ contacts of new users again (B99).
 * Tools: `tools/update-check.sh`, the checks around an update of a box of
   this fork, as root (also through `curl ... | sudo bash -s -- STEP`):
   * `before` records the state of the box in
-    `/root/update-check/<stamp>/before/` (mode 0700): version and origin of
+    `/root/update-check/<stamp>/before/` (mode 0700; `UPDATE_CHECK_DIR`
+    elsewhere only below directories of root's own): version and origin of
     `/root/mailinabox`, the units (enabled, active) and the failed ones, the
     mail queue, the error and warning lines of the status checks, the
     warnings of doveconf and postconf, key settings of Postfix and Dovecot
@@ -99,7 +100,8 @@ contacts of new users again (B99).
     Postfix and spampd (rc6, B78 and B81), the new keys of
     `/etc/mailinabox.conf`. Then it runs the log audit since `before`
     against the baseline. Exit code 1 for an unexpected change or a new
-    message class.
+    message class, 2 when nothing is unexpected but the log audit could not
+    run.
   * `mailcheck` sends a marked mail (`X-Miab-Test: 1`, a unique token) from
     administrator@PRIMARY_HOSTNAME (`--from`) to an external probe address
     (`--probe` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`, which setup

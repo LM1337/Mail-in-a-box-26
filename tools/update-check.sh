@@ -124,7 +124,8 @@ Steps:
                 each change is EXPECTED (announced by the releases in
                 between, tools/expected-changes/) or UNEXPECTED; then the log
                 audit since "before" against the baseline (only new message
-                classes count). Exit code 1 if anything unexpected or new.
+                classes count). Exit code 1 if anything unexpected or new,
+                2 if nothing is but the log audit could not run.
   mailcheck     mail round trip: a marked test mail to the probe address,
                 which must send it back (forward or answer); waits until it
                 is stored here and reports outbound, inbound, spam filter,
@@ -153,7 +154,8 @@ Options:
   --timeout SECONDS     mailcheck: how long to wait for the mail (default 900)
   -h, --help            show this help
 
-Environment: UPDATE_CHECK_DIR (default /root/update-check).
+Environment: UPDATE_CHECK_DIR (default /root/update-check; elsewhere only below
+directories that only root can change).
 EOF
 }
 
@@ -171,11 +173,33 @@ load_conf() {
 	[ -n "$STORAGE_ROOT" ] && [ -n "$PRIMARY_HOSTNAME" ] || die "/etc/mailinabox.conf has no STORAGE_ROOT or PRIMARY_HOSTNAME."
 }
 
-# The state directory: root's own, no symlink.
+# Is DIR, and is every directory above it, root's own: no symlink, owned by
+# root, not writable by group or others? A part that does not exist yet
+# counts as its parent. (As root_only_path in upgrade-in-place-to-2604.sh.)
+root_only_path() { # DIR
+	local d=$1 st
+	[[ $d == /* ]] || return 1
+	while [ ! -e "$d" ] && [ ! -L "$d" ]; do d=$(dirname "$d"); done
+	while :; do
+		[ ! -L "$d" ] && [ -d "$d" ] || return 1
+		st=$(stat -c '%u %a' "$d") || return 1
+		[ "${st%% *}" = 0 ] || return 1
+		[ $((8#${st#* } & 8#022)) = 0 ] || return 1
+		[ "$d" != / ] || return 0
+		d=$(dirname "$d")
+	done
+}
+
+# The state directory: root's own, no symlink, below directories that only
+# root can change (UPDATE_CHECK_DIR may point elsewhere than /root).
 init_state_root() {
+	[[ $STATE_ROOT == /* ]] || die "UPDATE_CHECK_DIR must be an absolute path."
+	root_only_path "$(dirname "$STATE_ROOT")" \
+		|| die "$(dirname "$STATE_ROOT") (or a directory above it) is not root's own; use a directory below /root (UPDATE_CHECK_DIR)."
 	if [ -L "$STATE_ROOT" ]; then die "$STATE_ROOT is a symlink; remove it."; fi
 	(umask 077 && mkdir -p "$STATE_ROOT")
-	[ "$(stat -c %u "$STATE_ROOT")" = 0 ] || die "$STATE_ROOT is not owned by root."
+	# stat without -L: the directory itself, not what a link points to.
+	[ "$(stat -c '%u %F' "$STATE_ROOT")" = "0 directory" ] || die "$STATE_ROOT is not a directory owned by root."
 	chmod 700 "$STATE_ROOT"
 }
 
@@ -655,6 +679,16 @@ do_after() {
 	if [ "$rc" = 0 ] && [ "$arc" = 0 ]; then
 		say "RESULT: OK - no unexpected change, no new log message class. Next: $SCRIPT_NAME mailcheck"
 		return 0
+	fi
+	if [ "$rc" = 0 ] && [ "$arc" = 2 ]; then
+		say "RESULT: INCOMPLETE - no unexpected change, but the log audit could not run (see the warning"
+		say "above). Next: $SCRIPT_NAME mailcheck"
+		return 2
+	fi
+	if [ "$arc" = 2 ]; then
+		say "RESULT: look at the unexpected changes ($RUN_DIR/after/changes.txt); the log audit could not"
+		say "run (see the warning above). Next: $SCRIPT_NAME mailcheck"
+		return 1
 	fi
 	say "RESULT: look at the unexpected changes ($RUN_DIR/after/changes.txt) and the new log"
 	say "message classes ($RUN_DIR/after/log-audit.txt). Next: $SCRIPT_NAME mailcheck"
