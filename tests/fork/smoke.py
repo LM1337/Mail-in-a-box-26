@@ -990,6 +990,24 @@ def admin_api(ctx, method, path, form=None, auth=None, body=None, headers=None, 
                     timeout=timeout)
 
 
+def remove_test_mailbox(ctx, email):
+    # Adding a user makes Dovecot create its mailbox (quota recalc), which
+    # stays after the user is removed and is listed as an archived
+    # (inactive) account. Remove it again for the test accounts of this run
+    # (needs --ssh). Returns a note.
+    local, domain = email.split("@", 1)
+    if not re.fullmatch(r"smoke[a-z]*-[0-9a-f]{10}", local) or not re.fullmatch(r"[a-z0-9.-]+", domain) or ctx.tok not in local:
+        raise Fail("not a test account of this run: %s" % email)
+    if not ctx.remote.available():
+        return "its archived mailbox stays (no --ssh)"
+    cmd = ('root=$(sed -n "s/^STORAGE_ROOT=//p" /etc/mailinabox.conf | tail -n 1); '
+           'd="$root/mail/mailboxes/%s/%s"; [ -n "$root" ] && [ ! -L "$d" ] && rm -rf -- "$d" && [ ! -e "$d" ]') % (domain, local)
+    rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("could not remove the archived mailbox of %s: %s" % (email, err.strip()[:120]))
+    return "archived mailbox removed"
+
+
 # ---------------------------------------------------------------------------
 # checks: logins
 # ---------------------------------------------------------------------------
@@ -1413,7 +1431,7 @@ def c_admin_tmp_user_alias(ctx):
         r = admin_api(ctx, "POST", "mail/users/remove", form={"email": tmp})
     if r.status != 200:
         raise Fail("users/remove HTTP %d %s" % (r.status, r.text()[:200]))
-    return "add/list/remove of user and alias ok"
+    return "add/list/remove of user and alias ok, %s" % remove_test_mailbox(ctx, tmp)
 
 
 def c_backup_status(ctx):
@@ -2860,13 +2878,16 @@ def c_api_write_roundtrip(ctx):
     try:
         api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": user, "password": ctx.user_pw}), 200, "text/html", "users/add")
         api_expect(admin_api(ctx, "POST", "mail/users/password", form={"email": user, "password": pw2}), 200, "text/html", "users/password")
+        for form in ({"email": user, "quota": "1.5G"}, {"email": user}):
+            r = admin_api(ctx, "POST", "mail/users/quota", form=form)
+            _need(r.status == 400, "users/quota %s: HTTP %d, expected 400" % (form.get("quota", "(none)"), r.status))
         api_expect(admin_api(ctx, "POST", "mail/users/quota", form={"email": user, "quota": "1G"}), 200, "text/html", "users/quota")
         r = admin_api(ctx, "GET", "mail/users/quota?" + urllib.parse.urlencode({"email": user}))
         api_expect(r, 200, "application/json", "GET quota")
         _need(r.json().get("quota") == "1G", "quota after set: %s" % r.json().get("quota"))
         r = admin_api(ctx, "GET", "mail/users/quota?" + urllib.parse.urlencode({"email": "nobody-%s@%s" % (ctx.tok, ctx.domain)}))
         _need(r.status == 400, "GET quota of a non-user: HTTP %d, expected 400" % r.status)
-        steps.append("user, password, quota")
+        steps.append("user, password, quota (and two refused)")
         api_expect(admin_api(ctx, "POST", "mail/users/privileges/add", form={"email": user, "privilege": "admin"}), 200, "text/html", "privileges/add")
         _need("admin" in admin_api(ctx, "GET", "mail/users/privileges?" + urllib.parse.urlencode({"email": user})).text().split("\n"),
               "admin privilege not listed")
@@ -2897,8 +2918,11 @@ def c_api_write_roundtrip(ctx):
         admin_api(ctx, "POST", "mail/aliases/remove", form={"address": alias})
         r = admin_api(ctx, "POST", "mail/users/remove", form={"email": user})
     api_expect(r, 200, "text/html", "users/remove")
-    steps.append("user removed")
+    steps.append("user removed, " + remove_test_mailbox(ctx, user))
     after = api_snapshot(ctx)
+    if not ctx.remote.available():
+        # without --ssh the archived mailbox of the test user stays
+        after["users"] = [u for u in after["users"] if u[0] != user]
     diff = [k for k in before if before[k] != after[k]]
     if diff:
         raise Fail("not the same afterwards: %s" % ", ".join(diff))
