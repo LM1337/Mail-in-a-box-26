@@ -123,6 +123,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | rc5 |
 | [B70](#b70) | low | Tools | In-place upgrade from 22.04 warns that ssh.service is disabled and advises to enable it, although ssh.socket starts it | Fork | no | no | rc6 |
 | [B71](#b71) | low | Tools | The terminal attached to the tool's tmux session shows nothing; through "curl \| sudo bash" it is not attached at all | Fork | no | no | rc6 |
+| [B72](#b72) | low | Tools | After the last reboot of the in-place upgrade the tmux window waits for Enter forever | Fork | no | no | rc6 |
 
 ## Details
 
@@ -956,6 +957,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux; "not attached at all" since rc4's last commit, the same for rc5).
 * **Evidence:** rc5 T4: the terminal of `curl ... | sudo bash -s -- --yes --no-backup-check` printed the message and returned. On a 26.04 test box, with the tools' own tmux functions, a pseudo terminal over `ssh -tt` and a ticker as the run: the rc5 code drew nothing in all start forms (curl pipe or file, sudo-rs or classic sudo 1.9.17 with use_pty, tmux 3.2a, 3.4 and 3.6); the new code drew the run and detached with Ctrl-b d in 36 of 36 runs (both tools; curl pipe, file and `sudo bash -c "curl | bash"`; sudo-rs and classic sudo), and the terminal was back in line mode afterwards. Attaching the operator's terminal under sudo-rs lost keys to sudo-rs in 3 of 5 runs, hence the raw mode there.
 * **Found by:** in-place test; **commit:** see `git log --grep B71`; **fixed in:** v78-r2604.0-rc6
+
+### B72
+
+**After the last reboot of the in-place upgrade the tmux window waits for Enter forever** (low, Tools)
+
+* **Symptom:** After the in-place upgrade has finished, the tmux session `upgrade-2604` is still there; its window ends with "The upgrade script ended with exit code 0. Press Enter to close this window." and stays open until someone attaches and presses Enter, or until the next reboot.
+* **Cause:** After a reboot the resume unit starts the tool in a new tmux session whose window waits for Enter without a time limit. The first window has a limit with `--yes` (10 minutes), the resumed one had none, although the resumed run always runs with `--yes` and usually nobody is attached.
+* **Fix:** When the resumed run has succeeded, the window closes by itself after 60 seconds (Enter closes it at once). After a failure it stays open until Enter is pressed, so that the output can be read.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc4, the automatic tmux). Only `tools/upgrade-in-place-to-2604.sh`; `tools/migrate-to-2604.sh` does not reboot.
+* **Evidence:** rc4 T4b and rc5 T4: the window with "Press Enter to close this window" was still open after the run. On a 26.04 test box, the window of the new resume script closed 61 seconds after a run with exit code 0 and was still open 70 seconds after a run with exit code 1.
+* **Found by:** in-place test; **commit:** see `git log --grep B72`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

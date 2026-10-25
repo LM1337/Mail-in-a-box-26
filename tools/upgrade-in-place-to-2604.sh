@@ -2681,8 +2681,11 @@ SCOPE=()
 if command -v systemd-run > /dev/null 2>&1; then SCOPE=(systemd-run --scope --quiet --collect "--unit=upgrade-2604-$(date +%s)" --); fi
 if command -v tmux > /dev/null 2>&1; then
 	if tmux has-session -t "$SESSION" 2> /dev/null; then exit 0; fi
+	# After a successful run the window closes by itself after 60 seconds:
+	# nobody may be attached after the last reboot (B72). After a failure it
+	# stays open until Enter is pressed.
 	"${SCOPE[@]}" tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-		"trap : INT QUIT; $CMD; rc=\$?; echo; echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _"
+		"trap : INT QUIT; $CMD; rc=\$?; echo; if [ \$rc = 0 ]; then echo \"The upgrade script ended with exit code 0. Press Enter to close this window (it closes by itself after 60 seconds).\"; read -r -t 60 _; else echo \"The upgrade script ended with exit code \$rc. Press Enter to close this window.\"; read -r _; fi; exit \$rc"
 	exit 0
 fi
 eval "exec ${SCOPE[*]} $CMD"

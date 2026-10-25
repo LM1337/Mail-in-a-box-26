@@ -718,7 +718,10 @@ screen) and attaches your terminal to it. If the SSH connection drops, the
 upgrade goes on: log in again and run `sudo tmux attach -t upgrade-2604`.
 When the command has ended, the window stays open until you press Enter
 (with `--yes` at most 10 minutes, so that a script calling it through
-`ssh -t` gets its exit code). `--no-tmux` turns this off.
+`ssh -t` gets its exit code). After a reboot the tool continues in a new
+window of the same session; when the upgrade has succeeded, that window
+closes by itself after 60 seconds, after a failure it stays open.
+`--no-tmux` turns this off.
 
 Through `curl | bash`, the tool runs the copy of the release tag (`TAG`,
 default: the latest release). Releases up to v78-r2604.0-rc3 do not start
@@ -822,7 +825,10 @@ Reißt die SSH-Verbindung ab, läuft das Upgrade weiter: neu anmelden und
 `sudo tmux attach -t upgrade-2604` aufrufen. Nach dem Ende des Befehls bleibt
 das Fenster offen, bis Enter gedrückt wird (mit `--yes` höchstens 10 Minuten,
 damit ein Skript, das den Befehl über `ssh -t` aufruft, seinen Exit-Code
-bekommt). `--no-tmux` schaltet das ab.
+bekommt). Nach einem Neustart läuft das Werkzeug in einem neuen Fenster
+derselben Sitzung weiter; ist das Upgrade gelungen, schließt sich dieses
+Fenster nach 60 Sekunden von selbst, nach einem Fehler bleibt es offen.
+`--no-tmux` schaltet das ab.
 
 Über `curl | bash` führt das Werkzeug die Fassung des Release-Tags aus (`TAG`,
 vorgegeben: das neueste Release). Releases bis v78-r2604.0-rc3 starten tmux

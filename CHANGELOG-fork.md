@@ -26,6 +26,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   these forms, with sudo on 22.04 and 24.04 and with sudo-rs on 26.04; Ctrl-b
   d detaches. `--check` no longer advises to start the command inside tmux,
   except for a `TAG` of rc1 to rc3 (B71).
+* Tools: after the last reboot of `tools/upgrade-in-place-to-2604.sh`
+  the tmux window closes by itself 60 seconds after a successful run,
+  instead of waiting for Enter forever; after a failure it stays open (B72).
 
 ## v78-r2604.0-rc5 (2026-10-24)
 
