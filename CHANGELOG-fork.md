@@ -9,6 +9,17 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
+## Unreleased
+
+### Fixed
+
+* Tools: phase verify of `tools/upgrade-in-place-to-2604.sh` no longer
+  warns that `ssh.service` was enabled before the upgrade and is disabled
+  now, and `etc-report.txt` no longer advises to enable it. Since 24.04
+  `ssh.socket` starts it. Units that are started another way (an enabled
+  socket, path or timer, a new name, a running unit that pulls them in)
+  are left out of the check (B70).
+
 ## v78-r2604.0-rc5 (2026-10-24)
 
 Fixes from the update of a copy of a production box from rc3 to rc4: Dovecot

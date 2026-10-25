@@ -3295,14 +3295,43 @@ restriction_items() {
 # for the others a release upgrade can have had its reasons. Units that setup
 # turns off on purpose are left out, so that nobody is told to enable them
 # again: spamd.service (setup/spamassassin.sh, spampd runs SpamAssassin itself;
-# Ubuntu 24.04 had it enabled).
+# Ubuntu 24.04 had it enabled). Units that are gone (removed packages) or are
+# static, generated or an alias now are not "disabled" and so not listed.
+# Units that are started another way are left out too (unit_started_otherwise).
 SETUP_DISABLED_UNITS="spamd.service"
 units_disabled_now() {
-	local ref=$STATE_DIR/meta/unit-files.txt
+	local ref=$STATE_DIR/meta/unit-files.txt u
 	[ -s "$ref" ] || return 0
 	LC_ALL=C join <(awk '$2 == "enabled" {print $1}' "$ref" | LC_ALL=C sort -u) \
 		<(systemctl list-unit-files --no-legend --no-pager 2> /dev/null | awk '$2 == "disabled" {print $1}' | LC_ALL=C sort -u) \
-		| grep -vxF -f <(tr ' ' '\n' <<< "$SETUP_DISABLED_UNITS") || true
+		| grep -vxF -f <(tr ' ' '\n' <<< "$SETUP_DISABLED_UNITS") \
+		| while IFS= read -r u; do
+			unit_started_otherwise "$u" || echo "$u"
+		done || true
+}
+
+# Whether a disabled unit still starts after a reboot, because something else
+# starts it: an enabled socket, path or timer that activates it (ssh.service
+# since Ubuntu 24.04, started by ssh.socket; B70), a unit name that is now
+# another unit's name (an alias), or a running unit that pulls it in. Do not
+# enable such a unit: ssh.service enabled next to ssh.socket would bind port 22
+# itself and bypass the socket.
+unit_started_otherwise() {
+	local u=$1 id t en
+	id=$(systemctl show -p Id --value "$u" 2> /dev/null || true)
+	if [ -n "$id" ] && [ "$id" != "$u" ]; then
+		en=$(systemctl is-enabled "$id" 2> /dev/null || true)
+		case "$en" in enabled | enabled-runtime | static | indirect | generated | alias) return 0 ;; esac
+	fi
+	for t in $(systemctl show -p TriggeredBy --value "$u" 2> /dev/null || true); do
+		en=$(systemctl is-enabled "$t" 2> /dev/null || true)
+		case "$en" in enabled | enabled-runtime | indirect | generated) return 0 ;; esac
+		if systemctl is-active --quiet "$t" 2> /dev/null; then return 0; fi
+	done
+	for t in $(systemctl show -p WantedBy -p RequiredBy -p UpheldBy --value "$u" 2> /dev/null || true); do
+		if systemctl is-active --quiet "$t" 2> /dev/null; then return 0; fi
+	done
+	return 1
 }
 
 # Customized files from before the upgrade that are different or gone now.

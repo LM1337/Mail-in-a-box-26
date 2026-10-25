@@ -121,6 +121,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B67](#b67) | high | Tools | In-place upgrade leaves Dovecot disabled: no IMAP, POP3 or mail delivery after the next reboot | Fork | no | no | rc5 |
 | [B68](#b68) | low | System | cloud-init puts the 127.0.1.1 line with another machine's name back into /etc/hosts on every boot | Fork | no | no | rc5 |
 | [B69](#b69) | low | Setup | systemctl is-enabled mailinabox and munin fail with "Too many levels of symbolic links" | PR #2603 | no | yes | rc5 |
+| [B70](#b70) | low | Tools | In-place upgrade from 22.04 warns that ssh.service is disabled and advises to enable it, although ssh.socket starts it | Fork | no | no | rc6 |
 
 ## Details
 
@@ -932,6 +933,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Evidence:** Fresh rc4 test box and a copy of a production box updated to rc4: `ls -l /etc/systemd/system/mailinabox.service` gives `-> /lib/systemd/system/mailinabox.service`, `/lib -> usr/lib`, and is-enabled fails as above for mailinabox.service and munin.service (systemd 259.9). After removing the link and `systemctl reenable`, both are `enabled`, the `.wants` links point to `/usr/lib/systemd/system/`, and the management daemon keeps running.
 * **Report upstream:** PR #2603: enable the units by name.
 * **Found by:** update test; **commit:** see `git log --grep B69`; **fixed in:** v78-r2604.0-rc5
+
+### B70
+
+**In-place upgrade from 22.04 warns that ssh.service is disabled and advises to enable it, although ssh.socket starts it** (low, Tools)
+
+* **Symptom:** On a box that comes from Ubuntu 22.04, phase verify of `tools/upgrade-in-place-to-2604.sh` prints "Enabled before the upgrade, disabled now (they do not start after a reboot): ssh.service", and `etc-report.txt` lists it under "systemctl enable UNIT, if still wanted". SSH works and comes back after a reboot.
+* **Cause:** Since Ubuntu 24.04 sshd is socket-activated: `ssh.socket` is enabled and starts `ssh.service`, which is disabled. The check of B67 compares the enabled units of `meta/unit-files.txt` (before the upgrade) with the disabled units now and left out only spamd. It did not look at how a disabled unit is started. Enabling ssh.service as advised would make sshd bind port 22 itself, next to the socket.
+* **Fix:** The check leaves out a disabled unit that is started another way: by an enabled (or running) socket, path or timer that activates it (`TriggeredBy`), when its name is now another unit's name, or when a running unit pulls it in. Units that are gone (removed packages) or are static, generated or an alias now were already not listed. The tool never enables such units itself.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (rc5, the check of B67). Only boxes that come from 22.04: a box that starts on 24.04 already has ssh.service disabled before the upgrade. `tools/migrate-to-2604.sh` has no such check.
+* **Evidence:** rc5 T4 (22.04 test VM, from the published tag): the warning and the line in `etc-report.txt`, with `ssh.socket` enabled and active after the upgrade. The new check run against the unit list of that run before the upgrade on a fresh 26.04 box lists nothing (the old check: ssh.service); with units added to that list by hand it still lists rsync, nftables and chrony-wait, but not iscsid (started by iscsid.socket).
+* **Found by:** in-place test; **commit:** see `git log --grep B70`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 
