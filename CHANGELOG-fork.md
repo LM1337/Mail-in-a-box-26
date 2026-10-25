@@ -235,8 +235,9 @@ contacts of new users again (B99).
   there, in a directory that belongs to munin; now `chown -h` (B86).
 * Settings: the daemon and setup no longer write `settings.yaml` through a
   symbolic link. `$STORAGE_ROOT` belongs to the storage user; root now
-  writes a new file under a random name and renames it, and reads the file
-  with `O_NOFOLLOW` (B87).
+  writes a new file under a random name and renames it (with at most the
+  read bits of the old file's mode), and reads only a regular file there,
+  with `O_NOFOLLOW` and without blocking on a FIFO (B87).
 * Tools: for backups on the machine itself (local, or a `file://` target
   below a directory that another account may change),
   `tools/upgrade-in-place-to-2604.sh` no longer copies the encrypted system

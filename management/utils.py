@@ -37,7 +37,9 @@ def write_settings(config, env):
     try:
         st = os.lstat(fn)
         if stat.S_ISREG(st.st_mode):
-            mode = stat.S_IMODE(st.st_mode) # keep the mode of the old file
+            # Keep the read bits of the old file, nothing more: the storage
+            # user may have put it there with any mode (0666, setuid).
+            mode = stat.S_IMODE(st.st_mode) & 0o644
     except FileNotFoundError:
         pass
     fd, tmp = tempfile.mkstemp(dir=env['STORAGE_ROOT'], prefix='.settings.yaml.')
@@ -54,10 +56,14 @@ def write_settings(config, env):
         raise
 
 def load_settings(env):
-    import rtyaml
+    import rtyaml, stat
     fn = os.path.join(env['STORAGE_ROOT'], 'settings.yaml')
     try:
-        with open(os.open(fn, os.O_RDONLY | os.O_NOFOLLOW), encoding="utf-8") as f:
+        # O_NONBLOCK: a FIFO in its place must not block the daemon; anything
+        # but a regular file reads as no settings.
+        fd = os.open(fn, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with open(fd, encoding="utf-8") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode): raise ValueError # caught below
             config = rtyaml.load(f)
         if not isinstance(config, dict): raise ValueError # caught below
         return config
