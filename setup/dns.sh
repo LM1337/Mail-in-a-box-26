@@ -18,6 +18,7 @@ mkdir -p /etc/nsd
 mkdir -p /etc/nsd/zones
 touch /etc/nsd/zones.conf
 
+NSD_CONF_BEFORE=$(cat /etc/nsd/nsd.conf 2> /dev/null || true)
 cat > /etc/nsd/nsd.conf << EOF;
 # Do not edit. Overwritten by Mail-in-a-Box setup.
 server:
@@ -70,6 +71,13 @@ apt_install nsd ldnsutils openssh-client
 # The management daemon restarts nsd (dns_update), setup does not: make sure
 # it is enabled here, like the services that setup restarts (B67).
 enable_service nsd
+# dns_update only reloads a running nsd ("nsd-control reconfig" and "reload"),
+# which keeps the addresses it listens on and its logging. When the server
+# section above changed (new PRIVATE_IP or PRIVATE_IPV6, or the old logfile
+# setting of an upgraded box), nsd must be restarted to use it (B83).
+if [ "$(cat /etc/nsd/nsd.conf)" != "$NSD_CONF_BEFORE" ] && systemctl is-active --quiet nsd; then
+	restart_service nsd
+fi
 
 # Create DNSSEC signing keys.
 
