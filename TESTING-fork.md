@@ -37,7 +37,9 @@ your mail.
   the run. Most runs start the tool with curl as documented; rc3 T4
   downloaded it from the tag and started it in a tmux session of its own,
   and the runs on a release branch set `SOURCE`/`TAG`. rc5 T4 is the run
-  that uses exactly the documented command against the published tag.
+  that uses exactly the documented command against the published tag. All
+  rc6 runs used the documented commands with `SOURCE`/`TAG` set to the
+  release branch.
 * **The smoke test measures the box, not itself:** against the unchanged
   22.04 test VM (v74) it passes in full (baseline run with the smoke test of
   rc1/rc2; not repeated with the larger smoke test of rc4/rc5).
@@ -65,7 +67,7 @@ Variants: **T3b** is a clean T3 run from the tag after a first run had found
 bugs. **T3c** and **T4b** repeat T3 and T4 with the automatic tmux of rc4;
 the SSH client is killed in the middle of the run, and the upgrade must go
 on. T3c also runs the before/after hooks for the local web service. **T5b**
-updates rc3 to rc5. Most in-place runs in the lab use `--no-backup-check`
+updates rc3 to the release under test (from rc5). Most in-place runs in the lab use `--no-backup-check`
 (the test VMs have no fresh backup) and run `prepare-testenv.sh` before the
 smoke test.
 
@@ -80,7 +82,11 @@ report. The groups:
 * **migrated** (migration and in-place only): users and aliases; per user the
   POP3 UIDLs and the folders with their message counts; active Sieve scripts;
   Bayes counts; Nextcloud event, contact and file; the custom DNS record; the
-  DKIM key; the Roundcube identity. All compared with the manifest.
+  DKIM key; the Roundcube identity. All compared with the manifest. From
+  rc6 the mailbox comparison ignores test mails (header `X-Miab-Test: 1`)
+  and the automatic replies and bounces to them, and reports how many it
+  ignored; any other missing or new mail, and a seeded mail that is there
+  twice, is a FAIL.
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
   injected user names) and the Intrusion Protection page.
@@ -125,9 +131,12 @@ the in-place tool reports it.
 | rc3 | 2026-10-23 | not run | not run | 53/55 (T3b) | 55/55 | – |
 | rc4 | 2026-10-24 | 60/60 | not run | 56/58 (T3c, pre-merge branch) | 58/58 (T4b, pre-merge branch) | 68/71, from the published tag 69/71 |
 | rc5 | 2026-10-24 | 62/62 | not run | 67/73 | 67/73 (from the published tag) | 67/73 (T5b, from rc3) |
+| rc6 | 2026-10-25 | 62/62 | 73/73 | 73/73 (first run 71/73) | 73/73 | 73/73 (T5b, from rc3; first run 71/73) |
 
 Every FAIL in this table is one of the known differences below, except one
-Nextcloud lock in rc4 T5 (see there).
+Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
+where the stricter comparison of rc6 found mails left in the snapshot (see
+there).
 
 ### rc1 and rc2 (2026-10-23)
 
@@ -184,34 +193,88 @@ which checked out the tag `v78-r2604.0-rc5` itself.
 The T4 run passed, but it showed things an operator upgrading from 22.04
 will run into. rc6 fixes 1 (B70), 4 (B71) and 5 (B72); for 2 and 3 the tool
 now says before each release upgrade what to expect, and README-fork.md
-describes it. 6 is not changed.
+describes it. 6 is not changed. rc6 T4 checked all of it again (see rc6
+below), and 6 did not show there.
 
-1. **False warning about `ssh.service`.** Phase verify prints "Enabled before
-   the upgrade, disabled now (they do not start after a reboot):
-   ssh.service", and `etc-report.txt` advises `systemctl enable` for it.
-   Since 24.04, SSH is started by `ssh.socket`, which is enabled and works;
-   the warning can be ignored. Following the advice was not tested. T3 starts
-   on 24.04 and showed no such warning; T5b does not use the in-place tool.
-   The check is new in rc5, so the earlier 22.04 runs (rc3 T4, rc4 T4b)
+1. **False warning about `ssh.service`** (fixed in rc6, B70). Phase verify
+   prints "Enabled before the upgrade, disabled now (they do not start after
+   a reboot): ssh.service", and `etc-report.txt` advises `systemctl enable`
+   for it. Since 24.04, SSH is started by `ssh.socket`, which is enabled and
+   works; the warning can be ignored. Following the advice was not tested. T3
+   starts on 24.04 and showed no such warning; T5b does not use the in-place
+   tool. The check is new in rc5, so the earlier 22.04 runs (rc3 T4, rc4 T4b)
    could not show it either.
-2. **New SSH logins fail during parts of both release upgrades**, for about
-   19 minutes in the first one (OpenSSH unpacked but not yet configured) and
-   about 7 minutes in the second. Open connections keep running, and so does
-   the upgrade in tmux. Wait and log in again.
-3. **`sudo` is missing for about 12 minutes** during the upgrade to 26.04,
-   while it is replaced by sudo-rs. `sudo tmux attach -t upgrade-2604` fails
-   with "command not found" then; wait until it is back.
-4. **No view of the run when it is started through `curl | sudo bash`.** The
-   terminal prints "Could not attach this terminal. The run goes on in the
-   tmux session upgrade-2604" and returns. The run goes on; follow it with
-   `sudo tmux attach -t upgrade-2604`. `--check` still advises starting the
-   command inside tmux, which rc5 does by itself.
+2. **New SSH logins fail during parts of both release upgrades** (rc6: the
+   tool says so, no change of behaviour), for about 19 minutes in the first
+   one (OpenSSH unpacked but not yet configured) and about 7 minutes in the
+   second. Open connections keep running, and so does the upgrade in tmux.
+   Wait and log in again.
+3. **`sudo` is missing for about 12 minutes** during the upgrade to 26.04
+   (rc6: the tool says so, no change of behaviour), while it is replaced by
+   sudo-rs. `sudo tmux attach -t upgrade-2604` fails with "command not found"
+   then. Waiting does not help for tmux: rc6 T3 found that a new `tmux
+   attach` cannot reach the run from tmux's replacement until the reboot
+   (B73); follow the log with `sudo tail -f` instead.
+4. **No view of the run when it is started through `curl | sudo bash`**
+   (fixed in rc6, B71). The terminal prints "Could not attach this terminal.
+   The run goes on in the tmux session upgrade-2604" and returns. The run
+   goes on; follow it with `sudo tmux attach -t upgrade-2604`. `--check`
+   still advises starting the command inside tmux, which rc5 does by itself.
 5. **The tmux window stays open after the last reboot** with "Press Enter to
-   close this window" (seen in T4b as well).
+   close this window" (seen in T4b as well; fixed in rc6, B72).
 6. Minor: `grub2-common.service` failed once on the first boot of 26.04
    ("invalid environment block") and was fine after the next reboot;
    `etc-report.txt` lists the files `/etc/sysctl.d/10-*.conf` that 24.04
    reorganized as gone, which is harmless.
+
+### rc6 (2026-10-25)
+
+All runs used the release branch, started with the documented commands and
+`SOURCE`/`TAG` set to it. Every mail the testers sent to a box themselves
+(vacation triggers, delivery checks, push tests) was a marked test mail sent
+with `smoke.py --send-test-mail`, except the one unmarked mail of the
+negative check in T4.
+
+| Run | Commit | Result |
+|---|---|---|
+| T4 (22.04 → 24.04 → 26.04) | `d78ed0e` | start state: the 22.04 test VM (Ubuntu 22.04.5, v74, Dovecot 2.3.16, Postfix 3.6.4, PHP 8.0, Nextcloud 26.0.13, sudo 1.9.9, tmux 3.2a; `ssh.service` enabled), with a vacation reply sent before the upgrade. Started with `curl … \| sudo bash -s -- --yes --no-backup-check` from a terminal: the terminal showed the run in tmux (B71); Ctrl-b d detached it; a client attached again and killed with SIGKILL did not stop the run; clients attached before each release upgrade stayed attached through the SSH outages and only dropped at the reboots. `--check` no longer advised starting it inside tmux. "All checks passed" with no manual step. Mail offline 1 h 25 min, 2 reboots (release upgrades 33 and 31 min, setup 15 min; whole run 1 h 25 min). The notes about SSH and sudo came before each release upgrade and before the first reboot, once each. Measured: new SSH logins failed for about 19 and 7 minutes, `/usr/bin/sudo` was missing for about 12.5 minutes, each reboot took 21 s. Phase verify: no unit warning (B70; `ssh.service` disabled, started by `ssh.socket`). The tmux window closed 60 s after the end (B72). Both favicons served (Roundcube and Nextcloud, the file of `branding/`). Ubuntu 26.04.1, Dovecot 2.4.2, Postfix 3.10.6, PHP 8.5, Nextcloud 34.0.5; `doveconf -n`, `postconf -n` and `postfix check` without warnings; no failed units (the `grub2-common` failure of rc5 T4 did not show); the vacation duplicate database kept working, no phantom folders. Reboot: SSH back after 22 s, all units active; IMAP login, submission and port 25 from the peer worked. Smoke 73/73. Negative check: one unmarked mail to alice gave 2 FAILs (`mig-folders-alice`, `mig-pop3-uidl-alice`: "1 new, not test mails"); after it was deleted, both passed |
+| T3 (24.04 copy) | `d78ed0e` | start state: the 24.04 test VM (Ubuntu 24.04.5, v74, Dovecot 2.3.21 with fts_xapian and the push plugin, PHP 8.0, Nextcloud 26.0.13, Roundcube 1.6.12, sudo 1.9.15, tmux 3.4), hooks for the local web service and the greylisting exception. Started with `curl … \| sudo bash -s -- --keep-local --yes --no-backup-check`: the terminal showed the run with 24.04's sudo, and Ctrl-b d detached it. "All checks passed"; mail offline 53 min (rc5: 1 h 01 min), 1 reboot (release upgrade 33 min, setup 15 min). The before hook ran just before mail went offline, the after hook at the end; push reached the web service after the upgrade; the greylisting exception was kept; full-text search gave the same hits with the old indexes; phase verify listed no unit; the window closed 60 s after the end. Measured: `/usr/bin/sudo` missing for about 15 minutes, new SSH logins failing for about 8.5 minutes. The run found B73: from tmux's replacement (3.4 → 3.6, about 6 minutes into the release upgrade) until the reboot a new `tmux attach` cannot reach the run, although the tool advised it; fixed in `165f18d` (text of the tool and the docs only). Reboot: SSH back after 21 s, all units active, mail delivered. Smoke 71/73 in the first run: alice had one unmarked mail that arrived while the test VM was built, after its manifest, and was in the snapshot; the comparison found it, as it should. Deleted, then 73/73 |
+| T5b (rc3 → rc6) | `165f18d`; final smoke at `c0a530c`; repeated at `e6bb8de` | start state: the 24.04 copy upgraded in place with rc3 (Ubuntu 26.04.1, Nextcloud 34.0.5, Roundcube 1.7.5), with Dovecot disabled (B67), mailinabox and munin "bad" (B69), the phantom folders of a vacation reply (B66) and another machine's name in `/etc/hosts`. Update: `git remote set-url`, then `sudo … bash -c "$(curl …/setup/bootstrap.sh)"`, three dialogs answered with Enter; setup exit 0 in 109 s (rc5: 143 s). A probe every 2 s saw Postfix down three times (about 4.5 s in all) and Dovecot three times (under 0.3 s each); one probe mail was refused at connect, the other 6 were delivered at once, none deferred. Afterwards: all core units enabled and active, the phantom folders removed, `/etc/hosts`, the cloud-init template and `/etc/mailname` correct, the greylisting exception kept, Nextcloud sharing limited to the domain, the same full-text hits, push working, both favicons served. Reboot: SSH back after 20 s, all units active, mail delivered. Five more setup runs changed only what upstream changes on every run (the nightly job's minute, the order of the OpenDKIM tables, Roundcube's `des_key`); they found B74 (`10-ssl.conf` grows) and B75 (logrotate fails), fixed in `fb81430` and `c0a530c`. An admin's own favicons (a replaced favicon of the Elastic skin, a favicon uploaded in Nextcloud) were kept on three runs. Smoke 71/73 in the first run: two unmarked mails for alice from when the test VM was built were in the snapshot; deleted, then 73/73 at `c0a530c`. Repeated at `e6bb8de`: three more update runs (one with the apt locks held for 90 s: setup waited and went on, B79), smoke 73/73 |
+| T2 (22.04 → fresh 26.04) | `4bbdacd` (a first run at `d58ee33` found B78) | the 22.04 test VM with a vacation reply sent before, and a fresh 26.04 VM. Started on the new machine with `curl …/tools/migrate-to-2604.sh \| sudo bash -s -- --from <old box> --skip-network-checks` (and the addresses of the test network), the questions answered with "y": the terminal showed the run with sudo-rs (B71), Ctrl-b d detached it, a killed client did not stop it. "All checks passed"; downtime 22 min 3 s (from stopping the old box to the end of the checks; setup with Nextcloud 26 → 34 took 21 min 35 s); the new box answered on port 25 and 587 after 3 min and on 993 after 4 min, while setup still ran. Verify: 4 users, 5 aliases, 4 mailboxes, 25 messages, 2 Sieve scripts, Bayes, Nextcloud accounts, contacts and events; DKIM, DNSSEC (DS records unchanged for 3 zones), TLS and backup keys and the Let's Encrypt account unchanged; all 11 services active and enabled. `--check-old`: nothing on the old box started again. The vacation duplicate database came over. Both favicons served. Reboot: SSH back after 17 s, port 25 greeting in 0.3 s. Smoke 73/73 (peer: the old box). `--check` before the runs found B76 and B77 |
+| T1 | `e6bb8de` (a first run at `4bbdacd`: 62/62) | install 1193 s (rc5: 1671 s), exit 0. All 14 core units enabled and active before and after a reboot, no failed units; `ssh.socket` active; port 25 greeting 0.08 s after the boot. The admin panel's icons, `/favicon.ico`, Roundcube's and Nextcloud's favicons are the files of `branding/`. Reboot: SSH back after 21 s; submission and port 25 from the peer delivered. Smoke 62/62 |
+
+What ran on which code: T1 and the repeated T5b ran on the last code commit
+`e6bb8de`. T3 and T4 ran on `d78ed0e`. After them came B73 (texts of the
+in-place tool), B74, B75, B78 and B79 (setup steps) and B76 and B77 (the
+migration tool only). The setup steps were tested on 26.04 by the T5b runs
+and T1; T3 and T4 were not repeated, so they have not run the new setup
+steps on a box that comes through a release upgrade. T2 ran before B79,
+whose code path T1 and the T5b runs cover. The release commit changes only
+the release tag in the scripts and the documentation.
+
+#### Open findings of rc6
+
+Not fixed in rc6:
+
+1. The `--check` plan of `tools/upgrade-in-place-to-2604.sh` does not say
+   that new SSH logins and sudo fail for a while; the tool says it only
+   during the run, and the docs describe it.
+2. The durations in that note come from test runs: the tool says about 7
+   minutes for SSH and 12 for sudo, T3 measured about 8.5 and 15.
+3. `migrate-to-2604.sh --check` proposes a start command with `--from` and
+   `--skip-network-checks`, but without the other options given (such as
+   `--public-ip`). This was so before rc6.
+4. Started through `curl | sudo bash` with classic sudo (22.04, 24.04), the
+   tool attaches the operator's own terminal: a change of the window size
+   reaches tmux only on the next attach. With sudo-rs (26.04), if the tool is
+   killed while attached, the terminal stays in raw mode (`reset` fixes it).
+5. With any uploaded favicon, Nextcloud also serves it as the touch icon,
+   with the type `application/octet-stream` (Nextcloud's own code).
+6. Updates on the boxes that came through a release upgrade print
+   "pollinate: cannot create /var/cache/pollinate/log: Permission denied";
+   it is harmless (README-fork.md, "Setup output").
+7. A watcher attached before tmux is replaced during the release upgrade to
+   26.04 and kept through the SSH outage was only tested in T4, not in T3.
 
 ### Production use
 
@@ -311,11 +374,9 @@ Outline, with a legacy box 192.0.2.10 and a new box 192.0.2.11:
 * **Interactive first install** with `sudo bash -c "$(curl …)"` on 26.04. The
   fresh installs ran non-interactively as root; the `sudo bash -c` form was
   tested for updating an existing box.
-* **T2 (migration) since rc2.** `migrate-to-2604.sh` changed in rc4 and rc5
-  (settings of an existing `mailinabox.conf` kept, greylisting exception taken
-  over, more checks in phase verify), without a new end-to-end run.
-  The migration was only run from a 22.04 source, not from a release-upgraded
-  24.04 box.
+* **T2 (migration) in rc3 to rc5.** `migrate-to-2604.sh` changed in rc4 and
+  rc5 without an end-to-end run; rc6 ran T2 again. The migration was only
+  run from a 22.04 source, not from a release-upgraded 24.04 box.
 * **Modes of the tools** that the scenarios do not use: `--rollback`,
   `--rehearse`, `--from-backup`, `--push-zones-to-old`, `--cleanup-only`.
 * **The Internet:** Let's Encrypt certificates, delivery to other providers,
