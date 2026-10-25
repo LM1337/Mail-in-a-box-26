@@ -47,7 +47,7 @@ weekly rotation of mail.log (B85).
   the nightly backup), and in that time the fail2ban jails `dovecot` and
   `miab-slow-dovecot` banned nobody. A path unit
   (`mailinabox-dovecot-log-reopen.path`) has Dovecot reopen its log after
-  each rotation and gives the new file rsyslog's owner and mode (B85).
+  each rotation, once rsyslog has created the new file (B85).
 
 ### Changed
 

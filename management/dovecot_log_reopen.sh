@@ -12,40 +12,41 @@
 # fail2ban jails dovecot and miab-slow-dovecot, which read mail.log, see none
 # of its failed logins.
 #
-# rsyslog (user syslog) creates the new mail.log only at its next line. If
-# Dovecot reopened first, it would create the file as root with mode 0600, and
-# rsyslog could no longer write to it. So the new file gets the owner, group and
-# mode that rsyslog gives the files it creates ($FileOwner, $FileGroup and
-# $FileCreateMode in /etc/rsyslog.conf), before the reopen and once more after it.
+# This script does no file operation in /var/log itself: that directory is
+# writable by the group syslog, so rsyslog's user could put a symlink in place
+# of mail.log at any time, and a create, chown or chmod by root would follow
+# it. rsyslog creates the new mail.log (with its own owner and mode) at its
+# next line, so one line is logged first. Only when mail.log is then a regular
+# file of rsyslog's user, not a symlink and with one link, is Dovecot told to
+# reopen; it appends to that file. Otherwise Dovecot would create the file as
+# root with mode 0600, and rsyslog could no longer write to it; the script then
+# logs a warning and fails, which shows in "systemctl --failed".
+# (Dovecot itself opens log_path as root at every start and reopen, following a
+# symlink: upstream behaviour since fac8477, which this script does not change.)
 
 set -u
 f=/var/log/mail.log
 
-rsyslog_setting() { # NAME DEFAULT
-	local v
-	v=$(sed -n "s/^\\\$$1[[:space:]]\\+\\([^[:space:]]\\+\\).*/\\1/p" /etc/rsyslog.conf 2> /dev/null | tail -n 1)
-	echo "${v:-$2}"
-}
-owner=$(rsyslog_setting FileOwner syslog)
-group=$(rsyslog_setting FileGroup adm)
-mode=$(rsyslog_setting FileCreateMode 0640)
+# The user that rsyslog gives the files it creates ($FileOwner in /etc/rsyslog.conf).
+owner=$(sed -n 's/^\$FileOwner[[:space:]]\+\([^[:space:]]\+\).*/\1/p' /etc/rsyslog.conf 2> /dev/null | tail -n 1)
+owner=${owner:-syslog}
 
 # The first event comes when logrotate renames the old mail.log.1 to mail.log.2,
 # before it renames mail.log. Let the rotation (renames, then the HUP of rsyslog) finish.
 sleep 3
 
-fix_owner() {
-	if [ ! -e "$f" ]; then
-		(umask 077 && : >> "$f") || return 0
-	fi
-	if [ "$(stat -c %U:%G "$f")" != "$owner:$group" ]; then chown "$owner:$group" "$f" || true; fi
-	if [ "$(stat -c %a "$f")" != "$(printf %o "$((8#$mode))")" ]; then chmod "$mode" "$f" || true; fi
-}
+logger -p mail.info -t mailinabox "mail.log rotated, reopening Dovecot's log file"
+for _ in $(seq 20); do
+	[ -e "$f" ] && break
+	sleep 0.5
+done
 
-fix_owner
+if [ ! -f "$f" ] || [ -L "$f" ] || [ "$(stat -c %U:%h "$f" 2> /dev/null)" != "$owner:1" ]; then
+	logger -p mail.warning -t mailinabox "Dovecot's log file not reopened: $f is not a regular file of $owner with one link ($(stat -c '%F %U:%G %h' "$f" 2> /dev/null || echo missing)). Dovecot still writes the rotated file until it restarts."
+	exit 1
+fi
+
 # Nothing to reopen when Dovecot is not running; it opens the file when it starts.
 if systemctl is-active --quiet dovecot.service; then
 	doveadm log reopen
 fi
-fix_owner
-exit 0
