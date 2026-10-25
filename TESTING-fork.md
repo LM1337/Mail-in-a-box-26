@@ -547,7 +547,8 @@ Everything is in `tests/fork/`:
   that root logged count), and what
   the box logged during a setup run carries the prefix `[setup]`; rules
   that start with `^\[setup\]` (cut connections of the restarts of the
-  services) apply only there. For the old box of a migration,
+  services) apply only there. For the old box of a migration, and for a
+  box upgraded in place when `--since` lies before the tool stops mail,
   add `--allow-extra tests/fork/log-audit-allow-old-box.txt`. `--since`
   also takes the short forms `-30m`, `-24h`, `-2d`. With `--baseline
   BEFORE.json` (the `--json` report of an earlier run, e.g. before an

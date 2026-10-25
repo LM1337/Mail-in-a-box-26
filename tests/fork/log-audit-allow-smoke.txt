@@ -9,3 +9,7 @@
 
 ^(gunicorn|start): (\[N-N-N N:N:N,N\] WARNING in daemon: )?Mail-in-a-Box Management Daemon: Failed login attempt from ip <ip> - timestamp N\.N$ # smoke test: the two deliberate failed logins of api-auth (smoke.py group api: a wrong password, a key after its logout); an attack on the control panel logs the same, and the miab-management jail bans it
 ^start: Fatal: reverse password verification check failed: Password mismatch$ # smoke test: the wrong password of api-auth; the daemon checks passwords with "doveadm pw -t", which says so on stderr
+^postfix/cleanup: fatal: dict_sqlite_lookup: /etc/postfix/[a-z-]+-maps\.cf: SQL prepare failed: database is locked\?$ # smoke test: api-write-roundtrip commits to users.sqlite while cleanup looks up a local mail (here a Munin alert); Postfix's sqlite table has no busy timeout, so cleanup exits, the mail stays in maildrop and pickup takes it again a minute later (upstream; a temporary error for mail over SMTP)
+^postfix/pickup: warning: maildrop/<hex>: error writing <hex>: queue file write error$ # the same event, see the line above
+^postfix/master: warning: process /usr/lib/postfix/sbin/cleanup pid N exit status N$ # the same event, see the line above
+^postfix/master: warning: /usr/lib/postfix/sbin/cleanup: bad command startup -- throttling$ # the same event: master waits a minute before it starts cleanup again
