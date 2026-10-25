@@ -793,7 +793,12 @@ def sign_zone(domain, zonefile, env):
 
 def write_opendkim_tables(domains, env):
 	# Append a record to OpenDKIM's KeyTable and SigningTable for each domain
-	# that we send mail from (zones and all subdomains).
+	# that we send mail from (zones and all subdomains). The domains come as a
+	# set, whose order changes with every Python process: sort them, so that
+	# the tables only change (and OpenDKIM is only restarted) when the domains
+	# do. The patterns never overlap (a domain has no "@"), so the order does
+	# not change which key signs.
+	domains = sorted(domains)
 
 	opendkim_key_file = os.path.join(env['STORAGE_ROOT'], 'mail/dkim/mail.private')
 
