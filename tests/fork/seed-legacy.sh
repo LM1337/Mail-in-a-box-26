@@ -20,6 +20,8 @@
 #   backup    one local backup run (management/backup.py)
 # and writes $SEED_MANIFEST (default /root/seed-manifest.json): POP3 UIDLs, per-folder
 # counts/UIDVALIDITY/Message-IDs, sa-learn magic counts, sieve, NC items, DKIM key ...
+# Test mails of smoke.py (X-Miab-Test: 1) and the automatic replies to them are left
+# out of the mail state, as smoke.py ignores them when it compares.
 #
 # Environment
 #   TEST_USER_PW         password for alice/bob/carol (required)
@@ -125,6 +127,8 @@ log "box $H, Mail-in-a-Box $MIAB_VERSION, primary domain $P"
 # ---------------------------------------------------------------- python helper
 cat > "$WORK/seedlib.py" <<'PYEOF'
 import base64, imaplib, json, os, poplib, re, smtplib, socket, ssl, subprocess, sys, time, uuid
+from email import message_from_bytes
+from email.policy import compat32
 from email.utils import formatdate
 
 if "MOVE" not in imaplib.Commands:
@@ -178,20 +182,73 @@ def search(M, folder, *crit, readonly=True):
     typ, data = M.uid("SEARCH", *crit)
     return data[0].split() if typ == "OK" and data and data[0] else []
 
-def message_ids(M, folder):
+# Test mails (tests/fork/smoke.py and its --send-test-mail: header
+# "X-Miab-Test: 1", Message-ID @smoketest.invalid) and the automatic replies and
+# bounces to them are left out of the manifest, by the same rule smoke.py uses
+# when it compares (keep the two in sync).
+TEST_HEADER = "X-Miab-Test"
+TEST_MSGID_DOMAIN = "smoketest.invalid"
+MSGID_RE = re.compile(r"<([^<>\s]+)>")
+
+def parse_mail(raw):
+    return message_from_bytes(raw, policy=compat32)
+
+def mail_id(m):
+    r = MSGID_RE.search(str(m.get("Message-ID", "")))
+    return r.group(1) if r else ""
+
+def is_marked(m):
+    return str(m.get(TEST_HEADER, "")).strip() == "1"
+
+def mail_refs(m):
+    refs = MSGID_RE.findall(str(m.get("In-Reply-To", "")) + " " + str(m.get("References", "")))
+    if m.is_multipart():
+        for part in m.walk():
+            if part.get_content_type() in ("message/rfc822", "message/rfc822-headers", "text/rfc822-headers"):
+                payload = part.get_payload()
+                if isinstance(payload, list):
+                    for inner in payload:
+                        refs += MSGID_RE.findall(str(inner.get("Message-ID", "")))
+                else:
+                    raw = payload if isinstance(payload, str) else ""
+                    refs += MSGID_RE.findall(" ".join(re.findall(r"(?im)^message-id:\s*(.*)$", raw)))
+    return refs
+
+def is_test_mail(m, marked):
+    if is_marked(m) or mail_id(m).lower().endswith("@" + TEST_MSGID_DOMAIN):
+        return True
+    auto = str(m.get("Auto-Submitted", "")).strip().lower()
+    if auto.startswith("auto-replied") or auto.startswith("auto-generated"):
+        return any(r in marked or r.lower().endswith("@" + TEST_MSGID_DOMAIN) for r in mail_refs(m))
+    return False
+
+def needs_body(m):
+    return bool(str(m.get("Auto-Submitted", "")).strip()) and m.get_content_maintype() == "multipart"
+
+def folder_mails(M, folder):
+    """The mails of a folder (headers; the whole message of a possible bounce)."""
     typ, _ = M.select(q(folder), readonly=True)
     if typ != "OK":
         return []
-    typ, data = M.search(None, "ALL")
-    if typ != "OK" or not data[0]:
+    typ, data = M.uid("SEARCH", "ALL")
+    if typ != "OK" or not data or not data[0]:
         return []
-    typ, data = M.fetch(b"1:*", "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
-    ids = []
-    for item in data:
-        if isinstance(item, tuple):
-            m = re.search(rb"<([^>]+)>", item[1])
-            ids.append(m.group(1).decode(errors="replace") if m else "")
-    return sorted(ids)
+    out = []
+    typ, data = M.uid("FETCH", b",".join(data[0].split()).decode(), "(BODY.PEEK[HEADER])")
+    for item in data or []:
+        if not isinstance(item, tuple):
+            continue
+        m = parse_mail(item[1])
+        if needs_body(m):
+            u = re.search(rb"UID (\d+)", item[0])
+            if u:
+                typ, full = M.uid("FETCH", u.group(1).decode(), "(BODY.PEEK[])")
+                for f in full or []:
+                    if isinstance(f, tuple):
+                        m = parse_mail(f[1])
+                        break
+        out.append(m)
+    return out
 
 def msg(frm, to, subject, n, body=None, extra=()):
     lines = ["From: %s" % frm, "To: %s" % to, "Subject: %s" % subject,
@@ -355,24 +412,43 @@ def cmd_mail(P, S2, S3, force):
 
 # ---- manifest parts --------------------------------------------------------------
 def cmd_mailstate(*users):
-    out = {}
+    # Two passes: an automatic reply lands in another mailbox than the test
+    # mail it answers.
+    state, marked = {}, set()
     for u in users:
         M = imap(u)
-        fl = {}
         try:
             for f in folders(M):
                 typ, data = M.status(q(f), "(MESSAGES UIDVALIDITY UIDNEXT)")
                 vals = dict(re.findall(r"(MESSAGES|UIDVALIDITY|UIDNEXT) (\d+)", data[0].decode(errors="replace")))
-                fl[f] = {k.lower(): int(v) for k, v in vals.items()}
-                fl[f]["message_ids"] = message_ids(M, f)
+                mails = folder_mails(M, f)
+                marked.update(mail_id(m) for m in mails if is_marked(m) and mail_id(m))
+                state.setdefault(u, {})[f] = ({k.lower(): int(v) for k, v in vals.items()}, mails)
         finally:
             M.logout()
+    out = {}
+    for u in users:
+        fl = {}
+        for f, (st, mails) in state.get(u, {}).items():
+            keep = [m for m in mails if not is_test_mail(m, marked)]
+            st["message_ids"] = sorted(mail_id(m) for m in keep)
+            if len(keep) != len(mails):
+                st["messages"] = len(keep)
+                st["test_mails_left_out"] = len(mails) - len(keep)
+            fl[f] = st
         P3 = poplib.POP3_SSL("127.0.0.1", 995, context=ctx())
         P3.user(u)
         P3.pass_(PW)
         _r, lines, _o = P3.uidl()
+        uidls = []
+        for line in lines:
+            n, uidl = line.decode().split(None, 1)
+            # TOP does not mark the mail as read.
+            _r, body, _o = P3.top(n, 300)
+            if not is_test_mail(parse_mail(b"\r\n".join(body) + b"\r\n"), marked):
+                uidls.append(uidl)
         P3.quit()
-        out[u] = {"folders": fl, "pop3_uidls": [l.decode().split(None, 1)[1] for l in lines]}
+        out[u] = {"folders": fl, "pop3_uidls": uidls}
     print(json.dumps(out))
 
 def cmd_salearn():

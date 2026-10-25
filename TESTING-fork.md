@@ -275,7 +275,8 @@ Everything is in `tests/fork/`:
   comparison counts them as new. Send them with `smoke.py --send-test-mail
   FROM TO` (`--via 587` or `465` submits as FROM, `--via 25` sends over
   port 25, from `--peer-ssh` if given), or add the header `X-Miab-Test: 1`
-  to them.
+  to them. `seed-legacy.sh` leaves test mails, and the automatic replies and
+  bounces to them, out of the manifest, so it can be run again after them.
 
 Configuration:
 

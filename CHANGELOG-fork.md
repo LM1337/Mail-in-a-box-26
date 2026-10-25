@@ -60,8 +60,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   new mail, and a seeded mail that is there twice, is a FAIL. Before, every
   mail sent to the box since the manifest was a FAIL (the 6 known FAILs of
   the rc5 runs). `smoke.py --send-test-mail FROM TO` sends a marked mail
-  for the testers' own checks. Manifests of earlier `seed-legacy.sh` runs
-  still work. TESTING-fork.md describes it.
+  for the testers' own checks. `seed-legacy.sh` leaves the same mails out of
+  the manifest. Manifests of earlier `seed-legacy.sh` runs still work.
+  TESTING-fork.md describes it.
 
 ## v78-r2604.0-rc5 (2026-10-24)
 

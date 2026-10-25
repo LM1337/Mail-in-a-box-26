@@ -52,7 +52,9 @@ mig-pop3-uidl-*) ignores these mails and the automatic replies and bounces
 to them (Auto-Submitted, with In-Reply-To, References or the returned
 message pointing to a test mail), and reports how many it ignored. Any other
 mail that is missing or new, and a seeded mail that is there twice, is a
-FAIL. Send your own mails to a box under test (vacation triggers, delivery
+FAIL. seed-legacy.sh leaves the same mails out of the manifest (in an older
+manifest they are ignored as well; for POP3 only while they are still on the
+box). Send your own mails to a box under test (vacation triggers, delivery
 checks after a reboot) the same way, or add the header to them:
 
     tests/fork/smoke.py --host 192.0.2.11 --hostname box.legacy.example.net \\
@@ -849,17 +851,27 @@ def compare_mails(want_ids, want_count, mails, marked_ids):
     Test mails are ignored; anything else that is missing or extra, and a
     seeded mail that is there twice, is a problem.
     Returns (problems, ignored {reason: count})."""
-    ignored, kept = Counter(), []
+    ignored, kept, test_ids = Counter(), [], set()
     for msg in mails:
         reason = test_mail_reason(msg, marked_ids)
         if reason:
             ignored[reason] += 1
+            test_ids.add(mail_id(msg))
         else:
             kept.append(msg)
     problems = []
     have = Counter(mail_id(m) for m in kept)
     if want_ids is not None:
-        want = Counter(want_ids)
+        # seed-legacy.sh leaves test mails out of the manifest; one written
+        # before that may still list them (those that are gone count as ignored).
+        want = Counter()
+        for i in want_ids:
+            if i and i in test_ids and not have[i]:
+                continue
+            if i.lower().endswith("@" + TEST_MSGID_DOMAIN):
+                ignored["gone"] += 1
+                continue
+            want[i] += 1
         missing = want - have
         extra = have - want
         dup = {i: n for i, n in extra.items() if i in want}
