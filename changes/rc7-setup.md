@@ -31,6 +31,16 @@ BUGS-fork.md, to be merged into them when the strands come together.
   there: connections that setup's restarts of the services cut are normal
   during setup and a finding at any other time. The report names the setup
   runs (`setup_runs` in the JSON report).
+* `tests/fork/log-audit-allow.txt`: rules for `(sd-pam)`'s "Varlink call
+  io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession"
+  at a reboot with an open SSH login; for Z-Push's first ActiveSync device
+  of a box (`FileStateMachine->LinkUserDevice()` reads its users file
+  before writing it); and, only during setup, for the ActiveSync long
+  polls that a restart of PHP-FPM ends (nginx "recv() failed ... while
+  reading response header from upstream" for `Cmd=Ping`/`Sync`), for
+  Z-Push's CardDAV `ChangesSink` errors when a restart hits its check of
+  the address book, and for the 404 of `/server-status?auto` and
+  `/nginx_status` that `munin-node-configure` (setup/munin.sh) probes.
 
 ### Fixed
 
