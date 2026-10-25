@@ -27,6 +27,10 @@ v78-r2604.0-rc6 before it is tagged. Munin sends its alerts (B80).
 * Spam: spampd keeps its PID file in `/run/spampd/`, which belongs to it,
   so it can remove the file when it stops; before, each stop logged
   "Couldn't unlink /run/spampd.pid" and left the file behind (B81).
+* Setup: cron is stopped while setup runs and started again at its end,
+  also when setup fails. Cron jobs no longer run against half-configured
+  services, and their mail to root no longer bounces on a new box before
+  setup has written the root@ alias (B82).
 
 ### Changed
 

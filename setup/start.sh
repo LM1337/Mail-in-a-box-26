@@ -9,6 +9,17 @@ source setup/functions.sh # load our functions
 # If not, this shows an error and exits.
 source setup/preflight.sh
 
+# No cron jobs while setup runs: they would run against half-configured
+# services (Nextcloud's cron.php during its upgrade steps, Munin during its
+# installation), and their mail to root bounces until setup has written the
+# root@ alias at its end (B82). Stop cron for the run and start it again when
+# setup ends, also when it fails. A cron that is already stopped (the
+# in-place upgrade and migration tools stop it themselves) is left alone.
+if systemctl is-active --quiet cron.service 2> /dev/null; then
+	systemctl stop cron.service
+	trap 'systemctl start cron.service 2> /dev/null || true' EXIT
+fi
+
 # Ensure Python reads/writes files in UTF-8. If the machine
 # triggers some other locale in Python, like ASCII encoding,
 # Python may not be able to read/write files. This is also

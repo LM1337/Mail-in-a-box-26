@@ -35,18 +35,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-81 bugs: 1 critical, 13 high, 33 medium, 34 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B81 by the log audit of the certification runs of rc6.
+82 bugs: 1 critical, 13 high, 33 medium, 35 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B82 by the log audit of the certification runs of rc6.
 
 | Origin | Count |
 |---|---|
-| Upstream | 21 |
+| Upstream | 22 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 19 |
 | Fork | 12 |
 
-22 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80). They are candidates for
+23 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -134,6 +134,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B79](#b79) | low | Setup | setup stops with "Could not get lock" when apt-daily or unattended-upgrades runs at the same time | Upstream | yes | yes | rc6 |
 | [B80](#b80) | medium | Munin | Munin never sends its alerts: no contact is defined, and there is no "mail" command | Upstream | yes | yes | rc6 |
 | [B81](#b81) | low | Spam | spampd cannot remove its PID file when it stops, a stale one stays in /run | 26.04 change | no | yes | rc6 |
+| [B82](#b82) | low | Setup | Cron jobs run while setup runs; their mail to root bounces before the root alias exists | Upstream | yes | yes | rc6 |
 
 ## Details
 
@@ -1077,6 +1078,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (spampd 2.53 of 22.04), PR #2603 yes. Origin: 26.04 change.
 * **Evidence:** rc6 certification runs: the message at every stop on the fresh, migrated, updated and upgraded boxes. With the fix on a test box, `/run/spampd/spampd.pid` belongs to spampd and is replaced at each restart, and restarts log nothing.
 * **Found by:** log audit; **commit:** see `git log --grep B81`; **fixed in:** v78-r2604.0-rc6
+
+### B82
+
+**Cron jobs run while setup runs; their mail to root bounces before the root alias exists** (low, Setup)
+
+* **Symptom:** On a fresh install or a migration to a new machine, mail.log shows mail to `root@PRIMARY_HOSTNAME` bounced with "User doesn't exist", and the bounce to the sender (`munin@` or `www-data@`) is dropped. In the migration test it was the output of Nextcloud's `cron.php`, run by `/etc/cron.d/mailinabox-nextcloud` in the middle of the Nextcloud upgrade steps; on a fresh install it was munin-cron, which ran between the unpack and the configuration of the munin package and failed with "Permission denied" and "Cannot create temporary file".
+* **Cause:** cron runs during setup. Setup installs the cron jobs early (Nextcloud, Munin), and they then run against services that setup has not finished. Their mail to root goes to root@PRIMARY_HOSTNAME, an automatic alias that setup/start.sh writes near the end. `tools/migrate-to-2604.sh` stopped cron on the new machine only when setup had already run there, although its comment said cron was stopped; `tools/upgrade-in-place-to-2604.sh` keeps cron stopped until setup has finished.
+* **Fix:** setup/start.sh stops cron at its start and starts it again when it ends, also when it fails (a trap). A cron that is already stopped (the in-place and migration tools stop it themselves) is left alone.
+* **Affects:** v78 yes (cron runs during setup; v78 has no root@ alias at all), PR #2603 yes. Origin: Upstream.
+* **Evidence:** rc6 T2 (migration to a fresh 26.04 test box): cron ran the whole 55 minutes of the migration, `cron.php` at 10:00:03 mailed root, and the mail bounced; rc6 T1 (fresh install): munin-cron at 10:05:01 during the munin install, the same bounce. With the fix, an update run on a test box stopped cron at the start and started it at the end.
+* **Found by:** log audit; **commit:** see `git log --grep B82`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

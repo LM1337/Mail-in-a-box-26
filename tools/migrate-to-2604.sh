@@ -2446,7 +2446,8 @@ phase_setup() {
 Fix the cause and run this command again; it continues with setup."
 	fi
 	state_set SETUP_SECONDS "$SETUP_SECONDS"
-	# Setup does not start cron, and it was stopped here before the copy.
+	# Setup stops cron while it runs and starts it again at the end (B82); a
+	# cron stopped here before the copy stays stopped until now.
 	systemctl start cron.service 2> /dev/null || true
 	phase_mark_done setup
 }
