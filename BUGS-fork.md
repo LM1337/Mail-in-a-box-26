@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11 and B76 shipped in rc1, B57, B67 and B73 in rc3, B68, B71 and B72 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -34,8 +34,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-75 bugs: 1 critical, 13 high, 32 medium, 29 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6.
+76 bugs: 1 critical, 13 high, 32 medium, 30 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76 in the migration test T2 of rc6.
 
 | Origin | Count |
 |---|---|
@@ -43,7 +43,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 18 |
-| Fork | 10 |
+| Fork | 11 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -127,6 +127,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B73](#b73) | low | Tools | During the release upgrade to 26.04 "tmux attach" cannot reach the in-place upgrade until the reboot, although the tool advises it | Fork | no | no | rc6 |
 | [B74](#b74) | low | Dovecot | Every setup run adds another commented copy of each SSL setting to 10-ssl.conf | PR #2603 | no | yes | rc6 |
 | [B75](#b75) | low | System | logrotate.service fails every day on boxes upgraded in place to 26.04: cloud-init's old logrotate file stays | 26.04 change | no | no | rc6 |
+| [B76](#b76) | low | Tools | The migration tool's Spamhaus checks follow the resolver's search domain and can report a wildcard address | Fork | no | no | rc6 |
 
 ## Details
 
@@ -1004,6 +1005,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no (only boxes upgraded in place). Origin: 26.04 change (the packaging of cloud-init). Boxes upgraded with `tools/upgrade-in-place-to-2604.sh` get the fix in its setup phase, boxes upgraded with an earlier release on their next update.
 * **Evidence:** rc6 T5b (copy of a production box upgraded in place with rc3, updated with setup/bootstrap.sh): `logrotate.service` failed at its first run on the copy with the errors above. `dpkg-query -W -f='${Conffiles}'` lists `/etc/logrotate.d/cloud-init` as obsolete for cloud-init, with the same MD5 sum as the file and as `cloud-init-base`'s file; the fresh 26.04 test box has no such file and the new step does nothing there. With a changed copy of the file the step kept it; with the unchanged file the next update removed it and `logrotate.service` ran without errors.
 * **Found by:** update test; **commit:** see `git log --grep B75`; **fixed in:** v78-r2604.0-rc6
+
+### B76
+
+**The migration tool's Spamhaus checks follow the resolver's search domain and can report a wildcard address** (low, Tools)
+
+* **Symptom:** `tools/migrate-to-2604.sh` (phase preflight and `--check`) prints "Spamhaus ZEN: unexpected answer 2001:db8::1" with an IPv6 address instead of "is not listed" or "no answer (Spamhaus refuses public resolvers)", when the new machine's resolver has a search domain (`search example.net` in `/etc/resolv.conf`, for example from DHCP or cloud-init) and that domain has a wildcard record (`*.example.net`). The Domain Block List check reads such an answer as well; it only warns on 127.0.1.x, so it stays silent.
+* **Cause:** The tool looked up `<reversed IP>.zen.spamhaus.org` and `<hostname>.dbl.spamhaus.org` with `getent -s dns hosts` without a trailing dot. getent asks for an AAAA record first. Spamhaus has none, so the resolver tries the name again with the search domain appended (`....zen.spamhaus.org.example.net`), and the wildcard answers. The same happened for the always-listed test address 127.0.0.2.
+* **Fix:** Both names end with a dot, so the resolver takes them as they are and does not append the search domain.
+* **Affects:** v78 no, PR #2603 no. Origin: Fork (the migration tool, since rc1). setup/network-checks.sh of upstream uses `host` the same way, but the tool runs setup with `SKIP_NETWORK_CHECKS=1`.
+* **Evidence:** rc6 T2 (fresh 26.04 test box with `search` set to a domain with a wildcard record): `--check` printed "Spamhaus ZEN: unexpected answer" with the wildcard's IPv6 address. On that box `getent -s dns hosts` returned the wildcard address with the search domain appended for the box's reversed IP, for 2.0.0.127 and for the DBL name; with the trailing dot it returned 127.255.255.254 (Spamhaus refuses the public resolver) for all three.
+* **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B76`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

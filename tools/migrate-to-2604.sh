@@ -1536,7 +1536,9 @@ network_checks() {
 	local a rev ptr
 	if [[ $NEW_PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 		rev=$(echo "$NEW_PUBLIC_IP" | awk -F. '{print $4"."$3"."$2"."$1}')
-		a=$(getent -s dns hosts "$rev.zen.spamhaus.org" 2> /dev/null | awk '{print $1; exit}' || true)
+		# The trailing dot keeps the resolver's search domains out: with a
+		# wildcard record there, "not listed" would come back as an address.
+		a=$(getent -s dns hosts "$rev.zen.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
 		case "$a" in
 			"") say "Spamhaus ZEN:      $NEW_PUBLIC_IP is not listed" ;;
 			127.255.255.*) say "Spamhaus ZEN:      no answer (Spamhaus refuses public resolvers); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
@@ -1548,7 +1550,7 @@ Mail from this machine would be rejected. Get another IP address or have it deli
 			*) say "Spamhaus ZEN:      unexpected answer $a" ;;
 		esac
 	fi
-	a=$(getent -s dns hosts "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org" 2> /dev/null | awk '{print $1; exit}' || true)
+	a=$(getent -s dns hosts "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
 	case "$a" in
 		127.0.1.*) warn "The hostname $NEW_PRIMARY_HOSTNAME is listed in the Spamhaus Domain Block List ($a), see https://check.spamhaus.org/." ;;
 	esac

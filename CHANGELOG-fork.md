@@ -55,6 +55,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `/etc/logrotate.d/cloud-init` next to the new `cloud-init-base`. Setup
   removes unchanged logrotate files that their package no longer ships
   (B75).
+* Tools: the Spamhaus checks of `tools/migrate-to-2604.sh` no longer
+  append the resolver's search domain to the names they look up. With a
+  wildcard record in that domain they reported "unexpected answer" with
+  the wildcard's address (B76).
 
 ### Changed
 
