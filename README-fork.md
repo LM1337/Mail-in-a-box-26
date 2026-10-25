@@ -864,11 +864,14 @@ run about 19 minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to
 26.04). Connections that are open stay open, and the upgrade goes on in
 tmux. From 24.04 to 26.04, `sudo` is also missing for about 12 minutes,
 while sudo-rs replaces it: `sudo tmux attach -t upgrade-2604` then fails
-with "command not found". The tool says so before each release upgrade. To
-watch the run, attach before it starts and keep that connection open (a
-root shell opened before with `sudo -i` works as well). If a new login fails
-or `sudo` is missing, wait a few minutes and try again. Do not reboot: a
-release upgrade stopped in the middle can leave the machine unbootable.
+with "command not found". The tool says so before each release upgrade, and
+before a reboot after which a release upgrade starts by itself (from 22.04
+the second one always does). To watch a release upgrade that starts without
+a reboot, attach before it starts and keep that connection open (a root
+shell opened before with `sudo -i` works as well). After a reboot it starts
+before you can attach. If a new login fails or `sudo` is missing, wait a few
+minutes and try again. Do not reboot: a release upgrade stopped in the
+middle can leave the machine unbootable.
 
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
@@ -991,9 +994,12 @@ von 24.04 auf 26.04). Offene Verbindungen bleiben bestehen, und das Upgrade
 läuft in tmux weiter. Von 24.04 auf 26.04 fehlt außerdem `sudo` für etwa
 12 Minuten, weil sudo-rs es ersetzt: `sudo tmux attach -t upgrade-2604`
 scheitert dann mit „command not found“. Das Werkzeug weist vor jedem
-Release-Upgrade darauf hin. Wer zusehen will, hängt sich vorher an und lässt
-diese Verbindung offen (eine vorher mit `sudo -i` geöffnete Root-Shell geht
-auch). Scheitert eine neue Anmeldung oder fehlt `sudo`, einige Minuten
+Release-Upgrade darauf hin, und vor einem Neustart, nach dem ein
+Release-Upgrade von selbst beginnt (von 22.04 aus beginnt das zweite immer
+so). Wer ein Release-Upgrade ohne vorherigen Neustart verfolgen will, hängt
+sich vorher an und lässt diese Verbindung offen (eine vorher mit `sudo -i`
+geöffnete Root-Shell geht auch). Nach einem Neustart beginnt es, bevor man
+sich anhängen kann. Scheitert eine neue Anmeldung oder fehlt `sudo`, einige Minuten
 warten und es erneut versuchen. Nicht neu starten: ein mitten im Lauf
 abgebrochenes Release-Upgrade kann die Maschine so hinterlassen, dass sie
 nicht mehr startet.

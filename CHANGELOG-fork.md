@@ -49,8 +49,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   minutes from 22.04 to 24.04 and about 7 minutes from 24.04 to 26.04) and,
   from 24.04 to 26.04, that `sudo` is missing for a while because sudo-rs
   replaces it: attach before and keep the connection open; if a login fails,
-  wait, do not reboot. README-fork.md ("Logging in during the release
-  upgrades") and README.md describe it.
+  wait, do not reboot. It also says so before a reboot after which a release
+  upgrade starts by itself, and in the motd while one is to come.
+  README-fork.md ("Logging in during the release upgrades") and README.md
+  describe it.
 * Tests: `tests/fork/smoke.py` marks every mail it sends with the header
   `X-Miab-Test: 1`. The manifest comparison (`mig-folders-<user>`,
   `mig-pop3-uidl-<user>`) ignores marked mails and the automatic replies

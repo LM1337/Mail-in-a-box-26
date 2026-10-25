@@ -2737,6 +2737,10 @@ motd_hint() { # [offline|after-setup|verify-failed]
 		verify-failed) how="Mail runs again, but the final checks FAILED: see --status, then run it again or --finish." ;;
 		*) how="Mail is offline. The upgrade continues on its own after each reboot." ;;
 	esac
+	local next
+	if [ "${1:-offline}" = offline ] && next=$(next_release); then
+		how+=$'\n'$(release_access_text "$next" reboot)
+	fi
 	motd_remove
 	if [ ! -e "$MOTD_FILE" ]; then state_set MOTD_CREATED 1; fi
 	cat >> "$MOTD_FILE" <<EOF
@@ -2810,7 +2814,14 @@ reboot_and_resume() {
 	say "Log in again in a few minutes and follow it with:"
 	say "  sudo tmux attach -t $TMUX_SESSION     (detach: Ctrl-b d)"
 	say "  tail -f $LOG_FILE"
-	say "If the machine does not come back on the network, use the provider's console."
+	local next line
+	if next=$(next_release); then
+		while IFS= read -r line; do say "$line"; done < <(release_access_text "$next" reboot)
+		say "If the machine does not come back on the network at all, look at the provider's console;"
+		say "do not reboot it while the release upgrade runs."
+	else
+		say "If the machine does not come back on the network, use the provider's console."
+	fi
 	if [ -z "$ASSUME_YES" ]; then
 		for i in 10 9 8 7 6 5 4 3 2 1; do
 			printf '\rRebooting in %2d seconds (Ctrl-C stops; run the command again to continue)... ' "$i" > /dev/tty 2> /dev/null || true
@@ -2958,30 +2969,77 @@ or restore from the backups."
 	release_done "$phase" "$to"
 }
 
-# What the operator runs into during a release upgrade. In the 22.04 test
-# run new SSH logins failed for about 19 minutes from 22.04 to 24.04 (while
+# What the operator runs into during a release upgrade. In the 22.04 test run
+# new SSH logins failed for about 19 minutes from 22.04 to 24.04 (while
 # openssh-server was unpacked but not yet configured) and for about 7 minutes
 # from 24.04 to 26.04, and /usr/bin/sudo was missing for about 12 minutes
 # while sudo-rs replaced sudo. Open connections and the run in tmux go on.
-release_access_note() { # TO
-	local mins=20
-	if [ "$1" = 26.04 ]; then mins=10; fi
-	say
-	say "During the release upgrade new SSH logins can fail for a while (about $mins minutes on a test"
-	say "box), while the SSH server is replaced. Connections that are open stay open, and the upgrade"
-	if [ -n "$RESUMED" ] || in_multiplexer; then
-		say "goes on in tmux. To watch it, attach now (sudo tmux attach -t $TMUX_SESSION) and keep that"
-		say "connection open."
+# WHEN: now (the release upgrade starts now) or reboot (it starts by itself
+# after this reboot, before anyone can attach). Also in the motd.
+release_access_text() { # TO now|reboot
+	local mins=19 attach
+	if [ "$1" = 26.04 ]; then mins=7; fi
+	if [ "$2" = reboot ]; then
+		echo "After the reboot the release upgrade to Ubuntu $1 starts by itself. While it replaces the"
+		echo "SSH server, new SSH logins can fail for a while (about $mins minutes in a test run)."
+		echo "If a login fails, wait a few minutes and try again. Do not reboot."
 	else
-		say "goes on. Keep this connection open."
+		echo "During the release upgrade new SSH logins can fail for a while (about $mins minutes in a test"
+		echo "run), while the SSH server is replaced. Connections that are open stay open, and the upgrade"
+		if attach=$(own_session_attach); then
+			echo "goes on in the session $TMUX_SESSION. To watch it, attach now and keep that connection"
+			echo "open: $attach"
+		elif in_multiplexer; then
+			echo "goes on in your own tmux, screen or mosh session. Keep this connection open (if it drops,"
+			echo "reattach to your session)."
+		else
+			echo "goes on. Keep this connection open."
+		fi
+		echo "If a new login fails, wait a few minutes and try again. Do not reboot."
 	fi
-	say "If a new login fails, wait a few minutes and try again. Do not reboot."
 	if [ "$1" = 26.04 ]; then
-		say "sudo is missing for about 15 minutes while sudo-rs replaces it: \"sudo tmux attach\" then"
-		say "fails with \"command not found\". Wait until it is back, or use a root shell opened before"
-		say "(sudo -i)."
+		echo "sudo is missing for a while (about 12 minutes in a test run) while sudo-rs replaces it:"
+		if [ "$2" = reboot ]; then
+			echo "\"sudo tmux attach\" then fails with \"command not found\". Wait until it is back."
+		else
+			echo "\"sudo tmux attach\" then fails with \"command not found\". Wait until it is back, or use a"
+			echo "root shell opened before (sudo -i)."
+		fi
 	fi
+}
+
+release_access_note() { # TO
+	local line
 	say
+	while IFS= read -r line; do say "$line"; done < <(release_access_text "$1" now)
+	say
+}
+
+# The command that attaches to this run, when it runs in the tool's own
+# session (not when the operator started it in a tmux or screen session of
+# their own, or under mosh).
+own_session_attach() {
+	[ -n "$RESUMED${MIAB_2604_MUX:-}" ] || return 1
+	if [ -n "${TMUX:-}" ]; then
+		echo "sudo tmux attach -t $TMUX_SESSION"
+	elif [ -n "${STY:-}" ]; then
+		echo "sudo screen -d -r $TMUX_SESSION"
+	else
+		return 1
+	fi
+}
+
+# The release upgrade that comes next (24.04 or 26.04), if one is still to come.
+next_release() {
+	local cur
+	cur=$(os_version)
+	if ! phase_is_done release_2404 && [ "$cur" = 22.04 ]; then
+		echo 24.04
+	elif ! phase_is_done release_2604 && [ "$cur" = 24.04 ]; then
+		echo 26.04
+	else
+		return 1
+	fi
 }
 
 phase_release_2404() { release_upgrade release_2404 22.04 24.04; }
