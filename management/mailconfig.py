@@ -90,15 +90,30 @@ def is_dcv_address(email):
 	email = email.lower()
 	return any(email.startswith((localpart + "@", localpart + "+")) for localpart in ("admin", "administrator", "postmaster", "hostmaster", "webmaster", "abuse"))
 
+class _ClosingCursor(sqlite3.Cursor):
+	# Closes its connection when the cursor is freed, which happens as soon as
+	# the function that opened the database returns (the cursor is in no
+	# reference cycle). Since Python 3.11 a connection is only freed by the
+	# cyclic garbage collector: every call left users.sqlite open until a
+	# collection ran, and the daemon, which runs for weeks, ran out of file
+	# descriptors (1024) after a few hundred API calls and then answered
+	# every request with 500 ("unable to open database file"). An open
+	# transaction of a write that returned without commit() is rolled back.
+	def __del__(self):
+		try:
+			self.connection.close()
+		except Exception:
+			pass
+
 def open_database(env, with_connection=False):
-	# Since Python 3.11 a connection is only freed by the cyclic garbage
-	# collector, which can take minutes in the daemon. A write that returns
-	# without commit() must close() the connection: its open transaction
-	# keeps users.sqlite locked for every other writer until then.
+	# Callers keep the cursor (and the connection) in local variables only:
+	# the connection is closed with the cursor (_ClosingCursor). A write that
+	# returns without commit() should still close() the connection, so that
+	# its transaction does not depend on when the cursor is freed.
 	conn = sqlite3.connect(env["STORAGE_ROOT"] + "/mail/users.sqlite")
 	if not with_connection:
-		return conn.cursor()
-	return conn, conn.cursor()
+		return conn.cursor(_ClosingCursor)
+	return conn, conn.cursor(_ClosingCursor)
 
 def get_mail_users(env):
 	# Returns a flat, sorted list of all user accounts.
