@@ -258,6 +258,8 @@ find_self_repo() {
 find_miab_dir() {
 	local d c
 	d=$(sed -nE 's|^cd (/[A-Za-z0-9._/-]+)$|\1|p' /usr/local/bin/mailinabox 2> /dev/null | head -n 1 || true)
+	# No "." or ".." parts: root_only_path checks the path as written.
+	if [[ /$d/ == */./* || /$d/ == */../* ]]; then d=; fi
 	for c in "$d" /root/mailinabox; do
 		[ -n "$c" ] && [ -d "$c/.git" ] && [ -f "$c/management/status_checks.py" ] || continue
 		if ! root_only_path "$c"; then
