@@ -637,7 +637,10 @@ show("EXPECTED changes", expected)
 show("Changes of values that change by themselves (not judged)", info)
 if missing:
     w("Recorded only once (not compared): %s\n" % ", ".join(missing))
-w("RESULT: %s - %d unexpected, %d expected changes\n" % ("OK" if not unexpected else "CHANGED", len(unexpected), len(expected)))
+if os.environ.get("UC_NOT_JUDGED"):
+    w("Not judged: %d changes that no list names, %d expected changes\n" % (len(unexpected), len(expected)))
+else:
+    w("RESULT: %s - %d unexpected, %d expected changes\n" % ("OK" if not unexpected else "CHANGED", len(unexpected), len(expected)))
 sys.exit(1 if unexpected else 0)
 PY
 }
@@ -713,7 +716,7 @@ do_after() {
 	else
 		say "Expected changes from: $(printf '%s ' "${rules[@]}")"
 	fi
-	UC_INFO_FILES=$INFO_FILES compare_states "$RUN_DIR/before" "$RUN_DIR/after" "${rules[@]+"${rules[@]}"}" \
+	UC_INFO_FILES=$INFO_FILES UC_NOT_JUDGED=$not_judged compare_states "$RUN_DIR/before" "$RUN_DIR/after" "${rules[@]+"${rules[@]}"}" \
 		| tee "$RUN_DIR/after/changes.txt" || rc=$?
 	[ "$rc" -le 1 ] || die "Could not compare the states (exit code $rc, see above)."
 	section "Log audit of the update"
