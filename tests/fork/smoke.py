@@ -2371,7 +2371,7 @@ def c_fail2ban_log_rotation(ctx):
     out = out.strip()
     if rc != 0:
         raise Fail("rotation of mail.log failed: %s %s" % (out[:200], err.strip()[:200]))
-    m = re.search(r"dovecot=(\S*) ?rsyslog=(\d+) owner=(.*)$", out)
+    m = re.search(r"dovecot=(\S*)\s+rsyslog=(\d+) owner=(.*)$", out)
     if not m:
         raise Fail("unexpected output: %s" % out[:200])
     dov, rs, owner = m.group(1), int(m.group(2)), m.group(3)
