@@ -232,6 +232,14 @@ contacts of new users again (B99).
   stays in `/root/upgrade-2604`, as the tool already said to copy it off the
   machine. A `file://` target whose path only root can change gets the copy
   as before (B90).
+* Tools: for an rsync backup target, `tools/upgrade-in-place-to-2604.sh`
+  (and the new `tools/update-check.sh backup`) no longer passes the host
+  and path from `custom.yaml` unchecked to ssh and rsync as root: a host or
+  path that starts with "-" (an option such as `-oProxyCommand=...`) or has
+  other characters than letters, digits, `.`, `_`, `-` (and `@` between user
+  and host) stops the tool, which names `--no-offsite` (`--no-upload`).
+  `custom.yaml` lies below `$STORAGE_ROOT`, which the user-data account can
+  change; current OpenSSH refused the resulting command line anyway (B102).
 * Management: the daemon no longer runs out of file descriptors. Each API
   call left `users.sqlite` open (1 to about 90 times per call); after a few
   hundred calls the daemon reached its limit of 1024 open files and

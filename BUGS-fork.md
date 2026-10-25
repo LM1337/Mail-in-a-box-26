@@ -153,6 +153,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B99](#b99) | high | Z-Push | ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push | PR #2603 | no | yes | rc7 |
 | [B100](#b100) | high | Tools | The fallback SSH server of the in-place tool never starts on a box without the group admin | Fork | no | no | rc7 |
 | [B101](#b101) | medium | Tools | The fallback SSH server of the in-place tool logs in with a key alone where sshd asks for more, and listens on all addresses | Fork | no | no | rc7 |
+| [B102](#b102) | low | Tools | The in-place tool passes the host of an rsync backup target to ssh unchecked, so a leading "-" is read as an option | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1283,6 +1284,18 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork. Only boxes with such sshd settings; the default configuration of Ubuntu (keys or passwords, all addresses, no Match block) was not affected.
 * **Evidence:** from reading the code; on the rc7 test box `sshd -T` printed `permitrootlogin prohibit-password` and `sshd -T -C addr=192.0.2.5` `no` for a `Match Address 192.0.2.0/24` block. With the fix on that box: `--ssh-fallback-test` with the default configuration wrote `ListenAddress [::]:1022` and `0.0.0.0:1022`, a key login on port 1022 worked, and the end of the test stopped the server, closed the ufw rule and removed its files; with a `Match` block in `sshd_config.d` it refused with the warning (removed again afterwards). The checks of `AuthenticationMethods` (any, `publickey,keyboard-interactive`, `publickey,password publickey`) and `PubkeyAuthentication no` were run against the function with a stubbed `sshd -T`.
 * **Found by:** rc7 review; **commit:** see `git log --grep B101`; **fixed in:** v78-r2604.0-rc7
+
+### B102
+
+**The in-place tool passes the host of an rsync backup target to ssh unchecked, so a leading "-" is read as an option** (low, Tools)
+
+* **Symptom:** None in normal operation. For an rsync backup target, phase snapshot of `tools/upgrade-in-place-to-2604.sh` runs `ssh ... USER@HOST "mkdir -p PATH-system/STAMP"` and then rsync as root, with USER@HOST and PATH taken from `$STORAGE_ROOT/backup/custom.yaml`. A target such as `rsync://-oProxyCommand=.../x` makes ssh read the host as an option.
+* **Cause:** `offsite_rsync` checked the characters of the path only, and neither path nor host for a leading "-". `custom.yaml` lies below `$STORAGE_ROOT`, which belongs to the user-data account: that account can rename `backup/` and put its own `custom.yaml` there (the same threat as B90). The control panel does not save such a target, because its own rsync check fails on it.
+* **Impact:** Low. OpenSSH 9.6 and later (and the patched OpenSSH of Ubuntu) refuse the destination that follows such an option, `"mkdir -p ..."`, with "hostname contains invalid characters" before they run a ProxyCommand or open a log file of `-E`, and the tool stops there; an OpenSSH without that check would run the ProxyCommand as root. It needs code running as user-data and the moment of the snapshot.
+* **Fix:** The host must be `[user@]host` of letters, digits, `.`, `_` and `-`, each part starting with a letter, digit or `_`, and the path must not start with "-"; otherwise the tool stops and names `--no-offsite`. ssh gets `--` before the host. The new `tools/update-check.sh backup` (rc7) checks the same and had allowed a leading "-" in its first version.
+* **Affects:** the fork rc3 to rc6 (the in-place tool). Origin: Fork. A target with an IPv6 address in brackets, which the tool did not handle before either, is now refused with that message.
+* **Evidence:** from reading the code. On OpenSSH 10.2 (26.04): `ssh ... "-oProxyCommand=touch pwned" "mkdir -p box-system/x"` and `ssh ... -Elnk "mkdir -p ..."` both ended with "hostname contains invalid characters"; no file was created, and the target of the symlink `lnk` was not written. The new checks accept `u123456@u123456.your-storagebox.de`, `backup@10.0.0.5` and `host.example` and refuse `-Evmlinuz`, `-oProxyCommand=...`, `u@-o...`, names with spaces and a path `-rf`. The OpenSSH builds of 22.04 and 24.04 were not tried.
+* **Found by:** rc7 review (in `tools/update-check.sh`, then the same code in the in-place tool); **commit:** see `git log --grep B102`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

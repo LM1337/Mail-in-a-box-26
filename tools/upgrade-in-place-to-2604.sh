@@ -2193,13 +2193,17 @@ offsite_rsync() { # URL FILE... (the first FILE names the stamp)
 	fi
 	path=${path%/}
 	dest=${path:-mailinabox}-system/$stamp
-	[[ $dest =~ ^[A-Za-z0-9._/~+-]+$ ]] || die "Unexpected characters in the backup path '$path'. Use --no-offsite and copy the archive yourself."
+	# The target comes from custom.yaml below $STORAGE_ROOT, which the
+	# user-data account can replace: nothing of it may reach ssh or rsync as
+	# an option (a leading "-", e.g. -oProxyCommand=...) or as shell syntax (B102).
+	[[ $dest =~ ^[A-Za-z0-9._/~+][A-Za-z0-9._/~+-]*$ ]] || die "Unexpected characters in the backup path '$path'. Use --no-offsite and copy the archive yourself."
+	[[ $userhost =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*(@[A-Za-z0-9_][A-Za-z0-9._-]*)?$ ]] || die "Unexpected characters in the backup host '$userhost'. Use --no-offsite and copy the archive yourself."
 	[ -f /root/.ssh/id_rsa_miab ] || die "/root/.ssh/id_rsa_miab (the backup SSH key) is missing."
 	local ssh=(ssh -p "$port" -i /root/.ssh/id_rsa_miab -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
 	rsh="ssh -p $port -i /root/.ssh/id_rsa_miab -oBatchMode=yes -oStrictHostKeyChecking=accept-new -oConnectTimeout=30"
 	say "Copying the encrypted archive to $userhost:$dest/ (port $port)..."
 	# One command, no shell syntax: restricted shells (e.g. SFTP/rsync-only storage accounts) run it as well.
-	"${ssh[@]}" "$userhost" "mkdir -p $dest" < /dev/null || die "Could not create $dest on $userhost."
+	"${ssh[@]}" -- "$userhost" "mkdir -p $dest" < /dev/null || die "Could not create $dest on $userhost."
 	rsync -t --partial -e "$rsh" "$@" "$userhost:$dest/" < /dev/null || die "Could not copy the archive to $userhost:$dest/."
 	out=$(rsync -anc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \
 		|| die "Could not compare the copy on $userhost:$dest/."
