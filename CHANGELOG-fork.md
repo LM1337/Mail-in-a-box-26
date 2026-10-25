@@ -96,7 +96,7 @@ and the mailinabox and munin units are enabled by name (B69).
   `etc-report.txt`). Setup enables a disabled service before it restarts it
   (and nsd), so the next setup run heals a box upgraded with rc3 (B67).
 * System: on machines where cloud-init writes `/etc/hosts` on every boot
-  (`manage_etc_hosts`, e.g. Proxmox and the images of hosting providers),
+  (`manage_etc_hosts`, e.g. hypervisors and the images of hosting providers),
   the 127.0.1.1 line with another machine's name that setup comments out
   came back after each reboot. Setup now also puts the box's name on the
   127.0.1.1 line of cloud-init's template

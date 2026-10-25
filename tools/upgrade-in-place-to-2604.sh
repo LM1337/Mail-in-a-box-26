@@ -1570,7 +1570,7 @@ is_ubuntu_uri() {
 		ppa.launchpad.net | ppa.launchpadcontent.net | private-ppa.launchpadcontent.net) return 1 ;;
 		ubuntu.com | *.ubuntu.com | *.canonical.com) return 0 ;;
 	esac
-	# Mirrors (e.g. http://mirror.hetzner.com/ubuntu/packages): the Release file
+	# Mirrors (e.g. http://mirror.example.net/ubuntu/packages): the Release file
 	# that apt downloaded from there names its origin. apt names it after the
 	# URI without the scheme, "/" replaced by "_".
 	local mangled rel
@@ -2129,7 +2129,7 @@ offsite_rsync() { # URL FILE... (the first FILE names the stamp)
 	local ssh=(ssh -p "$port" -i /root/.ssh/id_rsa_miab -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
 	rsh="ssh -p $port -i /root/.ssh/id_rsa_miab -oBatchMode=yes -oStrictHostKeyChecking=accept-new -oConnectTimeout=30"
 	say "Copying the encrypted archive to $userhost:$dest/ (port $port)..."
-	# One command, no shell syntax: restricted shells (e.g. Hetzner Storage Box) run it as well.
+	# One command, no shell syntax: restricted shells (e.g. SFTP/rsync-only storage accounts) run it as well.
 	"${ssh[@]}" "$userhost" "mkdir -p $dest" < /dev/null || die "Could not create $dest on $userhost."
 	rsync -t --partial -e "$rsh" "$@" "$userhost:$dest/" < /dev/null || die "Could not copy the archive to $userhost:$dest/."
 	out=$(rsync -anc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \

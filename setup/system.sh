@@ -31,7 +31,7 @@ if awk -v h="$PRIMARY_HOSTNAME" -v s="${PRIMARY_HOSTNAME%%.*}" \
 	echo "$HOSTS_NEW" > /etc/hosts
 fi
 
-# cloud-init (images of Proxmox and of many hosting providers) can write /etc/hosts
+# cloud-init (images of hypervisors and of many hosting providers) can write /etc/hosts
 # again on every boot (manage_etc_hosts), from /etc/cloud/templates/hosts.debian.tmpl
 # with its own name of the machine on the 127.0.1.1 line, and the line above came
 # back. Where that happened (the commented-out line above), the template's 127.0.1.1
