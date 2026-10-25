@@ -24,8 +24,9 @@ setup no longer sources or unpacks anything as root by a fixed name in
 directories of other accounts (B86, B87, B90, B98). The management daemon
 no longer runs out of file descriptors (B91), and ActiveSync syncs the
 contacts of new users again (B99). The review of the merged release found
-B100 to B105 in the new fallback SSH server, the update tools and the log
-audit, and B102 in the in-place tool's copy to an rsync target (all fixed).
+B100, B101 and B103 to B105 in the new fallback SSH server, the update
+tools and the log audit, and B102 in the in-place tool's copy to an rsync
+target (all fixed).
 
 ### New
 
@@ -382,6 +383,13 @@ Seen in the rc7 work, not done:
 * The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
   not installed (nginx 404).
 * `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
+* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
+  `management/backup.py` and `management/dns_update.py` still write
+  `custom.yaml` as root with `open(..., "w")` (B87 covers only
+  `settings.yaml`), and the backup (also `tools/update-check.sh backup`)
+  reads its target and `secret_key.txt` there by path. An account that can
+  replace `backup/` could point the backups to a server of its own with a
+  passphrase it knows.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 
