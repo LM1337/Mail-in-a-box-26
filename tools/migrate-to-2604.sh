@@ -3280,7 +3280,10 @@ check_summary() {
 	if [ ${#all[@]} -eq 0 ]; then
 		say "No blockers found. Nothing was changed on either machine."
 		say "Start the migration with:"
-		say "  $SELF --from $FROM${SSH_KEY:+ --ssh-key $SSH_KEY}${SSH_PORT:+ --ssh-port $SSH_PORT}${SKIP_NETWORK_CHECKS:+ --skip-network-checks}"
+		# The options of this check without --check (B113), quoted for the shell.
+		local cmd
+		cmd=$(printf ' %q' "$SELF" "${START_ARGS[@]+"${START_ARGS[@]}"}")
+		say " $cmd"
 		exit 0
 	fi
 	say "These must be fixed first:"
@@ -3340,6 +3343,22 @@ main() {
 			-h | --help) usage; exit 0 ;;
 			*) die "Unknown option $1. See --help." ;;
 		esac
+	done
+	# The command line without --check / --dry-run, for check_summary.
+	START_ARGS=()
+	local i=0 a
+	while [ "$i" -lt ${#orig_args[@]} ]; do
+		a=${orig_args[$i]}
+		case "$a" in
+			--check | --dry-run) ;;
+			--from | --from-backup | --backup-key | --ssh-key | --ssh-port | --hostname | --public-ip | --public-ipv6 \
+				| --private-ip | --private-ipv6 | --storage-root | --bwlimit | --redo-from)
+				START_ARGS+=("$a" "${orig_args[$((i + 1))]}")
+				i=$((i + 1))
+				;;
+			*) START_ARGS+=("$a") ;;
+		esac
+		i=$((i + 1))
 	done
 	if [ "$OPT_PUBLIC_IPV6" = none ]; then
 		die "--public-ipv6 none is not supported: setup always uses the IPv6 address it detects

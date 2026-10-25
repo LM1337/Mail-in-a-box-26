@@ -164,6 +164,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B110](#b110) | low | Tools | update-check.sh after judges an in-place upgrade or a migration from upstream by the lists of the fork's updates | Fork | no | no | rc7 |
 | [B111](#b111) | low | Tools | The test of the fallback SSH server leaves an empty /root/upgrade-2604 | Fork | no | no | rc7 |
 | [B112](#b112) | low | Tools | The fallback SSH server refuses new logins for up to 10 s after the release upgrade stops ssh.service | Fork | no | no | rc7 |
+| [B113](#b113) | low | Tools | migrate-to-2604.sh --check proposes a start command without the options it was given | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1416,6 +1417,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The in-place test T4 of rc7: ssh.service stopped at 20:28:49, the failed login with the message above at 20:28:50, the directory back at 20:28:59. With the fix, on the fresh-install test box during `--ssh-fallback-test`: `/run/sshd` removed by hand was back within 0.5 s.
 * **Found by:** rc7 certification (T4); **commit:** see `git log --grep B112`; **fixed in:** v78-r2604.0-rc7
+
+### B113
+
+**migrate-to-2604.sh --check proposes a start command without the options it was given** (low, Tools)
+
+* **Symptom:** `tools/migrate-to-2604.sh --check --from admin@192.0.2.10 --public-ip 192.0.2.11 --public-ipv6 2001:db8::11 --private-ip 192.0.2.11 --skip-network-checks` ends with "Start the migration with: .../migrate-to-2604.sh --from admin@192.0.2.10 --skip-network-checks". Whoever copies that line migrates with the addresses that setup detects instead of the given ones. With `--from-backup` the line says `--from` with nothing after it.
+* **Cause:** The line was put together from `--from`, `--ssh-key`, `--ssh-port` and `--skip-network-checks` only.
+* **Fix:** It repeats the command line of the check without `--check` (or `--dry-run`), each argument quoted for the shell.
+* **Affects:** rc4 to rc6 (the line is new in rc4). Origin: Fork.
+* **Evidence:** The migration test T2 of rc6 and of rc7: the check log ends with the short command above.
+* **Found by:** rc7 certification (T2; first seen in T2 of rc6); **commit:** see `git log --grep B113`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

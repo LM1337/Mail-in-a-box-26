@@ -352,6 +352,11 @@ in-place tool's copy to an rsync target (all fixed).
   server needs, within 2 s after the release upgrade stops ssh.service (it
   looked every 10 s, and new logins on port 1022 failed meanwhile). Its
   texts give the outage times of the rc7 tests (B112).
+* Tools: `tools/migrate-to-2604.sh --check` proposes the start command with
+  all options of the check (`--public-ip`, `--public-ipv6`,
+  `--private-ip`, `--hostname`, ...); it named only `--from`, the SSH options
+  and `--skip-network-checks`, and `--from` with nothing after it for
+  `--from-backup` (B113).
 
 ### Changed
 
