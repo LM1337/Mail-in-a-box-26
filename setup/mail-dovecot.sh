@@ -52,11 +52,20 @@ apt_install \
 # See here for discussion:
 # - https://www.dovecot.org/list/dovecot/2012-August/137569.html
 # - https://www.dovecot.org/list/dovecot/2011-December/132455.html
+## `log_path=syslog` (Dovecot's default): Dovecot logs through syslog
+# (facility mail), and rsyslog writes /var/log/mail.log, where the fail2ban
+# jails, management/mail_log.py and the fail2ban report read it. Upstream set
+# log_path=/var/log/mail.log (fac8477): Dovecot's log process, which runs as
+# root, then opened that file itself, by name and following symlinks, in
+# /var/log, which the group syslog may write; and after the weekly rotation
+# it went on writing mail.log.1, so the Dovecot jails saw no failed login
+# until Dovecot restarted (B85). rsyslog (user syslog) follows the rotation:
+# logrotate's rsyslog entry tells it to reopen its files.
 tools/editconf.py /etc/dovecot/conf.d/10-master.conf \
     default_client_limit="$(($(nproc) * 1250))" \
 	default_process_limit="$(($(nproc) * 250))" \
 	default_vsz_limit="$(($(free -tm  | tail -1 | awk '{print $2}') / 3))M" \
-	log_path=/var/log/mail.log
+	log_path=syslog
 
 # The inotify `max_user_instances` default is 128, which constrains
 # the total number of watched (IMAP IDLE push) folders by open connections.
@@ -282,16 +291,16 @@ ufw_allow sieve
 # Restart services.
 restart_service dovecot
 
-# Dovecot writes /var/log/mail.log itself (log_path above) and keeps the file
-# open. logrotate's rsyslog entry only tells rsyslog to reopen it, so after the
-# weekly rotation Dovecot went on writing into mail.log.1 until it restarted,
-# and the fail2ban jails dovecot and miab-slow-dovecot, which read mail.log,
-# saw none of its failed logins (B85). A path unit watches for the rotation and
-# has Dovecot reopen its log once rsyslog has created the new mail.log (see
-# management/dovecot_log_reopen.sh). Not an edit of /etc/logrotate.d/rsyslog:
-# that file belongs to the rsyslog package.
-mkdir -p /usr/local/lib/mailinabox
-install -o root -g root -m 0755 management/dovecot_log_reopen.sh /usr/local/lib/mailinabox/dovecot-log-reopen
-cp --remove-destination conf/mailinabox-dovecot-log-reopen.service /lib/systemd/system/mailinabox-dovecot-log-reopen.service
-install_unit mailinabox-dovecot-log-reopen.path
-hide_output systemctl restart mailinabox-dovecot-log-reopen.path
+# Test versions of rc6 (never released) had a path unit run "doveadm log
+# reopen" after each rotation of mail.log (B85). Dovecot no longer writes a
+# file of its own, so remove it from boxes that ran one of them.
+if [ -e /lib/systemd/system/mailinabox-dovecot-log-reopen.path ] || [ -e /lib/systemd/system/mailinabox-dovecot-log-reopen.service ] \
+		|| [ -e /usr/local/lib/mailinabox/dovecot-log-reopen ]; then
+	systemctl disable --now mailinabox-dovecot-log-reopen.path > /dev/null 2>&1 || true
+	systemctl stop mailinabox-dovecot-log-reopen.service > /dev/null 2>&1 || true
+	rm -f /lib/systemd/system/mailinabox-dovecot-log-reopen.path /lib/systemd/system/mailinabox-dovecot-log-reopen.service \
+		/etc/systemd/system/mailinabox-dovecot-log-reopen.path /etc/systemd/system/paths.target.wants/mailinabox-dovecot-log-reopen.path \
+		/usr/local/lib/mailinabox/dovecot-log-reopen
+	systemctl daemon-reload
+	systemctl reset-failed mailinabox-dovecot-log-reopen.service > /dev/null 2>&1 || true
+fi

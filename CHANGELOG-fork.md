@@ -16,16 +16,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Fixes from the in-place test from 22.04 of rc5, from the test runs of rc6
 and from the log audit and smoke tests of its certification runs. Security:
 after the weekly rotation of `mail.log` the fail2ban jails for IMAP, POP3
-and ManageSieve banned nobody until Dovecot restarted; Dovecot now follows
-the rotation. Munin's alerts reach the administrator for the first time.
-The tools show their run in the terminal, also through `curl | sudo bash`,
-and say that SSH logins, sudo and `tmux attach` fail for a while in the
-release upgrades. Setup waits for the apt lock of Ubuntu's daily jobs,
-pauses cron while it runs, restarts nsd when its configuration changed,
-and no longer grows `10-ssl.conf`; logrotate works again on boxes upgraded
-in place, Postfix no longer delays its greeting after an unlucky restart,
-and spampd leaves no stale PID file. Roundcube and Nextcloud show the
-fork's favicon. New test tool: `tests/fork/log-audit.sh`.
+and ManageSieve banned nobody until Dovecot restarted; Dovecot now logs
+through syslog, and rsyslog follows the rotation. Munin's alerts reach the
+administrator for the first time. The tools show their run in the
+terminal, also through `curl | sudo bash`, and say that SSH logins, sudo
+and `tmux attach` fail for a while in the release upgrades. Setup waits
+for the apt lock of Ubuntu's daily jobs, pauses cron while it runs,
+restarts nsd when its configuration changed, and no longer grows
+`10-ssl.conf`; logrotate works again on boxes upgraded in place, Postfix
+no longer delays its greeting after an unlucky restart, and spampd leaves
+no stale PID file. Roundcube and Nextcloud show the fork's favicon. New
+test tool: `tests/fork/log-audit.sh`.
 
 ### New
 
@@ -51,9 +52,14 @@ fork's favicon. New test tool: `tests/fork/log-audit.sh`.
   (`[in-place:release_2604]`), so that the allowlist accepts the noise of
   the old releases and the release upgrades only there.
   `tests/fork/log-audit-allow-old-box.txt` adds what the old box logs when
-  the migration tool stops it. The allowlist holds every class of the rc6
-  certification runs that was checked as harmless, with its reason; the
-  defects it found are B80 to B84. TESTING-fork.md describes it.
+  the migration tool stops it. The allowlist holds the classes of the rc6
+  certification runs that were checked as harmless, each with its reason,
+  except one rule that the final run needed from the test lab's own list
+  (see "Planned for rc7"); the defects it found are B80 to B84. Dovecot's
+  syslog lines (`dovecot: imap(...): ...`) get the class of Dovecot's
+  process, as its own lines in older files do, and its lines below warning
+  in the journal (failed logins of clients) are not findings.
+  TESTING-fork.md describes it.
 
 ### Fixed
 
@@ -139,21 +145,27 @@ fork's favicon. New test tool: `tests/fork/log-audit.sh`.
   daemon-reload. The resume script quotes the scope command with
   `printf %q`, so the description with its spaces reaches systemd-run as
   one argument (B84).
-* Dovecot: after a rotation of `/var/log/mail.log` Dovecot writes the new
-  file. It wrote into `mail.log.1` until its next restart (usually the
-  nightly backup), and in that time the fail2ban jails `dovecot` and
+* Dovecot: after a rotation of `/var/log/mail.log` Dovecot's lines go to
+  the new file. Dovecot wrote the file itself (`log_path`) and went on
+  writing into `mail.log.1` until its next restart (usually the nightly
+  backup); in that time the fail2ban jails `dovecot` and
   `miab-slow-dovecot` banned nobody: password guessing on IMAP, POP3 and
-  ManageSieve went unpunished. The path unit
-  `mailinabox-dovecot-log-reopen.path` watches `mail.log.1` and starts
-  `/usr/local/lib/mailinabox/dovecot-log-reopen` (from
-  `management/dovecot_log_reopen.sh`): it logs one line so that rsyslog
-  creates the new `mail.log` itself, and runs `doveadm log reopen` only if
-  that file is a regular file of rsyslog's user (`$FileOwner`), not a
-  symlink and with one link; otherwise it logs a warning and fails, which
-  shows in `systemctl --failed`. It does no file operation of its own in
-  `/var/log`. A first version, replaced before the release, created and
-  chowned the file as root in `/var/log`, which a symlink could have
-  redirected. Upstream bug since 2016 (B85).
+  ManageSieve went unpunished. Now Dovecot logs through syslog
+  (`log_path=syslog`, its default; facility mail), and rsyslog writes
+  `mail.log` and reopens it after each rotation, as for Postfix. No Dovecot
+  process opens a file in `/var/log` any more: before, Dovecot's log
+  process, which runs as root, opened `mail.log` by name and followed a
+  symlink there, in a directory that the group syslog may write.
+  `management/mail_log.py` reads the new form of the lines; the fail2ban
+  filters and the failed-login report already did. Two versions of this
+  fix were replaced before the release: the first created and chowned the
+  new `mail.log` as root in `/var/log`, which a symlink could have
+  redirected; the second had a path unit run `doveadm log reopen` after a
+  check of the file, and Dovecot then opened the path again as root, so
+  the check could be raced, and the group syslog could start that unit
+  at will. Setup removes that unit (`mailinabox-dovecot-log-reopen.path`
+  and `.service`, `/usr/local/lib/mailinabox/dovecot-log-reopen`) from
+  boxes that ran it. Upstream bug since 2016 (B85).
 
 ### Changed
 
@@ -179,8 +191,11 @@ fork's favicon. New test tool: `tests/fork/log-audit.sh`.
   the manifest. Manifests of earlier `seed-legacy.sh` runs still work.
   TESTING-fork.md describes it.
 * Tests: `tests/fork/smoke.py --fail2ban` rotates `mail.log` once before
-  the attacks (`fail2ban-log-rotation`) and checks that Dovecot and rsyslog
-  write the new file, so a jail that a rotation made blind fails (B85).
+  the attacks (`fail2ban-log-rotation`) and checks that rsyslog writes the
+  new file and that no Dovecot process holds a file in `/var/log`
+  (`log_path=syslog`; with Dovecot's own `log_path`, up to rc5, it must
+  hold the new `mail.log`), so a jail that a rotation made blind fails
+  (B85). `fail2ban-filters` has a Dovecot line in the syslog form.
 * Tests: `tests/fork/smoke.py` checks Munin's alert contact
   (`munin-alert-contact`), and `services-enabled` no longer reports a SysV
   service of 22.04 (postgrey) as not enabled. `prepare-testenv.sh` writes
@@ -202,12 +217,17 @@ fork's favicon. New test tool: `tests/fork/log-audit.sh`.
   `/var/lib/munin/limits` lists the states. Make sure that address reaches
   someone (it is an alias of the first administrator by default). A
   setting to change the address or turn the alerts off is planned for rc7.
-* Setup installs and starts `mailinabox-dovecot-log-reopen.path` (B85) and
-  restarts Dovecot, which then writes the current `mail.log`. Nothing to do
-  by hand. On a box whose `mail.log` was rotated since Dovecot's last
-  restart, the Dovecot lines of that time are in `mail.log.1`. Check after
-  the update: `systemctl is-active mailinabox-dovecot-log-reopen.path` says
-  `active`; after the next rotation `systemctl --failed` lists nothing.
+* Dovecot logs through syslog (B85); setup sets `log_path=syslog` and
+  restarts Dovecot. Nothing to do by hand. Its lines in `mail.log` now have
+  rsyslog's form, as Postfix's: `2026-10-25T13:00:00.123456+00:00 box
+  dovecot: imap-login: Logged in: user=<...>, ...` (time stamp, host,
+  `dovecot:`, no `Info:`); warnings and errors keep `Warning:` and `Error:`.
+  They are also in the journal (`journalctl -u dovecot`) and in
+  `/var/log/syslog`. Scripts or filters of your own that parse the old form
+  (`Oct 25 13:00:00 imap-login: Info: ...`) need the new one. On a box
+  whose `mail.log` was rotated since Dovecot's last restart, the Dovecot
+  lines of that time are in `mail.log.1`. Check after the update:
+  `doveconf -h log_path` says `syslog`.
 * Setup adds the systemd drop-in
   `/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf` (B81)
   and sets `pid /run/spampd.pid` in `/etc/spampd.cfg`. The in-place tool

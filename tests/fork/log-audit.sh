@@ -345,7 +345,7 @@ CORE_UNITS = ["postfix*", "dovecot*", "nginx*", "php*-fpm*", "spampd*", "opendki
 
 def journal(args):
     cmd = ["journalctl", "--no-pager", "-q", "-o", "json", "--since", "@%d" % SINCE,
-           "--output-fields=MESSAGE,SYSLOG_IDENTIFIER,_COMM,_SYSTEMD_UNIT,PRIORITY"] + args
+           "--output-fields=MESSAGE,SYSLOG_IDENTIFIER,_COMM,_SYSTEMD_UNIT,PRIORITY,_TRANSPORT"] + args
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     except OSError:
@@ -356,6 +356,19 @@ def journal(args):
         except ValueError:
             continue
     p.wait()
+
+# Dovecot logs through syslog (log_path=syslog, B85): "dovecot: imap(u)<1><s>:
+# Warning: ...". Its process is the program, as in the lines that Dovecot wrote
+# into mail.log itself before (and still in older files), so that one rule
+# covers both.
+RE_DOVECOT_INNER = re.compile(r"^(?P<prog>[a-z][\w-]*(?:\([^)\s]*\)|<[^>\s]*>|\[\d+\])*):\s(?P<msg>.*)$")
+
+def dovecot_inner(ident, msg):
+    if ident == "dovecot":
+        m = RE_DOVECOT_INNER.match(msg)
+        if m:
+            return prog_name(m.group("prog")), m.group("msg")
+    return ident, msg
 
 def jmsg(e):
     m = e.get("MESSAGE", "")
@@ -377,8 +390,16 @@ def scan_journal():
             msg = jmsg(e)
             if rx is not None and not rx.search(msg):
                 continue
-            seen.add(cur)
             ident = e.get("SYSLOG_IDENTIFIER") or e.get("_COMM") or e.get("_SYSTEMD_UNIT") or ""
+            # Dovecot's own syslog lines carry its level as the priority; below
+            # warning they are not findings (failed logins of clients, "auth
+            # failed"), as when Dovecot wrote mail.log itself. Its output on
+            # stderr (transport stdout) still goes through the error words.
+            if rx is not None and ident == "dovecot" and e.get("_TRANSPORT") == "syslog" \
+                    and str(e.get("PRIORITY", "6")).isdigit() and int(e.get("PRIORITY", "6")) > 4:
+                continue
+            seen.add(cur)
+            ident, msg = dovecot_inner(ident, msg)
             ts = int(e.get("__REALTIME_TIMESTAMP", "0")) // 1000000
             add("journal", ident, msg, "%s %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)), ident, msg),
                 phase_tag(ts))
@@ -472,7 +493,7 @@ def split_prog(rest):
     m = RE_SYSLOG_HEAD.match(rest)
     if not m:
         return "", rest
-    return prog_name(m.group("prog")), m.group("msg")
+    return dovecot_inner(prog_name(m.group("prog")), m.group("msg"))
 
 def files_of(path):
     """path plus its rotated files that changed in the window, oldest first"""

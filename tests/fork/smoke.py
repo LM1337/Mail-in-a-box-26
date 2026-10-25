@@ -1502,6 +1502,12 @@ F2B_FILTER_CASES = [
      "2026-10-24T10:00:00.123456+02:00 box dovecot: imap-login: Info: Login aborted: Connection closed "
      "(no auth attempts in 0 secs) (no_auth_attempts): rip=203.0.113.9, lip=192.0.2.11, TLS, session=<abc>",
      "203.0.113.9"),
+    # Through syslog (log_path=syslog, B85) Dovecot's lines have no "Info: ".
+    ("dovecotimap",
+     "2026-10-24T10:00:00.123456+02:00 box dovecot: pop3-login: Login aborted: Logged out "
+     "(auth failed, 1 attempts in 2 secs) (auth_failed): user=<bob@example.com>, method=PLAIN, rip=203.0.113.6, "
+     "lip=192.0.2.11, TLS, session=<abc>",
+     "203.0.113.6"),
     ("miab-management-daemon",
      "2026-10-24T10:00:00.123456+02:00 box start[1234]: [2026-10-24 10:00:00,123] WARNING in daemon: "
      "Mail-in-a-Box Management Daemon: Failed login attempt from ip 203.0.113.5 - timestamp 1792844266.505317",
@@ -2350,37 +2356,48 @@ logrotate -f "$conf"; rc=$?; rm -f "$conf"
 [ $rc = 0 ] || { echo "logrotate rc=$rc"; exit 1; }
 [ ! -e /var/log/mail.log ] || [ "$(stat -c %i /var/log/mail.log)" != "$ino" ] || { echo "mail.log was not rotated"; exit 1; }
 logger -p mail.info "smoke-rotation-$tok"
+# Up to rc5 (and in test versions of rc6) Dovecot wrote mail.log itself (log_path): it must then
+# write the new file. With log_path=syslog no Dovecot process may hold a file in
+# /var/log (rsyslog writes Dovecot's lines).
+lp=$(doveconf -h log_path 2> /dev/null)
 for i in $(seq 40); do
-	w=$(for p in $(pgrep -f 'dovecot/log'); do ls -l /proc/$p/fd 2> /dev/null | grep -o '/var/log/mail\.log[^ ]*'; done | sort -u | tr '\n' ' ')
+	w=$(for p in $(pgrep -f '^dovecot/|/usr/sbin/dovecot'); do ls -l /proc/$p/fd 2> /dev/null | grep -o '/var/log/[^ ]*'; done | sort -u | tr '\n' ' ')
 	r=$(grep -c "smoke-rotation-$tok" /var/log/mail.log 2> /dev/null)
-	[ "$w" = "/var/log/mail.log " ] && [ "${r:-0}" -ge 1 ] && break
+	if [ "$lp" = syslog ]; then [ "${r:-0}" -ge 1 ] && break
+	else [ "$w" = "/var/log/mail.log " ] && [ "${r:-0}" -ge 1 ] && break; fi
 	sleep 0.5
 done
-echo "dovecot=${w:-none} rsyslog=${r:-0} owner=$(stat -c '%U:%G %a' /var/log/mail.log 2> /dev/null)"
+echo "log_path=${lp:-unknown} dovecot=${w:-none} rsyslog=${r:-0} owner=$(stat -c '%U:%G %a' /var/log/mail.log 2> /dev/null)"
 """
 
 
 def c_fail2ban_log_rotation(ctx):
-    # The jails read /var/log/mail.log. After a rotation of it Dovecot (log_path)
-    # must write the new file at once, and rsyslog too; otherwise the Dovecot
-    # jails see no failed login until Dovecot restarts (B85). So rotate once
-    # before the attacks: a jail that went blind after a rotation then fails.
+    # The jails read /var/log/mail.log. After a rotation of it Dovecot's lines
+    # must go to the new file at once; otherwise the Dovecot jails see no failed
+    # login until Dovecot restarts (B85). Dovecot logs through syslog
+    # (log_path=syslog), so rsyslog writes them and no Dovecot process may hold
+    # a file in /var/log; with Dovecot's own log_path (up to rc5) it
+    # must hold the new mail.log. So rotate once before the attacks: a jail that
+    # went blind after a rotation then fails.
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
     rc, out, err = ctx.remote.run("bash -c %s smoke %s" % (shlex.quote(F2B_ROTATE_SCRIPT), ctx.tok), sudo=True, timeout=120)
     out = out.strip()
     if rc != 0:
         raise Fail("rotation of mail.log failed: %s %s" % (out[:200], err.strip()[:200]))
-    m = re.search(r"dovecot=(\S*)\s+rsyslog=(\d+) owner=(.*)$", out)
+    m = re.search(r"log_path=(\S*)\s+dovecot=(.*?)\s+rsyslog=(\d+)\s+owner=(.*)$", out)
     if not m:
         raise Fail("unexpected output: %s" % out[:200])
-    dov, rs, owner = m.group(1), int(m.group(2)), m.group(3)
-    if dov != "/var/log/mail.log":
-        raise Fail("20 s after a rotation Dovecot still writes %s, not the new /var/log/mail.log "
-                   "(the Dovecot jails would see no failed login, B85)" % (dov or "nothing"))
+    lp, dov, rs, owner = m.group(1), m.group(2).strip(), int(m.group(3)), m.group(4)
+    if lp == "syslog":
+        if dov != "none":
+            raise Fail("Dovecot logs through syslog, but its processes hold %s" % dov)
+    elif dov != "/var/log/mail.log":
+        raise Fail("20 s after a rotation Dovecot (log_path=%s) still writes %s, not the new /var/log/mail.log "
+                   "(the Dovecot jails would see no failed login, B85)" % (lp, dov or "nothing"))
     if rs < 1:
         raise Fail("rsyslog did not write the new /var/log/mail.log after the rotation (owner %s)" % owner)
-    return "rotated; Dovecot and rsyslog write the new mail.log (%s)" % owner
+    return "rotated; log_path=%s, rsyslog writes the new mail.log (%s)" % (lp, owner)
 
 
 def c_fail2ban_adaptive_toggle(ctx):

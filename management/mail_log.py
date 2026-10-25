@@ -327,8 +327,9 @@ def scan_mail_log_line(line, collector):
     """ Scan a log line and extract interesting data """
 
     # rsyslog on Ubuntu >= 24.04 writes RFC 3339 timestamps
-    # ("2026-10-22T22:01:23.217307+00:00"), while Dovecot (log_path) still
-    # writes "Oct 22 22:01:23". Accept both.
+    # ("2026-10-22T22:01:23.217307+00:00"). Dovecot wrote its own lines
+    # ("Oct 22 22:01:23 imap-login: Info: ...") until it logged through
+    # syslog (B85); older log files still have them. Accept both.
     m = re.match(r"(\w+[\s]+\d+ \d+:\d+:\d+|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?) ([\w]+ )?([\w\-/]+)[^:]*: (.*)", line)
 
     if not m:
@@ -336,6 +337,13 @@ def scan_mail_log_line(line, collector):
 
     date, _system, service, log = m.groups()
     collector["scan_count"] += 1
+
+    # Through syslog Dovecot's lines read "dovecot: imap-login: Logged in: ...":
+    # the service is the process name after "dovecot: ".
+    if service == "dovecot":
+        m = re.match(r"([a-z][\w\-]*)[^:\s]*: (.*)", log)
+        if m:
+            service, log = m.groups()
 
     # print()
     # print("date:", date)
@@ -479,8 +487,9 @@ def scan_dovecot_login_line(date, log, collector, protocol_name):
 
     # Dovecot 2.3 logs "Info: Login: user=<...>, method=PLAIN, rip=...", Dovecot 2.4
     # (Ubuntu 26.04) "Info: Logged in: user=<...>, method=PLAIN, rip=...". Both
-    # mechanisms of auth_mechanisms (PLAIN, LOGIN) count.
-    m = re.match(r"Info: (?:Login|Logged in): user=<(.*?)>, method=[A-Z0-9-]+, rip=(.*?),", log)
+    # mechanisms of auth_mechanisms (PLAIN, LOGIN) count. Through syslog there
+    # is no "Info: " (the level is the syslog priority).
+    m = re.match(r"(?:Info: )?(?:Login|Logged in): user=<(.*?)>, method=[A-Z0-9-]+, rip=(.*?),", log)
 
     if m:
         # TODO: CHECK DIT

@@ -150,9 +150,11 @@ Right after the update:
   each change of state of a watched value (warning, critical, back to ok)
   is mailed to administrator@ of the box's name. Make sure that address
   reaches someone.
-* **fail2ban after the log rotation.** From rc6 on, `systemctl is-active
-  mailinabox-dovecot-log-reopen.path` must say `active`: it keeps fail2ban's
-  Dovecot jails working after the weekly rotation of `mail.log` (B85).
+* **fail2ban after the log rotation.** From rc6 on, Dovecot logs through
+  syslog, and rsyslog writes its lines to `mail.log` (B85):
+  `doveconf -h log_path` must say `syslog`. fail2ban's Dovecot jails then
+  see failed IMAP, POP3 and ManageSieve logins also after the weekly
+  rotation of `mail.log`.
 
 ### Deutsch
 
@@ -218,10 +220,11 @@ Gleich nach dem Update:
   von Munin: Jeder Zustandswechsel eines überwachten Werts (Warnung,
   kritisch, wieder in Ordnung) geht per Mail an administrator@ des
   Box-Namens. Sicherstellen, dass diese Adresse jemanden erreicht.
-* **fail2ban nach der Log-Rotation.** Ab rc6 muss `systemctl is-active
-  mailinabox-dovecot-log-reopen.path` `active` sagen: Die Unit hält die
-  Dovecot-Jails von fail2ban nach der wöchentlichen Rotation von `mail.log`
-  funktionsfähig (B85).
+* **fail2ban nach der Log-Rotation.** Ab rc6 protokolliert Dovecot über
+  syslog, und rsyslog schreibt seine Zeilen in `mail.log` (B85):
+  `doveconf -h log_path` muss `syslog` sagen. Die Dovecot-Jails von
+  fail2ban sehen dann fehlgeschlagene Anmeldungen bei IMAP, POP3 und
+  ManageSieve auch nach der wöchentlichen Rotation von `mail.log`.
 
 
 Setup output / Ausgaben von setup

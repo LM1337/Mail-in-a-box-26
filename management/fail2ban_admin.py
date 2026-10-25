@@ -663,8 +663,9 @@ RE_TS_BSD = re.compile(rb"([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d)\s")
 # postfix (465 and 587 both log as postfix/submission/smtpd):
 #   warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=a@b
 RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-Fa-f:.]+)\]: SASL \S+ authentication failed: .*?(?:, sasl_username=(\S+))?\s*$")
-# Dovecot 2.4 (and 2.3 "Aborted login"/"Disconnected"):
-#   imap-login: Info: Login aborted: ... (auth failed, 3 attempts in 9 secs) (auth_failed): user=<a@b>, method=PLAIN, rip=192.0.2.1, lip=...
+# Dovecot 2.4 (and 2.3 "Aborted login"/"Disconnected"), through syslog without "Info: " (B85),
+# in older files written by Dovecot itself with it:
+#   dovecot: imap-login: Login aborted: ... (auth failed, 3 attempts in 9 secs) (auth_failed): user=<a@b>, method=PLAIN, rip=192.0.2.1, lip=...
 # The user name is logged unescaped, so the greedy user=<.*> takes the last rip= (see filter.d/dovecotimap.conf).
 RE_DOVECOT = re.compile(rb"(imap|pop3|managesieve|submission)-login: (?:Info: )?.*?\((?:auth failed|authorization failed|user disabled)(?:, (\d+) attempts)?[^)]*\)(?: \(\w+\))?: user=<(.*)>, (?:method=\S+, )?rip=([0-9A-Fa-f:.]+), lip=")
 
@@ -681,7 +682,7 @@ def _line_time(line, now):
 		return dt.timestamp()
 	m = RE_TS_BSD.match(line)
 	if m and m.group(1).decode() in MONTHS:
-		# Dovecot's own log lines: local time, no year.
+		# Dovecot's own log lines (before B85): local time, no year.
 		year = time.localtime(now).tm_year
 		parts = (MONTHS[m.group(1).decode()], int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
 		try:
