@@ -326,6 +326,10 @@ in-place tool's copy to an rsync target (all fixed).
   turned the alerts off. `log-audit.sh --smoke` accepts the two deliberate
   failed logins of `api-auth`; the default allowlist does not, so that real
   failed logins to the control panel stay visible on a production box.
+* Tools: `tools/update-check.sh mailcheck` reads the Received header of
+  an answer that came in over TLS. Postfix puts the TLS session and
+  "(No client certificate requested)" between the client and "by", and
+  the check said FAILED for a round trip that had worked (B107).
 
 ### Changed
 

@@ -925,7 +925,10 @@ for msg in msgs:
         continue  # the test mail itself (or a submission), not one that came back
     out["FOUND"] = "1"
     out["IN_USER"], out["IN_MAILBOX"], out["IN_UID"] = msg.get("user", "?"), msg.get("mailbox", "?"), msg.get("uid", "?")
-    m = re.match(r"from (\S+) \(([^)]*)\)\s+by \S+ \(Postfix\) with (\S+) id (\S+)", hop)
+    # Postfix puts comments between the client and "by": the TLS session
+    # ("(using TLSv1.3 with cipher ... (256/256 bits) ...)", one level of
+    # parentheses inside) and "(No client certificate requested)" (B107).
+    m = re.match(r"from (\S+) \(([^()]*)\)(?:\s+\((?:[^()]|\([^()]*\))*\))*\s+by \S+ \(Postfix\) with (\S+) id (\S+)", hop)
     if m:
         out["IN_FROM"] = "%s (%s)" % (m.group(1), m.group(2))
         out["IN_WITH"] = m.group(3)

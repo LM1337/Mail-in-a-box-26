@@ -157,6 +157,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B103](#b103) | medium | Tools | Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped | Fork | no | no | rc7 |
 | [B104](#b104) | medium | Tools | update-check.sh backup fails with two or more Docker volumes, after the Mail-in-a-Box backup | Fork | no | no | rc7 |
 | [B105](#b105) | low | Tests | Any local account can fake the setup marks in the journal, and the log audit then accepts its messages as setup noise | Fork | no | no | rc7 |
+| [B107](#b107) | medium | Tools | update-check.sh mailcheck reports FAILED when the mail comes back over TLS | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1332,6 +1333,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (the setup marks are new in rc7, never in a tag). Origin: Fork.
 * **Evidence:** On the fresh-install test box: a line with that identifier from root and one from the account nobody; `journalctl SYSLOG_IDENTIFIER=mailinabox-setup` listed both, with `_UID=0` only root's (test lines with another text, so that they mark no setup run).
 * **Found by:** rc7 review; **commit:** see `git log --grep B105`; **fixed in:** v78-r2604.0-rc7
+
+### B107
+
+**update-check.sh mailcheck reports FAILED when the mail comes back over TLS** (medium, Tools)
+
+* **Symptom:** The answer of the probe address comes back over port 25, passes the spam filter and is stored, and `tools/update-check.sh mailcheck` still shows "inbound: back after 15 s, from ? with ?" and "RESULT: FAILED". It happens with every answer that arrives with STARTTLS, which on the Internet is almost every one.
+* **Cause:** Postfix writes two comments between the client and `by` in its Received header: the TLS session (`(using TLSv1.3 with cipher ... (256/256 bits) ...)`, with parentheses inside) and `(No client certificate requested)`; setup turns them on (`smtpd_tls_received_header=yes`). The pattern of the tool expected `by` right after the first comment, so it found neither the protocol nor the queue ID, and the check for a delivery over port 25 failed.
+* **Fix:** The pattern skips any number of comments between the client and `by`, with one level of parentheses inside them.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The in-place test T3 and the update test T5b of rc7, with a test address on the peer box of the test network that answers over port 25: the stored answer had the Received header above (ESMTPS), the pattern gave no match in Python, and the same header without the TLS comments matched. With the fix, `mailcheck` on the T3 box: "from ... with ESMTPS (postfix/smtpd, port 25)" and "RESULT: OK".
+* **Found by:** rc7 certification (T3, T5b); **commit:** see `git log --grep B107`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 
