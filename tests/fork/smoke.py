@@ -104,7 +104,7 @@ if "MOVE" not in imaplib.Commands:
     imaplib.Commands["MOVE"] = ("SELECTED",)
 
 DEFAULT_ENV_FILE = os.environ.get("MIAB_TEST_ENV") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.env")
-GROUPS = ["login", "provision", "migrated", "admin", "dns", "web", "mail", "imapsieve", "fail2ban"]
+GROUPS = ["login", "provision", "migrated", "admin", "api", "dns", "web", "mail", "imapsieve", "fail2ban"]
 
 SIEVE_FILTER_NAME = "seedfilter"
 SIEVE_VACATION_NAME = "seedvacation"
@@ -982,11 +982,12 @@ def sa_magic(ctx):
     return vals
 
 
-def admin_api(ctx, method, path, form=None, auth=None, body=None, headers=None):
+def admin_api(ctx, method, path, form=None, auth=None, body=None, headers=None, timeout=90):
     auth = auth or ctx.admin_auth
     if not auth:
         raise Skip("no admin session (admin credentials missing or login failed)")
-    return http_req(ctx, method, "/admin/" + path.lstrip("/"), form=form, auth=auth, body=body, headers=headers)
+    return http_req(ctx, method, "/admin/" + path.lstrip("/"), form=form, auth=auth, body=body, headers=headers,
+                    timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -2127,6 +2128,7 @@ def c_munin_contact(ctx):
     # Munin's alerts (B80): the contact "admin" is defined before the host tree
     # (lines after a [host] line belong to that host), its command exists, and
     # always_send (a mail every 5 minutes while a warning lasts) is not set.
+    # Alerts that the admin panel turned off pass.
     cmd = ("awk '/^\\[/ { host = 1 } /^contact\\.admin\\./ { print (host ? \"host\" : \"global\"), $0 }' "
            "/etc/munin/munin.conf")
     rc, out, err = ctx.remote.run(cmd, sudo=True, timeout=60)
@@ -2138,6 +2140,12 @@ def c_munin_contact(ctx):
         raise Fail("contact lines inside the host tree (munin-limits ignores them): %s" % misplaced[0][:80])
     command = [rest.split(None, 1)[1] for where, rest in lines if rest.startswith("contact.admin.command ")]
     if not command:
+        # Turned off in the admin panel (rc7): no contact, "contacts none".
+        rc, out, err = ctx.remote.run("grep -qx 'contacts none' /etc/munin/munin.conf", sudo=True, timeout=60)
+        if rc == 0 and ctx.admin_auth:
+            r = admin_api(ctx, "GET", "system/munin/alerts")
+            if r.status == 200 and r.json().get("recipient") == "off":
+                return "alerts turned off in the admin panel (contacts none)"
         raise Fail("no contact.admin.command, Munin sends no alerts")
     if any(rest.startswith("contact.admin.always_send") for where, rest in lines):
         raise Fail("contact.admin.always_send is set (a mail every run while a warning lasts)")
@@ -2509,6 +2517,520 @@ def send_test_mail(ctx):
 
 
 # ---------------------------------------------------------------------------
+# checks: management API (group api), as api/mailinabox.yml documents it
+# ---------------------------------------------------------------------------
+
+# Every documented operation is in exactly one of these lists;
+# tests/fork/api-routes.py checks that against api/mailinabox.yml (and the
+# content types of API_READ_ONLY against the documented 200 answers).
+#
+# Read-only: (method, documented path, content type of the 200 answer).
+API_READ_ONLY = [
+    ("GET", "/system/version", "text/html"),
+    ("POST", "/system/latest-upstream-version", "text/html"),
+    ("POST", "/system/status", "application/json"),
+    ("GET", "/system/updates", "text/html"),
+    ("GET", "/system/privacy", "application/json"),
+    ("GET", "/system/reboot", "application/json"),
+    ("GET", "/system/backup/status", "application/json"),
+    ("GET", "/system/backup/config", "application/json"),
+    ("GET", "/system/fail2ban", "application/json"),
+    ("GET", "/system/fail2ban/settings", "application/json"),
+    ("GET", "/system/fail2ban/report", "application/json"),
+    ("GET", "/system/munin/alerts", "application/json"),
+    ("GET", "/ssl/status", "application/json"),
+    ("POST", "/ssl/csr/{domain}", "text/html"),
+    ("GET", "/dns/zones", "application/json"),
+    ("GET", "/dns/zonefile/{zone}", "text/plain"),
+    ("GET", "/dns/custom", "application/json"),
+    ("GET", "/dns/custom/{qname}", "application/json"),
+    ("GET", "/dns/custom/{qname}/{rtype}", "application/json"),
+    ("GET", "/dns/dump", "application/json"),
+    ("GET", "/dns/secondary-nameserver", "application/json"),
+    ("GET", "/mail/users", "application/json"),
+    ("GET", "/mail/users/privileges", "text/html"),
+    ("GET", "/mail/users/quota", "application/json"),
+    ("GET", "/mail/domains", "text/html"),
+    ("GET", "/mail/aliases", "application/json"),
+    ("GET", "/web/domains", "application/json"),
+    ("POST", "/mfa/status", "application/json"),
+    ("GET", "/munin/", "text/html"),
+]
+
+# Called by the auth check, the write round trip and the Munin checks.
+API_WRITES = [
+    ("POST", "/login"),
+    ("POST", "/logout"),
+    ("POST", "/mail/users/add"),
+    ("POST", "/mail/users/password"),
+    ("POST", "/mail/users/quota"),
+    ("POST", "/mail/users/privileges/add"),
+    ("POST", "/mail/users/privileges/remove"),
+    ("POST", "/mail/users/remove"),
+    ("POST", "/mail/aliases/add"),
+    ("POST", "/mail/aliases/remove"),
+    ("POST", "/dns/custom/{qname}/{rtype}"),
+    ("PUT", "/dns/custom/{qname}/{rtype}"),
+    ("DELETE", "/dns/custom/{qname}/{rtype}"),
+    ("POST", "/system/privacy"),
+    ("POST", "/system/munin/alerts"),
+    ("POST", "/system/munin/alerts/test"),
+]
+
+# Not called: (method, documented path, reason).
+API_NOT_CALLED = [
+    ("POST", "/system/reboot", "reboots the box"),
+    ("POST", "/system/update-packages", "installs package updates"),
+    ("POST", "/ssl/provision", "requests certificates from Let's Encrypt"),
+    ("POST", "/ssl/install", "replaces a certificate"),
+    ("POST", "/web/update", "rewrites the nginx configuration and reloads nginx"),
+    ("POST", "/system/backup/config", "changes the backup target and its credentials"),
+    ("POST", "/mfa/totp/enable", "turns on MFA for the admin"),
+    ("POST", "/mfa/disable", "removes MFA from an account"),
+    ("POST", "/dns/update", "rewrites all zones (the custom record round trip updates them)"),
+    ("POST", "/dns/secondary-nameserver", "changes the zones and nsd's transfer settings"),
+    ("POST", "/system/fail2ban/settings", "group admin (admin-fail2ban-settings) sets and restores it"),
+    ("POST", "/system/fail2ban/unban", "releases real bans (group fail2ban unbans its own)"),
+    ("POST", "/system/fail2ban/unban-all", "releases real bans"),
+    ("POST", "/dns/custom/{qname}", "the view of /dns/custom/{qname}/{rtype} with type A, which needs an address"),
+    ("PUT", "/dns/custom/{qname}", "the view of /dns/custom/{qname}/{rtype} with type A, which needs an address"),
+    ("DELETE", "/dns/custom/{qname}", "the view of /dns/custom/{qname}/{rtype} with type A: would delete real A records"),
+]
+
+MUNIN_NOTIFY = "/usr/local/lib/mailinabox/munin-notify"
+
+
+def api_ctype(r):
+    v = r.header("Content-Type")
+    return v[0].split(";")[0].strip().lower() if v else ""
+
+
+def api_expect(r, status, ctype, what):
+    # status and content type, or Fail with a short excerpt (never the body
+    # of an answer that can hold secrets: the caller passes what=... only)
+    if r.status != status:
+        raise Fail("%s: HTTP %d, expected %d: %s" % (what, r.status, status, r.text()[:120].strip()))
+    if ctype and api_ctype(r) != ctype:
+        raise Fail("%s: content type %s, expected %s" % (what, api_ctype(r) or "none", ctype))
+
+
+def c_api_auth(ctx):
+    # Exactly two failed logins (the wrong password and the key after its
+    # logout), far below the miab-management jail (20 within 30 s). Requests
+    # without an Authorization header are not logged as failed logins.
+    if not ctx.admin_auth:
+        raise Skip("no admin session (admin credentials missing or login failed)")
+    notes = []
+    r = http_req(ctx, "GET", "/admin/system/version")
+    api_expect(r, 401, "text/plain", "no credentials")
+    if not r.header("WWW-Authenticate") or not r.header("X-Reason"):
+        raise Fail("no credentials: 401 without WWW-Authenticate or X-Reason")
+    r = http_req(ctx, "GET", "/admin/system/version", headers={"Accept": "application/json"})
+    api_expect(r, 401, "application/json", "no credentials, Accept JSON")
+    if r.json().get("status") != "error" or not r.json().get("reason"):
+        raise Fail("no credentials, Accept JSON: body %s" % r.text()[:100])
+    r = http_req(ctx, "GET", "/admin/system/version", headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"})
+    api_expect(r, 403, "application/json", "no credentials, XMLHttpRequest")
+    notes.append("no credentials 401/401/403")
+    wrong = "wrong-%s" % ctx.tok
+    r = http_req(ctx, "GET", "/admin/system/version", auth=(ctx.admin_user, wrong))
+    api_expect(r, 401, "text/plain", "wrong password")
+    notes.append("wrong password 401")
+    r = admin_api(ctx, "GET", "system/version")
+    api_expect(r, 200, "text/html", "API key")
+    # A second session: its key works until logout, then it gets 401.
+    r = http_req(ctx, "POST", "/admin/login", auth=(ctx.admin_user, ctx.admin_pw))
+    api_expect(r, 200, "application/json", "second login")
+    j = r.json()
+    if j.get("status") != "ok" or not j.get("api_key") or j.get("email") != ctx.admin_user or "admin" not in (j.get("privileges") or []):
+        raise Fail("second login: status %s" % j.get("status"))
+    key2 = j["api_key"]
+    SECRETS.add(key2)
+    if key2 == ctx.admin_auth[1]:
+        raise Fail("second login gave the same key")
+    api_expect(http_req(ctx, "GET", "/admin/system/version", auth=(ctx.admin_user, key2)), 200, "text/html", "second key")
+    r = http_req(ctx, "POST", "/admin/logout", auth=(ctx.admin_user, key2))
+    api_expect(r, 200, "application/json", "logout")
+    if r.json().get("status") != "ok":
+        raise Fail("logout: %s" % r.text()[:100])
+    api_expect(http_req(ctx, "GET", "/admin/system/version", auth=(ctx.admin_user, key2)), 401, "text/plain", "key after logout")
+    notes.append("login/key/logout ok, key after logout 401")
+    api_expect(admin_api(ctx, "GET", "system/version"), 200, "text/html", "first key after the other logout")
+    return "; ".join(notes) + " (2 failed logins)"
+
+
+def _is_str_list(x):
+    return isinstance(x, list) and all(isinstance(v, str) for v in x)
+
+
+def _need(cond, what):
+    if not cond:
+        raise Fail(what)
+
+
+def api_shape(ctx, path, r):
+    # The documented shape of each read-only answer (api/mailinabox.yml).
+    # Returns a short note. Never puts the body of /mfa/status into a message.
+    if api_ctype(r) == "application/json":
+        j = r.json()
+    t = r.text()
+    if path == "/system/version":
+        _need(t.strip() and "\n" not in t.strip(), "version: %r" % t[:60])
+        return t.strip()
+    if path == "/system/latest-upstream-version":
+        _need(t.strip() and "\n" not in t.strip(), "latest version: %r" % t[:60])
+        return "latest " + t.strip()
+    if path == "/system/status":
+        _need(isinstance(j, list) and j, "status: not a non-empty list")
+        for e in j:
+            _need(isinstance(e, dict) and e.get("type") in ("heading", "ok", "error", "warning")
+                  and isinstance(e.get("text"), str) and isinstance(e.get("extra"), list), "status entry %r" % str(e)[:80])
+        c = Counter(e["type"] for e in j)
+        return "%d ok, %d warnings, %d errors" % (c["ok"], c["warning"], c["error"])
+    if path == "/system/updates":
+        bad = [x for x in t.splitlines() if x and not re.match(r"^\S+ \(.+\)$", x)]
+        _need(not bad, "updates: line %r" % (bad[:1],))
+        return "%d updates" % len(t.splitlines())
+    if path in ("/system/privacy", "/system/reboot"):
+        _need(isinstance(j, bool), "%s: not a boolean" % path)
+        return str(j).lower()
+    if path == "/system/backup/status":
+        _need(isinstance(j, dict) and (isinstance(j.get("backups"), list) or isinstance(j.get("error"), str)),
+              "backup status: no backups list and no error")
+        return "error" if "error" in j else "%d backups" % len(j["backups"])
+    if path == "/system/backup/config":
+        _need(isinstance(j, dict) and isinstance(j.get("target"), str), "backup config: no target")
+        return "target " + j["target"].split(":", 1)[0]
+    if path == "/system/fail2ban":
+        _need(isinstance(j.get("running"), bool) and isinstance(j.get("jails"), list) and isinstance(j.get("settings"), dict)
+              and isinstance(j.get("config_current"), bool), "fail2ban status: keys missing")
+        return "%d jails" % len(j["jails"])
+    if path == "/system/fail2ban/settings":
+        _need(isinstance(j.get("settings"), dict) and isinstance(j.get("defaults"), dict) and isinstance(j.get("warnings"), list),
+              "fail2ban settings: keys missing")
+        return "ok"
+    if path == "/system/fail2ban/report":
+        _need(isinstance(j.get("failures"), int) and isinstance(j.get("distinct_ips"), int) and _is_str_list(j.get("flagged_accounts")),
+              "fail2ban report: keys missing")
+        return "%d failures" % j["failures"]
+    if path == "/system/munin/alerts":
+        _need(j.get("recipient") in ("admin", "custom", "off") and j.get("level") in ("warning", "critical")
+              and isinstance(j.get("address"), str) and isinstance(j.get("warnings"), list), "munin alerts: keys missing")
+        _need(j.get("default_address") == "administrator@" + ctx.hostname, "munin alerts: default_address %s" % j.get("default_address"))
+        _need(j.get("config_current") is True, "munin alerts: munin.conf does not match the setting")
+        return "%s/%s" % (j["recipient"], j["level"])
+    if path == "/ssl/status":
+        _need(_is_str_list(j.get("can_provision")) and isinstance(j.get("status"), list)
+              and all({"domain", "status", "text"} <= set(e) for e in j["status"]), "ssl status: keys missing")
+        return "%d domains" % len(j["status"])
+    if path == "/ssl/csr/{domain}":
+        _need(t.startswith("-----BEGIN CERTIFICATE REQUEST-----"), "csr: not a PEM certificate request")
+        return "CSR"
+    if path == "/dns/zones":
+        _need(_is_str_list(j) and j, "zones: not a non-empty list of names")
+        return "%d zones" % len(j)
+    if path == "/dns/zonefile/{zone}":
+        _need(re.search(r"\sSOA\s", t), "zone file without SOA")
+        return "%d lines" % len(t.splitlines())
+    if path.startswith("/dns/custom"):
+        _need(isinstance(j, list) and all({"qname", "rtype", "value", "sort-order"} <= set(e) for e in j), "custom records: keys missing")
+        return "%d records" % len(j)
+    if path == "/dns/dump":
+        _need(isinstance(j, list) and j and all(isinstance(z, list) and len(z) == 2 and isinstance(z[1], list)
+                                              and all({"qname", "rtype", "value", "explanation"} <= set(x) for x in z[1]) for z in j),
+              "dns dump: not a list of [zone, records]")
+        return "%d zones" % len(j)
+    if path == "/dns/secondary-nameserver":
+        _need(_is_str_list(j.get("hostnames")), "secondary nameserver: no hostnames list")
+        return "%d hostnames" % len(j["hostnames"])
+    if path == "/mail/users":
+        _need(isinstance(j, list) and all(isinstance(d.get("domain"), str) and isinstance(d.get("users"), list) for d in j),
+              "users: not a list of domains with users")
+        users = {u.get("email"): u for d in j for u in d["users"]}
+        _need(all({"email", "privileges", "status"} <= set(u) for u in users.values()), "users: keys missing")
+        _need("admin" in (users.get(ctx.admin_user) or {}).get("privileges", []), "users: %s is not listed as admin" % ctx.admin_user)
+        return "%d users" % len(users)
+    if path == "/mail/users/privileges":
+        _need("admin" in t.split("\n"), "privileges of the admin: %r" % t[:60])
+        return "admin"
+    if path == "/mail/users/quota":
+        _need(j.get("email") == ctx.admin_user and isinstance(j.get("quota"), str), "quota: %r" % str(j)[:80])
+        return "quota " + j["quota"]
+    if path == "/mail/domains":
+        _need(ctx.domain in t.split("\n"), "domains: %s missing" % ctx.domain)
+        return "%d domains" % len(t.split())
+    if path == "/mail/aliases":
+        _need(isinstance(j, list) and all(isinstance(d.get("domain"), str) and isinstance(d.get("aliases"), list) for d in j)
+              and all({"address", "forwards_to", "permitted_senders", "auto"} <= set(a) for d in j for a in d["aliases"]),
+              "aliases: not a list of domains with aliases")
+        return "%d aliases" % sum(len(d["aliases"]) for d in j)
+    if path == "/web/domains":
+        _need(isinstance(j, list) and j and all({"domain", "root", "custom_root", "ssl_certificate"} <= set(d) for d in j),
+              "web domains: keys missing")
+        return "%d domains" % len(j)
+    if path == "/mfa/status":
+        _need(isinstance(j.get("enabled_mfa"), list) and isinstance((j.get("new_mfa") or {}).get("totp"), dict),
+              "mfa status: enabled_mfa or new_mfa.totp missing")
+        SECRETS.add(j["new_mfa"]["totp"].get("secret", ""))
+        return "%d MFA" % len(j["enabled_mfa"])
+    if path == "/munin/":
+        _need(t.strip() == "OK" and any("session=" in c for c in r.header("Set-Cookie")), "munin start: no session cookie")
+        return "cookie"
+    raise Fail("no shape check for %s" % path)
+
+
+def api_request(ctx, method, path):
+    # The request for a documented read-only path, with real parameters.
+    zones = getattr(ctx, "api_zones", None) or [ctx.domain]
+    real = (path.replace("{domain}", ctx.hostname).replace("{zone}", zones[0])
+            .replace("{qname}", ctx.hostname).replace("{rtype}", "A"))
+    form = None
+    if path == "/mail/users" or path == "/mail/aliases":
+        real += "?format=json"
+    elif path in ("/mail/users/privileges", "/mail/users/quota"):
+        real += "?" + urllib.parse.urlencode({"email": ctx.admin_user})
+    elif path == "/ssl/csr/{domain}":
+        form = {"countrycode": "US"}
+    elif method == "POST":
+        form = {}
+    # system/status runs all status checks, system/updates apt-get update
+    timeout = 300 if path in ("/system/status", "/system/updates") else 90
+    return admin_api(ctx, method, real, form=form, timeout=timeout)
+
+
+def c_api_read_only(ctx):
+    notes, fails = [], []
+    r = admin_api(ctx, "GET", "dns/zones")
+    ctx.api_zones = r.json() if r.status == 200 else None
+    for method, path, ctype in API_READ_ONLY:
+        try:
+            r = api_request(ctx, method, path)
+            if path == "/system/latest-upstream-version" and r.status == 503:
+                notes.append("%s 503 (documented: not reachable)" % path)
+                continue
+            api_expect(r, 200, ctype, "%s %s" % (method, path))
+            notes.append("%s %s" % (path, api_shape(ctx, path, r)))
+        except Fail as e:
+            fails.append(str(e))
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            fails.append("%s %s: %s %s" % (method, path, type(e).__name__, str(e)[:80]))
+    # The plain text forms of the user and alias lists.
+    r = admin_api(ctx, "GET", "mail/users")
+    if r.status != 200 or api_ctype(r) != "text/html" or ctx.admin_user not in r.text().split("\n"):
+        fails.append("GET /mail/users (text): HTTP %d %s" % (r.status, api_ctype(r)))
+    r = admin_api(ctx, "GET", "mail/aliases")
+    if r.status != 200 or api_ctype(r) != "text/html":
+        fails.append("GET /mail/aliases (text): HTTP %d %s" % (r.status, api_ctype(r)))
+    if fails:
+        raise Fail("%d of %d: %s" % (len(fails), len(API_READ_ONLY), "; ".join(fails)))
+    return "%d endpoints: %s" % (len(API_READ_ONLY), ", ".join(n for n in notes))
+
+
+def api_snapshot(ctx):
+    # The lists that the write round trip must leave as they were.
+    users = admin_api(ctx, "GET", "mail/users?format=json")
+    aliases = admin_api(ctx, "GET", "mail/aliases?format=json")
+    custom = admin_api(ctx, "GET", "dns/custom")
+    for r, what in ((users, "users"), (aliases, "aliases"), (custom, "custom records")):
+        api_expect(r, 200, "application/json", what)
+    # mailbox sizes change with deliveries; compare the accounts only
+    u = sorted((x["email"], tuple(x["privileges"]), x["status"], x.get("quota")) for d in users.json() for x in d["users"])
+    return {"users": u, "aliases": aliases.json(), "custom": custom.json(),
+            "privacy": admin_api(ctx, "GET", "system/privacy").json()}
+
+
+def c_api_write_roundtrip(ctx):
+    if not ctx.user_pw:
+        raise Skip("TEST_USER_PW missing")
+    before = api_snapshot(ctx)
+    user = "smokeapi-%s@%s" % (ctx.tok, ctx.domain)
+    alias = "smokeapialias-%s@%s" % (ctx.tok, ctx.domain)
+    qname = "smokeapi-%s.%s" % (ctx.tok, ctx.domain)
+    v1, v2 = "smokeapi-%s-1" % ctx.tok, "smokeapi-%s-2" % ctx.tok
+    pw2 = "Smk-%s" % uuid.uuid4().hex
+    SECRETS.add(pw2)
+    steps = []
+    txt = {"Content-Type": "text/plain"}
+
+    def records():
+        r = admin_api(ctx, "GET", "dns/custom/%s/TXT" % qname)
+        api_expect(r, 200, "application/json", "GET custom TXT")
+        return sorted(x["value"] for x in r.json())
+
+    try:
+        api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": user, "password": ctx.user_pw}), 200, "text/html", "users/add")
+        api_expect(admin_api(ctx, "POST", "mail/users/password", form={"email": user, "password": pw2}), 200, "text/html", "users/password")
+        api_expect(admin_api(ctx, "POST", "mail/users/quota", form={"email": user, "quota": "1G"}), 200, "text/html", "users/quota")
+        r = admin_api(ctx, "GET", "mail/users/quota?" + urllib.parse.urlencode({"email": user}))
+        api_expect(r, 200, "application/json", "GET quota")
+        _need(r.json().get("quota") == "1G", "quota after set: %s" % r.json().get("quota"))
+        r = admin_api(ctx, "GET", "mail/users/quota?" + urllib.parse.urlencode({"email": "nobody-%s@%s" % (ctx.tok, ctx.domain)}))
+        _need(r.status == 400, "GET quota of a non-user: HTTP %d, expected 400" % r.status)
+        steps.append("user, password, quota")
+        api_expect(admin_api(ctx, "POST", "mail/users/privileges/add", form={"email": user, "privilege": "admin"}), 200, "text/html", "privileges/add")
+        _need("admin" in admin_api(ctx, "GET", "mail/users/privileges?" + urllib.parse.urlencode({"email": user})).text().split("\n"),
+              "admin privilege not listed")
+        api_expect(admin_api(ctx, "POST", "mail/users/privileges/remove", form={"email": user, "privilege": "admin"}), 200, "text/html", "privileges/remove")
+        _need("admin" not in admin_api(ctx, "GET", "mail/users/privileges?" + urllib.parse.urlencode({"email": user})).text().split("\n"),
+              "admin privilege still listed")
+        steps.append("admin privilege")
+        api_expect(admin_api(ctx, "POST", "mail/aliases/add", form={"address": alias, "forwards_to": user, "permitted_senders": ""}),
+                   200, "text/html", "aliases/add")
+        r = admin_api(ctx, "GET", "mail/aliases?format=json")
+        _need(any(a["address"] == alias and a["forwards_to"] == [user] for d in r.json() for a in d["aliases"]), "new alias not listed")
+        api_expect(admin_api(ctx, "POST", "mail/aliases/remove", form={"address": alias}), 200, "text/html", "aliases/remove")
+        steps.append("alias")
+        api_expect(admin_api(ctx, "POST", "dns/custom/%s/TXT" % qname, body=v1, headers=txt), 200, "text/html", "POST custom TXT")
+        _need(records() == [v1], "after POST: %s" % records())
+        api_expect(admin_api(ctx, "POST", "dns/custom/%s/TXT" % qname, body=v2, headers=txt), 200, "text/html", "POST second TXT")
+        _need(records() == sorted([v1, v2]), "after second POST: %s" % records())
+        api_expect(admin_api(ctx, "PUT", "dns/custom/%s/TXT" % qname, body=v1, headers=txt), 200, "text/html", "PUT custom TXT")
+        _need(records() == [v1], "after PUT: %s" % records())
+        api_expect(admin_api(ctx, "DELETE", "dns/custom/%s/TXT" % qname, body=v1, headers=txt), 200, "text/html", "DELETE custom TXT")
+        _need(records() == [], "after DELETE: %s" % records())
+        steps.append("custom TXT post/put/delete")
+        cur = before["privacy"]
+        api_expect(admin_api(ctx, "POST", "system/privacy", form={"value": "private" if cur else "off"}), 200, "text/html", "privacy")
+        steps.append("privacy (same value)")
+    finally:
+        admin_api(ctx, "DELETE", "dns/custom/%s/TXT" % qname)
+        admin_api(ctx, "POST", "mail/aliases/remove", form={"address": alias})
+        r = admin_api(ctx, "POST", "mail/users/remove", form={"email": user})
+    api_expect(r, 200, "text/html", "users/remove")
+    steps.append("user removed")
+    after = api_snapshot(ctx)
+    diff = [k for k in before if before[k] != after[k]]
+    if diff:
+        raise Fail("not the same afterwards: %s" % ", ".join(diff))
+    return "%s; users, aliases, custom records and privacy the same afterwards" % ", ".join(steps)
+
+
+def munin_conf_contact(ctx):
+    # (contact lines before the host tree, "contacts" of the host tree)
+    rc, out, err = ctx.remote.run("cat /etc/munin/munin.conf", sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("cannot read /etc/munin/munin.conf: %s" % (err or out).strip()[:120])
+    contact, host, contacts = [], False, []
+    for line in out.splitlines():
+        if line.startswith("["):
+            host = True
+        elif line.startswith("contact.") and not host:
+            contact.append(line)
+        elif host and line.startswith("contacts "):
+            contacts.append(line.split(None, 1)[1].strip())
+    return contact, contacts, hashlib.sha256(out.encode()).hexdigest()
+
+
+def munin_set(ctx, form, what):
+    r = admin_api(ctx, "POST", "system/munin/alerts", form=form)
+    api_expect(r, 200, "application/json", what)
+    j = r.json()
+    _need(j.get("status") == "ok" and j.get("config_current") is True, "%s: %s" % (what, r.text()[:150]))
+    return j
+
+
+def munin_test_mail_arrived(ctx, user, since_uidnext, timeout=90):
+    # The test notification in user's INBOX: subject, marker, sender.
+    deadline = time.time() + timeout
+    while True:
+        M = imap_login(ctx, user)
+        try:
+            uids = uid_search(M, "INBOX", "UID", "%d:*" % since_uidnext, "SUBJECT", '"Munin test notification"',
+                              "HEADER", TEST_HEADER, "1", readonly=False)
+            uids = [u for u in uids if int(u) >= since_uidnext]
+            if uids:
+                typ, data = M.uid("FETCH", uids[-1].decode(), "(BODY.PEEK[HEADER])")
+                msg = parse_mail(data[0][1])
+                M.uid("STORE", b",".join(uids).decode(), "+FLAGS.SILENT", "(\\Deleted)")
+                M.expunge()
+                return msg, len(uids)
+        finally:
+            M.logout()
+        if time.time() > deadline:
+            raise Fail("no test notification in %s's INBOX after %d s" % (user, timeout))
+        time.sleep(5)
+
+
+def c_api_munin_alerts(ctx):
+    # The setting of Munin's alerts: invalid input refused, the three modes
+    # in munin.conf (with --ssh), the test mail to a test mailbox (alice,
+    # with TEST_USER_PW), and the old setting and file restored exactly.
+    r = admin_api(ctx, "GET", "system/munin/alerts")
+    api_expect(r, 200, "application/json", "GET munin alerts")
+    orig = r.json()
+    keep = {k: orig[k] for k in ("recipient", "address", "level")}
+    conf0 = munin_conf_contact(ctx) if ctx.remote.available() else None
+    notes = []
+    try:
+        for bad in ({"recipient": "custom", "address": "a@b.example\nBcc: x@example.com"},
+                    {"recipient": "custom", "address": "-oQ/tmp/x@example.com"},
+                    {"recipient": "custom", "address": "a b@example.com"},
+                    {"recipient": "custom", "address": "$(id)@example.com"},
+                    {"recipient": "custom", "address": ""},
+                    {"recipient": "everyone"}, {"level": "info"}):
+            r = admin_api(ctx, "POST", "system/munin/alerts", form=bad)
+            _need(r.status == 400, "invalid %r accepted: HTTP %d" % (bad, r.status))
+        now = admin_api(ctx, "GET", "system/munin/alerts").json()
+        _need({k: now[k] for k in keep} == keep, "a refused value changed the setting")
+        notes.append("7 invalid values refused")
+
+        users = admin_api(ctx, "GET", "mail/users").text().split("\n")
+        mailbox = ctx.user_pw and ctx.alice in users
+        target = ctx.alice if mailbox else ctx.admin_user
+        j = munin_set(ctx, {"recipient": "custom", "address": target, "level": "critical"}, "set custom/critical")
+        _need(j["to"] == target and j["level"] == "critical", "custom: to=%s level=%s" % (j["to"], j["level"]))
+        if conf0:
+            contact, contacts, _ = munin_conf_contact(ctx)
+            _need("contact.admin.command %s --to %s" % (MUNIN_NOTIFY, target) in contact, "custom: command %s" % contact[:1])
+            _need(any(c.startswith("contact.admin.text ${if:cfields ") for c in contact), "critical: no contact.admin.text")
+            _need(not any("always_send" in c for c in contact), "always_send set")
+            _need(contacts == ["admin"], "custom: contacts %s" % contacts)
+        if mailbox:
+            M = imap_login(ctx, target)
+            try:
+                uidnext = folder_status(M, "INBOX")["uidnext"]
+            finally:
+                M.logout()
+            r = admin_api(ctx, "POST", "system/munin/alerts/test")
+            api_expect(r, 200, "application/json", "test mail")
+            _need(r.json().get("to") == target, "test mail to %s" % r.json().get("to"))
+            msg, n = munin_test_mail_arrived(ctx, target, uidnext)
+            _need(n == 1, "%d test notifications arrived" % n)
+            frm = msg.get("From", "")
+            _need("administrator@" + ctx.hostname in frm, "test mail From: %s" % frm)
+            _need(msg.get("Auto-Submitted") == "auto-generated", "test mail without Auto-Submitted")
+            notes.append("test mail arrived in %s's INBOX (deleted)" % target.split("@")[0])
+        else:
+            notes.append("test mail not sent (no test mailbox %s)" % ctx.alice)
+
+        j = munin_set(ctx, {"recipient": "off"}, "set off")
+        _need(j["to"] is None and j["address"] == "", "off: to=%s address=%s" % (j["to"], j["address"]))
+        r = admin_api(ctx, "POST", "system/munin/alerts/test")
+        _need(r.status == 400, "test mail with alerts off: HTTP %d, expected 400" % r.status)
+        if conf0:
+            contact, contacts, _ = munin_conf_contact(ctx)
+            _need(contact == [] and contacts == ["none"], "off: contact %s, contacts %s" % (contact[:1], contacts))
+
+        j = munin_set(ctx, {"recipient": "admin", "level": "warning"}, "set admin/warning")
+        _need(j["to"] == "administrator@" + ctx.hostname, "admin: to=%s" % j["to"])
+        if conf0:
+            contact, contacts, _ = munin_conf_contact(ctx)
+            _need(contact == ["contact.admin.command %s" % MUNIN_NOTIFY] and contacts == ["admin"],
+                  "admin/warning: contact %s, contacts %s" % (contact, contacts))
+            notes.append("munin.conf right for custom/critical, off, admin/warning")
+    finally:
+        r = admin_api(ctx, "POST", "system/munin/alerts", form=keep)
+    api_expect(r, 200, "application/json", "restore")
+    after = admin_api(ctx, "GET", "system/munin/alerts").json()
+    if after != orig:
+        raise Fail("setting not restored: %s" % [k for k in orig if orig.get(k) != after.get(k)])
+    if conf0 and munin_conf_contact(ctx)[2] != conf0[2]:
+        raise Fail("munin.conf not restored byte for byte")
+    notes.append("setting%s restored" % (" and munin.conf" if conf0 else ""))
+    return "; ".join(notes)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -2617,7 +3139,7 @@ def main():
         finally:
             ctx.net.close()
 
-    if want("admin") or want("provision") or want("migrated") or want("dns"):
+    if want("admin") or want("api") or want("provision") or want("migrated") or want("dns"):
         print("== admin")
         run_check("admin-api-login", c_admin_login, ctx)
     if want("provision"):
@@ -2653,6 +3175,12 @@ def main():
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
         run_check("admin-fail2ban-filters", c_fail2ban_filters, ctx)
         run_check("admin-fail2ban-panel", c_fail2ban_panel, ctx)
+    if want("api"):
+        print("== api (management API as api/mailinabox.yml documents it)")
+        run_check("api-auth", c_api_auth, ctx)
+        run_check("api-read-only", c_api_read_only, ctx)
+        run_check("api-write-roundtrip", c_api_write_roundtrip, ctx)
+        run_check("api-munin-alerts", c_api_munin_alerts, ctx)
     if want("dns"):
         print("== dns")
         for zone in (ctx.domain, ctx.seed2, ctx.seed3):
