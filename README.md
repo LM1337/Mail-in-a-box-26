@@ -83,7 +83,7 @@ builds on that port. Its goals:
 | Python (management daemon) | 3.10.12 | 3.14.4 |
 | duplicity (backups) ² | 3.2.2 | 3.2.2 (unchanged) |
 
-Versions as of `v78-r2604.0-rc6` (October 2026). For v78 the table shows the
+Versions as of `v78-r2604.0-rc7` (October 2026). For v78 the table shows the
 version pinned in v78's setup scripts or the current Ubuntu 22.04 package.
 
 ¹ Pinned by the setup scripts (download with checksum). These change only with
@@ -109,7 +109,7 @@ Ubuntu's main component, which gets security updates during standard support;
 > Tauberer for help with this fork. Use this repository's
 > [issues](https://github.com/LM1337/Mail-in-a-box-26/issues) instead.
 
-**Status: release candidate (`v78-r2604.0-rc6`).** It is tested on test
+**Status: release candidate (`v78-r2604.0-rc7`).** It is tested on test
 machines and on a copy of a production box (which tests ran for each release,
 their results and what was not tested are in [TESTING-fork.md](TESTING-fork.md)), but it is not a final release.
 Make a backup, and try it on a copy or a spare machine before you run it on

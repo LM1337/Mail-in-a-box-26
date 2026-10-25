@@ -136,7 +136,7 @@ MOTD_END="### end $SCRIPT_NAME"
 DEFAULT_SOURCE=https://github.com/LM1337/Mail-in-a-box-26
 # Raw files of the branch main (GitHub serves them from another host).
 DEFAULT_RAW=https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main
-DEFAULT_TAG=v78-r2604.0-rc6 # keep in sync with setup/bootstrap.sh
+DEFAULT_TAG=v78-r2604.0-rc7 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5        # keep in sync with setup/functions.sh
 PHP_LEGACY_VER=8.2 # keep in sync with setup/system.sh

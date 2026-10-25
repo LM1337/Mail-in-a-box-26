@@ -11,22 +11,57 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-The plan of rc7 (from the update of a production box from rc3 to rc6):
-Munin's alerts are set in the admin panel, the management API is tested
-end to end against its documentation, and an update gets its own tools:
-the state of the box before and after, a backup before it, a comparison
-with the expected changes and an active mail check. The in-place tool runs
-a fallback SSH server while the release upgrades replace OpenSSH. Setup
-reloads nginx instead of restarting it, no longer shows the welcome dialog
-on an update, and writes the OpenDKIM tables in a fixed order. Security:
-setup no longer sources or unpacks anything as root by a fixed name in
-`/tmp` (B89, B97), and root no longer writes through symbolic links in
-directories of other accounts (B86, B87, B90, B98). The management daemon
-no longer runs out of file descriptors (B91), and ActiveSync syncs the
-contacts of new users again (B99). The review of the merged release found
-B100, B101 and B103 to B105 in the new fallback SSH server, the update
-tools and the log audit, and B102 in the in-place tool's copy to an rsync
-target (all fixed).
+### Planned
+
+For the final release v78-r2604.0 (from rc7):
+
+* The full test matrix T1 to T5b on the head of rc7 (TESTING-fork.md,
+  "What the scenarios of rc7 cover"): T3 and T4 run the fallback SSH server
+  with the single-binary sshd of 22.04 and 24.04 (so far tried only with
+  OpenSSH 10.2 of 26.04), T5b runs `tools/update-check.sh before`, `backup`
+  (with the Docker options and the rsync upload) and, after the update,
+  `after` and `mailcheck` with a lab probe.
+* T6 (on the Internet: Let's Encrypt, delivery to other providers, and
+  `mailcheck` with a real external probe) before the final release
+  v78-r2604.0.
+* `tools/expected-changes/` needs a list for each release, also an empty
+  one for the final release.
+
+Seen in the rc7 work, not done:
+
+* Setup restarts PHP-FPM four times per run, which ends ActiveSync long
+  polls; a reload (with `process_control_timeout`) would keep them.
+* The smoke test checks ActiveSync only with `OPTIONS`; a Sync of the
+  contacts folder would have caught B99.
+* Critical only (Munin's alerts) never mails the return to normal.
+* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
+  not installed (nginx 404).
+* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
+* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
+  `management/backup.py` and `management/dns_update.py` still write
+  `custom.yaml` as root with `open(..., "w")` (B87 covers only
+  `settings.yaml`), and the backup (also `tools/update-check.sh backup`)
+  reads its target and `secret_key.txt` there by path. An account that can
+  replace `backup/` could point the backups to a server of its own with a
+  passphrase it knows.
+
+## v78-r2604.0-rc7 (2026-10-25)
+
+From the update of a production box from rc3 to rc6: Munin's alerts are set
+in the admin panel, the management API is tested end to end against its
+documentation, and an update gets its own tools: the state of the box before
+and after, a backup before it, a comparison with the expected changes and an
+active mail check. The in-place tool runs a fallback SSH server while the
+release upgrades replace OpenSSH. Setup reloads nginx instead of restarting
+it, no longer shows the welcome dialog on an update, and writes the OpenDKIM
+tables in a fixed order. Security: setup no longer sources or unpacks
+anything as root by a fixed name in `/tmp` (B89, B97), and root no longer
+writes through symbolic links in directories of other accounts (B86, B87,
+B90, B98). The management daemon no longer runs out of file descriptors
+(B91), and ActiveSync syncs the contacts of new users again (B99). The
+review of the merged release found B100, B101 and B103 to B105 in the new
+fallback SSH server, the update tools and the log audit, and B102 in the
+in-place tool's copy to an rsync target (all fixed).
 
 ### New
 
@@ -328,6 +363,15 @@ target (all fixed).
 
 ### Upgrade note
 
+* Boxes on rc1 to rc6 are updated with the two commands of "Updating the
+  fork" in README-fork.md:
+  `sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`
+  and
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`.
+  The first one is needed for rc1 to rc3 and changes nothing on rc4 to rc6.
+  Setup no longer shows the welcome dialog of a new installation; the other
+  dialog boxes (host name, public IP address) are shown as before, and
+  Enter keeps the current values.
 * Munin's alerts: nothing to do. Without a setting `munin.conf` stays as in
   rc6 (alerts of warnings and critical values to administrator@). To change
   the address or turn them off: System > Munin Monitoring. Changes to
@@ -352,44 +396,14 @@ target (all fixed).
   main), then update, then `after` and `mailcheck` from
   `/root/mailinabox/tools/`.
 
-### Planned
+### Done from the plan
 
-Done from the rc6 list ("Planned for rc7" below) and the plan of rc7: the
+From the rc6 list ("Planned for rc7" below) and the plan of rc7: the
 Munin alert setting, the fallback SSH server and the live note, the order
 of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
 baseline and Internet allowlist, the update tools (state, backup,
 comparison, mail check) as code, the welcome dialog, the nginx reload with
-its allowlist rules, the journal check. Still open:
-
-* The full test matrix T1 to T5b on the release head, T6 (on the Internet:
-  Let's Encrypt, delivery to other providers) before a final release. T3
-  and T4 also run the fallback SSH server with the single-binary sshd of
-  22.04 and 24.04 (so far tried only with OpenSSH 10.2 of 26.04).
-* The update tools in the test scenarios, so that they are tested before an
-  admin uses them: T5b runs `tools/update-check.sh before`, `backup` (with
-  the Docker options and the rsync upload) and, after the update, `after`
-  and `mailcheck` with a lab probe; T6 runs `mailcheck` with a real
-  external probe (TESTING-fork.md, "What the scenarios of rc7 cover").
-* `tools/expected-changes/` needs a list for each release, also an empty
-  one for the final release.
-
-Seen in the rc7 work, not done:
-
-* Setup restarts PHP-FPM four times per run, which ends ActiveSync long
-  polls; a reload (with `process_control_timeout`) would keep them.
-* The smoke test checks ActiveSync only with `OPTIONS`; a Sync of the
-  contacts folder would have caught B99.
-* Critical only (Munin's alerts) never mails the return to normal.
-* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
-  not installed (nginx 404).
-* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
-* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
-  `management/backup.py` and `management/dns_update.py` still write
-  `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the backup (also `tools/update-check.sh backup`)
-  reads its target and `secret_key.txt` there by path. An account that can
-  replace `backup/` could point the backups to a server of its own with a
-  passphrase it knows.
+its allowlist rules, the journal check.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 
