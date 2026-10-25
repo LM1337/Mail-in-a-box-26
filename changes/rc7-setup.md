@@ -53,25 +53,34 @@ BUGS-fork.md, to be merged into them when the strands come together.
   under the key's name. Another local user could create these names first
   (the key tags are public); the copy then failed and the zone was not
   signed again, so its signatures would expire after 30 days (B98).
-* OpenDKIM: setup writes the `KeyTable` and `SigningTable` in a fixed
+* OpenDKIM: the `KeyTable` and `SigningTable` are written in a fixed
   (sorted) order. The domains came from a Python set, whose order changes
-  with every process, so with more than one mail domain each setup run
-  rewrote both tables and restarted OpenDKIM, although nothing had changed
-  (the management daemon, which writes them, starts anew in every run). Mail
-  sent in the moment of the restart went out without a DKIM signature
-  (Postfix has `milter_default_action=accept`) (B95).
+  with every process, so with more than one mail domain each setup run (the
+  management daemon, which writes them, starts anew in every run) and the
+  first DNS update after a reboot rewrote both tables and restarted
+  OpenDKIM once more, although nothing had changed. Mail sent in the moment
+  of a restart goes out without a DKIM signature (Postfix has
+  `milter_default_action=accept`) (B95).
+* Nextcloud/Z-Push: ActiveSync syncs the address book of new users again.
+  Nextcloud 34 puts an example contact into each new address book under the
+  name `default`, without the `.vcf` that Z-Push's CardDAV backend adds when
+  it fetches a contact; the Sync of the contacts folder then failed with a
+  PHP error (HTTP 500), so no contact reached the phone. Setup turns the
+  example contact off (`dav` `enableDefaultContact`). Users created before
+  keep their example contact: delete it in Nextcloud's Contacts (it is
+  marked "This is an example contact"), and the address book syncs (B99).
 
 ## BUGS-fork.md
 
 ### B95
 
-**Every setup run rewrites the OpenDKIM tables and restarts OpenDKIM** (low, Mail)
+**The OpenDKIM tables are rewritten in another order, and OpenDKIM restarted, without a change** (low, Mail)
 
-* **Symptom:** On a box with more than one mail domain, each run of setup (and the first DNS update after each start of the management daemon, e.g. after a reboot) rewrites `/etc/opendkim/KeyTable` and `/etc/opendkim/SigningTable` with the same lines in another order and restarts OpenDKIM, although no domain changed. A comparison of `/etc` before and after an update shows both files as changed, and a mail sent in the moment of the restart goes out without a DKIM signature (Postfix passes mail on when a milter does not answer, `milter_default_action=accept`), so it can fail DMARC at the receiver.
+* **Symptom:** On a box with more than one mail domain, each run of setup and the first DNS update after each start of the management daemon (e.g. after a reboot) rewrite `/etc/opendkim/KeyTable` and `/etc/opendkim/SigningTable` with the same lines in another order and restart OpenDKIM, although no domain changed; in a setup run that is a second restart after the one of setup/dkim.sh. A comparison of `/etc` before and after an update shows both files as changed, and a mail sent in the moment of a restart goes out without a DKIM signature (Postfix passes mail on when a milter does not answer, `milter_default_action=accept`), so it can fail DMARC at the receiver.
 * **Cause:** `write_opendkim_tables()` in `management/dns_update.py` writes one line per domain in the order of `get_mail_domains()`, a Python set. The order of a set of strings depends on the hash seed, which Python chooses at random for every process (here: every start of the management daemon), so the content differs from run to run and the "did the file change" check sees a change.
 * **Fix:** The domains are sorted before the tables are written. The patterns `*@domain` never overlap (a domain contains no "@"), so the order does not change which key signs a mail. The first run with the fix writes the tables once more in sorted order; from then on they only change when the domains do.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream.
-* **Evidence:** rc6 T5b: a second update run changed the order of both tables (noted in B74). The same set of four domains printed in four different orders with `PYTHONHASHSEED` 1 to 4.
+* **Evidence:** rc6 T5b: a second update run changed the order of both tables (noted in B74). The same set of four domains printed in four different orders with `PYTHONHASHSEED` 1 to 4. rc7, on a fresh test box with six mail domains: two setup runs after the install left both tables byte-identical (SHA-256), and OpenDKIM was restarted once per run (by setup/dkim.sh), not by the DNS update.
 * **Found by:** update test; **commit:** see `git log --grep B95`; **fixed in:** v78-r2604.0-rc7
 
 ### B96
@@ -106,3 +115,14 @@ BUGS-fork.md, to be merged into them when the strands come together.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only boxes with a local user or service that an attacker controls.
 * **Evidence:** From reading the code. On a fresh 26.04 test box with the fix, setup signed the zones (`.signed` files and DS records written), and no key file was left in `/tmp`.
 * **Found by:** rc7 review; **commit:** see `git log --grep B98`; **fixed in:** v78-r2604.0-rc7
+
+### B99
+
+**ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push** (high, Z-Push)
+
+* **Symptom:** A phone that syncs a new user's contacts over ActiveSync gets HTTP 500 for the Sync of the address book, every time, and shows no contacts. `/var/log/z-push/z-push-error.log`: "Attempt to read property "vcard" on null" and "Fatal error: /usr/local/lib/z-push/backend/carddav/carddav.php:484 - Uncaught Error: Call to a member function __toString() on null" (from `BackendCardDAV->GetMessage()`). Mail and calendar sync are not affected.
+* **Cause:** Since Nextcloud 30 the dav app writes an example contact into the default address book of each new user, with the card name `default` (`ExampleContactService::createDefaultContact()`). Z-Push's CardDAV client (`include/z_carddav.php`, `get_xml_vcard()`) appends `.vcf` to every card it fetches, so it asks for `default.vcf`, gets an empty answer, and `GetMessage()` dereferences the missing card.
+* **Fix:** setup/nextcloud.sh sets `occ config:app:set dav enableDefaultContact --value false --type boolean`, so new users get no example contact. Example contacts of users created before stay (setup does not delete user data); deleting the example contact in Nextcloud's Contacts makes their address book sync.
+* **Affects:** v78 no (Nextcloud 27), PR #2603 yes (Nextcloud 34). Origin: PR #2603.
+* **Evidence:** rc7 setup strand, fresh 26.04 test box: a minimal ActiveSync 14.0 client (Provision, FolderSync, Sync, Ping) for the admin, whose address book held only Nextcloud's `default` card, got HTTP 500 for the second Sync of the contacts folder with the errors above. With the setting, a user created afterwards had no example contact; Sync answered 200 (status 1) and a Ping on the contacts folder ran its 20 s heartbeat and ended with status 1, no new line in the error log. The smoke test checks only `OPTIONS` of ActiveSync.
+* **Found by:** rc7 setup tests (log audit of the restart window); **commit:** see `git log --grep B99`; **fixed in:** v78-r2604.0-rc7

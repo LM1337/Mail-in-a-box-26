@@ -554,6 +554,12 @@ chmod +x /etc/cron.d/mailinabox-nextcloud
 # Or else the reminders will just be sent as soon as possible when the background jobs run.
 hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config:app:set dav sendEventRemindersMode --value occ
 
+# No example contact in the address book of new users. Nextcloud stores it
+# under the name "default", without the ".vcf" that Z-Push's CardDAV backend
+# adds to every contact it fetches, so ActiveSync could not sync the address
+# book (the Sync request failed with a PHP error, B99).
+hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config:app:set dav enableDefaultContact --value false --type boolean
+
 # Sharing within the own mail domain (NEXTCLOUD_SHARE_SCOPE=domain, the default):
 # users only see and share with the accounts of their mail domain, members of the
 # group "admin" with everyone. The script sets the sharing options and puts all
