@@ -50,16 +50,22 @@
 # --internet adds log-audit-allow-internet.txt (next to this script): the
 # usual noise of a box on the Internet (firewall blocks, scanners, password
 # guessing, TLS errors of bad clients), for a production box; the tests do
-# not use it.
+# not use it. --smoke adds log-audit-allow-smoke.txt (next to this script):
+# the deliberate failures of tests/fork/smoke.py that look like a real
+# attack (failed logins to the control panel), for a box under test only.
 #
 # Baseline: --baseline BEFORE.json takes the --json report of an earlier run
 # (e.g. before an update, see tools/update-check.sh). A class that was in it
 # (UNKNOWN or allowed) is listed as KNOWN with both counts and is not an
-# UNKNOWN; only the classes that are new against the baseline count.
+# UNKNOWN; only the classes that are new against the baseline count. The
+# prefixes [in-place:PHASE] and [setup] are ignored for the comparison, except
+# for a class that was allowed with its prefix (a rule for its phase may have
+# allowed it): it is known only with that prefix. A KNOWN class counts however
+# often it comes now; both counts are in the report.
 #
 # Usage (as root on the box):
 #   tests/fork/log-audit.sh [--since TIME] [--allow FILE]... [--allow-extra FILE]...
-#                           [--internet] [--baseline BEFORE.json]
+#                           [--internet | --smoke] [--baseline BEFORE.json]
 #                           [--json OUT] [--setup-log FILE]... [--examples N]
 #   TIME: anything "date -d" understands ("2026-10-25 08:15", "-2 hours",
 #         "24 hours ago", "@1793000000"), the short forms -90s, -30m, -24h,
@@ -79,6 +85,7 @@ SINCE=boot
 ALLOW=()
 ALLOW_EXTRA=()
 INTERNET=
+SMOKE=
 BASELINE=
 JSON_OUT=
 EXAMPLES=2
@@ -89,6 +96,7 @@ while [ $# -gt 0 ]; do
 		--allow) ALLOW+=("${2:?--allow needs a file}"); shift 2 ;;
 		--allow-extra) ALLOW_EXTRA+=("${2:?--allow-extra needs a file}"); shift 2 ;;
 		--internet) INTERNET=1; shift ;;
+		--smoke) SMOKE=1; shift ;;
 		--baseline) BASELINE=${2:?--baseline needs a file}; shift 2 ;;
 		--json) JSON_OUT=${2:?--json needs a file}; shift 2 ;;
 		--setup-log) SETUP_LOGS+=("${2:?--setup-log needs a file}"); shift 2 ;;
@@ -115,6 +123,14 @@ if [ -n "$INTERNET" ]; then
 		ALLOW+=("$(dirname "${BASH_SOURCE[0]}")/log-audit-allow-internet.txt")
 	else
 		echo "log-audit.sh: --internet: no log-audit-allow-internet.txt next to the script, give --allow-extra FILE." >&2
+		exit 2
+	fi
+fi
+if [ -n "$SMOKE" ]; then
+	if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/log-audit-allow-smoke.txt" ]; then
+		ALLOW+=("$(dirname "${BASH_SOURCE[0]}")/log-audit-allow-smoke.txt")
+	else
+		echo "log-audit.sh: --smoke: no log-audit-allow-smoke.txt next to the script, give --allow-extra FILE." >&2
 		exit 2
 	fi
 fi
@@ -207,7 +223,9 @@ except SystemExit as e:
     sys.exit(2)
 
 # The classes of an earlier report (--baseline), without the phase prefix,
-# with their counts there.
+# with their counts there. An allowed class with a prefix keeps it: a rule for
+# that phase may be what allowed it, and the same class outside the phase
+# must still count.
 BASELINE_FILE = os.environ.get("LA_BASELINE", "")
 BASELINE = {}
 BASELINE_LABEL = ""
@@ -215,8 +233,10 @@ if BASELINE_FILE:
     try:
         with open(BASELINE_FILE, encoding="utf-8") as f:
             b = json.load(f)
-        for item in b.get("unknown", []) + b.get("allowed", []) + b.get("known", []):
+        for item in b.get("unknown", []) + b.get("known", []):
             BASELINE[RE_TAG.sub("", item["class"], count=1)] = int(item.get("count", 0))
+        for item in b.get("allowed", []):
+            BASELINE[item["class"]] = int(item.get("count", 0))
         BASELINE_LABEL = "%s since %s" % (b.get("host", "?"), b.get("since_label", "?"))
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print("log-audit.sh: cannot read the baseline %s: %s" % (BASELINE_FILE, e), file=sys.stderr)
@@ -769,9 +789,11 @@ def main():
     if BASELINE_FILE:
         for item in unknown:
             plain = RE_TAG.sub("", item["class"], count=1)
-            if plain in BASELINE:
-                item["baseline_count"] = BASELINE[plain]
-                known.append(item)
+            for k in (item["class"], plain):
+                if k in BASELINE:
+                    item["baseline_count"] = BASELINE[k]
+                    known.append(item)
+                    break
         unknown = [i for i in unknown if "baseline_count" not in i]
     known.sort(key=lambda i: (-i["count"], i["class"]))
     unknown.sort(key=lambda i: (-i["count"], i["class"]))

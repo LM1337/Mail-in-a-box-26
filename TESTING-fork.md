@@ -494,9 +494,11 @@ Everything is in `tests/fork/`:
   compared with `log-audit-allow.txt`. Each line there is a regex and,
   after " # ", the reason; artefacts of the test network and the smoke test
   are marked as such. Exit code 0 if every class is on the list, 1 if not
-  (`UNKNOWN`). Give the start of the scenario as `--since`, add local
-  exceptions of your lab with `--allow-extra FILE`, and `--json OUT` for the
-  report. An UNKNOWN class is a defect to fix, or, once checked as harmless,
+  (`UNKNOWN`). Give the start of the scenario as `--since`, `--smoke` when
+  the smoke test ran (its deliberate failed logins to the control panel,
+  `log-audit-allow-smoke.txt`; the default list does not accept them, so
+  that they stay visible on a production box), local exceptions of your lab
+  with `--allow-extra FILE`, and `--json OUT` for the report. An UNKNOWN class is a defect to fix, or, once checked as harmless,
   a new line with its reason in the allowlist. On a box upgraded in place,
   what it logged between stopping mail and the start of setup carries the
   phase of `tools/upgrade-in-place-to-2604.sh` (`[in-place:release_2404]`,

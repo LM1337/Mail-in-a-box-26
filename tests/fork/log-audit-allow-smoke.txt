@@ -1,0 +1,11 @@
+# Additions for a log audit of a box under test after tests/fork/smoke.py
+# (tests/fork/log-audit.sh --smoke): what the smoke test's deliberate
+# failures log, where the class cannot tell them from a real attack (a
+# failed login to the control panel names only the address). Not for a
+# production box, where they are real failed logins (with --internet,
+# log-audit-allow-internet.txt counts them as password guessing). Same format as
+# log-audit-allow.txt. Narrow rules for the smoke test that cannot match a
+# real attack (its own user names and HELO) stay in log-audit-allow.txt.
+
+^(gunicorn|start): (\[N-N-N N:N:N,N\] WARNING in daemon: )?Mail-in-a-Box Management Daemon: Failed login attempt from ip <ip> - timestamp N\.N$ # smoke test: the two deliberate failed logins of api-auth (smoke.py group api: a wrong password, a key after its logout); an attack on the control panel logs the same, and the miab-management jail bans it
+^start: Fatal: reverse password verification check failed: Password mismatch$ # smoke test: the wrong password of api-auth; the daemon checks passwords with "doveadm pw -t", which says so on stderr

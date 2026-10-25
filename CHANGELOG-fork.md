@@ -183,14 +183,20 @@ contacts of new users again (B99).
   `--json` report of an earlier run: a class that was in it is listed as
   KNOWN, with both counts, and does not count; only new classes are
   UNKNOWN (the prefixes `[in-place:PHASE]` and `[setup]` are ignored for
-  the comparison). `--internet` adds
+  the comparison, except for a class that was allowed with its prefix: a
+  rule for that phase may have allowed it, so the same class outside the
+  phase still counts). `--internet` adds
   `tests/fork/log-audit-allow-internet.txt`, the usual noise of a box on
   the Internet (ufw blocks, SYN floods, password guessing on SSH, SMTP
-  submission, Roundcube, Nextcloud and Z-Push, TLS and SSH errors of
+  submission, the control panel, Roundcube, Nextcloud and Z-Push, TLS and SSH errors of
   scanners and old clients, nginx 404s in the web roots, mail that Postfix
   rejects as spam, to unknown recipients or for relaying, greylisting,
-  reverse DNS warnings, DNS and DNSSEC errors of other zones), each rule
-  with its reason; only when asked, the test scenarios do not use it.
+  reverse DNS warnings, DNS and DNSSEC errors of other zones, not of the
+  box's own), each rule with its reason; only when asked, the test
+  scenarios do not use it. `--smoke` adds
+  `tests/fork/log-audit-allow-smoke.txt`, the deliberate failures of the
+  smoke test that look like a real attack (the failed logins of
+  `api-auth`), for the test scenarios only.
 * `tests/fork/log-audit-allow.txt`: rules for `(sd-pam)`'s "Varlink call
   io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession"
   at a reboot with an open SSH login; for Z-Push's first ActiveSync device
@@ -276,8 +282,9 @@ contacts of new users again (B99).
 * Tests: `admin-api-tmp-user-alias` removes the archived mailbox of its
   temporary user again (with `--ssh`), which every run left behind as an
   inactive account. `munin-alert-contact` passes when the admin panel
-  turned the alerts off. `log-audit-allow.txt` accepts the two deliberate
-  failed logins of `api-auth`.
+  turned the alerts off. `log-audit.sh --smoke` accepts the two deliberate
+  failed logins of `api-auth`; the default allowlist does not, so that real
+  failed logins to the control panel stay visible on a production box.
 
 ### Changed
 
