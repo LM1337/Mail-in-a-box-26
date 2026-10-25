@@ -484,7 +484,9 @@ Setup sets it on every run:
   shows in the browser tab, and Nextcloud also serves it as its touch icon.
   If an administrator uploaded a favicon there, setup keeps it; setup only
   sets the favicon when there is none (also after the administrator removed
-  it), or when it is the one setup set before.
+  it), or when it is the fork's (the one setup set before, or the same file
+  as `branding/favicon.ico`). If setting it fails, setup only warns and goes
+  on.
 
 To use your own favicon in Nextcloud, upload it under Administration >
 Theming. `FAVICON=off` in `/etc/mailinabox.conf`, then `sudo mailinabox`,
@@ -511,8 +513,10 @@ Favicon des Forks (`branding/favicon.ico`, siehe
   Nextcloud im Browser-Tab zeigt, und Nextcloud liefert es auch als
   Touch-Icon aus. Hat ein Administrator dort ein Favicon hochgeladen, behält
   setup es bei; setup setzt das Favicon nur, wenn keines gesetzt ist (auch
-  nachdem der Administrator es entfernt hat) oder wenn es das ist, das setup
-  vorher gesetzt hat.
+  nachdem der Administrator es entfernt hat) oder wenn es das des Forks ist
+  (das, das setup vorher gesetzt hat, oder dieselbe Datei wie
+  `branding/favicon.ico`). Scheitert das Setzen, warnt setup nur und läuft
+  weiter.
 
 Ein eigenes Favicon für Nextcloud lädt man unter Verwaltung > Design hoch.
 `FAVICON=off` in `/etc/mailinabox.conf` und danach `sudo mailinabox` geben
