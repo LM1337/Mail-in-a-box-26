@@ -20,6 +20,16 @@ BUGS-fork.md, to be merged into them when the strands come together.
   does not run and restarts it when the running binary is not the
   installed one (a package upgrade that left the old process running). The
   management daemon's web update already reloaded.
+* Journal: checked, no change. Since rc6 Dovecot logs through syslog, so
+  its lines are in the journal too. The journal stays bounded: setup keeps
+  it for 10 days (`MaxRetentionSec=10day`, as upstream), and journald's
+  defaults on 26.04 (systemd 259) cap it at 10% of the file system, at most
+  4 GiB, and keep 15% free. Its rate limit drops lines only from the
+  journal: journald forwards syslog lines to rsyslog before it applies the
+  limit, so `/var/log/mail.log`, which fail2ban reads, keeps all of them
+  (test box: 100000 lines in a few seconds from one unit, 37500 in the
+  journal, all 100000 in the syslog file). A comment in setup/system.sh
+  says so.
 
 ### New
 

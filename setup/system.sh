@@ -126,6 +126,14 @@ fi
 # Set the systemd journal log retention from infinite to 10 days,
 # since over time the logs take up a large amount of space.
 # (See https://discourse.mailinabox.email/t/journalctl-reclaim-space-on-small-mailinabox/6728/11.)
+#
+# Dovecot logs through syslog (mail-dovecot.sh), so its lines are in the
+# journal as well as in /var/log/mail.log. No further limit is needed: besides
+# these 10 days, journald's defaults keep the journal below 10% of the file
+# system (at most 4 GiB) and leave 15% of it free (SystemMaxUse=,
+# SystemKeepFree=). Its rate limit (RateLimitBurst=) only drops lines from
+# the journal: journald forwards each syslog line to rsyslog before it applies
+# the limit, so mail.log, which fail2ban reads, keeps all of them.
 tools/editconf.py /etc/systemd/journald.conf MaxRetentionSec=10day
 
 # ### Improve server privacy
