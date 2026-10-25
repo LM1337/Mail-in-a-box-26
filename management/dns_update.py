@@ -4,7 +4,7 @@
 # and mail aliases and restarts nsd.
 ########################################################################
 
-import sys, os, os.path, datetime, re, hashlib, base64
+import sys, os, os.path, datetime, re, hashlib, base64, tempfile
 import ipaddress
 import rtyaml
 import dns.resolver
@@ -721,16 +721,23 @@ def sign_zone(domain, zonefile, env):
 	# the domain _domain_, we have to re-write the files and place
 	# the actual domain name in it, so that ldns-signzone works.
 	#
-	# Patch each key, storing the patched version in /tmp for now.
+	# Patch each key, storing the patched version in a temporary directory
+	# for now: one of our own (mode 0700), not file names in /tmp that
+	# another local user could create first (B98).
 	# Each key has a .key and .private file. Collect a list of filenames
 	# for all of the keys (and separately just the key-signing keys).
+	with tempfile.TemporaryDirectory(prefix="mailinabox-dnssec-") as tmpdir:
+		sign_zone_with_keys(domain, zonefile, tmpdir, env)
+
+def sign_zone_with_keys(domain, zonefile, tmpdir, env):
 	all_keys = []
 	ksk_keys = []
 	for keytype, keyfn in find_dnssec_signing_keys(domain, env):
-		newkeyfn = '/tmp/' + keyfn.replace("_domain_", domain)
+		newkeyfn = os.path.join(tmpdir, keyfn.replace("_domain_", domain))
 
 		for ext in (".private", ".key"):
-			# Copy the .key and .private files to /tmp to patch them up.
+			# Copy the .key and .private files to the temporary directory to
+			# patch them up.
 			#
 			# Use os.umask and open().write() to securely create a copy that only
 			# we (root) can read.
@@ -784,10 +791,7 @@ def sign_zone(domain, zonefile, env):
 				])
 				f.write(rr_ds)
 
-	# Remove the temporary patched key files.
-	for fn in all_keys:
-		os.unlink(fn + ".private")
-		os.unlink(fn + ".key")
+	# The temporary patched key files go with their directory (sign_zone).
 
 ########################################################################
 

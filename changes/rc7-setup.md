@@ -21,6 +21,11 @@ BUGS-fork.md, to be merged into them when the strands come together.
   these names first and make setup fail; for Z-Push and the Roundcube
   plugins of git, a directory created in the right moment let them replace
   the unpacked code before setup moved it into place (B97).
+* DNS: the management daemon copies the DNSSEC keys for signing a zone
+  into a directory of its own (mode 0700), not to `/tmp/K<domain>...`
+  under the key's name. Another local user could create these names first
+  (the key tags are public); the copy then failed and the zone was not
+  signed again, so its signatures would expire after 30 days (B98).
 * OpenDKIM: setup writes the `KeyTable` and `SigningTable` in a fixed
   (sorted) order. The domains came from a Python set, whose order changes
   with every process, so with more than one mail domain each setup run
@@ -63,3 +68,14 @@ BUGS-fork.md, to be merged into them when the strands come together.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only during an install or update of the component (a new version), and only with a local user or service that an attacker controls.
 * **Evidence:** From reading the code; the race was not run. A fresh install of the fix on a 26.04 test box unpacked all components (smoke test), and no `mailinabox`, `z-push`, `git-clone`, `.zip` or `.tgz` entry was left in `/tmp`.
 * **Found by:** rc7 review; **commit:** see `git log --grep B97`; **fixed in:** v78-r2604.0-rc7
+
+### B98
+
+**DNSSEC: the keys are copied to /tmp under their own names for signing** (medium, DNS)
+
+* **Symptom:** A local user without privileges creates files named like the box's DNSSEC keys in `/tmp` (`K<domain>.+<algorithm>+<key tag>.private` and `.key`; domain, algorithm and key tag are in the public DNSKEY records). From then on each DNS update of that zone fails with "Permission denied" (`fs.protected_regular`), in setup and in the management daemon, and the zone is no longer signed again; its signatures expire 30 days after the last signing, and resolvers that validate DNSSEC then reject the domain. On a system without `fs.protected_regular` root writes the private key into the other user's file instead.
+* **Cause:** `sign_zone()` in `management/dns_update.py` wrote a copy of each key with the real domain name to `'/tmp/' + key name` (with umask 077, but by a fixed path in a directory that everyone can write) and removed the copies after signing.
+* **Fix:** The copies go into a `tempfile.TemporaryDirectory()` (mode 0700, random name), which is removed after signing, also when signing fails.
+* **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only boxes with a local user or service that an attacker controls.
+* **Evidence:** From reading the code. On a fresh 26.04 test box with the fix, setup signed the zones (`.signed` files and DS records written), and no key file was left in `/tmp`.
+* **Found by:** rc7 review; **commit:** see `git log --grep B98`; **fixed in:** v78-r2604.0-rc7
