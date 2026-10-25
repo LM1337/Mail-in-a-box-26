@@ -3,6 +3,21 @@
 Entries of the setup strand for CHANGELOG-fork.md ("Unreleased") and
 BUGS-fork.md, to be merged into them when the strands come together.
 
+Notes for the merge:
+
+* BUGS-fork.md legend, "Found by": B96 to B98 name a new source, *rc7
+  review* (the review of setup's file operations in /tmp for rc7), and B99
+  *rc7 setup tests*; either add both to the legend or fold them into an
+  existing entry. Summary and counts: B95 low (Mail, Upstream), B96
+  critical (Setup, Upstream), B97 high (Setup, Upstream), B98 medium (DNS,
+  Upstream), B99 high (Z-Push, PR #2603); v78 affected: B95 to B98.
+* TESTING-fork.md (log audit): the classes logged during a run of setup get
+  the prefix `[setup]`; rules starting with `^\[setup\]` apply only there
+  (the header of `tests/fork/log-audit.sh` describes it).
+* The "Planned" list of rc7: the deterministic OpenDKIM tables, the
+  `(sd-pam)` rule, the welcome dialog, the nginx reload with its allowlist
+  rules and the journal check are done.
+
 ## CHANGELOG-fork.md
 
 ### Changed
@@ -19,7 +34,9 @@ BUGS-fork.md, to be merged into them when the strands come together.
   reload lets the old workers finish them. Setup still starts nginx when it
   does not run and restarts it when the running binary is not the
   installed one (a package upgrade that left the old process running). The
-  management daemon's web update already reloaded.
+  management daemon's web update already reloaded. Setup's restarts of
+  PHP-FPM (four per run) still end an ActiveSync long poll, which the
+  client then starts again.
 * Journal: checked, no change. Since rc6 Dovecot logs through syslog, so
   its lines are in the journal too. The journal stays bounded: setup keeps
   it for 10 days (`MaxRetentionSec=10day`, as upstream), and journald's
@@ -100,14 +117,14 @@ BUGS-fork.md, to be merged into them when the strands come together.
 * **Cause:** `write_opendkim_tables()` in `management/dns_update.py` writes one line per domain in the order of `get_mail_domains()`, a Python set. The order of a set of strings depends on the hash seed, which Python chooses at random for every process (here: every start of the management daemon), so the content differs from run to run and the "did the file change" check sees a change.
 * **Fix:** The domains are sorted before the tables are written. The patterns `*@domain` never overlap (a domain contains no "@"), so the order does not change which key signs a mail. The first run with the fix writes the tables once more in sorted order; from then on they only change when the domains do.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream.
-* **Evidence:** rc6 T5b: a second update run changed the order of both tables (noted in B74). The same set of four domains printed in four different orders with `PYTHONHASHSEED` 1 to 4. rc7, on a fresh test box with six mail domains: two setup runs after the install left both tables byte-identical (SHA-256), and OpenDKIM was restarted once per run (by setup/dkim.sh), not by the DNS update.
+* **Evidence:** rc6 T5b: a second update run changed the order of both tables (noted in B74). The same set of four domains printed in four different orders with `PYTHONHASHSEED` 1 to 4. rc7, on a fresh test box with six mail domains: four setup runs after the install (three non-interactive, one interactive) left both tables byte-identical (SHA-256), and OpenDKIM was restarted once per run (by setup/dkim.sh), not by the DNS update.
 * **Found by:** update test; **commit:** see `git log --grep B95`; **fixed in:** v78-r2604.0-rc7
 
 ### B96
 
 **Setup sources a file in /tmp that another local user can put there: local root** (critical, Setup)
 
-* **Symptom:** A local user without privileges (a shell account on the box, or a service account that can write to `/tmp`) creates `/tmp/mailinabox.prev.conf` with shell commands. The next time the admin runs setup on the box (`sudo mailinabox`, an update with `setup/bootstrap.sh`, the upgrade and migration tools), setup runs these commands as root. Setup prints "/tmp/mailinabox.prev.conf: Permission denied" and goes on as usual.
+* **Symptom:** A local user without privileges (a shell account on the box, or a service account that can write to `/tmp`, such as www-data: Ubuntu's PHP-FPM has no private `/tmp`, so a weakness in Nextcloud, Roundcube or Z-Push is enough) creates `/tmp/mailinabox.prev.conf` with shell commands. The next time the admin runs setup on the box (`sudo mailinabox`, an update with `setup/bootstrap.sh`, the upgrade and migration tools), setup runs these commands as root. Setup prints "/tmp/mailinabox.prev.conf: Permission denied" and goes on as usual.
 * **Cause:** setup/start.sh copied `/etc/mailinabox.conf` with a `DEFAULT_` prefix to `/tmp/mailinabox.prev.conf`, sourced that file and removed it. `/tmp` is writable by everyone. On Ubuntu (`fs.protected_regular = 2`) root may not open another user's file in a sticky directory for writing, so the copy fails, and the `source` that follows reads the other user's file. Without that protection root would overwrite the file, which still belongs to the other user, who could change it before the `source`.
 * **Fix:** setup reads the settings through a pipe (`source <(sed s/^/DEFAULT_/ /etc/mailinabox.conf)`); no file is written.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only boxes with a local user or service that an attacker controls; the first install (no `/etc/mailinabox.conf` yet) does not read the file.
@@ -141,7 +158,7 @@ BUGS-fork.md, to be merged into them when the strands come together.
 **ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push** (high, Z-Push)
 
 * **Symptom:** A phone that syncs a new user's contacts over ActiveSync gets HTTP 500 for the Sync of the address book, every time, and shows no contacts. `/var/log/z-push/z-push-error.log`: "Attempt to read property "vcard" on null" and "Fatal error: /usr/local/lib/z-push/backend/carddav/carddav.php:484 - Uncaught Error: Call to a member function __toString() on null" (from `BackendCardDAV->GetMessage()`). Mail and calendar sync are not affected.
-* **Cause:** Since Nextcloud 30 the dav app writes an example contact into the default address book of each new user, with the card name `default` (`ExampleContactService::createDefaultContact()`). Z-Push's CardDAV client (`include/z_carddav.php`, `get_xml_vcard()`) appends `.vcf` to every card it fetches, so it asks for `default.vcf`, gets an empty answer, and `GetMessage()` dereferences the missing card.
+* **Cause:** The dav app of Nextcloud 34 (1.40) writes an example contact into the default address book of each new user, with the card name `default` (`ExampleContactService::createDefaultContact()`). Z-Push's CardDAV client (`include/z_carddav.php`, `get_xml_vcard()`) appends `.vcf` to every card it fetches, so it asks for `default.vcf`, gets an empty answer, and `GetMessage()` dereferences the missing card.
 * **Fix:** setup/nextcloud.sh sets `occ config:app:set dav enableDefaultContact --value false --type boolean`, so new users get no example contact. Example contacts of users created before stay (setup does not delete user data); deleting the example contact in Nextcloud's Contacts makes their address book sync.
 * **Affects:** v78 no (Nextcloud 27), PR #2603 yes (Nextcloud 34). Origin: PR #2603.
 * **Evidence:** rc7 setup strand, fresh 26.04 test box: a minimal ActiveSync 14.0 client (Provision, FolderSync, Sync, Ping) for the admin, whose address book held only Nextcloud's `default` card, got HTTP 500 for the second Sync of the contacts folder with the errors above. With the setting, a user created afterwards had no example contact; Sync answered 200 (status 1) and a Ping on the contacts folder ran its 20 s heartbeat and ended with status 1, no new line in the error log. The smoke test checks only `OPTIONS` of ActiveSync.
