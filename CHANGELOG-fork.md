@@ -63,6 +63,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the skipped network checks (port 25, Spamhaus) as ignored, not as
   blockers, and no longer exits with code 1 because of them. The run with
   the same options never stopped on them (B77).
+* Postfix: the first connections to port 25 after a start of Postfix no
+  longer wait 100 seconds for the greeting. A restart at the wrong moment
+  left Berkeley DB's temporary file of tlsmgr's TLS session cache
+  (`/var/lib/postfix/__db.smtp_scache.db`), and every later start stumbled
+  over it. A systemd drop-in of setup removes such files before each start
+  (B78).
 
 ### Changed
 

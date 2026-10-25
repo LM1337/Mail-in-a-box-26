@@ -334,6 +334,22 @@ ufw_allow smtp
 ufw_allow smtps
 ufw_allow submission
 
+# A stop or restart of Postfix while tlsmgr opens its TLS session cache (a
+# Berkeley DB btree, the package default for smtp_tls_session_cache_database)
+# can leave Berkeley DB's temporary file __db.smtp_scache.db behind. Every
+# later tlsmgr then waits 100 seconds and fails ("open database ... File
+# exists"), and the first SMTP connections after each start get no greeting
+# meanwhile. While Postfix is stopped such files are stale (tlsmgr empties
+# the cache when it starts anyway), so remove them before each start.
+POSTFIX_DROPIN=/etc/systemd/system/postfix.service.d/mailinabox-stale-db.conf
+POSTFIX_DROPIN_TEXT="[Service]
+ExecStartPre=+/bin/sh -c 'rm -f /var/lib/postfix/__db.*'"
+if [ "$(cat "$POSTFIX_DROPIN" 2> /dev/null)" != "$POSTFIX_DROPIN_TEXT" ]; then
+	mkdir -p "$(dirname "$POSTFIX_DROPIN")"
+	echo "$POSTFIX_DROPIN_TEXT" > "$POSTFIX_DROPIN"
+	systemctl daemon-reload
+fi
+
 # Restart services
 
 restart_service postfix

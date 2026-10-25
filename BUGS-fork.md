@@ -34,18 +34,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-77 bugs: 1 critical, 13 high, 32 medium, 31 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76 and B77 in the migration test T2 of rc6.
+78 bugs: 1 critical, 13 high, 32 medium, 32 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6.
 
 | Origin | Count |
 |---|---|
-| Upstream | 18 |
+| Upstream | 19 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 18 |
 | Fork | 12 |
 
-19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
+20 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -129,6 +129,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B75](#b75) | low | System | logrotate.service fails every day on boxes upgraded in place to 26.04: cloud-init's old logrotate file stays | 26.04 change | no | no | rc6 |
 | [B76](#b76) | low | Tools | The migration tool's Spamhaus checks follow the resolver's search domain and can report a wildcard address | Fork | no | no | rc6 |
 | [B77](#b77) | low | Tools | "migrate-to-2604.sh --check --skip-network-checks" still lists the skipped network checks as blockers and exits 1 | Fork | no | no | rc6 |
+| [B78](#b78) | low | Postfix | After a Postfix restart at the wrong moment, every start of Postfix delays the first SMTP greetings by 100 seconds | Upstream | yes | yes | rc6 |
 
 ## Details
 
@@ -1028,6 +1029,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (the migration tool, since rc1).
 * **Evidence:** rc6 T2: `--check ... --skip-network-checks` on a test box with port 25 blocked listed the port as the only blocker and exited 1; the run with the same options started.
 * **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B77`; **fixed in:** v78-r2604.0-rc6
+
+### B78
+
+**After a Postfix restart at the wrong moment, every start of Postfix delays the first SMTP greetings by 100 seconds** (low, Postfix)
+
+* **Symptom:** After each start of Postfix (a setup run, a reboot, a package update), the first connections to port 25 get the "220" greeting only after about 100 seconds; then it works normally until the next start. mail.log shows `postfix/tlsmgr: error: open database /var/lib/postfix/smtp_scache.db: File exists` and `warning: btree:/var/lib/postfix/smtp_scache is unavailable` 100 seconds after "open smtp TLS cache". The TLS session cache for outgoing mail stays off. Senders retry, so no mail is lost, but it is delayed.
+* **Cause:** The package's `main.cf` keeps the outgoing TLS session cache in a Berkeley DB btree (`smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache`). tlsmgr empties it when it starts; Berkeley DB writes the new file as `__db.smtp_scache.db` first and renames it. When Postfix is stopped during that moment, the temporary file stays. Every later tlsmgr finds it, retries for 100 seconds, gives up with "File exists" and runs without the cache. Meanwhile smtpd on port 25 sent no greeting (port 587 answered at once in the test). setup restarts Postfix several times within seconds, which is enough to hit it.
+* **Fix:** setup/mail-postfix.sh adds a systemd drop-in, `/etc/systemd/system/postfix.service.d/mailinabox-stale-db.conf`, that removes `/var/lib/postfix/__db.*` before each start of Postfix. While Postfix is stopped these files are always stale. The in-place tool does not count this drop-in as a local extension.
+* **Affects:** v78 yes, PR #2603 yes. Origin: Upstream (the package default and the restarts of setup). Not reproduced on 22.04, which has the same default and Berkeley DB 5.3.
+* **Evidence:** rc6 T2 (migration to a fresh 26.04 test box): setup restarted Postfix 60 ms after tlsmgr had started to open the cache (journal), and `__db.smtp_scache.db` stayed from that moment. After that, every restart of Postfix gave the first port 25 connection its greeting after 100 seconds, with the errors above. With the file removed, the greeting came at once; with the file put back and the drop-in in place, a start removed it and the greeting came at once.
+* **Found by:** test run (T2 of rc6); **commit:** see `git log --grep B78`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 
