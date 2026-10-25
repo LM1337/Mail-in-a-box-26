@@ -9,7 +9,19 @@ Bug IDs such as **B01** refer to [BUGS-fork.md](BUGS-fork.md). Each entry there
 documents the symptom, cause, fix and affected versions of one bug (v78 on 22.04,
 PR #2603). For upstream's own history see CHANGELOG.md.
 
-## Unreleased
+## v78-r2604.0-rc6 (2026-10-25)
+
+Fixes from the in-place test from 22.04 of rc5 and from the test runs of
+rc6: the tools show their run in the terminal, also through `curl | sudo
+bash` (B71), phase verify no longer warns about `ssh.service` (B70), the
+last tmux window closes by itself (B72), and the tool says that SSH logins,
+sudo and `tmux attach` fail for a while in the release upgrades (B73).
+Setup no longer stops on the apt lock of Ubuntu's daily jobs (B79), no
+longer grows `10-ssl.conf` (B74), fixes logrotate on boxes upgraded in
+place (B75), and Postfix no longer delays its greeting after an unlucky
+restart (B78); two fixes for the checks of `migrate-to-2604.sh` (B76, B77).
+Roundcube and Nextcloud show the fork's favicon, and the smoke test ignores
+marked test mails.
 
 ### New
 
@@ -95,6 +107,30 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   for the testers' own checks. `seed-legacy.sh` leaves the same mails out of
   the manifest. Manifests of earlier `seed-legacy.sh` runs still work.
   TESTING-fork.md describes it.
+
+### Upgrade note
+
+* Boxes on rc1 to rc5 are updated with the two commands of "Updating the
+  fork" in README-fork.md:
+  `sudo git -C /root/mailinabox remote set-url origin https://github.com/LM1337/Mail-in-a-box-26`
+  and
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`.
+  The first one is needed for rc1 to rc3 and changes nothing on rc4 and rc5.
+* After the update Roundcube and Nextcloud show the fork's favicon. A
+  favicon that an administrator uploaded in Nextcloud and a replaced
+  favicon of Roundcube's Elastic skin are kept. To keep the old favicons,
+  put `FAVICON=off` into `/etc/mailinabox.conf` before the update.
+* The first setup run of this release writes the SSL settings of
+  `/etc/dovecot/conf.d/10-ssl.conf` once more (B74). The commented copies
+  that earlier runs added stay; they are only comments.
+* On boxes upgraded in place to 26.04 with rc1 to rc5, setup removes
+  cloud-init's old `/etc/logrotate.d/cloud-init` if it is unchanged, and
+  logrotate works again (B75). A changed file is kept; then remove the
+  duplicate entry by hand.
+* For an in-place upgrade, read "Logging in during the release upgrades" in
+  README-fork.md ("In-place upgrade to 26.04") first: attach to the run
+  before each release upgrade and keep the connection; if a new login
+  fails, wait, do not reboot.
 
 ## v78-r2604.0-rc5 (2026-10-24)
 
