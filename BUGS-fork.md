@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101 and B103-B105 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101 and B103-B112 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -33,12 +33,13 @@ reproduced on a box, the evidence line says so.
   * *update test*: the update of a copy of that production box from rc3 to a later release (rc4 to rc6; T5b in rc6), and the fresh rc4 test box.
   * *log audit*: `tests/fork/log-audit.sh` on the boxes of the certification runs of rc6 (T1 to T5b), each warning and error classified.
   * *rc7 development*: the work on the changes of rc7 and their checks on a test box (new smoke test groups, setup runs, the log audit of the restart window).
+  * *rc7 certification*: the test matrix T1 to T5b on the release commit of rc7, with a test address on the peer box that answers the mail check and an rsync account there as the backup target.
   * *rc7 review*: the review of rc7's code, of setup and of the tools against the fork's rule that root does no file operations by path in directories that another account may write (such as `/tmp`, `/var/log/<service>`, `$STORAGE_ROOT`).
 
 ## Summary
 
-101 bugs: 2 critical, 17 high, 39 medium, 43 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+109 bugs: 2 critical, 17 high, 42 medium, 48 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B113 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -46,7 +47,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 20 |
+| Fork | 28 |
 
 32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.

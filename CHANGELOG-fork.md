@@ -61,7 +61,10 @@ B90, B98). The management daemon no longer runs out of file descriptors
 (B91), and ActiveSync syncs the contacts of new users again (B99). The
 review of the merged release found B100, B101 and B103 to B105 in the new
 fallback SSH server, the update tools and the log audit, and B102 in the
-in-place tool's copy to an rsync target (all fixed).
+in-place tool's copy to an rsync target (all fixed). The certification runs
+of rc7 (T1 to T5b) found B106 to B110 in `tools/update-check.sh` and its
+lists of expected changes, B111 and B112 in the fallback SSH server and
+B113 in the migration tool's check (all fixed).
 
 ### New
 
