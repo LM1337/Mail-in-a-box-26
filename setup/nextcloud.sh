@@ -593,10 +593,13 @@ nextcloud_favicon() {
 	fi
 	if [ -z "$mime" ] || [ "$have" != "$ours" ]; then
 		# occ runs as www-data, which cannot read the setup directory.
-		tmp=$(mktemp --suffix=.ico)
-		install -m 644 branding/favicon.ico "$tmp"
-		"${occ[@]}" theming:config favicon "$tmp" > /dev/null 2>&1 || rc=$?
-		rm -f "$tmp"
+		# A directory of root's own (mode 0711: www-data may open the file in it,
+		# nobody else may add, replace or list entries), not a file name in /tmp.
+		tmp=$(mktemp -d)
+		chmod 711 "$tmp"
+		install -m 644 branding/favicon.ico "$tmp/favicon.ico"
+		"${occ[@]}" theming:config favicon "$tmp/favicon.ico" > /dev/null 2>&1 || rc=$?
+		rm -rf "$tmp"
 		if [ "$rc" != 0 ]; then
 			echo "Nextcloud: could not set the fork's favicon (occ theming:config, exit code $rc)." >&2
 			return 0

@@ -38,7 +38,9 @@ test tool: `tests/fork/log-audit.sh`.
   an administrator uploaded under Administration > Theming is kept, and
   setup only replaces the one it set itself. `FAVICON=off` in
   `/etc/mailinabox.conf` turns both off and removes the fork's favicon from
-  Nextcloud again. See README-fork.md, "Favicons".
+  Nextcloud again. For `occ`, which runs as www-data, setup copies the file
+  into a new directory of root's own (mode 0711), not under a file name in
+  `/tmp`. See README-fork.md, "Favicons".
 * Tests: `tests/fork/log-audit.sh` (as root on the box, read-only) collects
   the warnings and errors since a point in time (`--since`, default the last
   boot) from the journal, `systemctl --failed` and the logs of the services
