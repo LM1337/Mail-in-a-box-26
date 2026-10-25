@@ -188,6 +188,7 @@ SELF=$STATE_DIR/$SCRIPT_NAME
 SELF_FILE=
 FALLBACK_STARTED=
 SSH_WATCH_PID=
+SSH_CHECK_HOSTS=()
 
 # ---------------------------------------------------------------------------
 # Output. Keep in sync with tools/migrate-to-2604.sh (blocker differs: it
@@ -306,9 +307,13 @@ During each release upgrade the SSH server on port 22 is down for a while
 (UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
 administrators (members of the groups sudo and admin, and root if
 PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
-others), with the AllowUsers/AllowGroups/DenyUsers/DenyGroups of sshd_config.
-ufw lets its port through only while it runs. The run says when port 22
-answers again.
+others), on the ListenAddress addresses of sshd and with its
+AllowUsers/AllowGroups/DenyUsers/DenyGroups, PubkeyAuthOptions, ForceCommand
+and ChrootDirectory. It does not start where sshd asks for more than a key
+(AuthenticationMethods) or sshd_config has Match blocks. ufw lets its port
+through only while it runs. The run says when port 22 answers again.
+UPGRADE_SSH_FALLBACK_TEST_SECONDS (default 600) is how long
+--ssh-fallback-test keeps it running.
 EOF
 }
 
@@ -3071,8 +3076,12 @@ or restore from the backups."
 # allows only public keys, of the administrators (members of the groups sudo
 # and admin, and root if PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS
 # names others), with the same AllowUsers, AllowGroups, DenyUsers and
-# DenyGroups and the same algorithms as the running sshd (sshd -T), without
-# forwarding. Their keys are copied (read as the user, not through a symlink
+# DenyGroups, listen addresses, PubkeyAuthOptions, ForceCommand,
+# ChrootDirectory and algorithms as the running sshd (sshd -T), without
+# forwarding. It must not let in with a key alone whom sshd asks for more:
+# where sshd requires other factors (AuthenticationMethods) or its
+# configuration has Match blocks (sshd -T without -C does not apply them),
+# there is no fallback (ssh_fallback_refusal). Their keys are copied (read as the user, not through a symlink
 # of theirs as root) into a root-owned directory, $FALLBACK_KEYS_DIR. ufw lets
 # the port through (rate limited) only while the fallback runs. Its
 # privilege separation directory /run/sshd goes away when ssh.service stops
@@ -3112,17 +3121,83 @@ port_listening() { # PORT
 	return 1
 }
 
-# Does an SSH server answer on 127.0.0.1:PORT (its banner)? It sends an
-# identification string first, so that sshd logs no kex_exchange_identification
-# error, only that the connection was closed before the login.
+# The local addresses on which sshd listens (its ListenAddress lines, from
+# sshd -T; 0.0.0.0 and [::] as 127.0.0.1 and ::1), to check its banner. Read
+# once, before the release upgrade replaces sshd; without them 127.0.0.1 and ::1.
+ssh_check_hosts() {
+	[ ${#SSH_CHECK_HOSTS[@]} = 0 ] || return 0
+	local key val host
+	while read -r key val; do
+		[ "$key" = listenaddress ] || continue
+		host=${val%% *}
+		host=${host%:*}
+		case "$host" in
+			0.0.0.0) host=127.0.0.1 ;;
+			"[::]") host=::1 ;;
+			\[*\]) host=${host#\[}; host=${host%\]} ;;
+		esac
+		[[ $host =~ ^[0-9A-Za-z.:%_-]+$ ]] || continue
+		[[ " ${SSH_CHECK_HOSTS[*]} " == *" $host "* ]] || SSH_CHECK_HOSTS+=("$host")
+	done < <(sshd -T 2> /dev/null < /dev/null || true)
+	[ ${#SSH_CHECK_HOSTS[@]} -gt 0 ] || SSH_CHECK_HOSTS=(127.0.0.1 ::1)
+}
+
+# Does an SSH server answer on PORT of one of these addresses (its banner)? It
+# sends an identification string first, so that sshd logs no
+# kex_exchange_identification error, only that the connection was closed
+# before the login.
 ssh_banner() { # PORT
-	(
-		exec 3<> "/dev/tcp/127.0.0.1/$1" || exit 1
-		printf 'SSH-2.0-upgrade-2604-check\r\n' >&3 || true
-		line=
-		read -r -t 10 -u 3 line || true
-		[[ $line == SSH-2.0-* ]]
-	) 2> /dev/null
+	local h
+	ssh_check_hosts
+	for h in "${SSH_CHECK_HOSTS[@]}"; do
+		if (
+			exec 3<> "/dev/tcp/$h/$1" || exit 1
+			printf 'SSH-2.0-upgrade-2604-check\r\n' >&3 || true
+			line=
+			read -r -t 10 -u 3 line || true
+			[[ $line == SSH-2.0-* ]]
+		) 2> /dev/null; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Why the fallback cannot keep the login policy of sshd, if it cannot: it
+# allows public keys only, without the factors that AuthenticationMethods
+# adds, and sshd -T (without -C) does not show what Match blocks change.
+# SSHD_T: the output of sshd -T.
+ssh_fallback_refusal() { # SSHD_T
+	local t=$1 am list ok='' f w files=(/etc/ssh/sshd_config)
+	if [ "$(sed -n 's/^pubkeyauthentication //p' <<< "$t")" = no ]; then
+		echo "sshd does not accept public keys (PubkeyAuthentication no)"
+		return 0
+	fi
+	am=$(sed -n 's/^authenticationmethods //p' <<< "$t")
+	if [ -n "$am" ] && [ "$am" != any ]; then
+		# Alternatives separated by spaces; the fallback is as strict as sshd
+		# only if one of them is a public key alone.
+		for list in $am; do
+			if [ "$list" = publickey ]; then ok=1; fi
+		done
+		if [ -z "$ok" ]; then
+			echo "sshd requires more than a key (AuthenticationMethods $am)"
+			return 0
+		fi
+	fi
+	# Match blocks in sshd_config and the files it includes (one level, as
+	# Ubuntu's sshd_config.d/*.conf; relative paths are below /etc/ssh).
+	while read -r -a w; do
+		for f in "${w[@]}"; do
+			[[ $f == /* ]] || f=/etc/ssh/$f
+			while IFS= read -r f; do files+=("$f"); done < <(compgen -G "$f" || true)
+		done
+	done < <(sed -nE 's/^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+//p' /etc/ssh/sshd_config 2> /dev/null || true)
+	if grep -sqiE '^[[:space:]]*match[[:space:]]' "${files[@]}"; then
+		echo "the sshd configuration has Match blocks, which the fallback cannot take over"
+		return 0
+	fi
+	return 0
 }
 
 # The administrators who may log in on the fallback.
@@ -3171,7 +3246,7 @@ user_keys() { # USER FILES...
 # Start the fallback (see above). Never fatal: without it the release upgrade
 # goes on as before.
 ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
-	local until=${1:-until the release upgrade has finished} port t prl keyfiles=() users=() u n=0 key val bin out
+	local until=${1:-until the release upgrade has finished} port t prl keyfiles=() users=() u n=0 key val bin out addr rest
 	port=$(ssh_fallback_port)
 	if [ "$port" = off ]; then
 		say "No fallback SSH server (UPGRADE_SSH_FALLBACK_PORT=off)."
@@ -3187,6 +3262,13 @@ ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
 		warn "sshd -T fails; no fallback SSH server."
 		return 0
 	fi
+	out=$(ssh_fallback_refusal "$t")
+	if [ -n "$out" ]; then
+		warn "No fallback SSH server: $out. With a key alone it could let in whom sshd
+refuses or asks for more. Keep an SSH connection open during the release upgrade (new logins fail for a while)."
+		return 0
+	fi
+	ssh_check_hosts
 	prl=$(sed -n 's/^permitrootlogin //p' <<< "$t")
 	case "$prl" in yes | without-password | prohibit-password) prl=prohibit-password ;; forced-commands-only) ;; *) prl=no ;; esac
 	read -r -a keyfiles <<< "$(sed -n 's/^authorizedkeysfile //p' <<< "$t")"
@@ -3251,8 +3333,17 @@ ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
 					| logingracetime | maxstartups | loglevel | syslogfacility | strictmodes)
 					echo "$key $val"
 					;;
-				allowusers | allowgroups | denyusers | denygroups | trustedusercakeys | revokedkeys | authorizedprincipalsfile)
+				allowusers | allowgroups | denyusers | denygroups | trustedusercakeys | revokedkeys | authorizedprincipalsfile \
+					| pubkeyauthoptions | forcecommand | chrootdirectory | banner)
 					[ "$val" = none ] || echo "$key $val"
+					;;
+				permittty | permituserrc)
+					echo "$key $val"
+					;;
+				listenaddress)
+					# The same addresses, on the fallback's port.
+					read -r addr rest <<< "$val"
+					echo "ListenAddress ${addr%:*}:$port${rest:+ $rest}"
 					;;
 			esac
 		done <<< "$t"
@@ -3331,6 +3422,7 @@ until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall 
 ssh_watch_start() {
 	local port
 	port=$(ssh_fallback_port)
+	ssh_check_hosts # before the release upgrade replaces sshd
 	(
 		trap - ERR EXIT
 		set +e

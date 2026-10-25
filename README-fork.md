@@ -1046,10 +1046,14 @@ the end; nothing listens on port 22 in between. From rc7 on, the tool runs a
 `ssh -p 1022 you@box`. It runs from a private copy of the old sshd, accepts
 only keys, and only of the administrators (members of the groups sudo and
 admin, and root if `PermitRootLogin` allows keys;
-`UPGRADE_SSH_FALLBACK_USERS="..."` names others), keeps the AllowUsers,
-AllowGroups, DenyUsers and DenyGroups of `sshd_config` and allows no
-forwarding. ufw lets the port through only while it runs; a firewall of the
-provider must allow it too. Try it before the upgrade with
+`UPGRADE_SSH_FALLBACK_USERS="..."` names others), listens on the addresses
+of `sshd_config` (ListenAddress), keeps its AllowUsers, AllowGroups,
+DenyUsers, DenyGroups, PubkeyAuthOptions, ForceCommand and ChrootDirectory
+and allows no forwarding. Where sshd asks for more than a key
+(`AuthenticationMethods`, e.g. a key and a one-time password) or
+`sshd_config` has `Match` blocks, there is no fallback (it would let in with
+a key alone); keep a connection open instead. ufw lets the port through
+only while it runs; a firewall of the provider must allow it too. Try it before the upgrade with
 `--ssh-fallback-test` (10 minutes). The run says when port 22 stops
 answering and when it answers again. The fallback is stopped when port 22
 works again, also when the tool stops with an error; while port 22 does not
@@ -1203,10 +1207,14 @@ Port, `off` schaltet ihn ab): `ssh -p 1022 name@box`. Er läuft aus einer
 eigenen Kopie des alten sshd, nimmt nur Schlüssel an, und nur die der
 Administratoren (Mitglieder der Gruppen sudo und admin, und root, wenn
 `PermitRootLogin` Schlüssel erlaubt; `UPGRADE_SSH_FALLBACK_USERS="..."` nennt
-andere), behält AllowUsers, AllowGroups, DenyUsers und DenyGroups aus
-`sshd_config` und erlaubt keine Weiterleitungen. ufw lässt den Port nur
-durch, solange er läuft; eine Firewall des Anbieters muss ihn ebenfalls
-erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`
+andere), hört auf den Adressen aus `sshd_config` (ListenAddress), behält
+dessen AllowUsers, AllowGroups, DenyUsers, DenyGroups, PubkeyAuthOptions,
+ForceCommand und ChrootDirectory und erlaubt keine Weiterleitungen. Wo sshd
+mehr als einen Schlüssel verlangt (`AuthenticationMethods`, etwa Schlüssel
+und Einmalpasswort) oder `sshd_config` `Match`-Blöcke hat, gibt es keinen
+Ersatz-Server (er ließe mit dem Schlüssel allein herein); dann eine
+Verbindung offen halten. ufw lässt den Port nur durch, solange er läuft;
+eine Firewall des Anbieters muss ihn ebenfalls erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`
 ausprobieren (10 Minuten). Der Lauf meldet, wann Port 22 nicht mehr
 antwortet und wann wieder. Der Ersatz-Server wird beendet, sobald Port 22
 wieder geht, auch wenn das Werkzeug mit einem Fehler abbricht; solange Port 22

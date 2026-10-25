@@ -152,6 +152,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B98](#b98) | medium | DNS | DNSSEC: the keys are copied to /tmp under their own names for signing | Upstream | yes | yes | rc7 |
 | [B99](#b99) | high | Z-Push | ActiveSync cannot sync the address book of new users: Nextcloud's example contact breaks Z-Push | PR #2603 | no | yes | rc7 |
 | [B100](#b100) | high | Tools | The fallback SSH server of the in-place tool never starts on a box without the group admin | Fork | no | no | rc7 |
+| [B101](#b101) | medium | Tools | The fallback SSH server of the in-place tool logs in with a key alone where sshd asks for more, and listens on all addresses | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1271,6 +1272,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (the fallback is new in rc7, never in a tag). Origin: Fork.
 * **Evidence:** reproduced with the function under the tool's shell options on a machine without the group `admin`: no user and the ERR trap before the fix, the members of sudo and root after it. The lab box of the rc7 development has a group `admin` (gid 107), which is why its runs of `--ssh-fallback-test` did not show it.
 * **Found by:** rc7 review; **commit:** see `git log --grep B100`; **fixed in:** v78-r2604.0-rc7
+
+### B101
+
+**The fallback SSH server of the in-place tool logs in with a key alone where sshd asks for more, and listens on all addresses** (medium, Tools)
+
+* **Symptom:** During a release upgrade (and `--ssh-fallback-test`) the fallback on port 1022 lets an administrator in with the key alone where sshd asks for a key and a second factor (`AuthenticationMethods publickey,keyboard-interactive`, e.g. a one-time password), ignores what `Match` blocks restrict (e.g. `PermitRootLogin no` for some source addresses), the FIDO touch or PIN of `PubkeyAuthOptions`, `ForceCommand` and `ChrootDirectory`, and listens on all addresses where sshd listens only on an internal or VPN address (ufw opens the port from anywhere). Where sshd does not listen on 127.0.0.1, the tool never sees port 22 answer again and leaves the fallback running until the reboot, with a warning that port 22 does not answer.
+* **Cause:** `ssh_fallback_start` wrote `AuthenticationMethods publickey` and copied only a fixed list of keys from `sshd -T`, without `authenticationmethods`, `listenaddress`, `pubkeyauthoptions`, `forcecommand` and `chrootdirectory`. `sshd -T` without `-C` does not apply Match blocks. `ssh_banner` connected only to 127.0.0.1.
+* **Fix:** The fallback does not start where sshd accepts no keys, where no alternative of `AuthenticationMethods` is a key alone, or where `sshd_config` or a file it includes has a `Match` line; the tool says why and advises to keep a connection open. It listens on the ListenAddress addresses of sshd (on its own port) and keeps `PubkeyAuthOptions`, `ForceCommand`, `ChrootDirectory`, `PermitTTY`, `PermitUserRC` and `Banner`. The banner check of port 22 (and of the fallback's port) tries each listen address of sshd (0.0.0.0 and `[::]` as 127.0.0.1 and ::1), read before the release upgrade.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork. Only boxes with such sshd settings; the default configuration of Ubuntu (keys or passwords, all addresses, no Match block) was not affected.
+* **Evidence:** from reading the code; on the rc7 test box `sshd -T` printed `permitrootlogin prohibit-password` and `sshd -T -C addr=192.0.2.5` `no` for a `Match Address 192.0.2.0/24` block. With the fix on that box: `--ssh-fallback-test` with the default configuration wrote `ListenAddress [::]:1022` and `0.0.0.0:1022`, a key login on port 1022 worked, and the end of the test stopped the server, closed the ufw rule and removed its files; with a `Match` block in `sshd_config.d` it refused with the warning (removed again afterwards). The checks of `AuthenticationMethods` (any, `publickey,keyboard-interactive`, `publickey,password publickey`) and `PubkeyAuthentication no` were run against the function with a stubbed `sshd -T`.
+* **Found by:** rc7 review; **commit:** see `git log --grep B101`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

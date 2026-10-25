@@ -117,14 +117,23 @@ contacts of new users again (B99).
   accepts only public keys, only of the administrators (members of the
   groups sudo and admin, and root if `PermitRootLogin` allows keys;
   `UPGRADE_SSH_FALLBACK_USERS` names others), whose keys it copies (read as
-  the user) into a root-owned directory, keeps the AllowUsers, AllowGroups,
-  DenyUsers, DenyGroups and the algorithms of the running sshd, and allows no
-  forwarding. ufw lets the port through (rate limited) only while it runs.
+  the user) into a root-owned directory, listens on the ListenAddress
+  addresses of the running sshd, keeps its AllowUsers, AllowGroups,
+  DenyUsers, DenyGroups, PubkeyAuthOptions, ForceCommand, ChrootDirectory,
+  PermitTTY and algorithms, and allows no forwarding. It does not start
+  where sshd asks for more than a key (`AuthenticationMethods`), accepts no
+  keys, or has `Match` blocks in `sshd_config` or its included files
+  (`sshd -T` does not apply them), so it never lets in with a key alone whom
+  sshd asks for more (B101). ufw lets the port through (rate limited) only
+  while it runs.
   It is stopped, and the port closed, when port 22 answers again after the
   release upgrade and on every way out of the tool (also after Ctrl-C);
   while port 22 does not answer it stays until the next reboot, and the next
-  run removes it and its ufw rule. `--ssh-fallback-test` starts it for 10
-  minutes before an upgrade, to try a login on its port.
+  run removes it and its ufw rule. Port 22 counts as answering when its SSH
+  banner comes on one of the listen addresses of sshd (not only
+  127.0.0.1). `--ssh-fallback-test` starts it for 10 minutes
+  (`UPGRADE_SSH_FALLBACK_TEST_SECONDS`) before an upgrade, to try a login on
+  its port.
 * Tools: `tools/upgrade-in-place-to-2604.sh` says in the run when the release
   upgrade has stopped the SSH server on port 22 and when port 22 answers
   again (its SSH banner), with the minutes in between.
