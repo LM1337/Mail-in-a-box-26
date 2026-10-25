@@ -225,6 +225,27 @@ function restart_service {
 	hide_output service "$1" restart
 }
 
+function reload_nginx {
+	# Load a new nginx configuration. A reload lets the old workers finish
+	# their requests; a restart gives them only the unit's stop timeout (5 s
+	# on Ubuntu) and then cuts long-polling ActiveSync, CalDAV and CardDAV
+	# clients. A reload also opens new listen sockets. nginx is (re)started
+	# only when it does not run, or when the running binary is not the
+	# installed one any more (an upgrade of the package that left the old
+	# process running). nginx -t first, so that a bad configuration stops
+	# setup with nginx's message, and the running nginx keeps its old one.
+	local pid
+	enable_service nginx
+	pid=$(systemctl show -P MainPID nginx.service 2> /dev/null || true)
+	if ! systemctl is-active --quiet nginx.service || [ -z "$pid" ] || [ "$pid" = 0 ] \
+		|| [ ! "/proc/$pid/exe" -ef /usr/sbin/nginx ]; then
+		hide_output service nginx restart
+		return
+	fi
+	hide_output nginx -t
+	hide_output service nginx reload
+}
+
 ## Dialog Functions ##
 function message_box {
 	dialog --title "$1" --msgbox "$2" 0 0

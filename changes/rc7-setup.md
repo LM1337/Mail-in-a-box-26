@@ -13,6 +13,13 @@ BUGS-fork.md, to be merged into them when the strands come together.
   questions that follow (hostname, and the IP addresses where they differ
   from what the box finds) come as before; non-interactive runs are
   unchanged.
+* nginx: setup reloads nginx (after `nginx -t`) instead of restarting it.
+  A restart gave the running requests only the unit's stop timeout (5 s on
+  Ubuntu) and cut long-polling ActiveSync, CalDAV and CardDAV clients; a
+  reload lets the old workers finish them. Setup still starts nginx when it
+  does not run and restarts it when the running binary is not the
+  installed one (a package upgrade that left the old process running). The
+  management daemon's web update already reloaded.
 
 ### Fixed
 
