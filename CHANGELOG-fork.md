@@ -55,9 +55,10 @@ test tool: `tests/fork/log-audit.sh`.
   the old releases and the release upgrades only there.
   `tests/fork/log-audit-allow-old-box.txt` adds what the old box logs when
   the migration tool stops it. The allowlist holds the classes of the rc6
-  certification runs that were checked as harmless, each with its reason,
-  except one rule that the final run needed from the test lab's own list
-  (see "Planned for rc7"); the defects it found are B80 to B84. Dovecot's
+  certification runs that were checked as harmless, each with its reason;
+  the test lab's own list added the classes of software that the copied
+  box runs besides Mail-in-a-Box, and the `(sd-pam)` class of one run (see
+  "Planned for rc7"). The defects it found are B80 to B84. Dovecot's
   syslog lines (`dovecot: imap(...): ...`) get the class of Dovecot's
   process, as its own lines in older files do, and its lines below warning
   in the journal (failed logins of clients) are not findings. A line that
@@ -273,7 +274,8 @@ test tool: `tests/fork/log-audit.sh`.
 * A rule in `tests/fork/log-audit-allow.txt` for `(sd-pam)`'s
   "pam_systemd(systemd-user:session): Varlink call
   io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession"
-  at a reboot, seen in the final rc6 run.
+  at a reboot, seen in one T5b run of rc6 (the test lab's own list
+  accepted it there).
 * The full test matrix T1 to T5b again on the release head, and T6 (on the
   Internet: Let's Encrypt, delivery to other providers) before a final
   release.

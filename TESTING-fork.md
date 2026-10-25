@@ -109,13 +109,15 @@ report. The groups:
   banned on IMAP, POP3, ManageSieve, 587 and 465, then it is unbanned; from
   rc4 also turning adaptive banning off reaches the running jails. From rc6
   the group first rotates `mail.log` once (`logrotate -f` of the rsyslog
-  entry, `fail2ban-log-rotation`) and checks that Dovecot and rsyslog write
-  the new file; the attacks then run against the rotated log, so a jail that
-  a rotation made blind fails (B85). Use a lab address of the peer
+  entry, `fail2ban-log-rotation`) and checks that rsyslog writes the new
+  file and that no Dovecot process holds a file in `/var/log` (Dovecot logs
+  through syslog; on a box where Dovecot still writes `mail.log` itself, up
+  to rc5, it must hold the new file); the attacks then run against the
+  rotated log, so a jail that a rotation made blind fails (B85). Use a lab address of the peer
   (`--peer-ssh`), never the jump host.
 
 The number of checks grew from release to release (49 in the first runs, 73
-in the rc5 in-place runs, 75 in the final rc6 update run with
+in the rc5 in-place runs, 75 in the final rc6 update runs with
 `munin-alert-contact` and `fail2ban-log-rotation`), and it depends on the
 mode and on `--fail2ban`.
 The counts below are not comparable between releases.
@@ -138,12 +140,15 @@ the in-place tool reports it.
 | rc3 | 2026-10-23 | not run | not run | 53/55 (T3b) | 55/55 | – |
 | rc4 | 2026-10-24 | 60/60 | not run | 56/58 (T3c, pre-merge branch) | 58/58 (T4b, pre-merge branch) | 68/71, from the published tag 69/71 |
 | rc5 | 2026-10-24 | 62/62 | not run | 67/73 | 67/73 (from the published tag) | 67/73 (T5b, from rc3) |
-| rc6 | 2026-10-25 | 62/62 ¹ | 73/73 ¹ | 73/73 ¹ | 73/73 ¹ | 75/75 (T5b, from rc3, on the release head `47d91e8`) |
+| rc6 | 2026-10-25 | 62/62 ¹ | 73/73 ¹ | 73/73 ¹ | 73/73 ¹ | 75/75 (T5b, from rc3, at `5d2d3aa`, the code of the release ²) |
 
 ¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
-not repeated on the release head (see "rc6 certification" below). The
-earlier rc6 development runs had the same counts (T3 and T5b after a first
-run of 71/73).
+not repeated on the code of the release (see "rc6 certification" below).
+The earlier rc6 development runs had the same counts (T3 and T5b after a
+first run of 71/73).
+
+² The commits after `5d2d3aa` change only the log audit tool, its
+allowlist and the documentation.
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -279,7 +284,7 @@ sudo times below come from.
 | T2 (22.04 → fresh 26.04) | `33f056b` | "All checks passed"; setup on the new machine 2451 s; reboot, SSH back after 22 s; smoke 73/73 (and 21/21 for the logins and the migrated data right after the reboot) |
 | T3 (24.04 copy, in place) | `33f056b` | "All checks passed"; mail offline 1 h 19 min, 1 reboot; new SSH logins failed for about 14 minutes, `/usr/bin/sudo` was missing for about 26 minutes; a reboot after the run, SSH back after 21 s; smoke 73/73 |
 | T4 (22.04 → 24.04 → 26.04, in place) | `33f056b` | "All checks passed"; mail offline 2 h 04 min, 2 reboots; new SSH logins failed for about 36 minutes (22.04 → 24.04) and about 10 minutes (24.04 → 26.04), `/usr/bin/sudo` was missing for about 19 minutes; a reboot after the run, SSH back after 20 s; smoke 73/73 (and 7/7 for the logins and enabled services right after the reboot) |
-| T5b (rc3 → rc6) | `33f056b` | two update runs, exit 0 in 144 s and 109 s; reboot, SSH back after 21 s; smoke 73/73 |
+| T5b (rc3 → rc6) | `33f056b` | update run 1, exit 0 in 144 s; reboot, SSH back after 21 s; smoke 73/73; update run 2, exit 0 in 109 s; reboot, SSH back after 25 s |
 
 The log audit of every one of these runs had classes that were not on the
 allowlist of `33f056b`. Each class was checked: the defects became B80
@@ -290,25 +295,40 @@ went into `tests/fork/log-audit-allow.txt` with their reason (`e6634bf`,
 
 The fixes were then tested on the update path T5b, the path of the boxes
 that already run the fork, from the same snapshot (the 24.04 copy upgraded
-in place with rc3) with the fresh 26.04 test box as peer:
+in place with rc3) with the fresh 26.04 test box as peer. Like all rc6
+runs, the update runs used the documented command (`setup/bootstrap.sh`
+through `curl | sudo bash`) with `SOURCE` and `TAG` set to the release
+branch on the lab's mirror, before the tag existed; the published tag
+itself was not used.
 
 | Run | Commit | Result |
 |---|---|---|
-| T5b | `12b4dc2` | two update runs, exit 0 in 133 s and 107 s; smoke 74/74 (with the new `munin-alert-contact`) |
-| T5b | `c7fd0bb` | two update runs, exit 0 in 141 s and 105 s; smoke 71/74: `fail2ban-imap`, `-pop3` and `-managesieve` failed ("no ban after 26 failed logins"). logrotate.timer had rotated `mail.log` during the smoke test, and Dovecot wrote into `mail.log.1`: this is B85 |
-| T5b, final | `9152190`, then `47d91e8` | update run 1 to `9152190`: exit 0 in 116 s; reboot, SSH back after 24 s; smoke 74/75. The one FAIL was the new check `fail2ban-log-rotation`, which did not parse its own output ("unexpected output: dovecot=/var/log/mail.log rsyslog=1 owner=syslog:adm 640", that is, Dovecot and rsyslog did write the new file); `47d91e8` fixes the regex in `smoke.py` and changes nothing else. Update run 2 (`9152190`, 88 s), reboot (SSH back after 25 s), update run 3 to `47d91e8` (103 s). Smoke 75/75, with `fail2ban-log-rotation` (a forced rotation, then the bans on IMAP, POP3 and ManageSieve against the rotated log). Runs 2 and 3 changed in `/etc` and the web apps only what upstream changes on every run: the minute of the nightly job, the order of the OpenDKIM `KeyTable` and `SigningTable`, Roundcube's `des_key`, and the time stamps of the favicon files (same content). Log audit since the start of run 1: 0 UNKNOWN, 59 allowed classes; one class needed a new rule in the lab's own list, `(sd-pam)` "pam_systemd(systemd-user:session): Varlink call io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession" at the reboot, which moves into the repository's allowlist with rc7 |
+| T5b | `12b4dc2` | update run 1, exit 0 in 133 s; reboot, SSH back after 24 s; smoke 74/74 (with the new `munin-alert-contact`); update run 2, exit 0 in 107 s; reboot, SSH back after 27 s |
+| T5b | `c7fd0bb` | update run 1, exit 0 in 141 s; reboot, SSH back after 31 s; smoke 71/74: `fail2ban-imap`, `-pop3` and `-managesieve` failed ("no ban after 26 failed logins"). logrotate.timer had rotated `mail.log` during the smoke test, and Dovecot wrote into `mail.log.1`: this is B85. Update run 2, exit 0 in 105 s; reboot, SSH back after 24 s |
+| T5b | `9152190`, then `47d91e8` | the second version of the B85 fix (a path unit that had Dovecot reopen its log), later replaced. Update run 1 to `9152190`: exit 0 in 116 s; reboot, SSH back after 24 s; smoke 74/75. The one FAIL was the new check `fail2ban-log-rotation`, which did not parse its own output (`unexpected output: dovecot=/var/log/mail.log  rsyslog=1 owner=syslog:adm 640`, with two spaces before `rsyslog=`, which the regex did not allow; Dovecot and rsyslog did write the new file); `47d91e8` fixes the regex in `smoke.py`. Update run 2 (`9152190`, 88 s), reboot (SSH back after 25 s), update run 3 to `47d91e8` (103 s); smoke 75/75. Log audit: 0 UNKNOWN, 59 allowed classes, one of them with a new rule in the lab's own list (`(sd-pam)` "pam_systemd(systemd-user:session): Varlink call io.systemd.Login.ReleaseSession failed: io.systemd.Login.NoSuchSession" at the reboot, planned for the repository's allowlist in rc7) |
+| T5b, final | `5d2d3aa` | the code of the release: B85 in its final form (Dovecot logs through syslog), the favicon copy in a directory of root's own, and the tools' sudo-rs check by path. After the catch-up of logrotate.timer at the boot of the snapshot (it failed there, B75), update run 1: exit 0 in 112 s; logrotate started again: success; reboot, SSH back after 26 s; smoke 75/75, with `fail2ban-log-rotation` (a forced rotation: `log_path=syslog`, no Dovecot process holds a file in `/var/log`, rsyslog writes the new `mail.log` as syslog:adm 0640; then the bans on IMAP, POP3 and ManageSieve against the rotated log) and `mail-log-logins` (`mail_log.py` counts the IMAP and POP3 logins in the new line form); update run 2: exit 0 in 93 s; reboot, SSH back after 24 s. Run 2 changed in `/etc` and the web apps only what setup changes on every run: as upstream, the minute of the nightly job, the order of the OpenDKIM `KeyTable` and `SigningTable` and Roundcube's `config.inc.php` (setup writes a new `des_key` each time; the snapshot records only the file's hash), and, from the fork, the time stamps of its favicon copies (same content). Log audit since the start of run 1, with the repository's allowlist and the lab's own list: the tool of `5d2d3aa` found 3 UNKNOWN classes: rsyslog's "message repeated N times: [ ... ]" around a lab-only warning (two classes), now that Dovecot's lines go through rsyslog, and one Postfix restart race of setup ("connect #N to subsystem public/cleanup: Connection refused"). `3656d5d` (tests only) classes repeated lines as the repeated line and adds a rule for the race; with its tool and list: 0 UNKNOWN, 58 allowed classes. Two of them matched rules of the lab's own list only: the push plugin of the copied box, whose endpoint is not in the lab, and Docker changing a sysctl of the network interface |
 
-B85 was also checked by hand on that box. Without the fix (`c7fd0bb`): a
-forced rotation, then 26 failed IMAP logins from the peer; all 26 lines
-went into `mail.log.1` and the `dovecot` jail found none. With the final
-form of the fix, installed by hand: two forced rotations within a minute;
-each time the new `mail.log` was created by rsyslog (syslog:adm 0640), got
-all 26 login lines and rsyslog's lines, and the jails `dovecot` and
-`miab-slow-dovecot` banned the peer. With a symlink in place of `mail.log`,
-the helper exited 1 with its warning and did not reopen Dovecot's log. A
-first version of the fix (`594cec9`), whose helper created and chowned the
-file as root in `/var/log`, was replaced by `9152190` before the release;
-its T5b run was stopped and is not counted.
+B85 was checked by hand as well. Without a fix (`c7fd0bb`, Dovecot with
+its own `log_path`): a forced rotation, then 26 failed IMAP logins from
+the peer; all 26 lines went into `mail.log.1` and the `dovecot` jail found
+none. The second version of the fix was checked on the same box at
+`594cec9` with the helper of `9152190` installed by hand (two forced
+rotations, then the bans; a symlink in place of `mail.log`: the helper
+exited 1 with its warning; the scripts of these hand checks were not
+kept); its own T5b run is the `9152190` row above,
+and the version itself was replaced because the check before the reopen
+could be raced (see B85). The first version (`594cec9`), whose helper
+created and chowned the file as root in `/var/log`, was replaced before
+that; its T5b run was stopped and is not counted. On the T5b box at
+`5d2d3aa`, after the final run: `doveconf` gives `log_path = syslog` and
+`syslog_facility = mail`; no Dovecot process holds a file in `/var/log`;
+the units and the helper of the second version are not installed; 30000
+lines from one process of a service unit, sent through syslog with
+facility mail in 1.3 s, all reached `mail.log` and the journal. On the
+same box: `systemctl stop spampd` removed `/run/spampd.pid` and the start
+wrote it again (B81); cron was stopped from the start to the end of each
+update run (B82); nsd was not restarted by the update runs, whose
+`nsd.conf` did not change, only by the reboots (B83).
 
 Targeted check of B84 on the 26.04 test box at `47d91e8` (systemd 259):
 both tools pass `bash -n`; the scope lines taken from the tools start a
@@ -324,32 +344,41 @@ Ubuntu 26.04 (resumed after a reboot)". As a control, the `exec` line of
 log the messages even for the old scope line, so the 22.04 case (systemd
 249) is covered only by the T4 run on `33f056b`, which showed the messages,
 not by a run with the fix; `migrate-to-2604.sh --check` got only as far as
-the SSH login to the old box.
+the SSH login to the old box. The tools' sudo-rs check (`mux_tty`) of
+`5d2d3aa` was compared with the one before on the same box: through a
+pipe with sudo-rs, through a pipe with classic sudo (`sudo.ws`) and with
+a terminal as stdin, both versions of both tools chose the same terminals.
+A 22.04 or 24.04 box was not used for it.
 
-**Not repeated on the release head.** At the maintainer's decision, T1 to
-T4 were not run again on `47d91e8`: rc7 is already in progress, and the
-full matrix (T1 to T5b, and T6 on the Internet before a final release)
-runs again for it. Further runs of T1, T2 and T4 on intermediate commits
-(`12b4dc2`, `c7fd0bb`) were stopped early and are not counted. What changed after `33f056b`, by path:
+**Not repeated on the code of the release.** At the maintainer's
+decision, T1 to T4 were not run again on `5d2d3aa`: rc7 is already in
+progress, and the full matrix (T1 to T5b, and T6 on the Internet before a
+final release) runs again for it. Further runs of T1, T2 and T4 on
+intermediate commits (`12b4dc2`, `c7fd0bb`) were stopped early and are not
+counted. What changed after `33f056b`, by path:
 
 * **Setup** (used by T1, T2 and T5b, and by the setup phase of T3 and
   T4): B80 (`setup/munin.sh`, `management/munin_notify.sh`), B81
   (`setup/spamassassin.sh`), B82 (`setup/start.sh`), B83 (`setup/dns.sh`),
-  B85 (`setup/mail-dovecot.sh`, `management/dovecot_log_reopen.sh`, the
-  path and service units, a comment in `conf/fail2ban/jails.conf`). Run on
-  the release head by T5b only; not on a fresh install, a migration or a
-  box that comes through a release upgrade.
-* **`tools/migrate-to-2604.sh`** (T2): the scope description of B84 and a
-  comment about cron. Covered by the targeted B84 check, not by a T2 run.
+  B85 (`setup/mail-dovecot.sh`: `log_path=syslog` and the removal of the
+  second version's units; `management/mail_log.py`; comments in
+  `management/fail2ban_admin.py` and `conf/fail2ban/jails.conf`), and the
+  favicon copy for Nextcloud (`setup/nextcloud.sh`). Run on the code of the
+  release by T5b only; not on a fresh install, a migration or a box that
+  comes through a release upgrade.
+* **`tools/migrate-to-2604.sh`** (T2): the scope description of B84, a
+  comment about cron, and the sudo-rs check by path. Covered by the
+  targeted checks of B84 and `mux_tty`, not by a T2 run.
 * **`tools/upgrade-in-place-to-2604.sh`** (T3, T4): the scope and the
   resume scope descriptions and `printf %q` in the resume script (B84);
   `detect_extensions` leaves out the fork's spampd drop-in; the texts with
-  the SSH, sudo and release upgrade times. Covered by the targeted B84
-  check and `--check`, not by a T3 or T4 run.
+  the SSH, sudo and release upgrade times; the sudo-rs check by path.
+  Covered by the targeted checks and `--check`, not by a T3 or T4 run.
 * **Tests and documentation only:** `tests/fork/log-audit.sh` and its
   allowlists, `smoke.py` (`munin-alert-contact`, `fail2ban-log-rotation`,
-  `services-enabled` on SysV services), `prepare-testenv.sh`, README-fork.md,
-  TESTING-fork.md, BUGS-fork.md, CHANGELOG-fork.md.
+  `fail2ban-filters`, `services-enabled` on SysV services),
+  `prepare-testenv.sh`, README-fork.md, TESTING-fork.md, BUGS-fork.md,
+  CHANGELOG-fork.md.
 
 #### Open findings of rc6
 
@@ -360,9 +389,10 @@ Not fixed in rc6:
    during the run, and the docs describe it.
 2. The durations in that note come from test runs, and they vary with the
    load of the disk: the tool now says 20 to 40 and 10 to 15 minutes for
-   SSH and 12 to 25 minutes for sudo; the certification runs measured up to
-   36 and 14 minutes for SSH and 26 minutes for sudo (see below). rc7 is to
-   shorten the SSH outage or announce its end in the run.
+   SSH and 12 to 26 minutes for sudo; the certification runs measured up to
+   36 and 14 minutes for SSH and 26 minutes for sudo (see "rc6
+   certification" above). rc7 is to shorten the SSH outage or announce its
+   end in the run.
 3. `migrate-to-2604.sh --check` proposes a start command with `--from` and
    `--skip-network-checks`, but without the other options given (such as
    `--public-ip`). This was so before rc6.
