@@ -50,6 +50,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Dovecot: setup no longer adds another commented copy of each SSL setting
   to `/etc/dovecot/conf.d/10-ssl.conf` on every run. The settings were
   passed to `editconf.py` with spaces around "=" (B74).
+* System: on boxes upgraded in place to 26.04, `logrotate.service` no
+  longer fails every day. The release upgrade leaves cloud-init's old
+  `/etc/logrotate.d/cloud-init` next to the new `cloud-init-base`. Setup
+  removes unchanged logrotate files that their package no longer ships
+  (B75).
 
 ### Changed
 

@@ -34,15 +34,15 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-74 bugs: 1 critical, 13 high, 32 medium, 28 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 in the update test T5b of rc6.
+75 bugs: 1 critical, 13 high, 32 medium, 29 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6.
 
 | Origin | Count |
 |---|---|
 | Upstream | 18 |
 | PR #2603 | 28 |
 | PR #2603 (latent) | 1 |
-| 26.04 change | 17 |
+| 26.04 change | 18 |
 | Fork | 10 |
 
 19 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63). They are candidates for
@@ -126,6 +126,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B72](#b72) | low | Tools | After the last reboot of the in-place upgrade the tmux window waits for Enter forever | Fork | no | no | rc6 |
 | [B73](#b73) | low | Tools | During the release upgrade to 26.04 "tmux attach" cannot reach the in-place upgrade until the reboot, although the tool advises it | Fork | no | no | rc6 |
 | [B74](#b74) | low | Dovecot | Every setup run adds another commented copy of each SSL setting to 10-ssl.conf | PR #2603 | no | yes | rc6 |
+| [B75](#b75) | low | System | logrotate.service fails every day on boxes upgraded in place to 26.04: cloud-init's old logrotate file stays | 26.04 change | no | no | rc6 |
 
 ## Details
 
@@ -992,6 +993,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 no (`ssl=required` and the other settings without spaces), PR #2603 yes. Origin: PR #2603.
 * **Evidence:** rc6 T5b (copy of a production box on rc3, updated with setup/bootstrap.sh): of all files in `/etc`, a second update run changed only `10-ssl.conf` in content (besides the random minute of the nightly cron job and the order of the OpenDKIM tables, both as upstream), with one more commented copy of each of the six lines. The new arguments, run twice on that file and on the 26.04 package's `10-ssl.conf`, change nothing on the second run; the old ones add a commented line per setting and run.
 * **Found by:** update test; **commit:** see `git log --grep B74`; **fixed in:** v78-r2604.0-rc6
+
+### B75
+
+**logrotate.service fails every day on boxes upgraded in place to 26.04: cloud-init's old logrotate file stays** (low, System)
+
+* **Symptom:** On a box upgraded in place from 24.04 to 26.04, `systemctl --failed` lists `logrotate.service` after its daily run, and its journal says "error: cloud-init-base:1 duplicate log entry for /var/log/cloud-init-output.log" and "found error in file cloud-init-base, skipping". The other logs are still rotated.
+* **Cause:** On 26.04 the package cloud-init-base ships `/etc/logrotate.d/cloud-init-base`, which cloud-init shipped as `/etc/logrotate.d/cloud-init` before. The release upgrade does not remove the old file: dpkg keeps it as an obsolete conffile of cloud-init. Both files name `/var/log/cloud-init*.log`, and logrotate rejects the second one and exits with an error. A fresh 26.04 install has only the new file. setup did not look at such files.
+* **Fix:** setup/system.sh removes obsolete conffiles of dpkg in `/etc/logrotate.d` that are unchanged (the MD5 sum dpkg recorded). A file changed by the administrator stays.
+* **Affects:** v78 no, PR #2603 no (only boxes upgraded in place). Origin: 26.04 change (the packaging of cloud-init). Boxes upgraded with `tools/upgrade-in-place-to-2604.sh` get the fix in its setup phase, boxes upgraded with an earlier release on their next update.
+* **Evidence:** rc6 T5b (copy of a production box upgraded in place with rc3, updated with setup/bootstrap.sh): `logrotate.service` failed at its first run on the copy with the errors above. `dpkg-query -W -f='${Conffiles}'` lists `/etc/logrotate.d/cloud-init` as obsolete for cloud-init, with the same MD5 sum as the file and as `cloud-init-base`'s file; the fresh 26.04 test box has no such file and the new step does nothing there. With a changed copy of the file the step kept it; with the unchanged file the next update removed it and `logrotate.service` ran without errors.
+* **Found by:** update test; **commit:** see `git log --grep B75`; **fixed in:** v78-r2604.0-rc6
 
 ## Not counted above
 

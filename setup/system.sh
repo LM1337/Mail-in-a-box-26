@@ -286,6 +286,23 @@ if [ -f /etc/update-manager/release-upgrades ]; then
 	rm -f /var/lib/ubuntu-release-upgrader/release-upgrade-available
 fi
 
+# ### Old logrotate files
+#
+# A release upgrade can leave a logrotate file that its package no longer
+# ships, as an obsolete conffile of dpkg: from 24.04 to 26.04 cloud-init's
+# logrotate.d/cloud-init stays next to the new logrotate.d/cloud-init-base.
+# logrotate then finds the same logs in two files and logrotate.service fails
+# every day. Remove such files when they are unchanged; a file changed by the
+# administrator stays (B75).
+dpkg-query -W -f='${Conffiles}\n' 2> /dev/null \
+	| awk '$1 ~ /^\/etc\/logrotate\.d\// && $3 == "obsolete" { print $1, $2 }' \
+	| while read -r file sum; do
+		if [ -f "$file" ] && [ "$(md5sum < "$file" | cut -d' ' -f1)" = "$sum" ]; then
+			echo "Removing $file: its package no longer uses it."
+			rm -f "$file"
+		fi
+	done
+
 # ### Set the system timezone
 #
 # On Ubuntu 26.04 tzdata keeps the system timezone only in the /etc/localtime
