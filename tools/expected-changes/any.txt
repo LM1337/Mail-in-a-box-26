@@ -24,3 +24,4 @@ status.txt - . # a status check error or warning from before is gone; not a regr
 config-warnings.txt - . # a warning of doveconf or postconf from before is gone; not a regression
 listening.txt ~ ^tcp \S+:22 (sshd|systemd)$ # port 22 belongs to systemd (ssh.socket) until the first connection starts sshd
 crontabs.txt ~ ^/etc/cron\.d/mailinabox-nightly [0-9a-f]+$ # setup/management.sh writes the nightly job with a new random minute (01:00 to 01:59) on every run, as upstream (B108)
+listening.txt ~ ^tcp \S+:4949 (munin-node|/usr/sbin/munin)$ # munin-node (a Perl script) shows as "munin-node" or as its path cut to 15 characters, not always the same after a start (B114)

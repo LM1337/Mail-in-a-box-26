@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101 and B103-B112 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112 and B114 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -38,8 +38,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-109 bugs: 2 critical, 17 high, 42 medium, 48 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B113 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+110 bugs: 2 critical, 17 high, 42 medium, 49 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -47,7 +47,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 28 |
+| Fork | 29 |
 
 32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -166,6 +166,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B111](#b111) | low | Tools | The test of the fallback SSH server leaves an empty /root/upgrade-2604 | Fork | no | no | rc7 |
 | [B112](#b112) | low | Tools | The fallback SSH server refuses new logins for up to 10 s after the release upgrade stops ssh.service | Fork | no | no | rc7 |
 | [B113](#b113) | low | Tools | migrate-to-2604.sh --check proposes a start command without the options it was given | Fork | no | no | rc7 |
+| [B114](#b114) | low | Tools | update-check.sh after lists munin-node's port as changed when the process shows under another name | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1429,6 +1430,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** rc4 to rc6 (the line is new in rc4). Origin: Fork.
 * **Evidence:** The migration test T2 of rc6 and of rc7: the check log ends with the short command above.
 * **Found by:** rc7 certification (T2; first seen in T2 of rc6); **commit:** see `git log --grep B113`; **fixed in:** v78-r2604.0-rc7
+
+### B114
+
+**update-check.sh after lists munin-node's port as changed when the process shows under another name** (low, Tools)
+
+* **Symptom:** After an update, `tools/update-check.sh after` lists `listening.txt - tcp *:4949 /usr/sbin/munin` and `+ tcp *:4949 munin-node` as UNEXPECTED.
+* **Cause:** The record names the process that holds a port by its process name (`ss -p`). munin-node is a Perl script, and its process name is not always the same: the same box showed `/usr/sbin/munin` (the script's path cut to the 15 characters of a process name) after the boot and `munin-node` after setup had restarted it; other boxes showed `munin-node` after a boot. Why it differs was not found out.
+* **Fix:** A rule in `tools/expected-changes/any.txt` accepts both names for port 4949.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The repeated update test T5b of rc7 (rc6 to rc7): the record before the update (taken after a boot) had `/usr/sbin/munin`, the one after the setup run `munin-node`; `/proc/<pid>/cmdline` was `/usr/bin/perl -wT /usr/sbin/munin-node --foreground` both times. Other boxes of the test network showed `munin-node`.
+* **Found by:** rc7 certification (T5b, repeated run); **commit:** see `git log --grep B114`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

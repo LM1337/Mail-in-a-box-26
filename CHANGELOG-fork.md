@@ -62,8 +62,8 @@ B90, B98). The management daemon no longer runs out of file descriptors
 review of the merged release found B100, B101 and B103 to B105 in the new
 fallback SSH server, the update tools and the log audit, and B102 in the
 in-place tool's copy to an rsync target (all fixed). The certification runs
-of rc7 (T1 to T5b) found B106 to B110 in `tools/update-check.sh` and its
-lists of expected changes, B111 and B112 in the fallback SSH server and
+of rc7 (T1 to T5b) found B106 to B110 and B114 in `tools/update-check.sh` and
+its lists of expected changes, B111 and B112 in the fallback SSH server and
 B113 in the migration tool's check (all fixed).
 
 ### New
@@ -360,6 +360,9 @@ B113 in the migration tool's check (all fixed).
   `--private-ip`, `--hostname`, ...); it named only `--from`, the SSH options
   and `--skip-network-checks`, and `--from` with nothing after it for
   `--from-backup` (B113).
+* Tools: `tools/update-check.sh after` accepts both names under which
+  munin-node holds its port (`munin-node`, or its path cut to 15
+  characters, `/usr/sbin/munin`) (B114).
 
 ### Changed
 
