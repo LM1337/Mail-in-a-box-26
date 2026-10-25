@@ -488,12 +488,20 @@ def line_ts(line):
 RE_SYSLOG_HEAD = re.compile(r"^(?:(?P<host>[^\s:\[(<]+)\s+)?"
                             r"(?P<prog>[^\s:\[(<]+(?:\([^)\s]*\)|<[^>\s]*>|\[\d+\])*):\s(?P<msg>.*)$")
 
+# rsyslog ($RepeatedMsgReduction on) writes a line that repeats the one before
+# it as "message repeated N times: [ <the line> ]": that is the line's class.
+RE_REPEATED = re.compile(r"^message repeated \d+ times: \[ ?(?P<msg>.*?) ?\]$")
+
 def split_prog(rest):
     """host prog[pid]: msg / prog(user)<pid>: msg -> (prog, msg)"""
     m = RE_SYSLOG_HEAD.match(rest)
     if not m:
         return "", rest
-    return dovecot_inner(prog_name(m.group("prog")), m.group("msg"))
+    msg = m.group("msg")
+    r = RE_REPEATED.match(msg)
+    if r:
+        msg = r.group("msg")
+    return dovecot_inner(prog_name(m.group("prog")), msg)
 
 def files_of(path):
     """path plus its rotated files that changed in the window, oldest first"""

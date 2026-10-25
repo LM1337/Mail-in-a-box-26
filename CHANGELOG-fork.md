@@ -60,7 +60,9 @@ test tool: `tests/fork/log-audit.sh`.
   (see "Planned for rc7"); the defects it found are B80 to B84. Dovecot's
   syslog lines (`dovecot: imap(...): ...`) get the class of Dovecot's
   process, as its own lines in older files do, and its lines below warning
-  in the journal (failed logins of clients) are not findings.
+  in the journal (failed logins of clients) are not findings. A line that
+  rsyslog shortens to "message repeated N times: [ ... ]" gets the class of
+  the repeated line.
   TESTING-fork.md describes it.
 
 ### Fixed
