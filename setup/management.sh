@@ -98,11 +98,12 @@ wget_verify $jquery_url/jquery-$jquery_version.min.js fc9a93dd241f6b045cbff0481c
 bootstrap_version=3.4.1
 bootstrap_url=https://github.com/twbs/bootstrap/releases/download/v$bootstrap_version/bootstrap-$bootstrap_version-dist.zip
 
-# Get Bootstrap
-wget_verify $bootstrap_url d49793cf773cbd393ac2cf340c3b4ddab5365fa7c292098ac07e12eab3efd92e /tmp/bootstrap.zip # SHA256 (no digest published for this asset)
-unzip -q /tmp/bootstrap.zip -d $assets_dir
+# Get Bootstrap (into a directory of root's own, not under a fixed name in /tmp, B97)
+bootstrap_tmp=$(mktemp -d)
+wget_verify $bootstrap_url d49793cf773cbd393ac2cf340c3b4ddab5365fa7c292098ac07e12eab3efd92e "$bootstrap_tmp/bootstrap.zip" # SHA256 (no digest published for this asset)
+unzip -q "$bootstrap_tmp/bootstrap.zip" -d $assets_dir
 mv $assets_dir/bootstrap-$bootstrap_version-dist $assets_dir/bootstrap
-rm -f /tmp/bootstrap.zip
+rm -rf "$bootstrap_tmp"
 
 # The fork's favicons and icon (from branding/), served as /admin/assets/branding/ and as
 # the fallback /favicon.ico of the box's web domains (see conf/nginx-alldomains.conf).

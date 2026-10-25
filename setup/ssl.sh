@@ -70,8 +70,10 @@ fi
 # etc. won't even start without some certificate in place, and we need nginx
 # so we can offer the user a control panel to install a better certificate.
 if [ ! -f "$STORAGE_ROOT/ssl/ssl_certificate.pem" ]; then
-	# Generate a certificate signing request.
-	CSR=/tmp/ssl_cert_sign_req-$$.csr
+	# Generate a certificate signing request (in a directory of root's own,
+	# not under a predictable name in /tmp, B97).
+	CSR_DIR=$(mktemp -d)
+	CSR=$CSR_DIR/ssl_cert_sign_req.csr
 	hide_output \
 	openssl req -new -key "$STORAGE_ROOT/ssl/ssl_private_key.pem" -out $CSR \
 	  -sha256 -subj "/CN=$PRIMARY_HOSTNAME"
@@ -83,7 +85,7 @@ if [ ! -f "$STORAGE_ROOT/ssl/ssl_certificate.pem" ]; then
 	  -in $CSR -signkey "$STORAGE_ROOT/ssl/ssl_private_key.pem" -out "$CERT"
 
 	# Delete the certificate signing request because it has no other purpose.
-	rm -f $CSR
+	rm -rf "$CSR_DIR"
 
 	# Symlink the certificate into the system certificate path, so system services
 	# can find it.

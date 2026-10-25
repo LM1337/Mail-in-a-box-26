@@ -71,15 +71,17 @@ if [ $needs_update == 1 ]; then
     fi
   fi
 
-	# install roundcube
+	# install roundcube (the downloads go into a directory of root's own, not
+	# under fixed names in /tmp that another local user could create first, B97)
+	RCM_TMP=$(mktemp -d)
 	wget_verify \
 		https://github.com/roundcube/roundcubemail/releases/download/$VERSION/roundcubemail-$VERSION-complete.tar.gz \
 		$HASH \
-		/tmp/roundcube.tgz
-	tar -C /usr/local/lib --no-same-owner -zxf /tmp/roundcube.tgz
+		"$RCM_TMP/roundcube.tgz"
+	tar -C /usr/local/lib --no-same-owner -zxf "$RCM_TMP/roundcube.tgz"
 	rm -rf /usr/local/lib/roundcubemail
 	mv /usr/local/lib/roundcubemail-$VERSION/ $RCM_DIR
-	rm -f /tmp/roundcube.tgz
+	rm -f "$RCM_TMP/roundcube.tgz"
 	# The skin's own favicon as released, to tell it from one replaced by hand.
 	sha256sum 2> /dev/null < ${RCM_DIR}/skins/elastic/images/favicon.ico | cut -d" " -f1 > ${RCM_DIR}/elastic-favicon.sha256 || true
 
@@ -98,11 +100,11 @@ if [ $needs_update == 1 ]; then
 	wget_verify \
 		https://github.com/mstilkerich/rcmcarddav/releases/download/v${CARDDAV_VERSION}/carddav-v${CARDDAV_VERSION}.tar.gz \
 		$CARDDAV_HASH \
-		/tmp/carddav.tar.gz
+		"$RCM_TMP/carddav.tar.gz"
 
 	# unzip and cleanup
-	tar -C ${RCM_PLUGIN_DIR} -zxf /tmp/carddav.tar.gz
-	rm -f /tmp/carddav.tar.gz
+	tar -C ${RCM_PLUGIN_DIR} -zxf "$RCM_TMP/carddav.tar.gz"
+	rm -rf "$RCM_TMP"
 
 	# record the version we've installed
 	echo $UPDATE_KEY > ${RCM_DIR}/version

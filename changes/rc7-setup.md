@@ -13,6 +13,14 @@ BUGS-fork.md, to be merged into them when the strands come together.
   name already existed (any local user can create one), the write failed and
   setup sourced the other user's file. It now reads the settings through a
   pipe (B96).
+* Setup: the downloads of Nextcloud and its apps, Roundcube and its
+  plugins, Z-Push and Bootstrap, the certificate request of the first
+  self-signed certificate and the daily download of Postgrey's allowlist no
+  longer use fixed or predictable names in `/tmp`, but a directory of
+  root's own (`mktemp -d`, mode 0700). Another local user could create
+  these names first and make setup fail; for Z-Push and the Roundcube
+  plugins of git, a directory created in the right moment let them replace
+  the unpacked code before setup moved it into place (B97).
 * OpenDKIM: setup writes the `KeyTable` and `SigningTable` in a fixed
   (sorted) order. The domains came from a Python set, whose order changes
   with every process, so with more than one mail domain each setup run
@@ -44,3 +52,14 @@ BUGS-fork.md, to be merged into them when the strands come together.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only boxes with a local user or service that an attacker controls; the first install (no `/etc/mailinabox.conf` yet) does not read the file.
 * **Evidence:** On a fresh 26.04 test box, an unprivileged user wrote `id > /root/b96-proof.txt` into `/tmp/mailinabox.prev.conf`; the three lines of setup/start.sh, run with sudo, printed "Permission denied" and wrote `uid=0(root)` into `/root/b96-proof.txt`, then removed the user's file.
 * **Found by:** rc7 review; **commit:** see `git log --grep B96`; **fixed in:** v78-r2604.0-rc7
+
+### B97
+
+**Setup downloads and unpacks code under fixed names in /tmp** (high, Setup)
+
+* **Symptom:** None in normal use. A local user without privileges who watches `/tmp` (inotify) can create a directory under the name that setup is about to use. For Z-Push, setup removes `/tmp/z-push` and then unpacks the release into it; a directory of the other user's own created in between receives the unpacked files, and its owner can replace `Z-Push-*/src` before setup moves it to `/usr/local/lib/z-push`, whose `z-push-admin.php` setup then runs as root. The Roundcube plugins (`git_clone`, `/tmp/git-clone-PID`) work the same way, with code that runs as www-data. The other names (`/tmp/nextcloud.zip`, `contacts.tgz`, `calendar.tgz`, `user_external.tgz`, `roundcube.tgz`, `carddav.tar.gz`, `bootstrap.zip`, `ssl_cert_sign_req-PID.csr`, and `postgrey_whitelist_clients` of the daily cron job) only let the other user make setup fail: root may not write into their file (`fs.protected_regular`) or follow their link (`fs.protected_symlinks`).
+* **Cause:** setup/zpush.sh, setup/nextcloud.sh, setup/webmail.sh, setup/management.sh, setup/ssl.sh, `git_clone` in setup/functions.sh and the cron job written by setup/mail-postfix.sh download, unpack and move files as root by fixed or predictable paths in `/tmp`, which everyone can write.
+* **Fix:** Each of them uses a directory of root's own from `mktemp -d` (mode 0700, random name) and removes it afterwards. `git_clone` clones into a subdirectory of it, so the plugin directory keeps its usual mode.
+* **Affects:** v78 yes, PR #2603 yes. Origin: Upstream. Only during an install or update of the component (a new version), and only with a local user or service that an attacker controls.
+* **Evidence:** From reading the code; the race was not run. A fresh install of the fix on a 26.04 test box unpacked all components (smoke test), and no `mailinabox`, `z-push`, `git-clone`, `.zip` or `.tgz` entry was left in `/tmp`.
+* **Found by:** rc7 review; **commit:** see `git log --grep B97`; **fixed in:** v78-r2604.0-rc7

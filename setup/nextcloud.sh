@@ -146,36 +146,39 @@ InstallNextcloud() {
 	echo "Upgrading to Nextcloud version $version"
 	echo
 
-	# Download and verify
-	wget_verify "https://download.nextcloud.com/server/releases/nextcloud-$version.zip" "$hash" /tmp/nextcloud.zip
+	# Download and verify, into a directory of root's own, not under fixed
+	# names in /tmp that another local user could create first (B97).
+	local dl; dl=$(mktemp -d)
+	wget_verify "https://download.nextcloud.com/server/releases/nextcloud-$version.zip" "$hash" "$dl/nextcloud.zip"
 
 	# Remove the current owncloud/Nextcloud
 	rm -rf /usr/local/lib/owncloud
 
 	# Extract ownCloud/Nextcloud
-	unzip -q /tmp/nextcloud.zip -d /usr/local/lib
+	unzip -q "$dl/nextcloud.zip" -d /usr/local/lib
 	mv /usr/local/lib/nextcloud /usr/local/lib/owncloud
-	rm -f /tmp/nextcloud.zip
+	rm -f "$dl/nextcloud.zip"
 
 	# The two apps we actually want are not in Nextcloud core. Download the releases from
 	# their github repositories.
 	mkdir -p /usr/local/lib/owncloud/apps
 
-	wget_verify "https://github.com/nextcloud-releases/contacts/releases/download/v$version_contacts/contacts-v$version_contacts.tar.gz" "$hash_contacts" /tmp/contacts.tgz
-	tar xf /tmp/contacts.tgz -C /usr/local/lib/owncloud/apps/
-	rm /tmp/contacts.tgz
+	wget_verify "https://github.com/nextcloud-releases/contacts/releases/download/v$version_contacts/contacts-v$version_contacts.tar.gz" "$hash_contacts" "$dl/contacts.tgz"
+	tar xf "$dl/contacts.tgz" -C /usr/local/lib/owncloud/apps/
+	rm "$dl/contacts.tgz"
 
-	wget_verify "https://github.com/nextcloud-releases/calendar/releases/download/v$version_calendar/calendar-v$version_calendar.tar.gz" "$hash_calendar" /tmp/calendar.tgz
-	tar xf /tmp/calendar.tgz -C /usr/local/lib/owncloud/apps/
-	rm /tmp/calendar.tgz
+	wget_verify "https://github.com/nextcloud-releases/calendar/releases/download/v$version_calendar/calendar-v$version_calendar.tar.gz" "$hash_calendar" "$dl/calendar.tgz"
+	tar xf "$dl/calendar.tgz" -C /usr/local/lib/owncloud/apps/
+	rm "$dl/calendar.tgz"
 
 	# Starting with Nextcloud 15, the app user_external is no longer included in Nextcloud core,
 	# we will install from their github repository.
 	if [ -n "$version_user_external" ]; then
-		wget_verify "https://github.com/nextcloud-releases/user_external/releases/download/v$version_user_external/user_external-v$version_user_external.tar.gz" "$hash_user_external" /tmp/user_external.tgz
-		tar -xf /tmp/user_external.tgz -C /usr/local/lib/owncloud/apps/
-		rm /tmp/user_external.tgz
+		wget_verify "https://github.com/nextcloud-releases/user_external/releases/download/v$version_user_external/user_external-v$version_user_external.tar.gz" "$hash_user_external" "$dl/user_external.tgz"
+		tar -xf "$dl/user_external.tgz" -C /usr/local/lib/owncloud/apps/
+		rm "$dl/user_external.tgz"
 	fi
+	rm -rf "$dl"
 
 	# Fix weird permissions.
 	chmod 750 /usr/local/lib/owncloud/{apps,config}
