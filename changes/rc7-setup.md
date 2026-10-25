@@ -5,6 +5,15 @@ BUGS-fork.md, to be merged into them when the strands come together.
 
 ## CHANGELOG-fork.md
 
+### Changed
+
+* Setup: an interactive update of an existing box (`/etc/mailinabox.conf`
+  exists) no longer shows the welcome dialog of a new installation ("You
+  should only install this on a brand new Ubuntu installation"). The
+  questions that follow (hostname, and the IP addresses where they differ
+  from what the box finds) come as before; non-interactive runs are
+  unchanged.
+
 ### Fixed
 
 * Setup: an update no longer runs as root what another local user put into
