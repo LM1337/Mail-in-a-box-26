@@ -348,6 +348,10 @@ in-place tool's copy to an rsync target (all fixed).
   3) when the Ubuntu release changed or the box came from upstream (B110).
 * Tools: `--ssh-fallback-test` of the in-place tool no longer leaves an
   empty `/root/upgrade-2604` behind (B111).
+* Tools: the in-place tool puts back `/run/sshd`, which the fallback SSH
+  server needs, within 2 s after the release upgrade stops ssh.service (it
+  looked every 10 s, and new logins on port 1022 failed meanwhile). Its
+  texts give the outage times of the rc7 tests (B112).
 
 ### Changed
 

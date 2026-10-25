@@ -163,6 +163,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B109](#b109) | low | Tools | The expected changes of rc7 miss changes of rc4 and rc5, so an update from rc1 to rc3 lists them as unexpected | Fork | no | no | rc7 |
 | [B110](#b110) | low | Tools | update-check.sh after judges an in-place upgrade or a migration from upstream by the lists of the fork's updates | Fork | no | no | rc7 |
 | [B111](#b111) | low | Tools | The test of the fallback SSH server leaves an empty /root/upgrade-2604 | Fork | no | no | rc7 |
+| [B112](#b112) | low | Tools | The fallback SSH server refuses new logins for up to 10 s after the release upgrade stops ssh.service | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1404,6 +1405,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The in-place test T3 of rc7. With the fix, on the fresh-install test box: after a test of 30 s neither `/root/upgrade-2604` nor the ufw rule for port 1022 nor files of the fallback were left.
 * **Found by:** rc7 certification (T3); **commit:** see `git log --grep B111`; **fixed in:** v78-r2604.0-rc7
+
+### B112
+
+**The fallback SSH server refuses new logins for up to 10 s after the release upgrade stops ssh.service** (low, Tools)
+
+* **Symptom:** A new login on port 1022 in the seconds after the release upgrade stopped ssh.service fails; sshd logs "fatal: Missing privilege separation directory: /run/sshd".
+* **Cause:** Stopping ssh.service removes its RuntimeDirectory `/run/sshd`, which the fallback needs as well. The tool's watcher puts it back, but looked only every 10 s.
+* **Fix:** The watcher checks `/run/sshd` every 2 s (port 22 still every 10 s). The comment on the fallback also names the few seconds of the 22.04 to 24.04 upgrade in which `libtirpc3` is removed before `libtirpc3t64` is unpacked; new logins then fail on both ports. The texts of the tool and README-fork.md give the outage times measured in the rc7 tests (port 22: 6 to 16 minutes from 24.04 to 26.04; sudo missing 12 to 31 minutes).
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** The in-place test T4 of rc7: ssh.service stopped at 20:28:49, the failed login with the message above at 20:28:50, the directory back at 20:28:59. With the fix, on the fresh-install test box during `--ssh-fallback-test`: `/run/sshd` removed by hand was back within 0.5 s.
+* **Found by:** rc7 certification (T4); **commit:** see `git log --grep B112`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

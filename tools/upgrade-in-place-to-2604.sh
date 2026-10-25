@@ -303,7 +303,7 @@ wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
 running (e.g. the nightly one) before anything is stopped.
 
 During each release upgrade the SSH server on port 22 is down for a while
-(10-40 minutes). Meanwhile a fallback SSH server listens on port 1022
+(5-40 minutes). Meanwhile a fallback SSH server listens on port 1022
 (UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
 administrators (members of the groups sudo and admin, and root if
 PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
@@ -3076,7 +3076,10 @@ or restore from the backups."
 # UPGRADE_SSH_FALLBACK_PORT=off turns it off) for the time of each release
 # upgrade, started from a private copy of the old binaries in $STATE_DIR (the
 # package cannot replace them underneath; the old monolithic sshd re-executes
-# its own copy for each connection, and the libraries keep their sonames). It
+# its own copy for each connection). It uses the system's libraries, which
+# keep their sonames, except for a few seconds of 22.04 to 24.04, when the
+# 64-bit time_t switch removes libtirpc3 before libtirpc3t64 is unpacked: new
+# logins then fail on both ports and work again a few seconds later. It
 # allows only public keys, of the administrators (members of the groups sudo
 # and admin, and root if PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS
 # names others), with the same AllowUsers, AllowGroups, DenyUsers and
@@ -3089,7 +3092,7 @@ or restore from the backups."
 # of theirs as root) into a root-owned directory, $FALLBACK_KEYS_DIR. ufw lets
 # the port through (rate limited) only while the fallback runs. Its
 # privilege separation directory /run/sshd goes away when ssh.service stops
-# (RuntimeDirectory); the watcher puts it back (in /run, root's own).
+# (RuntimeDirectory); the watcher puts it back within 2 s (in /run, root's own).
 # It is stopped when port 22 answers again after the release upgrade, and on
 # every way out of this script; if port 22 does not answer then, it is left
 # running (a reboot ends it) and the next run of this script removes it and
@@ -3432,27 +3435,34 @@ ssh_watch_start() {
 	(
 		trap - ERR EXIT
 		set +e
-		p22_down='' since=0
+		p22_down='' since=0 tick=0
 		# Builtins only where it loops: the release upgrade replaces date and
 		# sleep (coreutils). read -t on a pipe that never delivers is the pause.
 		exec {pause_fd}<> <(:)
 		while :; do
+			# Every 2 s: until /run/sshd is back, new logins on the fallback
+			# fail (B112). Port 22 every 10 s.
 			if [ -f "$FALLBACK_DIR/sshd.pid" ] && [ ! -d /run/sshd ] && [ ! -L /run/sshd ]; then
 				mkdir -m 0755 /run/sshd 2> /dev/null
+			fi
+			tick=$(((tick + 1) % 5))
+			if [ "$tick" != 1 ]; then
+				read -r -t 2 -u "$pause_fd" _
+				continue
 			fi
 			if [ -z "$p22_down" ] && ! port_listening 22; then
 				p22_down=1 since=$SECONDS
 				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on port 22: new logins fail until\n' -1
 				if [ -f "$FALLBACK_DIR/sshd.pid" ]; then
-					echo "  it is back (usually 10-40 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
+					echo "  it is back (usually 5-40 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
 				else
-					echo "  it is back (usually 10-40 minutes). Open connections stay. Do not reboot."
+					echo "  it is back (usually 5-40 minutes). Open connections stay. Do not reboot."
 				fi
 			elif [ -n "$p22_down" ] && port_listening 22 && ssh_banner 22; then
 				p22_down=
 				printf '\n%(%H:%M:%S)T SSH on port 22 answers again (after %d min): new logins work.\n' -1 $(((SECONDS - since + 59) / 60))
 			fi
-			read -r -t 10 -u "$pause_fd" _
+			read -r -t 2 -u "$pause_fd" _
 		done
 	) &
 	SSH_WATCH_PID=$!
@@ -3493,10 +3503,10 @@ do_ssh_fallback_test() {
 }
 
 # What the operator runs into during a release upgrade. In the test runs
-# new SSH logins failed for 19-36 minutes from 22.04 to 24.04 (while
-# openssh-server was unpacked but not yet configured) and for 7-14 minutes
-# from 24.04 to 26.04, and /usr/bin/sudo was missing for 12-26 minutes
-# while sudo-rs replaced sudo; the longer times on a busy disk. Open
+# new SSH logins on port 22 failed for 19-36 minutes from 22.04 to 24.04
+# (while openssh-server was unpacked but not yet configured) and for 6-16
+# minutes from 24.04 to 26.04, and /usr/bin/sudo was missing for 12-31
+# minutes while sudo-rs replaced sudo; the longer times on a busy disk. Open
 # connections and the run in tmux go on.
 # From 24.04 to 26.04 tmux 3.6 replaces tmux 3.4 a few minutes in; the new
 # client cannot attach to the running 3.4 server ("open terminal failed: not
@@ -3507,7 +3517,7 @@ do_ssh_fallback_test() {
 # after this reboot, before anyone can attach). Also in the motd.
 release_access_text() { # TO now|reboot
 	local mins="20 to 40" attach
-	if [ "$1" = 26.04 ]; then mins="10 to 15"; fi
+	if [ "$1" = 26.04 ]; then mins="5 to 20"; fi
 	if [ "$2" = reboot ]; then
 		echo "After the reboot the release upgrade to Ubuntu $1 starts by itself. While it replaces the"
 		echo "SSH server, new SSH logins can fail for a while ($mins minutes in the test runs)."
@@ -3533,7 +3543,7 @@ release_access_text() { # TO now|reboot
 		echo "  ssh -p $fb USER@${PRIMARY_HOSTNAME:-$(hostname -f 2> /dev/null || hostname)}"
 	fi
 	if [ "$1" = 26.04 ]; then
-		echo "sudo is missing for a while (12 to 26 minutes in the test runs) while sudo-rs replaces it:"
+		echo "sudo is missing for a while (12 to 31 minutes in the test runs) while sudo-rs replaces it:"
 		if [ "$2" = reboot ]; then
 			echo "sudo then fails with \"command not found\". Wait until it is back."
 		else

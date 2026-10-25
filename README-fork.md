@@ -1040,10 +1040,10 @@ during the release upgrade or after a reboot.
 
 **Logging in during the release upgrades.** While do-release-upgrade
 replaces the SSH server, new SSH logins fail for a while (in the test runs
-19 to 36 minutes from 22.04 to 24.04 and 7 to 14 minutes from 24.04 to
+19 to 36 minutes from 22.04 to 24.04 and 6 to 16 minutes from 24.04 to
 26.04, the longer times on a busy disk). Connections that are open stay
 open, and the upgrade goes on in tmux. From 24.04 to 26.04, `sudo` is also
-missing for 12 to 26 minutes, while sudo-rs replaces it:
+missing for 12 to 31 minutes, while sudo-rs replaces it:
 `sudo tmux attach -t upgrade-2604` then fails with "command not found". In the same release upgrade tmux 3.6 replaces
 tmux 3.4 a few minutes after the start. From then until the reboot a new
 `tmux attach` cannot reach the run ("open terminal failed: not a
@@ -1196,11 +1196,12 @@ des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.
 räumt danach die Reste der alten Releases weg.
 
 **Anmelden während der Release-Upgrades.** Solange do-release-upgrade den
-SSH-Server ersetzt, schlagen neue SSH-Anmeldungen eine Weile fehl (im
-Testlauf von 22.04 etwa 19 Minuten von 22.04 auf 24.04 und etwa 7 Minuten
-von 24.04 auf 26.04). Offene Verbindungen bleiben bestehen, und das Upgrade
-läuft in tmux weiter. Von 24.04 auf 26.04 fehlt außerdem `sudo` für etwa
-12 Minuten, weil sudo-rs es ersetzt: `sudo tmux attach -t upgrade-2604`
+SSH-Server ersetzt, schlagen neue SSH-Anmeldungen eine Weile fehl (in den
+Testläufen 19 bis 36 Minuten von 22.04 auf 24.04 und 6 bis 16 Minuten von
+24.04 auf 26.04, die längeren Zeiten bei ausgelasteter Platte). Offene
+Verbindungen bleiben bestehen, und das Upgrade läuft in tmux weiter. Von
+24.04 auf 26.04 fehlt außerdem `sudo` für 12 bis 31 Minuten, weil sudo-rs es
+ersetzt: `sudo tmux attach -t upgrade-2604`
 scheitert dann mit „command not found“. Im selben Release-Upgrade ersetzt
 tmux 3.6 einige Minuten nach dem Start tmux 3.4. Von da an bis zum Neustart
 erreicht ein neues `tmux attach` den Lauf nicht mehr („open terminal
