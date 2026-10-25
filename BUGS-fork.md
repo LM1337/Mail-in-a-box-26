@@ -155,6 +155,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B101](#b101) | medium | Tools | The fallback SSH server of the in-place tool logs in with a key alone where sshd asks for more, and listens on all addresses | Fork | no | no | rc7 |
 | [B102](#b102) | low | Tools | The in-place tool passes the host of an rsync backup target to ssh unchecked, so a leading "-" is read as an option | Fork | no | no | rc7 |
 | [B103](#b103) | medium | Tools | Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped | Fork | no | no | rc7 |
+| [B104](#b104) | medium | Tools | update-check.sh backup fails with two or more Docker volumes, after the Mail-in-a-Box backup | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1308,6 +1309,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** from reading the code; the lines of setup/start.sh that read and write the file, run against a copy: the key kept on two runs, and `PROBE_ADDRESS='x;id'` left out with the message. Not run in a full setup.
 * **Found by:** rc7 review; **commit:** see `git log --grep B103`; **fixed in:** v78-r2604.0-rc7
+
+### B104
+
+**update-check.sh backup fails with two or more Docker volumes, after the Mail-in-a-Box backup** (medium, Tools)
+
+* **Symptom:** `tools/update-check.sh backup --docker-volume A --docker-volume B` stops with "The Docker volumes are in different directories; archive them one by one." after `management/backup.py` (which stops mail for its run) and the system archive have run. With one volume the archive held a bare `_data/` without the volume's name.
+* **Cause:** The step archived all volumes in one tar relative to the parent of their mount points and required that parent to be the same. Docker mounts each local volume at `/var/lib/docker/volumes/<name>/_data`, so the parents always differ. The mount points were looked up only after the backup.
+* **Fix:** One archive per volume, `docker-volume-<name>.tar.gz.gpg`, of the content of its mount point. The mount points are looked up and checked with the other options, before the Mail-in-a-Box backup.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** the mount point of the volume on the box replica of the update test is `/var/lib/docker/volumes/<id>/_data`. With the fix there: `backup --no-miab-backup --no-upload` with that volume and a second test volume wrote `docker-volume-<id>.tar.gz.gpg` and `docker-volume-<test>.tar.gz.gpg`; the second decrypted with the backup passphrase to its one test file, and the checksums matched. The test volume and the archive were removed afterwards.
+* **Found by:** rc7 review; **commit:** see `git log --grep B104`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

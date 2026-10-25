@@ -76,10 +76,14 @@ contacts of new users again (B99).
     for its run) and writes an archive of `/etc`, `/root/mailinabox`, the
     crontabs, `/var/lib/z-push`, `/var/lib/munin`, `/usr/local/lib/owncloud`
     and the Docker stack directories and volumes named with `--docker-dir`
-    and `--docker-volume`, and a pg_dump of each container named with
-    `--postgres` (with its `POSTGRES_USER` and `POSTGRES_DB`). Everything is
-    encrypted with gpg (AES256, the passphrase of the Mail-in-a-Box backups)
-    as it is written, nothing goes to disk unencrypted. For an rsync target
+    and `--docker-volume` (one archive per volume), and a pg_dump of each
+    container named with `--postgres` (with its `POSTGRES_USER` and
+    `POSTGRES_DB`); the names and mount points are checked before the
+    Mail-in-a-Box backup. Everything is encrypted with gpg (AES256, the
+    passphrase of the Mail-in-a-Box backups) as it is written; only the
+    package and configuration listings that go into the system archive are
+    written in plain text first, in the root-only stamp directory, and
+    removed after it. For an rsync target
     the files are copied next to the backups
     (`<path>-system/update-check-<stamp>/`, with the backup SSH key) and
     compared by checksum (rsync -c, dry run); otherwise they stay in the

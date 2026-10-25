@@ -43,10 +43,13 @@
 # full one is due; it stops Postfix, Dovecot, postgrey and PHP for its run),
 # then a tar archive of /etc, /root/mailinabox, the crontabs, /var/lib/z-push,
 # /var/lib/munin, /usr/local/lib/owncloud and the Docker stack directories and
-# volumes named with --docker-dir and --docker-volume, and a pg_dump of each
-# container named with --postgres. Each is encrypted with gpg (AES256) with
-# the passphrase of the Mail-in-a-Box backups ($STORAGE_ROOT/backup/
-# secret_key.txt) right as it is written; nothing goes to disk unencrypted.
+# volumes named with --docker-dir and --docker-volume (one archive per
+# volume), and a pg_dump of each container named with --postgres. Each is
+# encrypted with gpg (AES256) with the passphrase of the Mail-in-a-Box backups
+# ($STORAGE_ROOT/backup/secret_key.txt) right as it is written; only the
+# package and configuration listings that go into the system archive (dpkg,
+# postconf -n, doveconf -n, unit files) are written in plain text first, in
+# the root-only stamp directory, and removed after it.
 # For an rsync target the files are copied next to the backups
 # (<path>-system/update-check-<stamp>/, with the backup SSH key, like
 # management/backup.py) and compared by checksum (rsync -c, dry run); for
@@ -727,9 +730,14 @@ do_backup() {
 		[[ $p == /* ]] && [ -d "$p" ] && [ ! -L "$p" ] || die "--docker-dir $p: not an absolute path of a directory."
 		[[ $p =~ ^/[A-Za-z0-9._/+-]+$ ]] || die "--docker-dir $p: unexpected characters."
 	done
+	# The mount point of each volume (/var/lib/docker/volumes/NAME/_data for
+	# the local driver), checked before the Mail-in-a-Box backup stops mail.
+	declare -A vol_mp=()
 	for v in "${OPT_VOLUMES[@]+"${OPT_VOLUMES[@]}"}"; do
 		valid_name "$v" || die "--docker-volume $v: not a volume name."
-		docker volume inspect "$v" > /dev/null 2>&1 || die "There is no Docker volume $v."
+		vol_mp[$v]=$(docker volume inspect -f '{{.Mountpoint}}' "$v" 2> /dev/null) || die "There is no Docker volume $v."
+		[[ ${vol_mp[$v]} == /* ]] && [ -d "${vol_mp[$v]}" ] && [ ! -L "${vol_mp[$v]}" ] \
+			|| die "The mount point of the volume $v (${vol_mp[$v]}) is not a directory here."
 	done
 	for c in "${OPT_POSTGRES[@]+"${OPT_POSTGRES[@]}"}"; do
 		valid_name "$c" || die "--postgres $c: not a container name."
@@ -771,24 +779,21 @@ do_backup() {
 	done
 	for p in "${OPT_DOCKER_DIRS[@]+"${OPT_DOCKER_DIRS[@]}"}"; do paths+=("${p#/}"); done
 	paths+=("${out#/}/meta")
-	n=$(du -scb "${paths[@]/#//}" 2> /dev/null | tail -n 1 | cut -f1 || echo 0)
+	# du exits 1 when a file goes away while it counts (logs, Nextcloud): its
+	# total is still the last line.
+	n=$({ du -scb "${paths[@]/#//}" 2> /dev/null || true; } | tail -n 1 | cut -f1)
+	[[ $n =~ ^[0-9]+$ ]] || n=0
 	local avail
 	avail=$(df -B1 --output=avail "$out" | tail -n 1 | tr -d ' ')
 	[ "${avail:-0}" -gt "$n" ] || die "Not enough space in $STATE_ROOT: $(human "$avail") free, the archive takes up to $(human "$n")."
 	say "Archiving$(printf ' /%s' "${paths[@]:0:${#paths[@]}-1}") ($(human "$n") before compression)..."
 	tar_enc "$out/system.tar.gz.gpg" / "${paths[@]}"
-	if [ ${#OPT_VOLUMES[@]} -gt 0 ]; then
-		local mp vols=() vdir=
-		for v in "${OPT_VOLUMES[@]}"; do
-			mp=$(docker volume inspect -f '{{.Mountpoint}}' "$v")
-			[ -d "$mp" ] && [ ! -L "$mp" ] || die "The mount point of the volume $v ($mp) is not a directory."
-			if [ -z "$vdir" ]; then vdir=$(dirname "$mp"); fi
-			[ "$(dirname "$mp")" = "$vdir" ] || die "The Docker volumes are in different directories; archive them one by one."
-			vols+=("$(basename "$mp")")
-		done
-		say "Archiving the Docker volumes ${OPT_VOLUMES[*]}..."
-		tar_enc "$out/docker-volumes.tar.gz.gpg" "$vdir" "${vols[@]}"
-	fi
+	# One archive per volume, of its content (each volume has a mount point
+	# of its own).
+	for v in "${OPT_VOLUMES[@]+"${OPT_VOLUMES[@]}"}"; do
+		say "Archiving the Docker volume $v (${vol_mp[$v]})..."
+		tar_enc "$out/docker-volume-$v.tar.gz.gpg" "${vol_mp[$v]}" .
+	done
 	for c in "${OPT_POSTGRES[@]+"${OPT_POSTGRES[@]}"}"; do
 		say "pg_dump of the database of $c..."
 		set +o pipefail
