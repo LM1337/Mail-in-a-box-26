@@ -110,7 +110,8 @@ Ubuntu's main component, which gets security updates during standard support;
 > [issues](https://github.com/LM1337/Mail-in-a-box-26/issues) instead.
 
 **Status: release candidate (`v78-r2604.0-rc5`).** It is tested on test
-machines and on a copy of a production box, but it is not a final release.
+machines and on a copy of a production box (which tests ran for each release,
+their results and what was not tested are in [TESTING-fork.md](TESTING-fork.md)), but it is not a final release.
 Make a backup, and try it on a copy or a spare machine before you run it on
 the box that holds your mail.
 

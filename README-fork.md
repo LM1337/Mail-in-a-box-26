@@ -5,7 +5,9 @@ This is a fork of [Mail-in-a-Box](https://github.com/mail-in-a-box/mailinabox)
 that runs on **Ubuntu 26.04 LTS**. It is upstream PR #2603 (the Ubuntu 26.04
 port) merged with upstream v78, plus the fixes listed in
 [CHANGELOG-fork.md](CHANGELOG-fork.md). Each fixed bug is documented with
-symptom, cause and affected versions in [BUGS-fork.md](BUGS-fork.md).
+symptom, cause and affected versions in [BUGS-fork.md](BUGS-fork.md). The
+end-to-end tests of each release and their results are in
+[TESTING-fork.md](TESTING-fork.md).
 Upstream's own history is in
 [CHANGELOG.md](CHANGELOG.md), its documentation in [README-upstream.md](README-upstream.md) and
 on <https://mailinabox.email>.

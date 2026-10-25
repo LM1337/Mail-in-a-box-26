@@ -9,7 +9,7 @@ This repository is an unofficial fork of Mail-in-a-Box for Ubuntu 26.04. For cha
 * Clone https://github.com/LM1337/Mail-in-a-box-26 and send pull requests and issues to this repository, not to upstream.
 * Fixes that also apply to upstream Mail-in-a-Box (Ubuntu 22.04) are welcome upstream as well, at https://github.com/mail-in-a-box/mailinabox.
 * Describe user-visible changes in CHANGELOG-fork.md (section "Unreleased"), and bugs with symptom, cause and affected versions in BUGS-fork.md.
-* Test on a fresh Ubuntu 26.04 machine or VM, and for the migration and in-place tools on a copy of a real box. `tests/fork/smoke.py` checks a box from outside (see its `--help`); `tests/fork/seed-legacy.sh` fills an old box with test data; `tests/fork/prepare-testenv.sh` adapts a test VM. Keep credentials and the addresses of your test network in an env file outside the repository (`MIAB_TEST_ENV`).
+* Test on a fresh Ubuntu 26.04 machine or VM, and for the migration and in-place tools on a copy of a real box. `tests/fork/smoke.py` checks a box from outside (see its `--help`); `tests/fork/seed-legacy.sh` fills an old box with test data; `tests/fork/prepare-testenv.sh` adapts a test VM. Keep credentials and the addresses of your test network in an env file outside the repository (`MIAB_TEST_ENV`). The test scenarios and the results of each release are in [TESTING-fork.md](TESTING-fork.md).
 * The public domain dedication below (CC0) applies to all contributions to this fork as well.
 
 ### Versioning
