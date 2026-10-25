@@ -137,6 +137,15 @@ FTS=${FTS:-${DEFAULT_FTS:-xapian}}
 NEXTCLOUD_SHARE_SCOPE=${NEXTCLOUD_SHARE_SCOPE:-${DEFAULT_NEXTCLOUD_SHARE_SCOPE:-domain}}
 FAVICON=${FAVICON:-${DEFAULT_FAVICON:-on}}
 EOF
+# PROBE_ADDRESS, the probe address of "tools/update-check.sh mailcheck", is
+# kept when it is set (a plain address only: the file is sourced as root);
+# setup itself does not use it.
+PROBE_ADDRESS=${PROBE_ADDRESS:-${DEFAULT_PROBE_ADDRESS:-}}
+if [[ $PROBE_ADDRESS =~ ^[A-Za-z0-9._%+=-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]]; then
+	echo "PROBE_ADDRESS=$PROBE_ADDRESS" >> /etc/mailinabox.conf
+elif [ -n "$PROBE_ADDRESS" ]; then
+	echo "PROBE_ADDRESS=$PROBE_ADDRESS is not a plain mail address; it is left out of /etc/mailinabox.conf."
+fi
 
 # Start service configuration.
 source setup/system.sh

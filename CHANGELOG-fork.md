@@ -98,7 +98,8 @@ contacts of new users again (B99).
     message class.
   * `mailcheck` sends a marked mail (`X-Miab-Test: 1`, a unique token) from
     administrator@PRIMARY_HOSTNAME (`--from`) to an external probe address
-    (`--probe` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) that forwards
+    (`--probe` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`, which setup
+    keeps when it rewrites the file, B103) that forwards
     or answers it, waits (`--timeout`, default 900 s) until a mail with the
     token comes back over port 25 and is stored, and reports the outbound
     delivery (relay, DKIM signature), the inbound delivery (port 25, the

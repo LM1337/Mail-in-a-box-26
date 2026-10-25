@@ -142,7 +142,8 @@ between, `tools/expected-changes/`) or UNEXPECTED, and runs the log audit
 against the baseline: only new message classes count (`--internet` accepts
 the usual noise of a public box). `mailcheck` sends a marked test mail to
 an address of another provider that sends it back (forward or automatic
-answer; `--probe ADDRESS` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`) and
+answer; `--probe ADDRESS` or `PROBE_ADDRESS=` in `/etc/mailinabox.conf`, which
+setup keeps from rc7 on) and
 waits for it to come back over port 25: outbound, inbound, spam filter,
 folder and storage in one round trip. Without a probe address it is skipped.
 
@@ -241,7 +242,8 @@ die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
 (`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin).
 `mailcheck` schickt eine markierte Testmail an eine Adresse bei einem
 anderen Anbieter, die sie zurückschickt (Weiterleitung oder automatische
-Antwort; `--probe ADRESSE` oder `PROBE_ADDRESS=` in `/etc/mailinabox.conf`),
+Antwort; `--probe ADRESSE` oder `PROBE_ADDRESS=` in `/etc/mailinabox.conf`,
+das Setup ab rc7 dort stehen lässt),
 und wartet, bis sie über Port 25 zurückkommt: Versand, Empfang,
 Spamfilter, Ordner und Ablage in einem Durchgang. Ohne Probe-Adresse wird
 der Schritt übersprungen.

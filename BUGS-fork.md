@@ -154,6 +154,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B100](#b100) | high | Tools | The fallback SSH server of the in-place tool never starts on a box without the group admin | Fork | no | no | rc7 |
 | [B101](#b101) | medium | Tools | The fallback SSH server of the in-place tool logs in with a key alone where sshd asks for more, and listens on all addresses | Fork | no | no | rc7 |
 | [B102](#b102) | low | Tools | The in-place tool passes the host of an rsync backup target to ssh unchecked, so a leading "-" is read as an option | Fork | no | no | rc7 |
+| [B103](#b103) | medium | Tools | Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1296,6 +1297,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the fork rc3 to rc6 (the in-place tool). Origin: Fork. A target with an IPv6 address in brackets, which the tool did not handle before either, is now refused with that message.
 * **Evidence:** from reading the code. On OpenSSH 10.2 (26.04): `ssh ... "-oProxyCommand=touch pwned" "mkdir -p box-system/x"` and `ssh ... -Elnk "mkdir -p ..."` both ended with "hostname contains invalid characters"; no file was created, and the target of the symlink `lnk` was not written. The new checks accept `u123456@u123456.your-storagebox.de`, `backup@10.0.0.5` and `host.example` and refuse `-Evmlinuz`, `-oProxyCommand=...`, `u@-o...`, names with spaces and a path `-rf`. The OpenSSH builds of 22.04 and 24.04 were not tried.
 * **Found by:** rc7 review (in `tools/update-check.sh`, then the same code in the in-place tool); **commit:** see `git log --grep B102`; **fixed in:** v78-r2604.0-rc7
+
+### B103
+
+**Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped** (medium, Tools)
+
+* **Symptom:** With the probe address set as documented (`PROBE_ADDRESS=` in `/etc/mailinabox.conf`), `tools/update-check.sh mailcheck` after the update says "mailcheck: skipped" and exits 0, and `after` reports the line `mailinabox-conf.txt - PROBE_ADDRESS=...` as UNEXPECTED.
+* **Cause:** setup/start.sh writes `/etc/mailinabox.conf` anew on every run from a fixed list of keys, so every setup run, the update included, removed the key. The order of the tool (before, backup, update, after, mailcheck) puts the mail check after it.
+* **Fix:** setup/start.sh keeps `PROBE_ADDRESS` (from the environment or the file) when it is a plain mail address; another value is left out with a message (the file is sourced as root).
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** from reading the code; the lines of setup/start.sh that read and write the file, run against a copy: the key kept on two runs, and `PROBE_ADDRESS='x;id'` left out with the message. Not run in a full setup.
+* **Found by:** rc7 review; **commit:** see `git log --grep B103`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 
