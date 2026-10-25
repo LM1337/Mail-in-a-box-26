@@ -3389,9 +3389,9 @@ units_disabled_now() {
 # Whether a disabled unit still starts after a reboot, because something else
 # starts it: an enabled socket, path or timer that activates it (ssh.service
 # since Ubuntu 24.04, started by ssh.socket; B70), a unit name that is now
-# another unit's name (an alias), or a running unit that pulls it in. Do not
-# enable such a unit: ssh.service enabled next to ssh.socket would bind port 22
-# itself and bypass the socket.
+# another unit's name (an alias), or a running unit that pulls it in. Such a
+# unit need not be enabled (ssh.socket starts ssh.service on the first
+# connection), and the tool does not enable it.
 unit_started_otherwise() {
 	local u=$1 id t en
 	id=$(systemctl show -p Id --value "$u" 2> /dev/null || true)
