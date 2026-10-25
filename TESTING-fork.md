@@ -62,6 +62,7 @@ compares against after a migration or upgrade.
 | T3 | the 24.04 test VM (copy of a production box) | in place, 24.04 → 26.04, one release upgrade | `curl …/tools/upgrade-in-place-to-2604.sh \| sudo bash -s -- --keep-local --yes` | migrated |
 | T4 | the 22.04 test VM | in place, 22.04 → 24.04 → 26.04, two release upgrades | `curl …/tools/upgrade-in-place-to-2604.sh \| sudo bash -s -- --yes` | migrated |
 | T5 | the 24.04 test VM after an in-place upgrade with rc3 | update of a box that already runs the fork | `git remote set-url` to GitHub, then `sudo bash -c "$(curl -fsSL …/setup/bootstrap.sh)"`; the setup dialogs answered with Enter | migrated |
+| T6 | a box on the Internet (public DNS, open port 25), before a final release | fresh install, then an update of it | as T1, then as T5; `tools/update-check.sh` around the update, `mailcheck` with a real external probe address | fresh |
 
 Variants: **T3b** is a clean T3 run from the tag after a first run had found
 bugs. **T3c** and **T4b** repeat T3 and T4 with the automatic tmux of rc4;
@@ -70,6 +71,40 @@ on. T3c also runs the before/after hooks for the local web service. **T5b**
 updates rc3 to the release under test (from rc5). Most in-place runs in the lab use `--no-backup-check`
 (the test VMs have no fresh backup) and run `prepare-testenv.sh` before the
 smoke test.
+
+### What the scenarios of rc7 cover
+
+rc7 adds tools and behaviour that the scenarios must run, not only the
+smoke test:
+
+* **T5b** (update from rc3 and from rc6): `tools/update-check.sh before`
+  and `backup` on the snapshot before the update, started through
+  `curl … | sudo bash -s -- STEP` as the upgrade note says (a box on rc6 has
+  no copy of the tool), `backup` with `--docker-dir`, `--docker-volume` and
+  `--postgres` for the Docker stand-in of the copied box and with the
+  rsync upload to a lab target; after the update `after` (RESULT OK: every
+  change EXPECTED by `tools/expected-changes/`, no new log message class
+  against the baseline) and `mailcheck` with a lab probe (`--probe`, an
+  address of the peer that answers the mail; outbound delivery and DKIM are
+  then only checked inside the lab). `PROBE_ADDRESS` in
+  `/etc/mailinabox.conf` is still there after the update (B103). An
+  interactive update shows no welcome dialog.
+* **T3 and T4** (the release upgrades): the fallback SSH server on port
+  1022 on the old OpenSSH of 22.04 and 24.04 (one binary; so far only tried
+  with OpenSSH 10.2 of 26.04), on boxes without a group `admin` (B100): a
+  key login on port 1022 while port 22 is down, the run's notes when port 22
+  stops and starts answering, and afterwards no fallback process, no ufw
+  rule for its port and none of its files. `--ssh-fallback-test` before the
+  upgrade. A login there of a user who is not an administrator fails.
+* **T1 and T5b**: Munin's alert setting in the admin panel (smoke test
+  `api-munin-alerts`, and one real alert to the chosen address), the nginx
+  reload of setup (no cut ActiveSync long poll except by the PHP-FPM
+  restarts), the OpenDKIM tables unchanged by a second setup run (B95).
+* **All scenarios**: the log audit with `--smoke` (the deliberate failed
+  logins of the smoke test's `api-auth`) and the lab's own list; the
+  classes of setup runs carry `[setup]`.
+* **T6**: `mailcheck` with a real external probe address (delivery to
+  another provider and back, DKIM and SPF there), Let's Encrypt.
 
 ### What the smoke test checks
 
@@ -108,7 +143,11 @@ report. The groups:
   and `munin.conf` restored exactly. Not called (`API_NOT_CALLED`, with the
   reasons): reboot, package updates, SSL provisioning and install, web
   update, backup config writes, MFA enable and disable, DNS update,
-  secondary nameserver, the fail2ban writes (group admin, group fail2ban).
+  secondary nameserver, the type-A shortcut `/dns/custom/{qname}` (it would
+  change real A records), the fail2ban writes (group admin, group
+  fail2ban). While `api-munin-alerts` has the alerts set to off or to a
+  custom address (a few seconds), a real alert of Munin in that moment is
+  not sent or goes to the test mailbox.
   `tests/fork/api-routes.py` (no box needed) checks that every route of
   `management/daemon.py` is documented and every documented operation has a
   route, that `smoke.py` calls or excludes each of them, and the content
@@ -572,6 +611,12 @@ Outline, with a legacy box 192.0.2.10 and a new box 192.0.2.11:
   run from a 22.04 source, not from a release-upgraded 24.04 box.
 * **Modes of the tools** that the scenarios do not use: `--rollback`,
   `--rehearse`, `--from-backup`, `--push-zones-to-old`, `--cleanup-only`.
+  Of `tools/update-check.sh backup`: the targets other than rsync and
+  local (S3, B2), and Docker setups other than the copied box's stand-in.
+* **The fallback SSH server's refusal** where sshd asks for more than a
+  key (`AuthenticationMethods`) or has `Match` blocks: checked by hand on a
+  test box (the Match case) and against the function, not in a release
+  upgrade. A box whose sshd listens only on some addresses was not tested.
 * **The Internet:** Let's Encrypt certificates, delivery to other providers,
   blocklists, reverse DNS. These need public DNS and an open port 25.
 * **Other virtualization and hosting providers.** The tests ran on one

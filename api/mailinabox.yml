@@ -2104,7 +2104,9 @@ paths:
         Form fields `recipient` (`admin`, `custom`, `off`), `address` (for
         `custom`: a plain address, ASCII letters, digits and `_ + - .` before
         the @, no name or quotes) and `level` (`warning`, `critical`); fields
-        that are not sent keep their value. Writes `/etc/munin/munin.conf`;
+        that are not sent keep their value, except `address`: it is cleared
+        unless `recipient` is `custom`, so send it again when switching back
+        to `custom`. Writes `/etc/munin/munin.conf`;
         Munin reads it on its next run.
       operationId: setMuninAlerts
       requestBody:

@@ -99,9 +99,10 @@ A box that runs this fork is updated like upstream Mail-in-a-Box: run the
 bootstrap command from [Installation](#installation) again. It brings
 `/root/mailinabox` to the current release tag and runs setup. Read the
 upgrade note of the new release in [CHANGELOG-fork.md](CHANGELOG-fork.md)
-first. The in-place tool is not needed for this. Setup shows its dialog
-boxes again (the welcome text, the host name, the public IP address when it
-differs from what the Internet sees); Enter keeps the current values.
+first. The in-place tool is not needed for this. Setup shows some of its
+dialog boxes again (the host name, the public IP address when it differs
+from what the Internet sees; from rc7 on no longer the welcome text of a new
+installation); Enter keeps the current values.
 
 Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
 tool) were cloned from the fork's previous home. bootstrap.sh stops on them
@@ -185,6 +186,11 @@ Right after the update:
   `doveconf -h log_path` must say `syslog`. fail2ban's Dovecot jails then
   see failed IMAP, POP3 and ManageSieve logins also after the weekly
   rotation of `mail.log`.
+* **ActiveSync contacts (B99).** From rc7 on, new users get no example
+  contact in Nextcloud. Users created before keep it, and the contact sync
+  of their phones over ActiveSync fails until it is deleted: in Nextcloud's
+  Contacts, delete the contact marked "This is an example contact" (each
+  user for themselves, or the admin for them).
 
 ### Deutsch
 
@@ -193,10 +199,10 @@ Bootstrap-Befehl aus [Installation](#installation) noch einmal aufrufen. Er
 bringt `/root/mailinabox` auf den aktuellen Release-Tag und lässt setup
 laufen. Vorher den Upgrade-Hinweis des neuen Releases in
 [CHANGELOG-fork.md](CHANGELOG-fork.md) lesen. Das Werkzeug für das Upgrade
-an Ort und Stelle wird dafür nicht gebraucht. Das Setup zeigt seine
-Dialogfenster noch einmal (den Begrüßungstext, den Hostnamen und die
-öffentliche IP-Adresse, wenn sie von der abweicht, die das Internet sieht);
-Enter behält die bisherigen Werte.
+an Ort und Stelle wird dafür nicht gebraucht. Das Setup zeigt einige seiner
+Dialogfenster noch einmal (den Hostnamen und die öffentliche IP-Adresse,
+wenn sie von der abweicht, die das Internet sieht; ab rc7 nicht mehr den
+Begrüßungstext einer neuen Installation); Enter behält die bisherigen Werte.
 
 Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
 In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.
@@ -289,6 +295,12 @@ Gleich nach dem Update:
   `doveconf -h log_path` muss `syslog` sagen. Die Dovecot-Jails von
   fail2ban sehen dann fehlgeschlagene Anmeldungen bei IMAP, POP3 und
   ManageSieve auch nach der wöchentlichen Rotation von `mail.log`.
+* **Kontakte über ActiveSync (B99).** Ab rc7 bekommen neue Benutzer in
+  Nextcloud keinen Beispielkontakt mehr. Ältere Benutzer behalten ihn, und
+  der Kontaktabgleich ihrer Telefone über ActiveSync schlägt fehl, bis er
+  gelöscht ist: in den Kontakten von Nextcloud den Kontakt löschen, der als
+  „This is an example contact“ markiert ist (jeder Benutzer selbst oder der
+  Admin für ihn).
 
 
 Setup output / Ausgaben von setup

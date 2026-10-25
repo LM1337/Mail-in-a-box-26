@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07 never shipped in a tag; B11, B54, B76, B77 and B90 shipped in rc1, B57, B67 and B73 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101 and B103-B105 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72 and B84 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -37,8 +37,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-95 bugs: 2 critical, 16 high, 36 medium, 41 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+101 bugs: 2 critical, 17 high, 39 medium, 43 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -46,7 +46,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 14 |
+| Fork | 20 |
 
 32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -1296,7 +1296,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Cause:** `offsite_rsync` checked the characters of the path only, and neither path nor host for a leading "-". `custom.yaml` lies below `$STORAGE_ROOT`, which belongs to the user-data account: that account can rename `backup/` and put its own `custom.yaml` there (the same threat as B90). The control panel does not save such a target, because its own rsync check fails on it.
 * **Impact:** Low. OpenSSH 9.6 and later (and the patched OpenSSH of Ubuntu) refuse the destination that follows such an option, `"mkdir -p ..."`, with "hostname contains invalid characters" before they run a ProxyCommand or open a log file of `-E`, and the tool stops there; an OpenSSH without that check would run the ProxyCommand as root. It needs code running as user-data and the moment of the snapshot.
 * **Fix:** The host must be `[user@]host` of letters, digits, `.`, `_` and `-`, each part starting with a letter, digit or `_`, and the path must not start with "-"; otherwise the tool stops and names `--no-offsite`. ssh gets `--` before the host. The new `tools/update-check.sh backup` (rc7) checks the same and had allowed a leading "-" in its first version.
-* **Affects:** the fork rc3 to rc6 (the in-place tool). Origin: Fork. A target with an IPv6 address in brackets, which the tool did not handle before either, is now refused with that message.
+* **Affects:** the fork rc3 to rc6 (the in-place tool). Origin: Fork. A target with an IPv6 address in brackets is now refused with that message (copy the archive by hand).
 * **Evidence:** from reading the code. On OpenSSH 10.2 (26.04): `ssh ... "-oProxyCommand=touch pwned" "mkdir -p box-system/x"` and `ssh ... -Elnk "mkdir -p ..."` both ended with "hostname contains invalid characters"; no file was created, and the target of the symlink `lnk` was not written. The new checks accept `u123456@u123456.your-storagebox.de`, `backup@10.0.0.5` and `host.example` and refuse `-Evmlinuz`, `-oProxyCommand=...`, `u@-o...`, names with spaces and a path `-rf`. The OpenSSH builds of 22.04 and 24.04 were not tried.
 * **Found by:** rc7 review (in `tools/update-check.sh`, then the same code in the in-place tool); **commit:** see `git log --grep B102`; **fixed in:** v78-r2604.0-rc7
 

@@ -23,7 +23,9 @@ setup no longer sources or unpacks anything as root by a fixed name in
 `/tmp` (B89, B97), and root no longer writes through symbolic links in
 directories of other accounts (B86, B87, B90, B98). The management daemon
 no longer runs out of file descriptors (B91), and ActiveSync syncs the
-contacts of new users again (B99).
+contacts of new users again (B99). The review of the merged release found
+B100 to B105 in the new fallback SSH server, the update tools and the log
+audit, and B102 in the in-place tool's copy to an rsync target (all fixed).
 
 ### New
 
@@ -169,7 +171,9 @@ contacts of new users again (B99).
   restored exactly). `API_NOT_CALLED` lists the endpoints it does not call,
   with the reason (reboot, package updates, SSL provisioning and install,
   web update, backup config writes, MFA enable and disable, DNS update,
-  secondary nameserver, the fail2ban writes). TESTING-fork.md describes it.
+  secondary nameserver, the type-A shortcut `/dns/custom/{qname}` (it
+  would change real A records), the fail2ban writes). TESTING-fork.md
+  describes it.
   Run it from the box itself or from a peer: through `--jump` its two
   failed logins come from the jump host.
 * Tests: `tests/fork/api-routes.py` (stdlib only, no box): every route of
@@ -353,13 +357,18 @@ Done from the rc6 list ("Planned for rc7" below) and the plan of rc7: the
 Munin alert setting, the fallback SSH server and the live note, the order
 of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
 baseline and Internet allowlist, the update tools (state, backup,
-comparison, mail check), the welcome dialog, the nginx reload with its
-allowlist rules, the journal check. Still open:
+comparison, mail check) as code, the welcome dialog, the nginx reload with
+its allowlist rules, the journal check. Still open:
 
 * The full test matrix T1 to T5b on the release head, T6 (on the Internet:
   Let's Encrypt, delivery to other providers) before a final release. T3
   and T4 also run the fallback SSH server with the single-binary sshd of
   22.04 and 24.04 (so far tried only with OpenSSH 10.2 of 26.04).
+* The update tools in the test scenarios, so that they are tested before an
+  admin uses them: T5b runs `tools/update-check.sh before`, `backup` (with
+  the Docker options and the rsync upload) and, after the update, `after`
+  and `mailcheck` with a lab probe; T6 runs `mailcheck` with a real
+  external probe (TESTING-fork.md, "What the scenarios of rc7 cover").
 * `tools/expected-changes/` needs a list for each release, also an empty
   one for the final release.
 
