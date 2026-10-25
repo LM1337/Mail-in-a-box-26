@@ -530,7 +530,7 @@ mux_term() {
 # when the operator's terminal is in raw mode. Without a terminal (cron,
 # nohup, ssh without -t) both stay empty.
 mux_tty() {
-	local t mine p sid
+	local t mine p sid exe rs
 	MUX_TTY='' MUX_RAW_TTY=''
 	if [ -t 0 ]; then
 		t=$(tty 2> /dev/null || true)
@@ -554,7 +554,11 @@ mux_tty() {
 		p=$(ps -o ppid= -p "$p" 2> /dev/null | tr -d ' ' || true)
 	done
 	[ -n "$t" ] && [ -c "/dev/$t" ] || return 0
-	if "/proc/$sid/exe" --version 2> /dev/null | grep -q sudo-rs; then
+	# sudo-rs (26.04: /usr/lib/cargo/bin/sudo, also named /usr/bin/sudo-rs) is
+	# told apart from sudo by the path of the binary, which is not run for it.
+	exe=$(readlink "/proc/$sid/exe" 2> /dev/null || true)
+	rs=$(readlink -f /usr/bin/sudo-rs 2> /dev/null || true)
+	if [ -n "$exe" ] && { [ "$exe" = "$rs" ] || [ "${exe##*/}" = sudo-rs ]; }; then
 		MUX_RAW_TTY=/dev/$t
 	else
 		MUX_TTY=/dev/$t
@@ -3017,7 +3021,7 @@ release_access_text() { # TO now|reboot
 		echo "If a new login fails, wait a few minutes and try again. Do not reboot."
 	fi
 	if [ "$1" = 26.04 ]; then
-		echo "sudo is missing for a while (12 to 25 minutes in the test runs) while sudo-rs replaces it:"
+		echo "sudo is missing for a while (12 to 26 minutes in the test runs) while sudo-rs replaces it:"
 		if [ "$2" = reboot ]; then
 			echo "sudo then fails with \"command not found\". Wait until it is back."
 		else

@@ -76,8 +76,10 @@ test tool: `tests/fork/log-audit.sh`.
   reading), and through `curl ... | sudo bash` the tools did not attach it
   at all ("Could not attach this terminal"). Now they attach it in all
   these forms, with sudo on 22.04 and 24.04 and with sudo-rs on 26.04; Ctrl-b
-  d detaches. `--check` no longer advises to start the command inside tmux,
-  except for a `TAG` of rc1 to rc3 (B71).
+  d detaches. They tell sudo-rs from sudo by the path of the binary that
+  runs the session; a test version ran that binary with `--version` as root.
+  `--check` no longer advises to start the command inside tmux, except for a
+  `TAG` of rc1 to rc3 (B71).
 * Tools: after the last reboot of `tools/upgrade-in-place-to-2604.sh`
   the tmux window closes by itself 60 seconds after a successful run,
   instead of waiting for Enter forever; after a failure it stays open (B72).
@@ -176,12 +178,13 @@ test tool: `tests/fork/log-audit.sh`.
   `sudo` is missing for a while because sudo-rs replaces it: attach before
   and keep the connection open; if a login fails, wait, do not reboot. It
   also says so before a reboot after which a release upgrade starts by
-  itself, and in the motd while one is to come. It gives the times of all
-  test runs: new SSH logins fail for 20 to 40 minutes from 22.04 to 24.04
-  and 10 to 15 minutes from 24.04 to 26.04, `sudo` is missing for 12 to 25
-  minutes, the longer times on a busy disk; a release upgrade takes 20 to
-  90 minutes. README-fork.md ("Logging in during the release upgrades")
-  gives the measured times, README.md describes it.
+  itself, and in the motd while one is to come. It gives rounded ranges
+  from the test runs: new SSH logins fail for 20 to 40 minutes from 22.04
+  to 24.04 and 10 to 15 minutes from 24.04 to 26.04, `sudo` is missing for
+  12 to 26 minutes, the longer times on a busy disk; a release upgrade
+  takes 20 to 90 minutes. The measured SSH times were 19 to 36 and 7 to 14
+  minutes; README-fork.md ("Logging in during the release upgrades") gives
+  them, README.md describes it.
 * Tests: `tests/fork/smoke.py` marks every mail it sends with the header
   `X-Miab-Test: 1`. The manifest comparison (`mig-folders-<user>`,
   `mig-pop3-uidl-<user>`) ignores marked mails and the automatic replies

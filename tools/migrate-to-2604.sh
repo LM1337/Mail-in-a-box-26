@@ -453,7 +453,7 @@ mux_term() {
 # when the operator's terminal is in raw mode. Without a terminal (cron,
 # nohup, ssh without -t) both stay empty.
 mux_tty() {
-	local t mine p sid
+	local t mine p sid exe rs
 	MUX_TTY='' MUX_RAW_TTY=''
 	if [ -t 0 ]; then
 		t=$(tty 2> /dev/null || true)
@@ -477,7 +477,11 @@ mux_tty() {
 		p=$(ps -o ppid= -p "$p" 2> /dev/null | tr -d ' ' || true)
 	done
 	[ -n "$t" ] && [ -c "/dev/$t" ] || return 0
-	if "/proc/$sid/exe" --version 2> /dev/null | grep -q sudo-rs; then
+	# sudo-rs (26.04: /usr/lib/cargo/bin/sudo, also named /usr/bin/sudo-rs) is
+	# told apart from sudo by the path of the binary, which is not run for it.
+	exe=$(readlink "/proc/$sid/exe" 2> /dev/null || true)
+	rs=$(readlink -f /usr/bin/sudo-rs 2> /dev/null || true)
+	if [ -n "$exe" ] && { [ "$exe" = "$rs" ] || [ "${exe##*/}" = sudo-rs ]; }; then
 		MUX_RAW_TTY=/dev/$t
 	else
 		MUX_TTY=/dev/$t
