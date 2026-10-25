@@ -147,7 +147,8 @@ contacts of new users again (B99).
 * Setup marks its start and end in the journal ("Mail-in-a-Box setup
   started", "Mail-in-a-Box setup ended (exit code N)", identifier
   `mailinabox-setup`). `tests/fork/log-audit.sh` prefixes what the box logs
-  in between with `[setup]` (outside the phases of an in-place upgrade),
+  in between with `[setup]` (outside the phases of an in-place upgrade;
+  only marks that root logged count, B105),
   and allowlist rules that start with `^\[setup\]` accept a class only
   there: connections that setup's restarts of the services cut are normal
   during setup and a finding at any other time. The report names the setup

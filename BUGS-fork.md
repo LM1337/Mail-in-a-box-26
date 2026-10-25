@@ -156,6 +156,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B102](#b102) | low | Tools | The in-place tool passes the host of an rsync backup target to ssh unchecked, so a leading "-" is read as an option | Fork | no | no | rc7 |
 | [B103](#b103) | medium | Tools | Setup drops PROBE_ADDRESS from /etc/mailinabox.conf, so the mail check after an update is skipped | Fork | no | no | rc7 |
 | [B104](#b104) | medium | Tools | update-check.sh backup fails with two or more Docker volumes, after the Mail-in-a-Box backup | Fork | no | no | rc7 |
+| [B105](#b105) | low | Tests | Any local account can fake the setup marks in the journal, and the log audit then accepts its messages as setup noise | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1320,6 +1321,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** the mount point of the volume on the box replica of the update test is `/var/lib/docker/volumes/<id>/_data`. With the fix there: `backup --no-miab-backup --no-upload` with that volume and a second test volume wrote `docker-volume-<id>.tar.gz.gpg` and `docker-volume-<test>.tar.gz.gpg`; the second decrypted with the backup passphrase to its one test file, and the checksums matched. The test volume and the archive were removed afterwards.
 * **Found by:** rc7 review; **commit:** see `git log --grep B104`; **fixed in:** v78-r2604.0-rc7
+
+### B105
+
+**Any local account can fake the setup marks in the journal, and the log audit then accepts its messages as setup noise** (low, Tests)
+
+* **Symptom:** None in normal operation. An account such as www-data or munin runs `logger -t mailinabox-setup "Mail-in-a-Box setup started"`; `tests/fork/log-audit.sh` then gives everything the box logs from that moment the prefix `[setup]` (a run without an end lasts until the next start), and the rules for setup runs accept the classes they cover (ActiveSync long polls that nginx and PHP-FPM cut, Z-Push's CardDAV errors, the 404 of the Munin probes) at any time. `tools/update-check.sh` runs this audit as root before and after an update of a production box.
+* **Cause:** `setup_runs()` selected the marks by `SYSLOG_IDENTIFIER` alone, which the client chooses.
+* **Fix:** Only marks with `_UID=0` count; journald sets that field from the sending process. The phases of an in-place upgrade come from the tool's state file in `/root`, which only root can write.
+* **Affects:** the development of rc7 only (the setup marks are new in rc7, never in a tag). Origin: Fork.
+* **Evidence:** On the fresh-install test box: a line with that identifier from root and one from the account nobody; `journalctl SYSLOG_IDENTIFIER=mailinabox-setup` listed both, with `_UID=0` only root's (test lines with another text, so that they mark no setup run).
+* **Found by:** rc7 review; **commit:** see `git log --grep B105`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

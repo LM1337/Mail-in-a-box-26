@@ -36,8 +36,8 @@
 #
 # Setup runs: what the box logs while setup/start.sh runs (between its marks
 # "Mail-in-a-Box setup started" and "... ended" in the journal, identifier
-# mailinabox-setup; a run without an end lasts until the next start) gets the
-# prefix "[setup]", outside the phases above. Rules that start with
+# mailinabox-setup, logged as root; a run without an end lasts until the next
+# start) gets the prefix "[setup]", outside the phases above. Rules that start with
 # "^\[setup\]" accept a class only there, e.g. connections that setup's
 # restarts of the services cut.
 #
@@ -443,9 +443,12 @@ def jmsg(e):
 
 def setup_runs():
     """[(start, end or None)] of the runs of setup/start.sh, from its marks in
-    the journal; a run that started before --since starts at --since."""
+    the journal; a run that started before --since starts at --since. Only the
+    marks that root logged: SYSLOG_IDENTIFIER is chosen by the client, so any
+    local account could log them (logger -t) and have its own classes
+    accepted as [setup]; _UID is set by journald."""
     runs = []
-    for e in journal(["SYSLOG_IDENTIFIER=mailinabox-setup"]):
+    for e in journal(["SYSLOG_IDENTIFIER=mailinabox-setup", "_UID=0"]):
         ts = int(e.get("__REALTIME_TIMESTAMP", "0")) // 1000000
         msg = jmsg(e)
         if msg.startswith("Mail-in-a-Box setup started"):

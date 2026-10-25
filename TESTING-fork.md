@@ -502,7 +502,8 @@ Everything is in `tests/fork/`:
   phase of `tools/upgrade-in-place-to-2604.sh` (`[in-place:release_2404]`,
   from the tool's state file); the noise of the old releases and the release
   upgrades is allowed only with that prefix. From rc7 on, setup marks its
-  start and end in the journal (identifier `mailinabox-setup`), and what
+  start and end in the journal (identifier `mailinabox-setup`; only marks
+  that root logged count), and what
   the box logged during a setup run carries the prefix `[setup]`; rules
   that start with `^\[setup\]` (cut connections of the restarts of the
   services) apply only there. For the old box of a migration,
