@@ -94,6 +94,10 @@ def backup_status(env, timings=None):
 		get_duplicity_target_url(config)
 		],
 		get_duplicity_env_vars(env),
+		# duplicity's and rsync's messages on stderr go into the error below,
+		# not into the journal of the caller: they repeat what duplicity logs
+		# on stdout and can name the target (B125).
+		capture_stderr=True,
 		trap=True)
 	timings["collection-status"] = time.monotonic() - started
 	timings["collection-status exit"] = code
@@ -459,12 +463,7 @@ def refresh_saved_status(env):
 	# text (it can name the target). Exit code 0, 1 when the query failed.
 	if get_backup_config(env)["target"] == "off":
 		return 0
-	# duplicity's and rsync's messages (on stderr) go into the saved error,
-	# not into the journal: they repeat it and can name the target.
-	log = os.fdopen(os.dup(2), "w", buffering=1)
-	devnull = os.open(os.devnull, os.O_WRONLY)
-	os.dup2(devnull, 2)
-	os.close(devnull)
+	log = sys.stderr
 	def limit(signum, frame):
 		raise TimeoutError("The refresh took longer than %d s and was ended." % REFRESH_LIMIT)
 	signal.signal(signal.SIGALRM, limit)

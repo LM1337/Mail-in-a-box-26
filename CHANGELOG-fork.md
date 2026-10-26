@@ -79,7 +79,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   own (`management/backup.py --refresh-status`); the nightly backup waits
   for one in progress and saves the status at its end. The refresh logs its
   duration and those of its steps (duplicity's collection-status, the list
-  of the target's files) in the journal of the management daemon. New API
+  of the target's files) in the journal of the management daemon; what
+  duplicity, rsync and ssh say on stderr is part of the error shown, no
+  longer written into that journal. New API
   calls `GET /system/backup/status/saved` and
   `POST /system/backup/status/refresh`; `GET /system/backup/status` still
   queries the target and waits for it. `tools/update-check.sh backup` no
