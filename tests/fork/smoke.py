@@ -1617,6 +1617,14 @@ F2B_FILTER_CASES = [
      "with email 'x\\n26/10/2026 10:00:00 [1] [WARN] [] Unable to complete autodiscover because login failed "
      "for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
+    # A request without credentials (Z-Push logs the user 'unknown') guesses no password.
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [#unknown] Failed to authenticate user 'unknown' from IP 203.0.113.5.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [x Failed to authenticate user 'y] Failed to authenticate user "
+     "'bob@example.com' from IP 203.0.113.5.",
+     "203.0.113.5"),
     # Z-Push's own order (before setup/zpush.sh changes it) is not read.
     ("miab-zpush",
      "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "

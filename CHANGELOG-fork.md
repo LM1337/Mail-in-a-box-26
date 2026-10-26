@@ -22,8 +22,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   gets no more lines), escapes control characters in Z-Push's log lines and
   puts the client's address at the end of the ActiveSync message, so that a
   user name chosen by a client can neither add a line nor name another
-  address for the jail. logrotate works in `/var/log/z-push` as www-data
-  (B126).
+  address for the jail. A request without credentials (a client asking for
+  the login prompt) is not counted. logrotate works in `/var/log/z-push` as
+  www-data (B126).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
@@ -93,8 +94,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Tests: the smoke test's fail2ban status check wants `miab-zpush` (and
   `miab-slow-zpush` with the slow web jails), `fail2ban-filters` has cases
   for the new filter (an e-mail address and user names with
-  " from IP 198.51.100.7." in them, an escaped line break, Z-Push's own
-  order of the message), and the fail2ban group bans the peer through
+  " from IP 198.51.100.7." in them, an escaped line break, a request without
+  credentials, Z-Push's own order of the message), and the fail2ban group bans the peer through
   failed ActiveSync and Autodiscover logins (`fail2ban-activesync`,
   `fail2ban-autodiscover`; it asks only the jails that run, so that a slow
   jail that is off logs no error). The log audit accepts what these

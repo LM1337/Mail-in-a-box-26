@@ -783,6 +783,8 @@ def scan_failed_logins(hours=SCAN_HOURS, files=SCAN_LOGS, now=None):
 						m = RE_ZPUSH.match(line)
 						if not m: continue
 						user, ip, proto, count = m.group(1), m.group(2), "activesync", 1
+						if user == b"unknown":
+							continue # a request without credentials (miab-zpush does not count it either)
 					elif b"Unable to complete autodiscover because login failed" in line:
 						m = RE_AUTODISCOVER.match(line)
 						if not m: continue

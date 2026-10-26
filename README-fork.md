@@ -817,7 +817,8 @@ the following, on by default:
   (`LOGAUTHFAIL`) to `/var/log/z-push/z-push-error.log` and
   `autodiscover-error.log`, with the client's address as the last thing on
   the line and control characters escaped, so that a user name a client
-  chooses cannot name another address. A login that fails because a service
+  chooses cannot name another address. A request without credentials is not
+  counted. A login that fails because a service
   behind Z-Push does not answer (Dovecot, Nextcloud for calendars and
   contacts) counts as well; setup no longer restarts these services (B120,
   B122). Since the fix of B121 (after rc7) the paths `/caldav`, `/carddav` and
@@ -959,7 +960,8 @@ eingeschaltet:
   `/var/log/z-push/z-push-error.log` und `autodiscover-error.log`), mit der
   Adresse des Clients am Ende der Zeile und maskierten Steuerzeichen, damit
   ein vom Client gewählter Benutzername keine andere Adresse unterschieben
-  kann. Eine Anmeldung, die scheitert, weil ein Dienst hinter Z-Push nicht
+  kann. Eine Anfrage ohne Zugangsdaten zählt nicht. Eine Anmeldung, die
+  scheitert, weil ein Dienst hinter Z-Push nicht
   antwortet (Dovecot, Nextcloud für Kalender und Kontakte), zählt ebenfalls;
   Setup startet diese Dienste nicht mehr neu (B120, B122). Seit der Korrektur
   von B121 nach rc7 geben die Pfade `/caldav`, `/carddav` und `/webdav` die
