@@ -39,18 +39,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-119 bugs: 2 critical, 18 high, 47 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+120 bugs: 2 critical, 18 high, 48 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 35 |
+| Upstream | 36 |
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
 | Fork | 34 |
 
-36 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123). They are candidates for
+37 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -176,6 +176,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B120](#b120) | medium | Dovecot | Setup restarts Dovecot before it rewrites the passdb, and logins can fail as wrong passwords for two seconds | Upstream | yes | yes | after rc7 |
 | [B121](#b121) | high | Nextcloud | Nextcloud throttles 127.0.0.1 after a setup run, and ActiveSync stops syncing calendars and contacts for every user | Upstream | yes | yes | after rc7 |
 | [B122](#b122) | medium | Setup | Setup restarts Dovecot, Postfix, PHP-FPM and fail2ban several times per run; each restart cuts the clients, and fail2ban lifts all bans for a moment | Upstream | yes | yes | after rc7 |
+| [B124](#b124) | medium | Nextcloud | Setup replaces Nextcloud's config.php with a file only root can read, for a moment, and Nextcloud fails the requests in that moment (an ActiveSync login gets HTTP 401) | Upstream | yes | yes | after rc7 |
 | [B123](#b123) | medium | Dovecot | /etc/dovecot belongs to the account mail, which can change the configuration that Dovecot's root processes read and the files that setup writes there as root | Upstream | yes | yes | after rc7 |
 
 ## Details
@@ -1550,6 +1551,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes, the fork up to rc7. Origin: Upstream. Only matters to an attacker who already runs code as `mail` (e.g. through a bug in an IMAP process): from there to root.
 * **Evidence:** From reading the code (setup/mail-dovecot.sh) and the file modes on a box of the fork. After the fix on the test boxes: `/etc/dovecot` `root:mail`, the smoke test (with delivery through the global sieve script, the spam folder and Sieve filters) and the log audit as before.
 * **Found by:** review of the fixes of B120-B122; **commit:** see `git log --grep B123`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B124
+
+**Setup replaces Nextcloud's config.php with a file only root can read, for a moment, and Nextcloud fails the requests in that moment** (medium, Nextcloud)
+
+* **Symptom:** During a setup run (every update), a Nextcloud request fails with "fopen(/usr/local/lib/owncloud/config/config.php): Failed to open stream: Permission denied" (nginx's error log). When it is Z-Push's login to CardDAV or CalDAV, Z-Push answers the phone's request with HTTP 401 ("BackendCardDAV->Logon(): User '...' failed to authenticate", `AuthenticationRequiredException`), which a phone may show as a password prompt.
+* **Cause:** setup/nextcloud.sh wrote the new `config.php` as root to a file of `mktemp` (mode 0600, root) in /tmp, moved it over `config.php`, and gave it to www-data only afterwards (`chown`); a request between the two found the file unreadable. Root also wrote it by path into `$STORAGE_ROOT/owncloud`, which belongs to www-data.
+* **Fix:** The PHP that merges the settings runs as www-data and replaces `config.php` atomically (a new file in the same directory, renamed over it); it stops setup if www-data cannot read the old file. The two `sed -i` that switch `config_is_read_only` run as www-data as well.
+* **Affects:** v78 yes (the same code), PR #2603 yes, the fork up to rc7. Origin: Upstream. Needs a request in the moment between the two commands; with a few phones per user seen once per setup run or less.
+* **Evidence:** The update test T5b with client load after the review of B120-B123 (copy of a production box, rc6 to the fixed branch, second run): one FolderSync of an ActiveSync device from another host got HTTP 401 at the moment setup rewrote `config.php`, with the messages above; no other failed login in the run.
+* **Found by:** update test (with client load, after the review of B120-B123); **commit:** see `git log --grep B124`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 

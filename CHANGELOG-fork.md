@@ -30,6 +30,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Nextcloud takes it from 127.0.0.1 only (`trusted_proxies`): these clients
   are throttled under their own address, and the miab-owncloud jail can ban
   them, which it never could on these paths (B121).
+* Nextcloud no longer fails a request (an ActiveSync login got HTTP 401)
+  while setup rewrites its `config.php`: root replaced the file with one only
+  root could read and gave it to www-data a moment later. The file is now
+  written as www-data and replaced atomically (B124).
 * `/etc/dovecot` belongs to root now (group `mail` may read): it belonged
   to the account `mail`, which all IMAP, POP3 and LMTP processes run as and
   which could therefore change Dovecot's configuration (read by its root

@@ -269,7 +269,7 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 
 		if [ -e "$STORAGE_ROOT/owncloud/config.php" ]; then
 			# Remove the read-onlyness of the config, which is needed for migrations, especially for v24
-			sed -i -e '/config_is_read_only/d' "$STORAGE_ROOT/owncloud/config.php"
+			sudo -u www-data sed -i -e '/config_is_read_only/d' "$STORAGE_ROOT/owncloud/config.php"
 		fi
 
 		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^[89] ]]; then
@@ -440,11 +440,20 @@ fi
 #   is on its brute-force bypass list (B121, see below). Another header in
 #   that list would let a client name its own address through the proxy.
 # Use PHP to read the settings file, modify it, and write out the new settings array.
+# This runs as www-data, which owns config.php and its directory, and replaces the
+# file atomically (a new file in the same directory, renamed over it). Up to rc7
+# root wrote it to a file of its own (mode 0600) in /tmp, moved that over
+# config.php and gave it to www-data only afterwards: a request in between found
+# config.php unreadable, and Nextcloud failed it (Z-Push's login to CardDAV during
+# an update, which made a phone's FolderSync get HTTP 401; B124).
 TIMEZONE=$(timedatectl show -p Timezone --value)
-CONFIG_TEMP=$(/bin/mktemp)
-php"$PHP_VER" <<EOF > "$CONFIG_TEMP" && mv "$CONFIG_TEMP" "$STORAGE_ROOT/owncloud/config.php";
+sudo -u www-data php"$PHP_VER" <<EOF
 <?php
-include("$STORAGE_ROOT/owncloud/config.php");
+\$path = '$STORAGE_ROOT/owncloud/config.php';
+if ((include \$path) === false || !isset(\$CONFIG) || !is_array(\$CONFIG)) {
+  fwrite(STDERR, "Nextcloud: www-data cannot read \$path.\n");
+  exit(1);
+}
 
 \$CONFIG['config_is_read_only'] = false;
 \$CONFIG['appstoreenabled'] = false; # https://discourse.mailinabox.email/t/problems-with-z-push-and-nextcloud-likely-after-package-updates-today/16460/21
@@ -481,12 +490,16 @@ if (!in_array('127.0.0.1', \$proxies, true)) { \$proxies[] = '127.0.0.1'; }
 \$CONFIG['mail_smtpname'] = ''; # if smtpmode is smtp, set this to a mail user
 \$CONFIG['mail_smtppassword'] = ''; # if smtpmode is smtp, set this to the user's password
 
-echo "<?php\n\\\$CONFIG = ";
-var_export(\$CONFIG);
-echo ";";
+\$tmp = tempnam(dirname(\$path), '.config.php.');
+if (\$tmp === false || dirname(\$tmp) !== dirname(\$path)
+    || file_put_contents(\$tmp, "<?php\n\\\$CONFIG = " . var_export(\$CONFIG, true) . ";\n") === false
+    || !rename(\$tmp, \$path)) {
+  if (\$tmp !== false) { @unlink(\$tmp); }
+  fwrite(STDERR, "Nextcloud: could not write \$path.\n");
+  exit(1);
+}
 ?>
 EOF
-chown www-data:www-data "$STORAGE_ROOT/owncloud/config.php"
 
 # Enable/disable apps. Note that this must be done after the Nextcloud setup.
 # The firstrunwizard gave Josh all sorts of problems, so disabling that.
@@ -710,7 +723,8 @@ nextcloud_favicon
 
 # Now set the config to read-only.
 # Do this only at the very bottom when no further occ commands are needed.
-sed -i'' "s/'config_is_read_only'\s*=>\s*false/'config_is_read_only' => true/" "$STORAGE_ROOT/owncloud/config.php"
+# As www-data, which owns the file and its directory (sed -i replaces it atomically).
+sudo -u www-data sed -i'' "s/'config_is_read_only'\s*=>\s*false/'config_is_read_only' => true/" "$STORAGE_ROOT/owncloud/config.php"
 
 # Rotate the nextcloud.log file
 cat > /etc/logrotate.d/nextcloud <<EOF
