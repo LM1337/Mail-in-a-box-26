@@ -428,7 +428,9 @@ function f2b_render_settings() {
   });
   $('#f2b-allowlist').val(s.allowlist.join("\n"));
   $('#f2b-help-allowlist').text("Addresses and networks (CIDR) that are never banned, one per line, at most " + f2b_state.max_allowlist
-    + ". The box's own addresses are always exempt. Put your office or home network here.");
+    + ". The box's own addresses are always exempt. Put your office or home network here, and the servers of a mail app that syncs through its provider's cloud"
+    + " (such as Outlook for iOS and Android with an Exchange ActiveSync account): all its users come from these few addresses, so one wrong password there"
+    + " 20 times within 2 minutes would ban them all from ActiveSync.");
   f2b_toggle_inputs();
   f2b_settings_dirty = false;
 }

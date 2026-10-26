@@ -817,13 +817,24 @@ the following, on by default:
   (`LOGAUTHFAIL`) to `/var/log/z-push/z-push-error.log` and
   `autodiscover-error.log`, with the client's address as the last thing on
   the line and control characters escaped, so that a user name a client
-  chooses cannot name another address. A request without credentials is not
-  counted. A login that fails because a service
+  chooses cannot name another address. Only a request with a user name and
+  a password is logged and counted: a phone's first request without
+  credentials (it waits for the login prompt, also with its user in the URL)
+  is not. A login that fails because a service
   behind Z-Push does not answer (Dovecot, Nextcloud for calendars and
   contacts) counts as well; setup no longer restarts these services (B120,
   B122). Since the fix of B121 (after rc7) the paths `/caldav`, `/carddav` and
   `/webdav` pass the client's address to Nextcloud, so `miab-owncloud` counts
-  and bans those clients too.
+  and bans those clients too. Some mail apps sync through their provider's
+  servers, for example Outlook for iOS and Android with an Exchange
+  ActiveSync account: all their users reach the box from the same few
+  addresses, and someone who enters a wrong password there 20 times within
+  two minutes gets these addresses banned for all of them (and, repeated,
+  the one-week recidive ban). If your users sync that way, put those
+  networks on the allowlist. `/var/log/z-push` belongs to root (group
+  www-data, which may write the four log files but not replace them), so
+  that fail2ban never opens a link or a FIFO there; setup and logrotate
+  create the log files.
 * **Failed-login report.** The status checks read the mail log of the last
   48 hours (SMTP AUTH, IMAP, POP3, ManageSieve) and Z-Push's error logs
   (ActiveSync, Autodiscover) and report accounts with failed
@@ -960,13 +971,24 @@ eingeschaltet:
   `/var/log/z-push/z-push-error.log` und `autodiscover-error.log`), mit der
   Adresse des Clients am Ende der Zeile und maskierten Steuerzeichen, damit
   ein vom Client gewählter Benutzername keine andere Adresse unterschieben
-  kann. Eine Anfrage ohne Zugangsdaten zählt nicht. Eine Anmeldung, die
-  scheitert, weil ein Dienst hinter Z-Push nicht
+  kann. Nur eine Anfrage mit Benutzername und Passwort wird protokolliert
+  und gezählt: Die erste Anfrage eines Telefons ohne Zugangsdaten (es wartet
+  auf die Anmeldeaufforderung, auch mit seinem Benutzer in der URL) nicht.
+  Eine Anmeldung, die scheitert, weil ein Dienst hinter Z-Push nicht
   antwortet (Dovecot, Nextcloud für Kalender und Kontakte), zählt ebenfalls;
   Setup startet diese Dienste nicht mehr neu (B120, B122). Seit der Korrektur
   von B121 nach rc7 geben die Pfade `/caldav`, `/carddav` und `/webdav` die
   Adresse des Clients an Nextcloud weiter, also zählt und sperrt
-  `miab-owncloud` auch diese Clients.
+  `miab-owncloud` auch diese Clients. Manche Mail-Apps synchronisieren über
+  die Server ihres Anbieters, zum Beispiel Outlook für iOS und Android mit
+  einem Exchange-ActiveSync-Konto: Alle ihre Nutzer erreichen die Box von
+  denselben wenigen Adressen, und wer dort 20-mal in zwei Minuten ein
+  falsches Passwort eingibt, lässt diese Adressen für alle sperren (und
+  wiederholt die einwöchige recidive-Sperre). Wenn die Nutzer so
+  synchronisieren, diese Netze in die Freigabeliste setzen.
+  `/var/log/z-push` gehört root (Gruppe www-data, die die vier Logdateien
+  beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
+  oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.
 * **Bericht über Fehlanmeldungen.** Die Statusprüfungen lesen das Mail-Log der
   letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve) und die Fehler-Logs
   von Z-Push (ActiveSync, Autodiscover) und melden Konten

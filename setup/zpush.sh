@@ -88,16 +88,23 @@ grep -qF 'return addcslashes($log, "\0..\37\177"); // MIAB-B126' "$ZPUSH_FILELOG
 # address last, as in the autodiscover message, where the jail's filter
 # anchors it at the end of the line (B126). Only the format string changes:
 # its arguments stay the same, in their positions (%1$s, %2$s).
+# Z-Push also writes that line for a request without a password (with the
+# user name of the URL, "User=", or "unknown"): a phone sends its first
+# request without credentials and waits for the login prompt, so each sync
+# of a phone would count as a failed login. Write it only when the request
+# had a user name and a password, i.e. when Z-Push checked a password.
 ZPUSH_INDEX=/usr/local/lib/z-push/index.php
 ZPUSH_AUTHFAIL_FORMAT="\"Failed to authenticate user '%2\\\$s' from IP %1\\\$s.\""
-if ! grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX"; then
+ZPUSH_AUTHFAIL_IF="if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false && Request::HasAuthenticationInfo()) // MIAB-B126"
+if ! grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" || ! grep -qF "$ZPUSH_AUTHFAIL_IF" "$ZPUSH_INDEX"; then
 	sed -f <(cat <<'SED'
 s/sprintf("IP: %s failed to authenticate user '%s'",/sprintf("Failed to authenticate user '%2\\$s' from IP %1\\$s.",/
+s/^            if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false)$/            if (defined('LOGAUTHFAIL') \&\& LOGAUTHFAIL != false \&\& Request::HasAuthenticationInfo()) \/\/ MIAB-B126: only when a password was sent/
 SED
 ) "$ZPUSH_INDEX" | tools/write_conf.py "$ZPUSH_INDEX"
 fi
-grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" \
-	|| { echo "Could not patch $ZPUSH_INDEX (Z-Push $VERSION); the miab-zpush jail would see no failed ActiveSync login."; exit 1; }
+grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" && [ "$(grep -cF "$ZPUSH_AUTHFAIL_IF" "$ZPUSH_INDEX")" = 1 ] \
+	|| { echo "Could not patch $ZPUSH_INDEX (Z-Push $VERSION); the miab-zpush jail would not see the failed ActiveSync logins, or would count requests without a password."; exit 1; }
 
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php
@@ -124,21 +131,38 @@ sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezo
 
 # Some directories it will use.
 
-mkdir -p /var/log/z-push
 mkdir -p /var/lib/z-push
-chmod 750 /var/log/z-push
 chmod 750 /var/lib/z-push
-chown www-data:www-data /var/log/z-push
 chown www-data:www-data /var/lib/z-push
+
+# The log directory belongs to root, group www-data, which may read it but not
+# change its entries (B126). fail2ban (root) opens the error logs by path, so
+# www-data, the account of Roundcube, Nextcloud and Z-Push, must not be able to
+# replace them with a symbolic link or a FIFO (which would stall all jails).
+# Before, the directory belonged to www-data: setup removes what is not a
+# regular file in it. Z-Push writes into its four log files, which therefore
+# must exist (it cannot create them any more): setup and logrotate create them
+# as root, in this directory of root's own, and give them to www-data.
+mkdir -p /var/log/z-push
+if [ -L /var/log/z-push ] || [ ! -d /var/log/z-push ]; then
+	echo "/var/log/z-push is not a directory."; exit 1
+fi
+chown root:www-data /var/log/z-push
+chmod 750 /var/log/z-push
+find /var/log/z-push -mindepth 1 -maxdepth 1 ! -type f -exec rm -rf -- {} +
+for f in z-push.log z-push-error.log autodiscover.log autodiscover-error.log; do
+	[ -f "/var/log/z-push/$f" ] || install -o www-data -g www-data -m 640 /dev/null "/var/log/z-push/$f"
+	chown -h www-data:www-data "/var/log/z-push/$f"
+	chmod 640 "/var/log/z-push/$f"
+done
 
 # Add log rotation
 
-# The directory belongs to www-data: logrotate works there as www-data (su),
-# not as root by path. "create" puts an empty file in place at once, so that
-# fail2ban (miab-zpush) finds its log files also before Z-Push's next request.
+# logrotate works as root, in a directory that only root may change. "create"
+# puts an empty file in place at once, for Z-Push (which cannot create it) and
+# for fail2ban (miab-zpush).
 tools/write_conf.py /etc/logrotate.d/z-push <<EOF;
 /var/log/z-push/*.log {
-	su www-data www-data
 	weekly
 	missingok
 	rotate 52
@@ -148,10 +172,6 @@ tools/write_conf.py /etc/logrotate.d/z-push <<EOF;
 	create 0640 www-data www-data
 }
 EOF
-
-# The miab-zpush jail reads the error logs, and fail2ban does not start a
-# jail whose log files do not exist. Created as www-data, in its directory.
-sudo -u www-data touch /var/log/z-push/z-push-error.log /var/log/z-push/autodiscover-error.log
 
 # Restart service.
 

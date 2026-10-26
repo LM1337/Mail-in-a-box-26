@@ -22,9 +22,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   gets no more lines), escapes control characters in Z-Push's log lines and
   puts the client's address at the end of the ActiveSync message, so that a
   user name chosen by a client can neither add a line nor name another
-  address for the jail. A request without credentials (a client asking for
-  the login prompt) is not counted. logrotate works in `/var/log/z-push` as
-  www-data (B126).
+  address for the jail. Z-Push writes the line only for a request with a
+  user name and a password, so a phone's first request without credentials
+  (it waits for the login prompt, also with its user in the URL) is not
+  counted. `/var/log/z-push` belongs to root now (group www-data), so that
+  www-data cannot replace the logs that fail2ban opens with a link or a
+  FIFO; setup and logrotate (as root) create the log files (B126).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
@@ -89,8 +92,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   failed-login report and its status check read Z-Push's error logs as well
   (protocols `activesync` and `autodiscover`, also the files of the last
   rotation). The help texts name ActiveSync and say that `/caldav`,
-  `/carddav` and `/webdav` now count under the client's address (B126,
-  B121).
+  `/carddav` and `/webdav` now count under the client's address; the
+  allowlist help names the servers of mail apps that sync through their
+  provider's cloud (B126, B121).
 * Tests: the smoke test's fail2ban status check wants `miab-zpush` (and
   `miab-slow-zpush` with the slow web jails), `fail2ban-filters` has cases
   for the new filter (an e-mail address and user names with
@@ -98,7 +102,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   credentials, Z-Push's own order of the message), and the fail2ban group bans the peer through
   failed ActiveSync and Autodiscover logins (`fail2ban-activesync`,
   `fail2ban-autodiscover`; it asks only the jails that run, so that a slow
-  jail that is off logs no error). The log audit accepts what these
+  jail that is off logs no error). `fail2ban-activesync-noauth` sends 25
+  ActiveSync requests as a phone sends its first one (a user of the box in
+  the URL, no credentials) and wants 401, no failed-login line and no ban.
+  The log audit accepts what these
   deliberate failures log (Z-Push's three IMAP tries, its exception and the
   new warning; for Autodiscover, which names no user in brackets, only with
   `--smoke`), and with `--internet` the same lines as password guessing.
@@ -141,7 +148,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   authenticate user '...' from IP ...." now (Z-Push: "IP: ... failed to
   authenticate user '...'"), and control characters in Z-Push's log lines
   are escaped (a multi-line message is one line with `\n`). A fail2ban
-  filter or log tool of your own for Z-Push needs the new form.
+  filter or log tool of your own for Z-Push needs the new form. A request
+  without a password no longer logs that message.
+* `/var/log/z-push` belongs to root, group www-data (0750), and Z-Push can
+  no longer create files there: setup creates `z-push.log`,
+  `z-push-error.log`, `autodiscover.log` and `autodiscover-error.log`, and
+  removes what is not a regular file there. Per-user logs of your own
+  (`$specialLogUsers` in Z-Push's `config.php`) need their files created
+  the same way (www-data, 0640).
+* Outlook for iOS and Android syncs an Exchange ActiveSync account through
+  Microsoft's servers: if your users do that, put those networks on the
+  fail2ban allowlist, or one wrong password entered there 20 times within
+  two minutes bans them for all of these users (B126).
 * Setup sets Nextcloud's `trusted_proxies` (adds 127.0.0.1, keeps the
   others) and `forwarded_for_headers` (`HTTP_X_FORWARDED_FOR` only, the
   Nextcloud default; another value there is replaced). A reverse proxy of
