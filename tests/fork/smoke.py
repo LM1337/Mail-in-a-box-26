@@ -597,7 +597,7 @@ def source_ip(spec):
 
 # fail2ban attack (wrong passwords); runs here or on the peer.
 F2B_SNIPPET = r'''
-import base64, imaplib, poplib, smtplib, socket, ssl, time
+import base64, http.client, imaplib, poplib, smtplib, socket, ssl, time
 from concurrent.futures import ThreadPoolExecutor
 
 USER = "f2btest-nouser@invalid.example"
@@ -655,6 +655,26 @@ def one(proto, host, port):
                 S.quit()
             except Exception:
                 pass
+        elif proto in ("activesync", "autodiscover"):
+            # Z-Push (B126): a wrong password, as a phone with an old one sends it.
+            name = HOSTNAME or host
+            c = http.client.HTTPSConnection(host, port, timeout=20, context=_ctx())
+            try:
+                c.sock = _ctx().wrap_socket(socket.create_connection((host, port), 20), server_hostname=name)
+                h = {"Host": name, "User-Agent": "miab-fork-smoke/1",
+                     "Authorization": "Basic " + base64.b64encode(("%s:%s" % (USER, PW)).encode()).decode()}
+                if proto == "activesync":
+                    c.request("OPTIONS", "/Microsoft-Server-ActiveSync", headers=h)
+                else:
+                    h["Content-Type"] = "text/xml"
+                    body = ('<?xml version="1.0" encoding="utf-8"?><Autodiscover xmlns="http://schemas.microsoft.com/'
+                            'exchange/autodiscover/mobilesync/requestschema/2006"><Request><EMailAddress>%s</EMailAddress>'
+                            '<AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/mobilesync/'
+                            'responseschema/2006</AcceptableResponseSchema></Request></Autodiscover>' % USER)
+                    c.request("POST", "/autodiscover/autodiscover.xml", body=body.encode(), headers=h)
+                c.getresponse().read()
+            finally:
+                c.close()
         elif proto == "managesieve":
             s = socket.create_connection((host, port), 20)
             try:
@@ -678,8 +698,12 @@ def one(proto, host, port):
     except Exception as e:
         return "error:%s" % type(e).__name__
 
+HOSTNAME = None
+
 def attack(spec):
+    global HOSTNAME
     host, port, proto = spec["host"], spec["port"], spec["proto"]
+    HOSTNAME = spec.get("hostname")
     t0 = time.time()
     with ThreadPoolExecutor(spec.get("parallel", 8)) as ex:
         res = list(ex.map(lambda i: one(proto, host, port), range(spec["count"])))
@@ -1461,11 +1485,18 @@ def c_fail2ban_api(ctx):
         raise Fail("fail2ban not running: %s" % j.get("error"))
     names = {x["name"] for x in j["jails"]}
     s = j["settings"]
-    want = {"dovecot", "miab-postfix587", "recidive"}
+    want = {"dovecot", "miab-postfix587", "miab-zpush", "recidive"}
     if s.get("slow_jails"):
-        want |= {"miab-slow-smtp", "miab-slow-dovecot"}
+        want |= set(j.get("slow_jails") or [])
+    if s.get("slow_web_jails"):
+        want.add("miab-slow-zpush")
     if want - names:
         raise Fail("jails missing: %s" % sorted(want - names))
+    if "miab-slow-zpush" not in (j.get("slow_web_jails") or []):
+        raise Fail("miab-slow-zpush is not among the slow web jails: %s" % j.get("slow_web_jails"))
+    kinds = {x["name"]: x.get("kind") for x in j["jails"]}
+    if kinds.get("miab-zpush") != "miab":
+        raise Fail("miab-zpush has kind %s, expected miab" % kinds.get("miab-zpush"))
     if not j.get("config_current"):
         raise Fail("rendered jail file does not match the settings")
     if "client" not in j:
@@ -1555,6 +1586,39 @@ F2B_FILTER_CASES = [
      "failed. in /usr/local/lib/roundcubemail/program/lib/Roundcube/rcube_imap.php on line 197 "
      "(POST /mail/?_task=login&_action=login)",
      "203.0.113.5"),
+    # Z-Push (B126): the address is the last thing on the line (setup/zpush.sh moves it there in the
+    # ActiveSync message), after the user names and the e-mail address that the client chose; control
+    # characters there are escaped ("\\n" below is a backslash and an n, not a line break).
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "from IP 2001:db8::5.",
+     "2001:db8::5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [ WARN] [x from ip 198.51.100.7.] Failed to authenticate user "
+     "'x from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'bob@example.com' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'x from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'x\\n26/10/2026 10:00:00 [1] [ WARN] [] Unable to complete autodiscover because login failed "
+     "for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    # Z-Push's own order (before setup/zpush.sh changes it) is not read.
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "
+     "'bob@example.com'",
+     None),
 ]
 
 
@@ -2525,7 +2589,7 @@ def f2b_banned(ctx, jail):
 
 
 def f2b_unban(ctx, ip):
-    for jail in ("dovecot", "miab-postfix587", "miab-postfix465", "postfix-sasl", "recidive"):
+    for jail in ("dovecot", "miab-postfix587", "miab-postfix465", "postfix-sasl", "miab-zpush", "recidive"):
         ctx.remote.run("fail2ban-client set %s unbanip %s" % (jail, shlex.quote(ip)), sudo=True)
     ctx.remote.run("fail2ban-client unban %s" % shlex.quote(ip), sudo=True)
 
@@ -2660,13 +2724,14 @@ def c_fail2ban(ctx, proto, jails, port):
         raise Fail("none of the jails %s exist" % jails)
     if ctx.args.peer_ssh:
         spec = {"host": ctx.args.host, "port": port, "proto": proto, "count": ctx.args.fail2ban_count,
-                "parallel": ctx.args.fail2ban_parallel}
+                "parallel": ctx.args.fail2ban_parallel, "hostname": ctx.hostname}
         res = run_snippet(F2B_SNIPPET, "attack", spec, ssh_host=ctx.args.peer_ssh)
     else:
         h, p = ctx.net.addr(port)
         res = run_snippet(F2B_SNIPPET, "attack", {"host": h, "port": p, "proto": proto,
                                                   "count": ctx.args.fail2ban_count,
-                                                  "parallel": ctx.args.fail2ban_parallel})
+                                                  "parallel": ctx.args.fail2ban_parallel,
+                                                  "hostname": ctx.hostname})
     new = set()
     deadline = time.time() + 30
     while time.time() < deadline:
@@ -3462,6 +3527,10 @@ def main():
             run_check("fail2ban-managesieve", c_fail2ban, ctx, "managesieve", dovecot, 4190)
             run_check("fail2ban-smtp587", c_fail2ban, ctx, "smtp587", ["miab-postfix587"] + smtp, 587)
             run_check("fail2ban-smtp465", c_fail2ban, ctx, "smtp465", ["miab-postfix465"] + smtp, 465)
+            # ActiveSync and Autodiscover (B126): miab-zpush bans HTTP and HTTPS.
+            zpush = ["miab-zpush", "miab-slow-zpush"]
+            run_check("fail2ban-activesync", c_fail2ban, ctx, "activesync", zpush, 443)
+            run_check("fail2ban-autodiscover", c_fail2ban, ctx, "autodiscover", zpush, 443)
 
     ctx.net.close()
     summary = {}

@@ -90,6 +90,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   rotation). The help texts name ActiveSync and say that `/caldav`,
   `/carddav` and `/webdav` now count under the client's address (B126,
   B121).
+* Tests: the smoke test's fail2ban status check wants `miab-zpush` (and
+  `miab-slow-zpush` with the slow web jails), `fail2ban-filters` has cases
+  for the new filter (an e-mail address and user names with
+  " from IP 198.51.100.7." in them, an escaped line break, Z-Push's own
+  order of the message), and the fail2ban group bans the peer through
+  failed ActiveSync and Autodiscover logins (`fail2ban-activesync`,
+  `fail2ban-autodiscover`).
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.

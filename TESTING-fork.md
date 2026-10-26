@@ -203,7 +203,8 @@ report. The groups:
   twice, is a FAIL.
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
-  injected user names) and the Intrusion Protection page.
+  injected user names) and the Intrusion Protection page; after rc7 the
+  status wants `miab-zpush`, and the filter cases cover it (B126).
 * **api** (from rc7): the management API as `api/mailinabox.yml` documents
   it. Auth: 401 without credentials (text or JSON by `Accept`, 403 for an
   XMLHttpRequest) and with a wrong password, the API key works, a second
@@ -267,7 +268,9 @@ report. The groups:
   file and that no Dovecot process holds a file in `/var/log` (Dovecot logs
   through syslog; on a box where Dovecot still writes `mail.log` itself, up
   to rc5, it must hold the new file); the attacks then run against the
-  rotated log, so a jail that a rotation made blind fails (B85). Use a lab address of the peer
+  rotated log, so a jail that a rotation made blind fails (B85). After rc7
+  also failed ActiveSync (OPTIONS with a wrong password) and Autodiscover
+  logins get the peer banned by `miab-zpush` (B126), on HTTP and HTTPS. Use a lab address of the peer
   (`--peer-ssh`), never the jump host.
 
 The number of checks grew from release to release (49 in the first runs, 73
