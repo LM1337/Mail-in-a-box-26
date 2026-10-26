@@ -235,7 +235,11 @@ report. The groups:
   host keys sshd serves, custom records.
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail
   password; Nextcloud sharing within the mail domain (from rc4); Roundcube
-  login; Z-Push OPTIONS and Autodiscover.
+  login; Z-Push OPTIONS and Autodiscover; `nextcloud-dav-proxy` (after rc7):
+  the proxy of `/carddav` passes an escaped name and the query string (a
+  card whose name has a space and a `?`, put through Nextcloud's own path,
+  is read, found in `?export` and deleted through `/carddav`, and the
+  address book stays; B130), and `/caldav` and `/webdav` answer PROPFIND.
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed

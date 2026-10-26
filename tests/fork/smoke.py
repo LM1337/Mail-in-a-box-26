@@ -1704,6 +1704,66 @@ def c_nc_dav(ctx, kind):
     return "207, %d entries (user id %s)" % (n, uid)
 
 
+def c_nc_dav_proxy(ctx):
+    # B130: the proxy of /caldav, /carddav and /webdav (to Nextcloud's
+    # remote.php) passes the path escaped, as the client sent it, and the
+    # query string. It decoded the path: a space gave 400, an escaped "?"
+    # began a query string (a DELETE of a card whose name began with "?"
+    # deleted the whole address book), and query strings were dropped. A
+    # card whose name has a space and a "?" is put through Nextcloud's own
+    # path, then read through /carddav, found in the address book's export
+    # (?export) and deleted through /carddav; the address book must stay.
+    # The DELETE is only sent when the reads worked (on a box with the old
+    # proxy it would reach another name, never the address book: the name
+    # does not begin with "?").
+    uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
+    auth = (ctx.alice, ctx.user_pw)
+    mark = "miab-smoke-%s" % ctx.tok
+    name = urllib.parse.quote("%s proxy?name.vcf" % mark, safe="")
+    book = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/" % uid
+    proxied_book = "/carddav/addressbooks/%s/contacts/" % uid
+    vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s-proxy\r\nFN:%s proxy\r\nN:%s;Proxy;;;\r\n"
+           "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+    propfind = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>'
+    try:
+        for attempt in range(3):
+            # Nextcloud on SQLite answers 500 ("database is locked") now and then
+            r = http_req(ctx, "PUT", book + name, auth=auth, body=vcf,
+                         headers={"Content-Type": "text/vcard; charset=utf-8"})
+            if r.status not in (500, 503):
+                break
+            time.sleep(10)
+        if r.status not in (201, 204):
+            raise Fail("PUT %s HTTP %d" % (book + name, r.status))
+        r = http_req(ctx, "GET", proxied_book + name, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET of the card %s through /carddav: HTTP %d (the proxy does not pass the escaped name)"
+                       % (name, r.status))
+        r = http_req(ctx, "GET", proxied_book + "?export", auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET /carddav/.../contacts/?export: HTTP %d (the proxy drops the query string)" % r.status)
+        r = http_req(ctx, "DELETE", proxied_book + name, auth=auth)
+        if r.status != 204:
+            raise Fail("DELETE of the card through /carddav: HTTP %d" % r.status)
+        r = http_req(ctx, "PROPFIND", book, auth=auth, body=propfind,
+                     headers={"Depth": "0", "Content-Type": "application/xml"})
+        if r.status != 207:
+            raise Fail("after the DELETE through /carddav the address book answers HTTP %d" % r.status)
+        r = http_req(ctx, "GET", book + name, auth=auth)
+        if r.status != 404:
+            raise Fail("after the DELETE through /carddav the card answers HTTP %d" % r.status)
+        out = ["/carddav: card with space and ? read, exported, deleted (the address book stays)"]
+        for kind, path in (("caldav", "/caldav/calendars/%s/" % uid), ("webdav", "/webdav/")):
+            r = http_req(ctx, "PROPFIND", path, auth=auth, body=propfind,
+                         headers={"Depth": "0", "Content-Type": "application/xml"})
+            if r.status != 207:
+                raise Fail("PROPFIND %s HTTP %d" % (path, r.status))
+            out.append("/%s 207" % kind)
+        return "; ".join(out)
+    finally:
+        http_req(ctx, "DELETE", book + name, auth=auth)
+
+
 def nc_user_info(ctx, user, pw):
     r = http_req(ctx, "GET", "/cloud/ocs/v1.php/cloud/user?format=json",
                  headers={"OCS-APIRequest": "true"}, auth=(user, pw))
@@ -3473,6 +3533,7 @@ def main():
         run_check("nextcloud-caldav-propfind", c_nc_dav, ctx, "caldav")
         run_check("nextcloud-carddav-propfind", c_nc_dav, ctx, "carddav")
         run_check("nextcloud-webdav-propfind", c_nc_dav, ctx, "webdav")
+        run_check("nextcloud-dav-proxy", c_nc_dav_proxy, ctx)
         run_check("nextcloud-share-scope", c_nc_share_scope, ctx)
         run_check("roundcube-login", c_roundcube, ctx)
         run_check("zpush-options", c_zpush_options, ctx)

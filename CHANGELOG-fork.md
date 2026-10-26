@@ -88,6 +88,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Z-Push allows a heartbeat of at most 3540 s, the protocol's maximum: a
   Ping that asks for more gets status 5 with that bound, and the phone
   pings with it (B129).
+* The proxy of `/caldav`, `/carddav` and `/webdav` to Nextcloud passes the
+  path escaped, as the client sent it, and the query string. It passed
+  nginx's decoded path: a name with a space got HTTP 400, an escaped `?`
+  began a query string (a DELETE of a card named `?x.vcf` deleted the whole
+  address book on a test box), and a query such as `?export` was dropped.
+  Only clients set up with these short paths were affected, not those with
+  the `/cloud/remote.php/...` URLs or `.well-known`, and not Z-Push (B130).
 
 ### Changed
 
@@ -130,6 +137,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   once, and nginx's timeout for `/Microsoft-Server-ActiveSync` is at least
   a minute longer than that bound (B129). `tests/fork/eas.py --ping`
   accepts status 5 and prints the bound.
+* Tests: the smoke test's new check `nextcloud-dav-proxy` (group `web`):
+  a card whose name has a space and a `?` is read, found in `?export` and
+  deleted through `/carddav`, and the address book stays; `/caldav` and
+  `/webdav` answer PROPFIND (B130).
 
 ### Upgrade note
 
@@ -154,6 +165,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   their running ActiveSync long polls end, up to an hour (before: 10.5
   minutes). Pings of up to 59 minutes hold a PHP-FPM worker each, as they
   already did past nginx's old timeout (B129).
+* `/caldav`, `/carddav` and `/webdav` are now prefix locations of nginx: a
+  proxy of your own for one of these paths (`www/custom.yaml`) would now
+  clash with them (B130).
 
 ### Planned
 

@@ -40,18 +40,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-125 bugs: 2 critical, 19 high, 51 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B128 in the update test with client load (found there, its cause in the ActiveSync analysis on a copy of the production box), B129 in nginx's log of the production box after the update (its cause in that analysis). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+126 bugs: 2 critical, 19 high, 52 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B128 in the update test with client load (found there, its cause in the ActiveSync analysis on a copy of the production box), B129 in nginx's log of the production box after the update (its cause in that analysis), B130 in that analysis. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 41 |
+| Upstream | 42 |
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
 | Fork | 34 |
 
-42 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B126, B127, B128, B129). They are candidates for
+43 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B126, B127, B128, B129, B130). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -182,6 +182,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B125](#b125) | low | Backup | The backup page and the backups wait up to two minutes when the rsync target does not answer a connection request | Upstream | yes | yes | after rc7 |
 | [B128](#b128) | high | Z-Push | ActiveSync answers every contacts Sync with HTTP 500 for a user with a card whose name has no .vcf, such as Nextcloud's example contact left from rc3 to rc6 | Upstream | yes | yes | after rc7 |
 | [B129](#b129) | medium | Z-Push | nginx ends an ActiveSync Ping with a heartbeat of more than 630 s with HTTP 504, while Z-Push still waits | Upstream | yes | yes | after rc7 |
+| [B130](#b130) | medium | nginx | The /caldav, /carddav and /webdav proxy passes the decoded path: a space gives 400, an escaped ? starts a query string (a DELETE can hit the whole address book), query strings are lost | Upstream | yes | yes | after rc7 |
 
 ## Details
 
@@ -1599,6 +1600,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes (the same values: `fastcgi_read_timeout 630`, no Ping bound), PR #2603 yes, the fork up to rc7. Origin: Upstream.
 * **Evidence:** On a copy of a production box (the box's defaults): a Ping with a heartbeat of 1800 s ended with "HTTP 504 after 630.1 s" and the error log line above, the same message as on the production box; Z-Push's log of the device showed the Ping still waiting ("lifetime 1800 seconds") after the 504, until the device's next request ended it after 668 s. With the ActiveSync timeout lowered to 60 s for a test: a Ping of 120 s got 504 after 60 s; with a Ping bound of 45 s, a Ping of 120 s got status 5 with heartbeat 45 at once, and a Ping of 45 s status 1 after 46 s; with a timeout of 200 s and no bound, a Ping of 120 s status 1 after 121 s.
 * **Found by:** production update (nginx's log of the box after the update to rc7) and the ActiveSync analysis (the cause); **commit:** see `git log --grep B129`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B130
+
+**The /caldav, /carddav and /webdav proxy passes the decoded path: a space gives 400, an escaped ? starts a query string (a DELETE can hit the whole address book), query strings are lost** (medium, nginx)
+
+* **Symptom:** Through `https://<box>/carddav/...`, `/caldav/...` or `/webdav/...` (the short paths that MIAB proxies to Nextcloud's `remote.php`): a resource whose name has a space (`%20`) gets HTTP 400; a name with an escaped `?` (`%3F`) reaches another resource, as Nextcloud gets the `?` unescaped and takes the rest for a query string, so that a DELETE of a card named `?x.vcf` deleted the whole address book that holds it (seen on a test box) and a DELETE through `/webdav` could in the same way hit a folder; and a request's query string (such as `?export` of an address book) is dropped (HTTP 501). The URLs below `/cloud/remote.php/` and the `.well-known` redirects are not affected, nor is Z-Push (it uses the proxy only for its first requests and then the hrefs that Nextcloud sends).
+* **Cause:** conf/nginx-primaryonly.conf proxied them with `location ~ ^/((caldav|carddav|webdav).*)$ { proxy_pass https://127.0.0.1/cloud/remote.php/$1; }`. `$1` is captured from nginx's normalized, decoded path, and a `proxy_pass` with a variable sends that text as it is: not escaped again and without the query string.
+* **Fix:** Three prefix locations, `/caldav`, `/carddav` and `/webdav`, each with a `proxy_pass` to the same path below `/cloud/remote.php` and no variable: nginx then replaces the prefix in the normalized path, escapes the result again and passes the query string. They match the same paths as before (anything that begins with them), keep the headers of B121, and the regex locations before them (such as the one for dotfiles) still come first, as they did. `$request_uri` was not used: it is not normalized and would let `../` reach other paths of Nextcloud from 127.0.0.1.
+* **Affects:** v78 yes (the same location), PR #2603 yes, the fork up to rc7. Origin: Upstream. Only DAV clients configured with the short paths and resource names with a space, `?`, `#` or `%`.
+* **Evidence:** On a test box (a copy of a production box), through `/carddav`: a GET of `contacts/zp%20space.vcf` went to Nextcloud as `.../contacts/zp space.vcf` and got 400; a GET of `zp%3Fprobe.vcf` as `.../contacts/zp?probe.vcf` (404); a DELETE of `contacts/%3Fzp.vcf` as `DELETE .../contacts/?zp.vcf` and got 204: the test user's whole address book `contacts` was gone, not the card; a GET of `contacts/?export` lost the `?export` (501). With prefix locations: 200 for the first two, `?export` 200, and the DELETE removed only the card.
+* **Found by:** ActiveSync analysis (the requests of Z-Push through the proxy); **commit:** see `git log --grep B130`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 
