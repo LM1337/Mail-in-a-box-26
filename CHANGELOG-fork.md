@@ -237,7 +237,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   setup (B120). It accepts what Dovecot logs when setup reloads it (also the
   SIGTERM of the IMAP, POP3, ManageSieve and login processes of the old
   configuration), what nginx logs for the ActiveSync and CalDAV/CardDAV
-  requests that the one PHP-FPM restart ends, and what Postfix and OpenDKIM
+  requests that the one PHP-FPM restart ends (also nginx's `readv()` reset
+  of a response it has begun to read, seen in the update test after the
+  merge of B125 to B127), and what Postfix and OpenDKIM
   log when a client comes in during setup's restart of OpenDKIM (also
   "Application error"), and fts-xapian's retries of its write lock when two
   processes index a new folder at once (BUGS-fork.md, known limitations).
