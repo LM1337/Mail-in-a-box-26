@@ -6,6 +6,8 @@
 #
 #   tools/patch_source.py DIR PATCHFILE           apply the changes
 #   tools/patch_source.py --check DIR PATCHFILE   check, write nothing
+#   tools/patch_source.py --digest PATCHFILE      print a checksum of the
+#                                                 changes (SHA-256, hex)
 #
 # PATCHFILE holds blocks, each for a file below DIR (lines starting with "#"
 # outside a block are comments). A replacement of exact text:
@@ -25,6 +27,15 @@
 #   !!!
 #   text that must not occur
 #   >>>
+#
+# The new text of a replacement must not be empty: a block that only deletes
+# text could not be told apart from the original once it is applied. Keep a
+# comment in its place (such as "// MIAB-Bnnn: ... removed").
+#
+# --digest hashes the blocks as parsed (paths, old, new and forbidden text),
+# not the file: comments and empty lines between the blocks do not change
+# it. setup/zpush.sh marks the installed tree with it, so that only a change
+# of the changes themselves makes every box install Z-Push again.
 #
 # A replacement is applied when its old text occurs exactly once in the file.
 # It counts as applied already when its new text occurs exactly once and the
@@ -47,6 +58,8 @@
 # applied). Exit code 0 (also when nothing changed), 1 on an error or, with
 # --check, when the tree does not have every change.
 
+import hashlib
+import json
 import os
 import stat
 import sys
@@ -90,13 +103,23 @@ def parse(text):
 			if line == ">>>":
 				if not old:
 					raise ValueError("line %d: a block with an empty old text" % n)
-				blocks.append((path, "\n".join(old) + "\n", "\n".join(new) + "\n" if new else ""))
+				if not "".join(new).strip():
+					raise ValueError("line %d: a block with an empty new text (a deletion cannot be told apart "
+						"from the original once it is applied: keep a comment in its place)" % n)
+				blocks.append((path, "\n".join(old) + "\n", "\n".join(new) + "\n"))
 				state = None
 			else:
 				new.append(line)
 	if state is not None:
 		raise ValueError("the last block is not closed (>>>)")
 	return blocks, forbidden
+
+
+def digest(blocks, forbidden):
+	"""SHA-256 (hex) of the changes as parsed: the same for two patch files
+	that differ only in comments or empty lines between the blocks."""
+	data = json.dumps({"blocks": blocks, "forbidden": forbidden}, ensure_ascii=False, separators=(",", ":"))
+	return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 def read_file(path):
@@ -120,7 +143,7 @@ def read_file(path):
 
 def applied(data, old, new):
 	"""Whether the replacement old -> new is made in data."""
-	return bool(new) and data.count(new) == 1 and data.count(old) == new.count(old)
+	return data.count(new) == 1 and data.count(old) == new.count(old)
 
 
 def run(directory, blocks, forbidden, check=False):
@@ -149,7 +172,7 @@ def run(directory, blocks, forbidden, check=False):
 				continue
 			if data.count(old) != 1:
 				raise ValueError("%s: change %d does not apply (its old text is found %d times, its new text %d times)"
-					% (full, n, data.count(old), data.count(new) if new else 0))
+					% (full, n, data.count(old), data.count(new)))
 			data = data.replace(old, new)
 		for path, text in forbidden:
 			if path == rel and text in data:
@@ -169,16 +192,19 @@ def run(directory, blocks, forbidden, check=False):
 
 if __name__ == "__main__":
 	args = sys.argv[1:]
-	check = args[:1] == ["--check"]
-	if check:
+	mode = args[0] if args[:1] in (["--check"], ["--digest"]) else None
+	if mode:
 		args = args[1:]
-	if len(args) != 2 or args[0].startswith("-"):
-		print("usage: tools/patch_source.py [--check] DIR PATCHFILE", file=sys.stderr)
+	if len(args) != (1 if mode == "--digest" else 2) or any(a.startswith("-") for a in args):
+		print("usage: tools/patch_source.py [--check] DIR PATCHFILE | --digest PATCHFILE", file=sys.stderr)
 		sys.exit(1)
 	try:
-		with open(args[1], encoding="utf-8") as f:
+		with open(args[-1], encoding="utf-8") as f:
 			blocks, forbidden = parse(f.read())
-		problems = run(args[0], blocks, forbidden, check)
+		if mode == "--digest":
+			print(digest(blocks, forbidden))
+			sys.exit(0)
+		problems = run(args[0], blocks, forbidden, mode == "--check")
 	except (OSError, ValueError, UnicodeDecodeError) as e:
 		print("patch_source.py: %s" % e, file=sys.stderr)
 		sys.exit(1)

@@ -320,17 +320,31 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   root's own before it moves the tree to `/usr/local/lib/z-push`, and stops
   if a block does not apply; for the lines the miab-zpush jail relies on,
   the file also names text that must not be left. The tree is marked with
-  the version and the checksum of the whole file
-  (`/usr/local/lib/z-push/version`, such as `2.7.7+patches-<16 hex digits>`):
-  a change of any block, or a tree that no longer has every change (a file
-  changed by hand, checked with `tools/patch_source.py --check` on every
-  run), gets a fresh copy of Z-Push on the next setup run (B126, B128).
-  The copy is made next to `/usr/local/lib/z-push` (on the same file
-  system) and replaces the old tree with two renames. Before, setup removed
-  the old tree first and moved the new one from `/tmp`, a tmpfs on Ubuntu
-  26.04, so that mv copied it file by file: in the update test under client
-  load, two ActiveSync requests in that second found Z-Push's files without
-  permissions for www-data and ended with a PHP fatal error.
+  the version and a checksum of the file's blocks
+  (`/usr/local/lib/z-push/version`, such as `2.7.7+patches-<16 hex digits>`,
+  from `tools/patch_source.py --digest`; a comment in the file does not
+  change it): a change of any block, or a tree that no longer has every
+  change (a file changed by hand, checked with `tools/patch_source.py
+  --check` on every run), gets a fresh copy of Z-Push on the next setup run
+  (B126, B128). The copy is made next to `/usr/local/lib/z-push` (on the
+  same file system), patched and configured there, and replaces the old
+  tree with two renames, so that no request finds Z-Push without its
+  configuration (before, for the moment of about ten steps, requests ran
+  with Z-Push's own defaults: no backend, so every request failed, and no
+  logging of failed logins). Before, setup also removed the old tree first
+  and moved the new one from `/tmp`, a tmpfs on Ubuntu 26.04, so that mv
+  copied it file by file: in the update test under client load, two
+  ActiveSync requests in that second found Z-Push's files without
+  permissions for www-data and ended with a PHP fatal error. On every
+  setup run Z-Push's configuration files are written atomically and only
+  when they change (`tools/write_conf.py`); before, each backend's
+  `config.php` was removed and copied again, and was missing for a moment.
+  The mark is written last, after Z-Push's `fixstates`: a setup run that
+  stops in between installs Z-Push again at the next run instead of
+  leaving out that step, and a temporary directory that such a run left in
+  `/usr/local/lib` is removed then. `tools/patch_source.py` refuses a block
+  with an empty new text, which it could never count as applied (setup
+  would have stopped on every run).
 * Tests: the log audit accepts, in a setup run, what the update from rc7
   logs once: the new jail `miab-zpush` skipping the older lines of Z-Push's
   error logs at its first start, and the login that setup's Dovecot reload
@@ -341,8 +355,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the other logs; the rules for them accept it.
 * Tests: the smoke test's new check `zpush-patches` (group `activesync`,
   with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
-  the checkout's conf/zpush/z-push.patches, and the installed tree has
-  every change of it (B126, B128).
+  the blocks of the checkout's conf/zpush/z-push.patches, and the installed
+  tree has every change of it (B126, B128).
 * `tools/update-check.sh after` also uses `tools/expected-changes/unreleased.txt`,
   the changes since the newest release, when the checkout after the update
   is not at a release tag (bootstrap.sh with `TAG=<branch or commit>`) or
@@ -417,8 +431,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   there by hand) is replaced by a fresh copy at the next setup run, and
   the changes made by hand are lost. The first update with this release
   downloads Z-Push 2.7.7 from GitHub once more (its directory is marked
-  with the patch file's checksum now), so the box needs to reach GitHub
-  during the update, as at a new Z-Push version. Nextcloud's example
+  with a checksum of the fork's changes now), so the box needs to reach
+  GitHub during the update, as at a new Z-Push version: check it before
+  the update with `curl -fsSIL
+  https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null
+  && echo OK`. If the download fails, setup stops (after Nextcloud's step,
+  before PHP-FPM and the control panel are restarted; the old Z-Push keeps
+  running): run it again (`sudo mailinabox`) once GitHub is reachable. A
+  later edit of conf/zpush/z-push.patches that changes a block makes every
+  box download Z-Push again the same way; a comment does not. Nextcloud's example
   contact now syncs to phones like any other contact; delete it in
   Nextcloud's Contacts if it is not wanted. A phone that got HTTP 500 needs
   no new setup: its next Sync continues (B128).

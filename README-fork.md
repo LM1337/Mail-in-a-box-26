@@ -110,7 +110,15 @@ you modify something in /root/mailinabox?": `git -C /root/mailinabox status
 --short` lists them, `git -C /root/mailinabox checkout -- FILE` puts one
 back. Setup downloads some components from GitHub again when the release
 changes them (Z-Push on the first update after rc7, as the fork's changes to
-it are new), so the box must reach GitHub during the update.
+it are new), so the box must reach GitHub during the update. Check that
+first:
+
+	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
+
+If such a download fails, setup stops in the middle of the update (for
+Z-Push after Nextcloud's step, before PHP-FPM and the control panel are
+restarted; the box keeps the old Z-Push). Run setup again (`sudo mailinabox`) once
+GitHub is reachable: it installs Z-Push and finishes the update.
 
 Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
 tool) were cloned from the fork's previous home. bootstrap.sh stops on them
@@ -252,7 +260,15 @@ failed. Did you modify something in /root/mailinabox?“ ab: `git -C
 checkout -- DATEI` setzt eine zurück. Setup lädt manche Bestandteile wieder
 von GitHub, wenn das Release sie ändert (Z-Push beim ersten Update nach rc7,
 weil die Änderungen des Forks daran neu sind); die Box muss GitHub während
-des Updates also erreichen.
+des Updates also erreichen. Das vorher prüfen:
+
+	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
+
+Schlägt ein solcher Download fehl, hält setup mitten im Update an (bei
+Z-Push nach dem Schritt für Nextcloud, bevor PHP-FPM und das Control Panel
+neu gestartet werden; die Box behält das alte Z-Push). Sobald GitHub erreichbar
+ist, setup noch einmal aufrufen (`sudo mailinabox`): Es installiert Z-Push
+und schließt das Update ab.
 
 Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
 In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.

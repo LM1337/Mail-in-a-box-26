@@ -2589,22 +2589,23 @@ def c_zpush_ping(ctx):
 def c_zpush_patches(ctx):
     # B126, B128: setup applies every change of the fork to Z-Push's code
     # (conf/zpush/z-push.patches) to a fresh copy before it moves the tree into
-    # place, and marks the tree with Z-Push's version and the patch file's
-    # checksum (/usr/local/lib/z-push/version). The installed tree must carry
-    # the mark of the checkout's patch file and have every change
+    # place, and marks the tree with Z-Push's version and a checksum of the
+    # patch file's blocks (tools/patch_source.py --digest), once its setup
+    # steps are done (/usr/local/lib/z-push/version). The installed tree must
+    # carry the mark of the checkout's patch file and have every change
     # (tools/patch_source.py --check, which writes nothing).
     rc, miab, _err = ctx.remote.run("awk '$1 == \"cd\" { print $2; exit }' /usr/local/bin/mailinabox")
     miab = miab.strip()
     if rc != 0 or not miab:
         raise Skip("Mail-in-a-Box checkout not found in /usr/local/bin/mailinabox")
-    cmd = ("cd %s && sha256sum conf/zpush/z-push.patches && cat /usr/local/lib/z-push/version"
+    cmd = ("cd %s && tools/patch_source.py --digest conf/zpush/z-push.patches && cat /usr/local/lib/z-push/version"
            " && tools/patch_source.py --check /usr/local/lib/z-push conf/zpush/z-push.patches" % shlex.quote(miab))
     rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=60)
     lines = out.split()
-    if rc != 0 or len(lines) < 3:
+    if rc != 0 or len(lines) < 2:
         raise Fail("rc=%d: %s" % (rc, (err or out).strip()[-300:]))
     want = "+patches-" + lines[0][:16]
-    stamp = lines[2]
+    stamp = lines[1]
     if not re.fullmatch(r"\d+\.\d+\.\d+\+patches-[0-9a-f]{16}", stamp) or not stamp.endswith(want):
         raise Fail("/usr/local/lib/z-push/version is %r, not the version with %r (the checkout's patch file)" % (stamp, want))
     return "Z-Push %s, every change of conf/zpush/z-push.patches applied" % stamp

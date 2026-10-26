@@ -296,7 +296,8 @@ report. The groups:
   or the http block's, in nginx's time units) is at least a minute longer
   than that bound, so a phone's long Ping never ends with 504 (B129);
   `zpush-patches` (with `--ssh`): `/usr/local/lib/z-push/version` carries
-  the checksum of the checkout's `conf/zpush/z-push.patches`, and
+  the checksum of the blocks of the checkout's `conf/zpush/z-push.patches`
+  (`tools/patch_source.py --digest`), and
   `tools/patch_source.py --check` finds every change of it in the installed
   tree (B126, B128). Quick enough to run right after a setup run:
   `--only activesync`.

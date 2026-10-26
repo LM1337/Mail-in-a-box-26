@@ -3,11 +3,13 @@
 # a fresh copy of Z-Push in a directory of root's own, before it moves the
 # tree to /usr/local/lib/z-push, and stops if one does not apply. Each change
 # names its bug in BUGS-fork.md with a "MIAB-Bnnn" comment. The installed
-# tree is marked with Z-Push's version and this file's checksum
-# (/usr/local/lib/z-push/version, "2.7.7+patches-<16 hex digits>"): when this
-# file changes, or the installed tree no longer has every change (a file
-# changed by hand), setup installs a fresh copy, so a block is always applied
-# to the original text and may be edited. Z-Push's configuration
+# tree is marked with Z-Push's version and a checksum of the blocks of this
+# file (/usr/local/lib/z-push/version, "2.7.7+patches-<16 hex digits>",
+# tools/patch_source.py --digest; comments and empty lines outside the
+# blocks do not change it): when a block changes, or the installed tree no
+# longer has every change (a file changed by hand), setup installs a fresh
+# copy from GitHub on every box, so a block is always applied to the
+# original text and may be edited. Z-Push's configuration
 # (config.php, the backends' config.php) is not changed here: setup sets it
 # on every run.
 
