@@ -60,6 +60,13 @@ sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezo
 sed -i "s/define('BACKEND_PROVIDER', .*/define('BACKEND_PROVIDER', 'BackendCombined');/" /usr/local/lib/z-push/config.php
 sed -i "s/define('USE_FULLEMAIL_FOR_LOGIN', .*/define('USE_FULLEMAIL_FOR_LOGIN', true);/" /usr/local/lib/z-push/config.php
 sed -i "s/define('LOGLEVEL', .*/define('LOGLEVEL', LOGLEVEL_ERROR);/" /usr/local/lib/z-push/config.php
+# Longest Ping (push long poll) a phone may ask for: 3540 s (59 min), Z-Push's
+# own maximum and the server heartbeat Apple advises. A longer request gets
+# status 5 with this bound, and the phone pings with it. Without a bound
+# Z-Push keeps any heartbeat open, beyond nginx's fastcgi_read_timeout for
+# /Microsoft-Server-ActiveSync (3660 s, conf/nginx-alldomains.conf), which must
+# stay longer than this (B131).
+sed -i "s/define('PING_HIGHER_BOUND_LIFETIME', .*/define('PING_HIGHER_BOUND_LIFETIME', 3540);/" /usr/local/lib/z-push/config.php
 
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php

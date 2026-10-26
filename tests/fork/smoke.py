@@ -44,8 +44,9 @@ examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
         --ssh legacy-box --expect-nc 26
 
   Right after a setup run (an update), --only activesync checks within a
-  minute that Nextcloud does not throttle the box's own services and that an
-  ActiveSync account syncs its calendar and contacts.
+  minute that Nextcloud does not throttle the box's own services, that an
+  ActiveSync account syncs its calendar and contacts, and that a Ping with a
+  long heartbeat gets the box's bound instead of a 504.
 
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
@@ -2032,6 +2033,69 @@ def c_zpush_sync(ctx):
             http_req(ctx, "DELETE", path, auth=auth)
 
 
+def c_zpush_ping(ctx):
+    # B131: a Ping (the push long poll) lasts as long as the heartbeat the
+    # phone asks for, and iOS asks for long ones. One longer than the box
+    # allows gets status 5 with the bound at once, and that bound fits in
+    # nginx's fastcgi_read_timeout of /Microsoft-Server-ActiveSync (checked
+    # with --ssh), so a Ping never ends with 504. A short Ping completes.
+    eas = _load_eas()
+    devid = "miabsmokeping" + ctx.tok
+    c = eas.Client(ctx.hostname, ctx.alice, ctx.user_pw, devid, addr=ctx.net.addr(443),
+                   user_agent="miab-fork-smoke/1")
+    try:
+        c.provision()
+        c.folder_sync()
+        inbox = c.folders_of(eas.TYPE_INBOX)
+        if not inbox:
+            raise Fail("FolderSync: no inbox")
+        c.sync([inbox[0]["ServerId"]])
+        folders = [(inbox[0]["ServerId"], "Email")]
+        t0 = time.time()
+        st, bound, _ = c.ping_answer(folders, 3600)
+        took = time.time() - t0
+        if st != "5" or not (bound or "").isdigit() or took > 60:
+            raise Fail("Ping with heartbeat 3600 s: status %s, bound %s after %ds (want status 5 with the "
+                       "box's bound at once)" % (st, bound, took))
+        bound = int(bound)
+        t0 = time.time()
+        st2, _, _ = c.ping_answer(folders, 20)
+        if st2 not in ("1", "2"):
+            raise Fail("Ping with heartbeat 20 s: status %s" % st2)
+        took2 = time.time() - t0
+    except eas.EASError as e:
+        raise Fail("%s (%s)" % (e, e.kind))
+    finally:
+        if ctx.remote.available():
+            ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
+                           % (shlex.quote(ctx.alice), devid), timeout=120)
+    msg = "heartbeat 3600 s: status 5, bound %d s; heartbeat 20 s: status %s after %ds" % (bound, st2, took2)
+    if not ctx.remote.available():
+        return msg + " (nginx timeout not checked: needs --ssh)"
+    rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("nginx -T: %s" % err.strip()[:200])
+    # Every server block has the location; the shortest timeout counts.
+    timeouts, inside = [], False
+    for line in out.splitlines():
+        w = line.split()
+        if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
+            inside = True
+        elif inside and w[:1] == ["fastcgi_read_timeout"]:
+            v = w[1].rstrip(";")
+            timeouts.append(int(v[:-1]) if v.endswith("s") else int(v))
+        elif inside and w[:1] == ["}"]:
+            inside = False
+    if not timeouts:
+        raise Fail("no fastcgi_read_timeout in nginx's /Microsoft-Server-ActiveSync locations (default 60 s)")
+    # Z-Push checks the mailbox every PING_INTERVAL (30 s) and needs a few
+    # seconds before and after the heartbeat: keep a minute of margin.
+    if min(timeouts) < bound + 60:
+        raise Fail("fastcgi_read_timeout %d s is not a minute longer than the Ping bound %d s: a long Ping "
+                   "ends with 504" % (min(timeouts), bound))
+    return msg + "; fastcgi_read_timeout %d s in %d locations" % (min(timeouts), len(timeouts))
+
+
 def c_zpush_autodiscover(ctx):
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006">'
@@ -3417,6 +3481,7 @@ def main():
         run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
         run_check("nextcloud-forwarded-for", c_nc_forwarded_for, ctx)
         run_check("zpush-sync", c_zpush_sync, ctx)
+        run_check("zpush-ping", c_zpush_ping, ctx)
     if want("mail"):
         print("== mail flow")
         st, _ = run_check("mail-flow-send", c_mail_flow, ctx)

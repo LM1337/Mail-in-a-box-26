@@ -68,6 +68,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
+* ActiveSync push no longer ends with HTTP 504 after 10 minutes (seen on a
+  production box: 68 × 504 for one iPhone's `Ping` in a day). nginx gave a
+  request to `/Microsoft-Server-ActiveSync` 630 s, but a Ping lasts as long
+  as the heartbeat the phone asks for, and iPhones ask for more. The limit
+  is now 3660 s, and Z-Push accepts heartbeats up to 3540 s (59 minutes,
+  `PING_HIGHER_BOUND_LIFETIME`): a phone that asks for more gets that bound
+  at once (status 5) and pings with it. Phones keep their long heartbeats
+  and wake up less often (B131).
 
 ### Changed
 
@@ -82,6 +90,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   not for 127.0.0.1 (`nextcloud-forwarded-for`), and syncs a marked event
   and contact through ActiveSync (`zpush-sync`, with the new small client
   `tests/fork/eas.py`).
+* Tests: the smoke test's group `activesync` checks the heartbeat bound of
+  a Ping (`zpush-ping`: 3600 s get status 5 with the box's bound at once, a
+  Ping of 20 s completes, and with `--ssh` nginx's `fastcgi_read_timeout` of
+  the ActiveSync location is at least a minute longer than the bound, B131).
+  `tests/fork/eas.py` has `Client.ping_answer` (status, the server's
+  heartbeat and the changed folders, also for status 5), and its `--ping`
+  prints them.
 * Tests: `tests/fork/client-load.py` keeps the clients of a few users busy
   while setup runs, at the rate that reproduced the production incident:
   per user several ActiveSync devices (`--ping-devices`, `--sync-devices`;
@@ -117,6 +132,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   permissions in another place.
 * The first update with this release reloads Dovecot once (its open IMAP
   sessions log in again), as the checksum of its configuration is new.
+* A reverse proxy or firewall of your own in front of the box must keep an
+  ActiveSync request open for an hour (3660 s) too, or it ends the long Pings
+  instead of nginx (B131).
 
 ### Planned
 

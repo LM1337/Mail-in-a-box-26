@@ -247,8 +247,13 @@ report. The groups:
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
   contact folders), and a marked event and contact put into alice's
   Nextcloud over DAV just before arrive; both are deleted again, and the
-  test device is removed from Z-Push (with `--ssh`). Quick enough to run
-  right after a setup run: `--only activesync`.
+  test device is removed from Z-Push (with `--ssh`); `zpush-ping`: a Ping
+  with a heartbeat of 3600 s gets status 5 with the box's bound at once, a
+  Ping of 20 s completes with status 1 or 2, and (with `--ssh`) nginx's
+  `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
+  at least a minute longer than that bound, so a phone's long Ping never ends
+  with 504 (B131). Quick enough to run right after a setup run:
+  `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail
   to the 10 MB mailbox rejected at RCPT; GETQUOTAROOT; the greylisting
