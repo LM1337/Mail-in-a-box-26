@@ -499,17 +499,18 @@ def status_for_checks(env):
 	# result as a refresh does, or, while a backup run or a refresh holds the
 	# lock (a second duplicity on the same archive directory would fail),
 	# the saved status. Never raises for a failed query.
-	# Returns (status or None, time_str of the saved status or None when it
-	# was queried now, error or None).
+	# Returns (status or None, in_progress, time_str of the saved status or
+	# None, error or None). in_progress is true when the lock is held: status
+	# is then the saved one, None when none has been saved for this target.
 	try:
 		dfd = _open_status_dir(create=True)
 	except OSError:
 		dfd = None
 	if dfd is None:
 		try:
-			return backup_status(env), None, None
+			return backup_status(env), False, None, None
 		except Exception as e:
-			return None, None, str(e) or e.__class__.__name__
+			return None, False, None, str(e) or e.__class__.__name__
 	try:
 		lock = _lock_status(dfd, wait=False)
 		if lock is not None:
@@ -517,11 +518,11 @@ def status_for_checks(env):
 				_, _, error, status = _save_status_locked(env, dfd, "status checks")
 			finally:
 				os.close(lock)
-			return status, None, error
+			return status, False, None, error
 	finally:
 		os.close(dfd)
 	saved = get_saved_status(env)
-	return saved["status"], saved["time_str"] or "never", None
+	return saved["status"], True, saved["time_str"], None
 
 def get_saved_status(env):
 	# The saved status for the control panel (GET /system/backup/status/saved).

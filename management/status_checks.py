@@ -278,12 +278,15 @@ def check_backup(rounded_values, env, output):
 	
 	# Get the age of the most recent backup. A target that cannot be read is
 	# one failed check, not the end of all checks (B132).
-	backup_stat, saved_at, error = status_for_checks(env)
+	backup_stat, in_progress, saved_at, error = status_for_checks(env)
 	if error is not None:
 		output.print_error("The status of the backups could not be read from the backup target.")
 		output.print_line(error.strip()[:2000], monospace=True)
 		return
-	if saved_at is not None:
+	if in_progress and not isinstance(backup_stat, dict):
+		output.print_warning("A backup run or a refresh of the backup status is in progress, and no status of the backups has been saved yet. Check again when it has ended.")
+		return
+	if in_progress:
 		output.print_line("A backup run or a refresh of the backup status is in progress: the status saved at %s is used." % saved_at)
 	
 	backups = (backup_stat or {}).get("backups", {})
