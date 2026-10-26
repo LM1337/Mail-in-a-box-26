@@ -1935,14 +1935,19 @@ echo "reset=$?"
     except ValueError:
         raise Fail("no 'Login failed' line for the test login in nextcloud.log")
     try:
-        attempts = json.loads(vals.get("pub", "")).get("attempts")
-    except ValueError:
+        pub = json.loads(vals.get("pub", ""))
+        attempts, listed = pub.get("attempts"), pub.get("bypass-listed")
+    except (ValueError, AttributeError):
         raise Fail("occ security:bruteforce:attempts %s: %s" % (public, vals.get("pub", "")[:200]))
     if vals.get("reset") != "0":
         raise Fail("occ security:bruteforce:reset %s failed" % public)
     if remote != public:
         raise Fail("Nextcloud saw the login from %s, not from the client %s (X-Forwarded-For through the "
                    "/webdav proxy, trusted_proxies)" % (remote, public))
+    if listed is True:
+        # An entry of the bypass list covers the box's own address (e.g. an
+        # administrator's private range): Nextcloud counts nothing for it.
+        return "remoteAddr %s (the address is on the bypass list, attempts not counted)" % remote
     if not attempts:
         raise Fail("Nextcloud counted no attempt for %s" % public)
     return "remoteAddr %s, attempts %s (reset)" % (remote, attempts)
