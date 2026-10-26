@@ -198,6 +198,12 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
   which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
   `miab-zpush` threshold slows down the ActiveSync logins of other users
   is not measured.
+* `miab-zpush` counts failures per address, like the other jails, and is
+  always on: behind the shared servers of a mail app that syncs through its
+  provider's cloud (Outlook for iOS and Android with an ActiveSync
+  account), one person with a wrong password can get all users of that app
+  banned (B126). The README and the allowlist help say to put such networks
+  on the allowlist; nothing finds them on its own.
 * The failed-login report does not read `nextcloud.log` yet, which now
   has the client's address for `/caldav`, `/carddav` and `/webdav` too
   (B121).
