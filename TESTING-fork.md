@@ -203,6 +203,7 @@ the in-place tool reports it.
 | rc4 | 2026-10-24 | 60/60 | not run | 56/58 (T3c, pre-merge branch) | 58/58 (T4b, pre-merge branch) | 68/71, from the published tag 69/71 |
 | rc5 | 2026-10-24 | 62/62 | not run | 67/73 | 67/73 (from the published tag) | 67/73 (T5b, from rc3) |
 | rc6 | 2026-10-25 | 62/62 ¹ | 73/73 ¹ | 73/73 ¹ | 73/73 ¹ | 75/75 (T5b, from rc3, at `5d2d3aa`, the code of the release ²) |
+| rc7 | 2026-10-25 | 68/68 ³ | 79/79 ³ | 79/79 ³ | 79/79 ³ | 79/79 (T5b from rc6), 71/71 (from rc3) ³ |
 
 ¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
 not repeated on the code of the release (see "rc6 certification" below).
@@ -211,6 +212,12 @@ first run of 71/73).
 
 ² The commits after `5d2d3aa` change only the log audit tool, its
 allowlist and the documentation.
+
+³ Repeated certification run after the fixes B106-B114 (see "rc7" below):
+the code of setup and of the tools was the same in all runs; between the
+commits of the runs only `tools/expected-changes/any.txt` (B114), the
+allowlists of the log audit and the documentation changed. Every log
+audit ended with 0 unknown classes.
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -469,6 +476,56 @@ Not fixed in rc6:
    it is harmless (README-fork.md, "Setup output").
 7. A watcher attached before tmux is replaced during the release upgrade to
    26.04 and kept through the SSH outage was only tested in T4, not in T3.
+
+### rc7 (2026-10-25)
+
+The first certification run on the release commit `1d3ef06` passed the
+smoke tests of all scenarios but found B106-B113 in `tools/update-check.sh`,
+its lists of expected changes, the fallback SSH server and the migration
+tool's check, and log classes that were not on the allowlists. After the
+fixes every scenario ran again on the same test VMs (rolled back to their
+snapshots, T5b Part A from the update of the box copy to the published
+rc6), all five at the same time on one hypervisor with an HDD pool, so the
+disk was busy. The runs installed the release branch from the lab's mirror
+(`SOURCE`/`TAG`), not a tag; that is why `update-check.sh after` lists the
+version lines as changed (a test with the version lines of a tag gave
+RESULT OK, see T5b). Commits: `d586ba0` has the fixes B106-B113; `f5bd16f`
+adds the rule of B114 to `tools/expected-changes/any.txt`; `20a5162` adds
+allowlist lines.
+
+| Run | Commit | Result |
+|---|---|---|
+| T1 (fresh 26.04) | install `d586ba0`, setup runs A-C and everything after them `f5bd16f` | install exit 0 in 2460 s. Smoke 60/60 after the install, 68/68 with `--fail2ban` after each of two reboots (SSH back after 21 s). Munin's alert setting through the panel's API: 29/29 checks, among them one real alert of a forced warning, one recovery, none on the next run, critical only to a custom address, off. ActiveSync of a new user (B99): Provision, FolderSync, Sync and Ping with status 1, the contact added over CardDAV synced, no example contact. Three second setup runs (non-interactive, interactive bootstrap, interactive `sudo mailinabox`), exit 0 in 88, 109 and 95 s: no welcome dialog, the OpenDKIM tables byte for byte the same (B95), nginx reloaded with the same main process, `settings.yaml` 0600. Log audit: 0 unknown, twice |
+| T2 (22.04 → fresh 26.04) | `d586ba0` | `--check` proposed the full start command with the given addresses (B113). "All checks passed"; the old box stopped 21:48:17, setup 46 min, end of the checks 22:34:45 (46 min 28 s; the new box answered on 25 and 587 after 8 min, on 993 after 9 min). 4 users, 5 aliases, 4 mailboxes, 25 messages, 2 Sieve scripts; the vacation duplicate database came over; `--check-old`: nothing started again. Smoke 21/21 after the first reboot, 79/79 with `--fail2ban` twice. Log audit of the new box: 4 unknown classes with the lists of `d586ba0` (fwupd's timer once during setup, a late timer interrupt of the VM), 0 with those of `20a5162`; old box: 0 |
+| T3 (24.04 copy, in place) | tool `d586ba0`, setup `f5bd16f` | `update-check.sh before` and `backup` on the upstream box with the checkout in `/mailinabox` (B106): version v74 and 17 errors and 9 warnings of the status checks recorded; v74's `backup.py` ran (17 s), the archive took `/mailinabox`, the stack directory and the volume and was verified on the lab's rsync target. `--ssh-fallback-test`: admin key login and sudo on 1022, a non-admin refused there and accepted on 22, nothing left afterwards, also no `/root/upgrade-2604` (B111). "All checks passed"; mail offline 1 h 35 min, 1 reboot (release upgrade 1 h 10 min, setup 20 min). Port 22 stopped answering 22:29:09 and answered again 22:48:01 (the run's notes; 19 min); key logins on 1022 worked meanwhile, the non-admin was refused; `/usr/bin/sudo` was missing about 37 minutes. `after`: "RESULT: NOT JUDGED" (B110, exit code 3, no new log message class). `mailcheck`: RESULT OK over STARTTLS (B107). `PROBE_ADDRESS` kept. Smoke 79/79 with `--fail2ban` after each reboot. `--cleanup-only --old-checkout` deleted `/mailinabox-v74`. Log audit with the baseline of `before`: 0 unknown, 14 known, twice |
+| T4 (22.04 → 24.04 → 26.04, in place) | tool `d586ba0`, setup `f5bd16f` | `--ssh-fallback-test` with and without the group `admin` (B100): as in T3. Without the group: "All checks passed"; mail offline 2 h 04 min, 2 reboots (release upgrades 1 h 12 min and 32 min, setup 15 min). Port 22 down 42 min and 6 min (the run's notes); a new key login on 1022 worked in every check while port 22 was down, except once for about 20 s at 22:09:55 (both ports: the `libtirpc3` switch of 22.04 → 24.04); the non-admin was refused on 1022 both times; sudo missing about 13 minutes; afterwards no fallback process, listener, ufw rule or file. Vacation replies after the upgrade; port 25 from the peer delivered. Smoke 79/79 with `--fail2ban`. Log audit: 11 unknown classes with the lists of `d586ba0` (a new SSH login during the minutes between the unpack of the new systemd and the re-execution of PID 1 gets no user manager; Nextcloud's example event of a first login left out on a busy SQLite database), 0 with those of `20a5162` |
+| T5b Part A (published rc6 → rc7) | `d586ba0` | `before`, `backup` with `--docker-dir`, two `--docker-volume` (one archive each) and `--postgres`, uploaded and verified. Interactive update twice (101 and 118 s), no welcome dialog; the OpenDKIM tables unchanged, nginx's main process the same; `PROBE_ADDRESS` kept; `settings.yaml` 0600. `after`: 6 changes not on the lists: 4 from installing a branch (version lines), munin-node's process name (B114, fixed in `f5bd16f`) and a status check warning of a second backup cache (the lab had changed the backup target right before `before`); the same records with tag version lines and the lists of `f5bd16f`: only that warning. `mailcheck`: RESULT OK. Munin through the API: a custom address set, an invalid one refused, a forced warning gave 1 alert, the recovery 1, the next run none. ActiveSync of two new users (B99): status 1. Smoke 79/79 with `--fail2ban`; a second run right after a reboot that followed the fail2ban group got 9 FAIL, because fail2ban read the attacks again at its start and banned the peer for 4 minutes (fail2ban's normal behaviour after a restart); run again, 79/79. Log audit with the baseline: 0 unknown |
+| T5b Part B (rc3 → rc7) | `20a5162` | on a temporary copy of the rc3 snapshot. `before`, interactive update (no welcome dialog), `PROBE_ADDRESS` kept; `after`: only the 2 version lines of the branch install not on the lists (B109: `/etc/mailname`, the hosts line, Dovecot and `mailinabox.service` enabled again are EXPECTED); with tag version lines "RESULT: OK - 0 unexpected, 30 expected". `mailcheck`: RESULT OK. Smoke 71/71 (a first run had 2 FAIL for the two unmarked lab mails of the snapshot, which the lab script had not deleted). Log audit with the baseline: 0 unknown, 3 known |
+
+#### Open findings of rc7
+
+Seen in the runs, not fixed in rc7:
+
+1. Postfix's sqlite lookup has no busy timeout: a mail that is cleaned up
+   while the management daemon commits to `users.sqlite` waits a minute in
+   maildrop (a temporary error for mail over SMTP). Seen once, during the
+   smoke test's API write round trip.
+2. Setup's restart of Dovecot can store a mail in delivery twice (Postfix
+   delivers it again after spampd's 421); no mail is lost.
+3. On the busy test host a new user's first Nextcloud login took 20 to 90
+   s; Z-Push's CalDAV request through nginx has the default proxy timeout
+   of 60 s.
+4. `tests/fork/log-audit.sh` replaces only the users that exist at the
+   time of the audit by `<user>`: the lines of a deleted test user miss
+   the rules written for them. The test scripts delete their users after
+   the audit.
+5. Through `curl | bash`, `tools/update-check.sh` takes its helpers from
+   the branch main; before a release is on main, a test of the release
+   branch has to point it elsewhere.
+6. The outage times of the release upgrades depend on the load of the
+   disk: on the shared test host port 22 was down up to 42 minutes from
+   22.04 to 24.04 (the tool says 20 to 40) and sudo was missing up to 37
+   minutes from 24.04 to 26.04 (the tool says 12 to 31).
 
 ### Production use
 

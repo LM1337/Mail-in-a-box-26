@@ -15,19 +15,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 For the final release v78-r2604.0 (from rc7):
 
-* The full test matrix T1 to T5b on the head of rc7 (TESTING-fork.md,
-  "What the scenarios of rc7 cover"): T3 and T4 run the fallback SSH server
-  with the single-binary sshd of 22.04 and 24.04 (so far tried only with
-  OpenSSH 10.2 of 26.04), T5b runs `tools/update-check.sh before`, `backup`
-  (with the Docker options and the rsync upload) and, after the update,
-  `after` and `mailcheck` with a lab probe.
 * T6 (on the Internet: Let's Encrypt, delivery to other providers, and
   `mailcheck` with a real external probe) before the final release
   v78-r2604.0.
 * `tools/expected-changes/` needs a list for each release, also an empty
   one for the final release.
 
-Seen in the rc7 work, not done:
+Seen in the rc7 work, not done (the certification runs of rc7 add their
+open findings in TESTING-fork.md, "Open findings of rc7"):
 
 * Setup restarts PHP-FPM four times per run, which ends ActiveSync long
   polls; a reload (with `process_control_timeout`) would keep them.
@@ -440,7 +435,10 @@ Munin alert setting, the fallback SSH server and the live note, the order
 of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
 baseline and Internet allowlist, the update tools (state, backup,
 comparison, mail check) as code, the welcome dialog, the nginx reload with
-its allowlist rules, the journal check.
+its allowlist rules, the journal check. The full test matrix T1 to T5b ran on rc7 after the fixes B106-B114
+(TESTING-fork.md, "rc7"): T3 and T4 with the single-binary sshd of 22.04
+and 24.04 for the fallback, T5b with `tools/update-check.sh` around the
+update (Docker options, rsync upload, lab probe).
 
 ## v78-r2604.0-rc6 (2026-10-25)
 
