@@ -29,7 +29,7 @@
 #   management/fail2ban_admin.py --allow NET    add an address or network to the allowlist and apply
 #   management/fail2ban_admin.py --report       print the spraying report
 
-import os, os.path, re, sys, time, datetime, ipaddress, subprocess, ast
+import os, os.path, re, stat, sys, time, datetime, ipaddress, subprocess, ast
 
 import utils
 
@@ -70,17 +70,22 @@ MAIL_PORTS = "465,587,993,995,4190"
 # mail ports, so a device with an old password does not lock its network out of
 # webmail and the control panel. The web jails block HTTP and HTTPS, so they
 # are a separate switch, off by default: a CalDAV/CardDAV client with an old
-# password polls Nextcloud every few minutes and would ban its whole network
-# from webmail and the control panel.
+# password polls Nextcloud every few minutes (a phone ActiveSync) and would
+# ban its whole network from webmail and the control panel.
 SLOW_MAIL_JAILS = [
 	# name, filter, log file, ports
 	("miab-slow-smtp", "miab-postfix-submission", "/var/log/mail.log", MAIL_PORTS),
 	("miab-slow-dovecot", "miab-dovecot-authfail", "/var/log/mail.log", MAIL_PORTS),
 ]
+# Z-Push's error logs (ActiveSync and Autodiscover), which the miab-zpush jail
+# (conf/fail2ban/jails.conf) and the failed-login report read (B126).
+ZPUSH_LOGS = ("/var/log/z-push/z-push-error.log", "/var/log/z-push/autodiscover-error.log")
 SLOW_WEB_JAILS = [
 	("miab-slow-roundcube", "miab-roundcube", "/var/log/roundcubemail/errors.log", "http,https"),
 	("miab-slow-owncloud", "miab-owncloud", "STORAGE_ROOT/owncloud/nextcloud.log", "http,https"),
 	("miab-slow-management", "miab-management-daemon", "/var/log/syslog", "http,https"),
+	# A log file or a tuple of them.
+	("miab-slow-zpush", "miab-zpush", ZPUSH_LOGS, "http,https"),
 ]
 SLOW_JAILS = SLOW_MAIL_JAILS + SLOW_WEB_JAILS
 
@@ -89,7 +94,7 @@ SLOW_JAILS = SLOW_MAIL_JAILS + SLOW_WEB_JAILS
 # fixed length: a growing ban would lock a whole office out of the control
 # panel (where it could unban itself), webmail and Nextcloud for days.
 # recidive still bans addresses that are banned again and again.
-WEB_JAILS = ["miab-management", "miab-munin", "miab-owncloud", "miab-roundcube"]
+WEB_JAILS = ["miab-management", "miab-munin", "miab-owncloud", "miab-roundcube", "miab-zpush"]
 
 # SETTINGS
 
@@ -259,7 +264,9 @@ def base_ignoreip(env):
 	return ret
 
 def slow_jail_logpath(path, env):
-	return path.replace("STORAGE_ROOT", env["STORAGE_ROOT"])
+	# A list of the jail's log files (one or more).
+	paths = (path,) if isinstance(path, str) else path
+	return [p.replace("STORAGE_ROOT", env["STORAGE_ROOT"]) for p in paths]
 
 def render_config(env, settings):
 	# Returns ({path: content or None}, skipped). None means: the file must not
@@ -304,8 +311,10 @@ def render_config(env, settings):
 
 	slow = (SLOW_MAIL_JAILS if settings["slow_jails"] else []) + (SLOW_WEB_JAILS if settings["slow_web_jails"] else [])
 	for name, filt, logpath, ports in slow:
-		logpath = slow_jail_logpath(logpath, env)
-		if not os.path.exists(logpath):
+		# fail2ban refuses a jail whose log files do not exist: leave out the
+		# missing ones, and the jail when none exists.
+		logpaths = [p for p in slow_jail_logpath(logpath, env) if os.path.exists(p)]
+		if not logpaths:
 			skipped.append(name)
 			continue
 		lines += [
@@ -314,7 +323,7 @@ def render_config(env, settings):
 			"enabled  = true",
 			f"filter   = {filt}",
 			f"port     = {ports}",
-			f"logpath  = {logpath}",
+			"logpath  = " + "\n           ".join(logpaths),
 			"backend  = auto",
 			"maxretry = %d" % settings["slow_maxretry"],
 			"findtime = %d" % settings["slow_findtime"],
@@ -653,6 +662,9 @@ def unban_jail(jail):
 # FAILED-LOGIN REPORT (password spraying, slow attacks)
 
 MAIL_LOGS = ("/var/log/mail.log.1", "/var/log/mail.log") # logrotate: weekly, delaycompress
+# Z-Push's error logs and their last rotation (weekly, delaycompress) (B126).
+ZPUSH_SCAN_LOGS = tuple(p for f in ZPUSH_LOGS for p in (f + ".1", f))
+SCAN_LOGS = MAIL_LOGS + ZPUSH_SCAN_LOGS
 SCAN_HOURS = 48
 ACCOUNT_HOURS = 24
 PERSISTENT_MIN_FAILURES = 10
@@ -662,6 +674,7 @@ REPORT_LIMIT = 50
 MONTHS = { m: i + 1 for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) }
 RE_TS_ISO = re.compile(rb"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)\s")
 RE_TS_BSD = re.compile(rb"([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d)\s")
+RE_TS_ZPUSH = re.compile(rb"(\d\d)/(\d\d)/(\d{4}) (\d\d):(\d\d):(\d\d) ") # local time, day first
 # postfix (465 and 587 both log as postfix/submission/smtpd):
 #   warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=a@b
 RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-Fa-f:.]+)\]: SASL \S+ authentication failed: .*?(?:, sasl_username=(\S+))?\s*$")
@@ -670,6 +683,14 @@ RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-F
 #   dovecot: imap-login: Login aborted: ... (auth failed, 3 attempts in 9 secs) (auth_failed): user=<a@b>, method=PLAIN, rip=192.0.2.1, lip=...
 # The user name is logged unescaped, so the greedy user=<.*> takes the last rip= (see filter.d/dovecotimap.conf).
 RE_DOVECOT = re.compile(rb"(imap|pop3|managesieve|submission)-login: (?:Info: )?.*?\((?:auth failed|authorization failed|user disabled)(?:, (\d+) attempts)?[^)]*\)(?: \(\w+\))?: user=<(.*)>, (?:method=\S+, )?rip=([0-9A-Fa-f:.]+), lip=")
+# Z-Push (LOGAUTHFAIL, B126), anchored at the end of the line like
+# conf/fail2ban/filter.d/miab-zpush.conf: the user names and the e-mail
+# address come from the client, the address is the last thing on the line
+# (setup/zpush.sh moves it there in the ActiveSync message).
+#   26/10/2026 13:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' from IP 192.0.2.1.
+#   26/10/2026 13:00:00 [12345] [ WARN] [] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
+RE_ZPUSH = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Failed to authenticate user '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
+RE_AUTODISCOVER = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Unable to complete autodiscover because login failed for user with email '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
 
 def _line_time(line, now):
 	m = RE_TS_ISO.match(line)
@@ -682,6 +703,13 @@ def _line_time(line, now):
 		if dt.tzinfo is None:
 			return time.mktime(dt.timetuple())
 		return dt.timestamp()
+	m = RE_TS_ZPUSH.match(line)
+	if m:
+		d, mo, y, hh, mi, ss = (int(x) for x in m.groups())
+		try:
+			return time.mktime((y, mo, d, hh, mi, ss, 0, 0, -1))
+		except (OverflowError, ValueError):
+			return None
 	m = RE_TS_BSD.match(line)
 	if m and m.group(1).decode() in MONTHS:
 		# Dovecot's own log lines (before B85): local time, no year.
@@ -718,7 +746,24 @@ def _seek(f, size, cutoff, now):
 	if lo:
 		f.readline()
 
-def scan_failed_logins(hours=SCAN_HOURS, files=MAIL_LOGS, now=None):
+def _open_log(fn):
+	# Opens a log file for reading, or returns None. Z-Push's logs are in a
+	# directory of www-data: no symbolic link is followed there, and only a
+	# regular file is read (not a FIFO, which would block).
+	try:
+		fd = os.open(fn, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+	except OSError:
+		return None
+	try:
+		if not stat.S_ISREG(os.fstat(fd).st_mode):
+			os.close(fd)
+			return None
+		return os.fdopen(fd, "rb")
+	except OSError:
+		os.close(fd)
+		return None
+
+def scan_failed_logins(hours=SCAN_HOURS, files=SCAN_LOGS, now=None):
 	# Returns a list of (time, protocol, ip, user, count) for failed logins of
 	# the last hours. Passwords are not in these log lines; the user is what the
 	# client sent.
@@ -726,14 +771,25 @@ def scan_failed_logins(hours=SCAN_HOURS, files=MAIL_LOGS, now=None):
 	cutoff = now - hours * 3600
 	events = []
 	for fn in files:
-		try:
-			f = open(fn, "rb")
-		except OSError:
+		f = _open_log(fn)
+		if f is None:
 			continue
 		with f:
 			_seek(f, os.fstat(f.fileno()).st_size, cutoff, now)
 			for line in f:
-				if b"authentication failed" in line:
+				if RE_TS_ZPUSH.match(line):
+					# A line of Z-Push (no line of mail.log starts so).
+					if b"] Failed to authenticate user '" in line:
+						m = RE_ZPUSH.match(line)
+						if not m: continue
+						user, ip, proto, count = m.group(1), m.group(2), "activesync", 1
+					elif b"Unable to complete autodiscover because login failed" in line:
+						m = RE_AUTODISCOVER.match(line)
+						if not m: continue
+						user, ip, proto, count = m.group(1), m.group(2), "autodiscover", 1
+					else:
+						continue
+				elif b"authentication failed" in line:
 					m = RE_SMTP.search(line)
 					if not m: continue
 					ip, user, proto, count = m.group(1), m.group(2) or b"", "smtp", 1
@@ -944,7 +1000,7 @@ def check_failed_logins(rounded_values, env, output):
 	try:
 		report = failed_login_report(env, settings)
 	except Exception as e:
-		output.print_warning("Could not read the mail log for failed logins: " + str(e))
+		output.print_warning("Could not read the mail and ActiveSync logs for failed logins: " + str(e))
 		return
 
 	problems = False
@@ -1004,7 +1060,7 @@ def check_failed_logins(rounded_values, env, output):
 				{p['failures']} times in {p['hours']} hours. It probably has an old password.""")
 
 	if not problems:
-		output.print_ok(f"No signs of password spraying or slow login attacks in the mail log of the last {report['scan_hours']} hours.")
+		output.print_ok(f"No signs of password spraying or slow login attacks in the mail and ActiveSync logs of the last {report['scan_hours']} hours.")
 
 # COMMAND LINE
 

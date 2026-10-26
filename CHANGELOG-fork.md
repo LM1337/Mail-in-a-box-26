@@ -82,6 +82,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
+* Control panel (System > Intrusion Protection): `miab-zpush` is a web
+  jail (its bans keep their fixed length with adaptive banning), the slow
+  web jails get `miab-slow-zpush` (ActiveSync and Autodiscover), and the
+  failed-login report and its status check read Z-Push's error logs as well
+  (protocols `activesync` and `autodiscover`, also the files of the last
+  rotation). The help texts name ActiveSync and say that `/caldav`,
+  `/carddav` and `/webdav` now count under the client's address (B126,
+  B121).
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
