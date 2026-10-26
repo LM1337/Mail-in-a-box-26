@@ -87,6 +87,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   password from standard input (its first line) instead of the command
   line, which every local account can read; without a password they still
   ask for it. Its usage text says so (B127).
+* Tests: the smoke test's new check `admin-journal-no-hash` (with `--ssh`)
+  fails when a line of the journal of `mailinabox.service` since the start
+  of the run looks like a password hash or the output of `doveadm pw`
+  (B127). `tests/fork/password-hash.py` checks the control panel's SHA-512
+  crypt: the test vectors of its specification and its limits without a
+  box, and with `--doveadm` (on a box, as root) random passwords against
+  Dovecot's `doveadm pw` both ways and other schemes through the fallback.
+  The log audit no longer accepts doveadm's "reverse password verification
+  check failed" (smoke and Internet lists): the daemon no longer logs it.
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
