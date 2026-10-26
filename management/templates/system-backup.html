@@ -167,7 +167,11 @@
 
 <h3>Available backups</h3>
 
-<p>The backup location currently contains the backups listed below. The total size of the backups is currently <span id="backup-total-size"></span>.</p>
+<p>The backup location contains the backups listed below. Their total size is <span id="backup-total-size"></span>.</p>
+
+<p id="backup-status-info" class="text-muted"></p>
+<div id="backup-refresh-state" style="margin-bottom: 1em"></div>
+<p><button id="backup-refresh-button" type="button" class="btn btn-default" onclick="start_backup_refresh(); return false;">Refresh now</button></p>
 
 <table id="backup-status" class="table" style="width: auto">
   <thead>
@@ -205,52 +209,161 @@ function nice_size(bytes) {
   return bytes + " " + powers[0];
 }
 
+// The page shows the saved status of the backups at once (saved after each
+// backup run and each refresh that worked) and refreshes it in the
+// background, polling until the refresh ends: a query of the backup target
+// can take minutes when the target does not answer.
+var backup_poll_timer = null;
+var backup_refresh_auto_age = 300; // seconds: refresh on a visit when the saved status is older
+
 function show_system_backup() {
   show_custom_backup()
 
   $('#backup-status tbody').html("<tr><td colspan='2' class='text-muted'>Loading...</td></tr>")
+  $('#backup-status-info').text("");
+  $('#backup-refresh-state').html("");
+  load_saved_backup_status(true, false);
+}
+
+function backup_time_ago(seconds) {
+  if (seconds < 90) return "just now";
+  if (seconds < 5400) return Math.round(seconds / 60) + " minutes ago";
+  if (seconds < 172800) return Math.round(seconds / 3600) + " hours ago";
+  return Math.round(seconds / 86400) + " days ago";
+}
+
+function schedule_backup_poll() {
+  if (backup_poll_timer) clearTimeout(backup_poll_timer);
+  backup_poll_timer = setTimeout(function() {
+    backup_poll_timer = null;
+    if (current_panel == "system_backup")
+      load_saved_backup_status(false, true);
+  }, 3000);
+}
+
+function load_saved_backup_status(auto_refresh, quiet) {
   api(
-    "/system/backup/status",
+    "/system/backup/status/saved",
     "GET",
     { },
     function(r) {
-      if (r.error) {
-          show_modal_error("Backup Error", $("<pre/>").text(r.error));
-          return;
+      show_saved_backup_status(r);
+      if (r.refreshing)
+        schedule_backup_poll();
+      else if (auto_refresh && r.status !== null && typeof r.status.backups == "undefined")
+        ; // backups are turned off
+      else if (auto_refresh && (r.status === null || r.age_seconds > backup_refresh_auto_age))
+        start_backup_refresh();
+    },
+    function(text, xhr) {
+      show_backup_refresh_problem("The saved status could not be loaded: " + (xhr.miab_error_message || ("HTTP " + xhr.status + ".")));
+    },
+    null,
+    { quiet: quiet, timeout: 30000 });
+}
+
+function start_backup_refresh() {
+  $('#backup-refresh-button').prop("disabled", true);
+  api(
+    "/system/backup/status/refresh",
+    "POST",
+    { },
+    function(r) {
+      if (r.refreshing) {
+        show_backup_refreshing(null);
+        schedule_backup_poll();
+      } else {
+        $('#backup-refresh-button').prop("disabled", false);
       }
+    },
+    function(text, xhr) {
+      $('#backup-refresh-button').prop("disabled", false);
+      show_backup_refresh_problem("The refresh could not be started: " + (xhr.miab_error_message || ("HTTP " + xhr.status + ".")));
+    },
+    null,
+    { quiet: true, timeout: 30000 });
+  return false;
+}
 
-      $('#backup-status tbody').html("");
-      var total_disk_size = 0;
+function show_backup_refreshing(running) {
+  var d = $('<div class="text-muted"><span class="fa fa-spinner fa-pulse"></span> </div>');
+  if (running && running.by == "backup")
+    d.append($('<span/>').text("A backup is running (since " + running.started_str + "). The status is saved at its end."));
+  else
+    d.append($('<span/>').text("Refreshing the status from the backup target"
+      + (running ? " (since " + running.started_str + ")" : "") + ". This can take some minutes when the target is slow to answer; the rest of the control panel can be used meanwhile."));
+  $('#backup-refresh-state').html("").append(d);
+}
 
-      if (typeof r.backups == "undefined") {
-        var tr = $('<tr><td colspan="3">Backups are turned off.</td></tr>');
-        $('#backup-status tbody').append(tr);
-        return;
-      } else if (r.backups.length == 0) {
-        var tr = $('<tr><td colspan="3">No backups have been made yet.</td></tr>');
-        $('#backup-status tbody').append(tr);
-      }
+function show_backup_refresh_problem(message) {
+  var d = $('<div class="alert alert-warning" role="alert"/>');
+  d.append($('<p/>').text(message));
+  $('#backup-refresh-state').html("").append(d);
+  $('#backup-refresh-button').prop("disabled", false);
+}
 
-      for (var i = 0; i < r.backups.length; i++) {
-        var b = r.backups[i];
-        var tr = $('<tr/>');
-        if (b.full) tr.addClass("full-backup");
-        tr.append( $('<td/>').text(b.date_str) );
-        tr.append( $('<td/>').text(b.date_delta + " ago") );
-        tr.append( $('<td/>').text(b.full ? "full" : "increment") );
-        tr.append( $('<td style="text-align: right"/>').text( nice_size(b.size)) );
-        if (b.deleted_in)
-          tr.append( $('<td/>').text(b.deleted_in) );
-        else
-          tr.append( $('<td class="text-muted">unknown</td>') );
-        $('#backup-status tbody').append(tr);
+function show_saved_backup_status(r) {
+  $('#backup-refresh-button').prop("disabled", r.refreshing);
+  var refresh = r.refresh;
 
-        total_disk_size += b.size;
-      }
+  // The state of the refresh.
+  if (r.refreshing) {
+    show_backup_refreshing(r.running);
+  } else if (refresh && !refresh.ok && (r.time === null || refresh.started >= r.time)) {
+    var d = $('<div class="alert alert-warning" role="alert"/>');
+    d.append($('<p/>').text("The last refresh of the status (" + (refresh.by == "backup" ? "after the backup run of " : refresh.by == "status checks" ? "by the status checks of " : "")
+      + refresh.started_str + ") did not work after " + refresh.seconds + " s:"));
+    d.append($('<pre style="white-space: pre-wrap"/>').text(refresh.error));
+    d.append($('<p/>').text(r.time === null ? "No status of this backup target has been saved yet."
+      : "The status below is the one saved before."));
+    $('#backup-refresh-state').html("").append(d);
+  } else {
+    $('#backup-refresh-state').html("");
+  }
 
-      total_disk_size += r.unmatched_file_size;
-      $('#backup-total-size').text(nice_size(total_disk_size));
-    })
+  // The saved status.
+  if (r.status === null) {
+    $('#backup-status-info').text("No status of this backup target has been saved yet.");
+    if (!r.refreshing)
+      $('#backup-status tbody').html("<tr><td colspan='3' class='text-muted'>Not known yet.</td></tr>");
+    return;
+  }
+  if (typeof r.status.backups == "undefined") {
+    $('#backup-status-info').text("");
+    $('#backup-refresh-button').prop("disabled", true);
+    $('#backup-status tbody').html('<tr><td colspan="3">Backups are turned off.</td></tr>');
+    return;
+  }
+  $('#backup-status-info').text("Status as of " + r.time_str + " (" + backup_time_ago(r.age_seconds) + "), "
+    + (r.source == "backup" ? "saved after the backup run." : r.source == "status checks" ? "from the status checks." : "from a refresh of the control panel."));
+
+  $('#backup-status tbody').html("");
+  var total_disk_size = 0;
+  var backups = r.status.backups;
+  if (backups.length == 0) {
+    var tr = $('<tr><td colspan="3">No backups have been made yet.</td></tr>');
+    $('#backup-status tbody').append(tr);
+  }
+
+  for (var i = 0; i < backups.length; i++) {
+    var b = backups[i];
+    var tr = $('<tr/>');
+    if (b.full) tr.addClass("full-backup");
+    tr.append( $('<td/>').text(b.date_str) );
+    tr.append( $('<td/>').text(b.date_delta + " ago") );
+    tr.append( $('<td/>').text(b.full ? "full" : "increment") );
+    tr.append( $('<td style="text-align: right"/>').text( nice_size(b.size)) );
+    if (b.deleted_in)
+      tr.append( $('<td/>').text(b.deleted_in) );
+    else
+      tr.append( $('<td class="text-muted">unknown</td>') );
+    $('#backup-status tbody').append(tr);
+
+    total_disk_size += b.size;
+  }
+
+  total_disk_size += r.status.unmatched_file_size;
+  $('#backup-total-size').text(nice_size(total_disk_size));
 }
 
 function show_custom_backup() {

@@ -8,6 +8,7 @@
 # 5) STORAGE_ROOT/backup/after-backup is executed if it exists.
 
 import os, os.path, re, datetime, sys, time
+import contextlib, fcntl, hashlib, json, signal, stat
 import dateutil.parser, dateutil.relativedelta, dateutil.tz
 from datetime import date
 import rtyaml
@@ -24,7 +25,37 @@ import operator
 # the next address, and makes two such attempts.
 SSH_TIMEOUT_OPTIONS = "-oConnectTimeout=10 -oConnectionAttempts=2"
 
-def backup_status(env):
+# The saved status of the backups (B125). The control panel shows it at once
+# and refreshes it in the background (backup.py --refresh-status, started by
+# the management daemon), because a query of the target can take minutes when
+# the target does not answer, and the daemon has a single worker. The status
+# is saved after each backup run and after each refresh that worked, in a
+# directory of root's own (STATUS_DIR, 0700), written atomically. The lock
+# file there is held by the refresh and by the whole backup run, so that only
+# one of them queries the target (two duplicity processes on one archive
+# directory refuse each other) and the nightly backup waits for a refresh.
+STATUS_DIR = ("var", "lib", "mailinabox", "backup-status")
+STATUS_FILE = "status.json"
+STATUS_LOCK = "lock"
+# A refresh ends after this many seconds: duplicity and what it started
+# (rsync, ssh) are ended, and the failed refresh is saved. A target that does
+# not answer took about 4 minutes in a test with the ssh options above
+# (duplicity's own 5 attempts), 13 minutes without them.
+REFRESH_LIMIT = 900
+
+def reldate(date, ref, clip):
+	if ref < date: return clip
+	rd = dateutil.relativedelta.relativedelta(ref, date)
+	if rd.years > 1: return "%d years, %d months" % (rd.years, rd.months)
+	if rd.years == 1: return "%d year, %d months" % (rd.years, rd.months)
+	if rd.months > 1: return "%d months, %d days" % (rd.months, rd.days)
+	if rd.months == 1: return "%d month, %d days" % (rd.months, rd.days)
+	if rd.days >= 7: return "%d days" % rd.days
+	if rd.days > 1: return "%d days, %d hours" % (rd.days, rd.hours)
+	if rd.days == 1: return "%d day, %d hours" % (rd.days, rd.hours)
+	return "%d hours, %d minutes" % (rd.hours, rd.minutes)
+
+def backup_status(env, timings=None):
 	# If backups are disabled, return no status.
 	config = get_backup_config(env)
 	if config["target"] == "off":
@@ -37,18 +68,8 @@ def backup_status(env):
 	now = datetime.datetime.now(dateutil.tz.tzlocal())
 	backup_root = os.path.join(env["STORAGE_ROOT"], 'backup')
 	backup_cache_dir = os.path.join(backup_root, 'cache')
-
-	def reldate(date, ref, clip):
-		if ref < date: return clip
-		rd = dateutil.relativedelta.relativedelta(ref, date)
-		if rd.years > 1: return "%d years, %d months" % (rd.years, rd.months)
-		if rd.years == 1: return "%d year, %d months" % (rd.years, rd.months)
-		if rd.months > 1: return "%d months, %d days" % (rd.months, rd.days)
-		if rd.months == 1: return "%d month, %d days" % (rd.months, rd.days)
-		if rd.days >= 7: return "%d days" % rd.days
-		if rd.days > 1: return "%d days, %d hours" % (rd.days, rd.hours)
-		if rd.days == 1: return "%d day, %d hours" % (rd.days, rd.hours)
-		return "%d hours, %d minutes" % (rd.hours, rd.minutes)
+	if timings is None:
+		timings = {}
 
 	# Get duplicity collection status and parse for a list of backups.
 	def parse_line(line):
@@ -63,6 +84,7 @@ def backup_status(env):
 			"volumes": int(keys[2]), # number of archive volumes for this backup (not really helpful)
 		}
 
+	started = time.monotonic()
 	code, collection_status = shell('check_output', [
 		"/usr/bin/duplicity",
 		"collection-status",
@@ -73,7 +95,13 @@ def backup_status(env):
 		get_duplicity_target_url(config)
 		],
 		get_duplicity_env_vars(env),
+		# duplicity's and rsync's messages on stderr go into the error below,
+		# not into the journal of the caller: they repeat what duplicity logs
+		# on stdout and can name the target (B125).
+		capture_stderr=True,
 		trap=True)
+	timings["collection-status"] = time.monotonic() - started
+	timings["collection-status exit"] = code
 	if code != 0:
 		# Command failed. This is likely due to an improperly configured remote
 		# destination for the backups or the last backup job terminated unexpectedly.
@@ -89,7 +117,12 @@ def backup_status(env):
 	# with the list of backups we have. Track unmatched files so we know how much other
 	# space is used for those.
 	unmatched_file_size = 0
-	for fn, size in list_target_files(config):
+	started = time.monotonic()
+	try:
+		target_files = list_target_files(config, timings)
+	finally:
+		timings["file list"] = time.monotonic() - started
+	for fn, size in target_files:
 		m = re.match(r"duplicity-(full|full-signatures|(inc|new-signatures)\.(?P<incbase>\d+T\d+Z)\.to)\.(?P<date>\d+T\d+Z)\.", fn)
 		if not m: continue # not a part of a current backup chain
 		key = m.group("date")
@@ -273,6 +306,311 @@ def get_duplicity_env_vars(env):
 def get_target_type(config):
 	return config["target"].split(":")[0]
 
+def _target_id(config):
+	# Which target a saved status belongs to, without keeping the target
+	# itself (a B2 target holds its application key).
+	return hashlib.sha256(config["target"].encode("utf-8")).hexdigest()
+
+def _open_status_dir(create):
+	# STATUS_DIR as a descriptor, opened one directory at a time from /
+	# without following a symbolic link; each directory must belong to root
+	# and be writable by no group or other account, so that nobody else can
+	# put or swap a file there. With create, the last two are made if they
+	# are missing. Raises OSError (FileNotFoundError without create).
+	fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+	try:
+		for i, name in enumerate(STATUS_DIR):
+			last = i == len(STATUS_DIR) - 1
+			if create and i >= len(STATUS_DIR) - 2:
+				with contextlib.suppress(FileExistsError):
+					os.mkdir(name, 0o700 if last else 0o755, dir_fd=fd)
+			nfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+			os.close(fd)
+			fd = nfd
+			st = os.fstat(fd)
+			if st.st_uid != 0 or st.st_mode & 0o022:
+				raise OSError("/%s does not belong to root alone" % "/".join(STATUS_DIR[:i + 1]))
+			if last and stat.S_IMODE(st.st_mode) != 0o700:
+				os.fchmod(fd, 0o700)
+		return fd
+	except BaseException:
+		os.close(fd)
+		raise
+
+def _read_saved_status(dfd):
+	try:
+		fd = os.open(STATUS_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
+	except FileNotFoundError:
+		return {}
+	with os.fdopen(fd, "rb") as f:
+		if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+			return {}
+		try:
+			saved = json.loads(f.read(16 << 20).decode("utf-8"))
+		except ValueError:
+			return {}
+	return saved if isinstance(saved, dict) else {}
+
+def _write_saved_status(dfd, saved):
+	# A new file (O_EXCL, 0600) in the same directory, renamed over the old one.
+	data = json.dumps(saved, indent=1, sort_keys=True).encode("utf-8")
+	tmp = ".%s.%s" % (STATUS_FILE, os.urandom(6).hex())
+	fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+	try:
+		with os.fdopen(fd, "wb") as f:
+			f.write(data)
+			f.flush()
+			os.fsync(f.fileno())
+		os.rename(tmp, STATUS_FILE, src_dir_fd=dfd, dst_dir_fd=dfd)
+	except BaseException:
+		with contextlib.suppress(OSError):
+			os.unlink(tmp, dir_fd=dfd)
+		raise
+	os.fsync(dfd)
+
+def _lock_status(dfd, wait):
+	# The descriptor of the lock file, locked exclusively, or None when it is
+	# held elsewhere and wait is false. Without wait it is tried for 2 s, in
+	# case the daemon is just looking whether it is held (status_refreshing).
+	fd = os.open(STATUS_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+	try:
+		if wait:
+			fcntl.flock(fd, fcntl.LOCK_EX)
+			return fd
+		for _ in range(20):
+			try:
+				fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+				return fd
+			except BlockingIOError:
+				time.sleep(0.1)
+		os.close(fd)
+		return None
+	except BaseException:
+		os.close(fd)
+		raise
+
+def status_refreshing():
+	# Whether a refresh or a backup run holds the lock (for the daemon).
+	try:
+		dfd = _open_status_dir(create=True)
+	except OSError:
+		return False
+	try:
+		fd = os.open(STATUS_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+		try:
+			fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+		except BlockingIOError:
+			return True
+		finally:
+			os.close(fd)
+		return False
+	finally:
+		os.close(dfd)
+
+def _mark_running(dfd, config, by):
+	# Note who holds the lock since when (the caller holds it); returns the
+	# saved status of the current target.
+	saved = _read_saved_status(dfd)
+	if saved.get("target") != _target_id(config):
+		saved = { "target": _target_id(config) }
+	running = saved.get("running")
+	if not (by == "backup" and isinstance(running, dict) and running.get("by") == "backup" and running.get("pid") == os.getpid()):
+		saved["running"] = { "by": by, "started": time.time(), "pid": os.getpid() }
+		_write_saved_status(dfd, saved)
+	return saved
+
+def _save_status_locked(env, dfd, by):
+	# Query the target and save the result; the caller holds the lock.
+	# Returns (seconds, timings, error or None, status or None).
+	config = get_backup_config(env)
+	timings = {}
+	started_at = time.time()
+	started = time.monotonic()
+	error = None
+	status = None
+	saved = _mark_running(dfd, config, by)
+	try:
+		status = backup_status(env, timings)
+	except Exception as e:
+		error = str(e) or e.__class__.__name__
+	seconds = time.monotonic() - started
+	saved.pop("running", None)
+	saved["refresh"] = {
+		"by": by,
+		"started": started_at,
+		"finished": time.time(),
+		"seconds": round(seconds, 1),
+		"ok": error is None,
+		"error": error,
+	}
+	if error is None:
+		saved.update({ "status": status, "time": started_at, "source": by })
+	_write_saved_status(dfd, saved)
+	return seconds, timings, error, status
+
+def _timings_text(timings):
+	parts = []
+	if "collection-status" in timings:
+		parts.append("collection-status %.1f s (exit %s)" % (timings["collection-status"], timings.get("collection-status exit")))
+	if "file list" in timings:
+		n = timings.get("file list attempts", 1)
+		parts.append("file list %.1f s (%d attempt%s)" % (timings["file list"], n, "" if n == 1 else "s"))
+	return ", ".join(parts)
+
+def _signal_own_group(sig):
+	# Send sig to every other process of this process's group, if this
+	# process leads it (the daemon starts the refresh in a session of its
+	# own): duplicity, and the rsync and ssh it started, which would outlive
+	# a duplicity that is killed. Run by hand inside another process group,
+	# nothing is sent (the group is not ours). A process ID cannot move into
+	# this group from elsewhere, so the list cannot name a stranger.
+	me = os.getpid()
+	if os.getpgrp() != me:
+		return 0
+	n = 0
+	for name in os.listdir("/proc"):
+		if not name.isdigit() or int(name) == me:
+			continue
+		try:
+			with open("/proc/%s/stat" % name, "rb") as f:
+				fields = f.read().rsplit(b")", 1)[1].split()
+		except (OSError, IndexError):
+			continue
+		if len(fields) > 2 and fields[2] == str(me).encode():
+			with contextlib.suppress(ProcessLookupError, PermissionError):
+				os.kill(int(name), sig)
+				n += 1
+	return n
+
+def _end_own_group():
+	# After the limit: what is left of the group gets SIGKILL after 5 s.
+	for _ in range(50):
+		if _signal_own_group(0) == 0:
+			return
+		time.sleep(0.1)
+	_signal_own_group(signal.SIGKILL)
+
+def refresh_saved_status(env):
+	# backup.py --refresh-status: one refresh, unless a refresh or a backup
+	# run holds the lock. Logs its duration and those of its steps (to the
+	# journal of the management daemon, which starts it), never the error
+	# text (it can name the target). Exit code 0, 1 when the query failed.
+	if get_backup_config(env)["target"] == "off":
+		return 0
+	log = sys.stderr
+	timed_out = []
+	def limit(signum, frame):
+		# subprocess kills duplicity when this exception reaches it; its
+		# children are ended here.
+		timed_out.append(True)
+		_signal_own_group(signal.SIGTERM)
+		raise TimeoutError("The refresh took longer than %d s and was ended." % REFRESH_LIMIT)
+	signal.signal(signal.SIGALRM, limit)
+	signal.alarm(REFRESH_LIMIT)
+	try:
+		dfd = _open_status_dir(create=True)
+		try:
+			lock = _lock_status(dfd, wait=False)
+			if lock is None:
+				print("backup status: not refreshed, a backup run or another refresh is in progress", file=log)
+				return 0
+			try:
+				seconds, timings, error, _ = _save_status_locked(env, dfd, "refresh")
+				signal.alarm(0)
+			finally:
+				os.close(lock)
+				if timed_out:
+					_end_own_group()
+		finally:
+			os.close(dfd)
+	except Exception:
+		# Not a failed query (that is saved): the status could not be saved.
+		import traceback
+		print("backup status: the refresh could not save the status:", file=log)
+		traceback.print_exc(file=log)
+		return 1
+	if error is None:
+		print("backup status: refreshed in %.1f s: %s" % (seconds, _timings_text(timings)), file=log)
+		return 0
+	print("backup status: the refresh failed after %.1f s: %s" % (seconds, _timings_text(timings) or "no step finished"), file=log)
+	return 1
+
+def status_for_checks(env):
+	# For the status checks (B132): a query of the target that saves its
+	# result as a refresh does, or, while a backup run or a refresh holds the
+	# lock (a second duplicity on the same archive directory would fail),
+	# the saved status. Never raises for a failed query.
+	# Returns (status or None, in_progress, time_str of the saved status or
+	# None, error or None). in_progress is true when the lock is held: status
+	# is then the saved one, None when none has been saved for this target.
+	try:
+		dfd = _open_status_dir(create=True)
+	except OSError:
+		dfd = None
+	if dfd is None:
+		try:
+			return backup_status(env), False, None, None
+		except Exception as e:
+			return None, False, None, str(e) or e.__class__.__name__
+	try:
+		lock = _lock_status(dfd, wait=False)
+		if lock is not None:
+			try:
+				_, _, error, status = _save_status_locked(env, dfd, "status checks")
+			finally:
+				os.close(lock)
+			return status, False, None, error
+	finally:
+		os.close(dfd)
+	saved = get_saved_status(env)
+	return saved["status"], True, saved["time_str"], None
+
+def get_saved_status(env):
+	# The saved status for the control panel (GET /system/backup/status/saved).
+	config = get_backup_config(env)
+	ret = {
+		"status": None, "time": None, "time_str": None, "age_seconds": None, "source": None,
+		"refresh": None, "refreshing": False, "running": None, "now": time.time(),
+	}
+	if config["target"] == "off":
+		ret["status"] = {}
+		return ret
+	try:
+		dfd = _open_status_dir(create=False)
+	except FileNotFoundError:
+		return ret
+	try:
+		saved = _read_saved_status(dfd)
+	finally:
+		os.close(dfd)
+	def time_str(t):
+		t = datetime.datetime.fromtimestamp(t, dateutil.tz.tzlocal())
+		return t.strftime("%Y-%m-%d %X") + " " + t.tzname()
+	ret["refreshing"] = status_refreshing()
+	if saved.get("target") != _target_id(config):
+		return ret
+	running = saved.get("running")
+	if ret["refreshing"] and isinstance(running, dict) and isinstance(running.get("started"), (int, float)):
+		ret["running"] = { "by": running.get("by"), "started": running["started"], "started_str": time_str(running["started"]) }
+	refresh = saved.get("refresh")
+	if isinstance(refresh, dict) and isinstance(refresh.get("started"), (int, float)):
+		ret["refresh"] = dict(refresh, started_str=time_str(refresh["started"]))
+	status = saved.get("status")
+	if isinstance(status, dict) and isinstance(saved.get("time"), (int, float)):
+		# The age of each backup as of now, not as of the query.
+		now = datetime.datetime.now(dateutil.tz.tzlocal())
+		for bak in status.get("backups", []):
+			with contextlib.suppress(Exception):
+				bak["date_delta"] = reldate(dateutil.parser.parse(bak["date"]).astimezone(dateutil.tz.tzlocal()), now, "the future?")
+		ret.update({
+			"status": status,
+			"time": saved["time"],
+			"time_str": time_str(saved["time"]),
+			"age_seconds": max(0, int(ret["now"] - saved["time"])),
+			"source": saved.get("source"),
+		})
+	return ret
+
 def perform_backup(full_backup):
 	env = load_environment()
 
@@ -288,6 +626,18 @@ def perform_backup(full_backup):
 	# Are backups disabled?
 	if config["target"] == "off":
 		return
+
+	# Hold the lock of the saved status for the whole run: wait for a refresh
+	# of the control panel that queries the target now, and keep new ones
+	# from starting (B125). The lock goes with the process. If the directory
+	# cannot be used, back up all the same (and say so in the nightly mail).
+	try:
+		status_dfd = _open_status_dir(create=True)
+		status_lock = _lock_status(status_dfd, wait=True) # held until the process ends
+		_mark_running(status_dfd, config, "backup")
+	except OSError as e:
+		print("The saved backup status cannot be written:", e)
+		status_dfd = None
 
 	# On the first run, always do a full backup. Incremental
 	# will fail. Otherwise do a full backup when the size of
@@ -380,6 +730,14 @@ def perform_backup(full_backup):
 		],
 		get_duplicity_env_vars(env))
 
+	# Save the status of the backups as they are now, for the control panel
+	# (B125). A failed query is saved as the result of this refresh; the
+	# status of the last query that worked stays. Nothing is printed: the
+	# panel shows it, and this script's output is the nightly mail.
+	if status_dfd is not None:
+		with contextlib.suppress(OSError):
+			_save_status_locked(env, status_dfd, "backup")
+
 	# Change ownership of backups to the user-data user, so that the after-bcakup
 	# script can access them.
 	if get_target_type(config) == 'file':
@@ -446,7 +804,7 @@ def print_duplicity_command():
 		get_duplicity_target_url(config)
 		]))
 
-def list_target_files(config):
+def list_target_files(config, timings=None):
 	import urllib.parse
 	try:
 		target = urllib.parse.urlparse(config["target"])
@@ -490,6 +848,8 @@ def list_target_files(config):
 		# stops when it fails (should_force_full).
 		for attempt in range(3):
 			code, listing = shell('check_output', rsync_command, trap=True, capture_stderr=True)
+			if timings is not None:
+				timings["file list attempts"] = attempt + 1
 			if code == 0 or attempt == 2 or 'Permission denied (' in listing or 'No such file or directory' in listing:
 				break
 			time.sleep(5)
@@ -647,6 +1007,11 @@ if __name__ == "__main__":
 		# List the saved backup files.
 		for fn, size in list_target_files(get_backup_config(load_environment())):
 			print(f"{fn}\t{size}")
+
+	elif sys.argv[-1] == "--refresh-status":
+		# Refresh the saved status for the control panel (started by the
+		# management daemon in the background, B125).
+		sys.exit(refresh_saved_status(load_environment()))
 
 	elif sys.argv[-1] == "--status":
 		# Show backup status.

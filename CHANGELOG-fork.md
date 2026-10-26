@@ -97,6 +97,43 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   doveadm's arguments either. A login with an unknown address takes as long as a wrong password. Setup
   no longer puts the first user's password, and tools/dns_update and
   tools/web_update no longer the API key, on a command line either (B127).
+* The backup page shows the status of the backups at once: the status
+  saved after the last backup run or refresh that worked, with its time.
+  It refreshes it in the background (on a visit when the saved status is
+  older than five minutes, and with the new "Refresh now" button) and
+  shows a failed refresh with its error next to the saved status. Before,
+  the page queried the target while it loaded, and the whole control panel
+  waited with it (its service has one worker): on a production box once
+  more than a minute, until nginx gave up. The refresh is a process of its
+  own (`management/backup.py --refresh-status`); the nightly backup waits
+  for one in progress and saves the status at its end. The refresh logs its
+  duration and those of its steps (duplicity's collection-status, the list
+  of the target's files) in the journal of the management daemon; what
+  duplicity, rsync and ssh say on stderr is part of the error shown, no
+  longer written into that journal. A refresh is ended after 15 minutes,
+  with the rsync and ssh that duplicity started. New API
+  calls `GET /system/backup/status/saved` and
+  `POST /system/backup/status/refresh`; `GET /system/backup/status` still
+  queries the target, but waits for it 30 s at most and not at all while a
+  backup runs: it then returns the saved status at once, with
+  `in_progress` saying why (it would hold the control panel for as long).
+  `tools/update-check.sh backup` no longer takes such a refresh for a
+  running backup, and still stops for any other run of `backup.py` (B125).
+* The status checks no longer stop as a whole when the status of the
+  backups cannot be read (the target does not answer, or another duplicity
+  runs on the same archive directory): the System Status page showed only
+  "Something went wrong" and the nightly check mailed a traceback. The
+  backup check now fails alone with duplicity's message, and while a backup
+  run or a refresh of the backup page queries the target it uses the saved
+  status, or warns that none has been saved yet (B132).
+* nginx waits for the control panel as long as gunicorn lets a request
+  run (630 s) instead of its default of 60 s, so that the status checks,
+  the TLS provisioning and the backup page's live query are no longer cut
+  off with a 504 after a minute (B125).
+* The control panel says what happened when its service does not answer:
+  for nginx's 502 and 504, a timeout and a lost connection it shows a
+  clear message and what to do, on every page, instead of only "Something
+  went wrong, sorry." (B125).
 
 ### Changed
 
@@ -190,6 +227,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Microsoft's servers: if your users do that, put those networks on the
   fail2ban allowlist, or one wrong password entered there 20 times within
   two minutes bans them for all of these users (B126).
+* The backup page shows "No status of this backup target has been saved
+  yet" on the first visit after the update, until its first refresh (or
+  the next backup run) ends. The saved status is kept in
+  `/var/lib/mailinabox/backup-status` (root only).
 * Setup sets Nextcloud's `trusted_proxies` (adds 127.0.0.1, keeps the
   others) and `forwarded_for_headers` (`HTTP_X_FORWARDED_FOR` only, the
   Nextcloud default; another value there is replaced). A reverse proxy of
@@ -223,11 +264,6 @@ For the final release v78-r2604.0 (from rc7):
   v78-r2604.0.
 * `tools/expected-changes/` needs a list for each release, also an empty
   one for the final release.
-* The backup page shows the status of the last backup at once (kept after
-  each backup run, with its time) and refreshes it in the background, so
-  that it no longer waits for the target; nginx waits for the control
-  panel as long as gunicorn does, and a timeout gets a clear message
-  (B125).
 
 Seen in the rc7 work, not done (the certification runs of rc7 add their
 open findings in TESTING-fork.md, "Open findings of rc7"):

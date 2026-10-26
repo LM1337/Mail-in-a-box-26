@@ -19,7 +19,7 @@ from ssl_certificates import get_ssl_certificates, get_domain_ssl_files, check_c
 from mailconfig import get_mail_domains, get_mail_aliases
 
 from utils import shell, sort_domains, load_env_vars_from_file, load_settings, get_ssh_port, get_ssh_config_value
-from backup import get_backup_config, backup_status
+from backup import get_backup_config, status_for_checks
 from fail2ban_admin import check_failed_logins
 
 def get_services():
@@ -276,10 +276,20 @@ def check_backup(rounded_values, env, output):
 	else:
 		output.print_ok("Backups are enabled")
 	
-	# Get the age of the most recent backup
-	backup_stat = backup_status(env)
+	# Get the age of the most recent backup. A target that cannot be read is
+	# one failed check, not the end of all checks (B132).
+	backup_stat, in_progress, saved_at, error = status_for_checks(env)
+	if error is not None:
+		output.print_error("The status of the backups could not be read from the backup target.")
+		output.print_line(error.strip()[:2000], monospace=True)
+		return
+	if in_progress and not isinstance(backup_stat, dict):
+		output.print_warning("A backup run or a refresh of the backup status is in progress, and no status of the backups has been saved yet. Check again when it has ended.")
+		return
+	if in_progress:
+		output.print_line("A backup run or a refresh of the backup status is in progress: the status saved at %s is used." % saved_at)
 	
-	backups = backup_stat.get("backups", {})
+	backups = (backup_stat or {}).get("backups", {})
 	if backups and len(backups) > 0:
 		most_recent = backups[0]["date"]
 		

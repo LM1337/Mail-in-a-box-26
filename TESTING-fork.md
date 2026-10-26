@@ -204,14 +204,17 @@ report. The groups:
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
   injected user names) and the Intrusion Protection page; after rc7 the
-  status wants `miab-zpush`, and the filter cases cover it (B126). After
-  rc7, with `--ssh` and after the **api** group: `admin-journal-no-hash`,
-  no line of the journal of `mailinabox.service` since the start of the run
-  looks like a password hash or the output of `doveadm pw` (B127; the run's
-  logins, wrong passwords and password changes included). It reads the
-  journal with journalctl alone and counts on the test host: a failed
-  `sudo` or journalctl, or a journal it may not read, is a FAIL, not an
-  empty count.
+  status wants `miab-zpush`, the filter cases cover it (B126), and the
+  saved backup status (`admin-backup-saved`, B125): a refresh in the
+  background, polled until it ends, with the control panel answering
+  meanwhile (the slowest answer is in the note), and a new saved status
+  afterwards. After rc7, with `--ssh` and after the **api** group:
+  `admin-journal-no-hash`, no line of the journal of `mailinabox.service`
+  since the start of the run looks like a password hash or the output of
+  `doveadm pw` (B127; the run's logins, wrong passwords and password
+  changes included). It reads the journal with journalctl alone and counts
+  on the test host: a failed `sudo` or journalctl, or a journal it may not
+  read, is a FAIL, not an empty count.
 * **api** (from rc7): the management API as `api/mailinabox.yml` documents
   it. Auth: 401 without credentials (text or JSON by `Accept`, 403 for an
   XMLHttpRequest) and with a wrong password, the API key works, a second
