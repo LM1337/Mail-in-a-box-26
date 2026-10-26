@@ -174,6 +174,15 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
 
 * Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
+* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
+  test of B126): Z-Push tries the IMAP login three times, and Dovecot
+  delays failed logins, possibly more for an address with many failures,
+  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
+  `miab-zpush` threshold slows down the ActiveSync logins of other users
+  is not measured.
+* The failed-login report does not read `nextcloud.log` yet, which now
+  has the client's address for `/caldav`, `/carddav` and `/webdav` too
+  (B121).
 * Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
   postgrey, named, systemd-resolved, munin-node and the management daemon
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
