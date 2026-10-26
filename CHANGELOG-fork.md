@@ -11,6 +11,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Changed
+
+* Tests: the log audit's rule for Postfix's milter warnings while setup
+  restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
+  session (`SMFIC_MAIL` and the other commands), not only in the handshake.
+  The GitHub counter-test of rc7 (rc6 to rc7) logged it once.
+
 ### Planned
 
 For the final release v78-r2604.0 (from rc7):
