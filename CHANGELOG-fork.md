@@ -359,7 +359,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   mark of the fork's Z-Push (rc7 or earlier); a log audit of your own across
   such an update needs `--allow-extra tests/fork/log-audit-allow-from-rc7.txt`.
   The classes of `nextcloud.log` get the prefix `[setup]` in a setup run
-  too, as those of the other logs; the rules for them accept it.
+  too, as those of the other logs; the rules for them accept it. In a setup
+  run the log audit also accepts fail2ban's "Unable to get failures in
+  <log file>": its reload at the end of setup removes a jail's log files
+  while the jail may be reading a line just written there (fail2ban 1.1.0,
+  seen once in the update test under client load).
 * Tests: the smoke test's new check `zpush-patches` (group `activesync`,
   with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
   the blocks of the checkout's conf/zpush/z-push.patches, and the installed
