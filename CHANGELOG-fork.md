@@ -486,13 +486,17 @@ Munin alert setting, the fallback SSH server and the live note, the order
 of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
 baseline and Internet allowlist, the update tools (state, backup,
 comparison, mail check) as code, the welcome dialog, the nginx reload with
-its allowlist rules, the journal check. The full test matrix T1 to T5b ran
-on rc7 twice (TESTING-fork.md, "rc7"): on the release commit, where it
-found B106 to B113, and after the fixes, with 0 FAIL in the smoke tests and
-0 unknown classes in every log audit: T3 and T4 with the single-binary sshd
-of 22.04 and 24.04 for the fallback, T5b with `tools/update-check.sh`
-around the update (Docker options, rsync upload, lab probe). T6 is left for
-the final release.
+its allowlist rules, the journal check. The test matrix T1 to T5b ran on
+rc7 three times (TESTING-fork.md, "rc7"): on the release commit, where it
+found B106 to B113; after those fixes, where it found B114; and, after the
+review of those fixes (B115 to B118) and B119, T2 to T5b Part A again on
+`014ff8a`. The last smoke run of every scenario had 0 FAIL (two earlier runs
+of the second round failed for lab reasons, see TESTING-fork.md), and
+every log audit ended with 0 unknown classes with the final allowlists and
+the lab's own list: T3 and T4 with the single-binary sshd of 22.04 and
+24.04 for the fallback, T5b with `tools/update-check.sh` around the update
+(Docker options, rsync upload, lab probe). T6 is left for the final
+release.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 
