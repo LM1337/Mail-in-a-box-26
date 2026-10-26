@@ -133,7 +133,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   of the target's files) in the journal of the management daemon; what
   duplicity, rsync and ssh say on stderr is part of the error shown, no
   longer written into that journal. A refresh is ended after 15 minutes,
-  with the rsync and ssh that duplicity started. New API
+  with the rsync and ssh that duplicity started (only those of its own
+  session: run by hand from a shell, `backup.py --refresh-status` ends
+  nothing else, not the other commands of a pipeline). New API
   calls `GET /system/backup/status/saved` and
   `POST /system/backup/status/refresh`; `GET /system/backup/status` still
   queries the target, but waits for it 30 s at most and not at all while a

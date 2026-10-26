@@ -459,13 +459,17 @@ def _timings_text(timings):
 
 def _signal_own_group(sig):
 	# Send sig to every other process of this process's group, if this
-	# process leads it (the daemon starts the refresh in a session of its
-	# own): duplicity, and the rsync and ssh it started, which would outlive
-	# a duplicity that is killed. Run by hand inside another process group,
-	# nothing is sent (the group is not ours). A process ID cannot move into
-	# this group from elsewhere, so the list cannot name a stranger.
+	# process leads its session (the daemon starts the refresh in a session
+	# of its own, so it leads that session and its group): duplicity, and the
+	# rsync and ssh it started, which would outlive a duplicity that is
+	# killed. Leading the group is not enough: a shell with job control makes
+	# a command typed by hand the leader of its job's group, which also holds
+	# the other commands of a pipeline (`... | tee log`). Run by hand, the
+	# shell leads the session, and nothing is sent (B125). A process ID cannot
+	# move into this group from another session, so the list cannot name a
+	# stranger.
 	me = os.getpid()
-	if os.getpgrp() != me:
+	if os.getsid(0) != me or os.getpgrp() != me:
 		return 0
 	n = 0
 	for name in os.listdir("/proc"):
