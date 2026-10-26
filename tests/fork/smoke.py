@@ -44,8 +44,9 @@ examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
         --ssh legacy-box --expect-nc 26
 
   Right after a setup run (an update), --only activesync checks within a
-  minute that Nextcloud does not throttle the box's own services and that an
-  ActiveSync account syncs its calendar and contacts.
+  minute that Nextcloud does not throttle the box's own services, that an
+  ActiveSync account syncs its calendar and contacts, and that a Ping with a
+  long heartbeat gets the box's bound instead of a 504 from nginx.
 
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
@@ -1941,6 +1942,100 @@ def c_nc_dav(ctx, kind):
     return "207, %d entries (user id %s)" % (n, uid)
 
 
+def c_nc_dav_proxy(ctx):
+    # B130: the proxy of /caldav, /carddav and /webdav (to Nextcloud's
+    # remote.php) passes the path escaped, as the client sent it, and the
+    # query string. It decoded the path: a space gave 400, an escaped "?"
+    # began a query string (a DELETE of a card whose name began with "?"
+    # deleted the whole address book), and query strings were dropped. A
+    # card whose name has a space and a "?" is put through Nextcloud's own
+    # path, then read through /carddav, found in the address book's export
+    # (?export) and deleted through /carddav; the address book must stay.
+    # The DELETE is only sent when the reads worked (on a box with the old
+    # proxy it would reach another name, never the address book: the name
+    # does not begin with "?"). And nginx's dotfile block (the regex location
+    # at the end of nginx-alldomains.conf) must not apply to these paths, as
+    # it did not with the old regex location (users' own files, #414): a
+    # file named ".htmiab-smoke-..." and a card ".gitmiab-smoke-....vcf",
+    # put through Nextcloud's own path, are read through /webdav and
+    # /carddav (403 with plain prefix locations).
+    uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
+    auth = (ctx.alice, ctx.user_pw)
+    mark = "miab-smoke-%s" % ctx.tok
+    name = urllib.parse.quote("%s proxy?name.vcf" % mark, safe="")
+    book = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/" % uid
+    proxied_book = "/carddav/addressbooks/%s/contacts/" % uid
+    vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s-proxy\r\nFN:%s proxy\r\nN:%s;Proxy;;;\r\n"
+           "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+    propfind = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>'
+    dotfile = ".htmiab-smoke-%s" % ctx.tok
+    files = "/cloud/remote.php/dav/files/%s/" % uid
+    dotcard = ".gitmiab-smoke-%s.vcf" % ctx.tok
+    dotvcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s-dot\r\nFN:%s dot\r\nN:%s;Dot;;;\r\n"
+              "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+
+    def put(path, body, ctype):
+        for attempt in range(3):
+            # Nextcloud on SQLite answers 500 ("database is locked") now and then
+            r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": ctype})
+            if r.status not in (500, 503):
+                break
+            time.sleep(10)
+        if r.status not in (201, 204):
+            raise Fail("PUT %s HTTP %d" % (path, r.status))
+
+    try:
+        put(book + name, vcf, "text/vcard; charset=utf-8")
+        r = http_req(ctx, "GET", proxied_book + name, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET of the card %s through /carddav: HTTP %d (the proxy does not pass the escaped name)"
+                       % (name, r.status))
+        r = http_req(ctx, "GET", proxied_book + "?export", auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET /carddav/.../contacts/?export: HTTP %d (the proxy drops the query string)" % r.status)
+        r = http_req(ctx, "DELETE", proxied_book + name, auth=auth)
+        if r.status != 204:
+            raise Fail("DELETE of the card through /carddav: HTTP %d" % r.status)
+        r = http_req(ctx, "PROPFIND", book, auth=auth, body=propfind,
+                     headers={"Depth": "0", "Content-Type": "application/xml"})
+        if r.status != 207:
+            raise Fail("after the DELETE through /carddav the address book answers HTTP %d" % r.status)
+        r = http_req(ctx, "GET", book + name, auth=auth)
+        if r.status != 404:
+            raise Fail("after the DELETE through /carddav the card answers HTTP %d" % r.status)
+        out = ["/carddav: card with space and ? read, exported, deleted (the address book stays)"]
+        put(files + dotfile, "%s X-Miab-Test 1\n" % mark, "text/plain")
+        r = http_req(ctx, "GET", "/webdav/" + dotfile, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET /webdav/%s: HTTP %d (nginx's dotfile block applies to the proxy)" % (dotfile, r.status))
+        put(book + dotcard, dotvcf, "text/vcard; charset=utf-8")
+        r = http_req(ctx, "GET", proxied_book + dotcard, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET of the card %s through /carddav: HTTP %d (nginx's dotfile block applies to the proxy)"
+                       % (dotcard, r.status))
+        out.append("dotfiles %s, %s through /webdav, /carddav 200" % (dotfile, dotcard))
+        for kind, path in (("caldav", "/caldav/calendars/%s/" % uid), ("webdav", "/webdav/")):
+            r = http_req(ctx, "PROPFIND", path, auth=auth, body=propfind,
+                         headers={"Depth": "0", "Content-Type": "application/xml"})
+            if r.status != 207:
+                raise Fail("PROPFIND %s HTTP %d" % (path, r.status))
+            out.append("/%s 207" % kind)
+        return "; ".join(out)
+    finally:
+        http_req(ctx, "DELETE", book + name, auth=auth)
+        http_req(ctx, "DELETE", book + dotcard, auth=auth)
+        r = http_req(ctx, "DELETE", files + dotfile, auth=auth)
+        if r.status == 204:
+            # and from alice's trash bin (it holds "<name>.d<time>")
+            trash = "/cloud/remote.php/dav/trashbin/%s/trash/" % uid
+            r = http_req(ctx, "PROPFIND", trash, auth=auth, body=propfind,
+                         headers={"Depth": "1", "Content-Type": "application/xml"})
+            if r.status == 207:
+                for href in re.findall(r"<d:href>([^<]+)</d:href>", r.text()):
+                    if urllib.parse.unquote(href.rstrip("/").rsplit("/", 1)[-1]).startswith(dotfile + ".d"):
+                        http_req(ctx, "DELETE", href, auth=auth)
+
+
 def nc_user_info(ctx, user, pw):
     r = http_req(ctx, "GET", "/cloud/ocs/v1.php/cloud/user?format=json",
                  headers={"OCS-APIRequest": "true"}, auth=(user, pw))
@@ -2204,7 +2299,10 @@ def c_zpush_sync(ctx):
     # An ActiveSync account as a phone sets it up: Provision, FolderSync, and
     # a Sync of the calendars and the address books, which Z-Push reads from
     # Nextcloud over CalDAV/CardDAV from 127.0.0.1 (B99, B120). A marked event
-    # and contact, put into Nextcloud over DAV first, must arrive.
+    # and contact, put into Nextcloud over DAV first, must arrive. So must a
+    # second marked contact whose card name has no ".vcf", like Nextcloud's
+    # example contact "default" and the cards of some clients: Z-Push 2.7.7
+    # asked for it with ".vcf" and ended the whole Sync with HTTP 500 (B128).
     eas = _load_eas()
     uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
     auth = (ctx.alice, ctx.user_pw)
@@ -2216,6 +2314,8 @@ def c_zpush_sync(ctx):
         raise Fail("PROPFIND %s HTTP %d" % (cal_home, r.status))
     event = cal_home + "personal/%s.ics" % mark
     card = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/%s.vcf" % (uid, mark)
+    mark_noext = mark + "-noext"
+    card_noext = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/%s" % (uid, mark_noext)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     start = time.strftime("%Y%m%dT%H0000Z", time.gmtime(time.time() + 86400))
     end = time.strftime("%Y%m%dT%H3000Z", time.gmtime(time.time() + 86400))
@@ -2224,10 +2324,12 @@ def c_zpush_sync(ctx):
            "END:VEVENT\r\nEND:VCALENDAR\r\n" % (mark, stamp, start, end, mark))
     vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s\r\nFN:%s contact\r\nN:%s;Smoke;;;\r\n"
            "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+    vcf_noext = vcf.replace(mark, mark_noext)
     created = []
     try:
         for path, body, ctype in ((event, ics, "text/calendar; charset=utf-8"),
-                                  (card, vcf, "text/vcard; charset=utf-8")):
+                                  (card, vcf, "text/vcard; charset=utf-8"),
+                                  (card_noext, vcf_noext, "text/vcard; charset=utf-8")):
             for attempt in range(3):
                 # Nextcloud on SQLite answers 500 ("database is locked")
                 # while its cron job or a user's first login writes
@@ -2257,17 +2359,92 @@ def c_zpush_sync(ctx):
                 ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
                                % (shlex.quote(ctx.alice), devid), timeout=120)
 
-        def found(folders):
-            return any(mark in " ".join(eas.flat_strings(a)) for f in folders for a in adds.get(f["ServerId"], []))
-        missing = [what for what, folders in (("event", cals), ("contact", cons)) if not found(folders)]
+        def found(folders, m):
+            # the strings of an Add, split at the words: mark is a prefix of mark_noext
+            return any(m in " ".join(eas.flat_strings(a)).split() for f in folders for a in adds.get(f["ServerId"], []))
+        missing = [what for what, folders, m in (("event", cals, mark), ("contact", cons, mark),
+                                                 ("contact without .vcf", cons, mark_noext)) if not found(folders, m)]
         if missing:
             raise Fail("Sync ok, but the marked %s did not arrive (adds: %s)" % (
                 " and ".join(missing), {f.get("DisplayName"): len(adds.get(f["ServerId"], [])) for f in cals + cons}))
-        return "Provision, FolderSync (%d calendar, %d contact folders), Sync: event and contact arrived" % (
-            len(cals), len(cons))
+        return ("Provision, FolderSync (%d calendar, %d contact folders), Sync: event, contact and contact "
+                "without .vcf arrived" % (len(cals), len(cons)))
     finally:
         for path in created:
             http_req(ctx, "DELETE", path, auth=auth)
+
+
+def c_zpush_ping(ctx):
+    # B129: a Ping (the push long poll) lasts as long as the heartbeat the
+    # phone asks for, and nginx ended every Ping longer than its
+    # fastcgi_read_timeout for /Microsoft-Server-ActiveSync (630 s) with 504.
+    # A Ping longer than the box allows gets status 5 with the bound at once,
+    # and (with --ssh) the timeout of every such location is at least a
+    # minute longer than that bound. The Ping waits 90 s at most: a box
+    # without a bound keeps it open (until nginx's 504), and a newer Ping of
+    # the device ends that wait in Z-Push; the check waits for that newer
+    # Ping (60 s), so that no Ping of the device is left when it is removed.
+    eas = _load_eas()
+    wait = 90
+    devid = "miabsmokeping" + ctx.tok
+    c = eas.Client(ctx.hostname, ctx.alice, ctx.user_pw, devid, addr=ctx.net.addr(443),
+                   user_agent="miab-fork-smoke/1")
+    try:
+        c.provision()
+        c.folder_sync()
+        cons = c.folders_of(eas.TYPE_CONTACTS, eas.TYPE_USER_CONTACTS)
+        if not cons:
+            raise Fail("FolderSync: no contact folder")
+        c.sync([cons[0]["ServerId"]])
+        t0 = time.time()
+        try:
+            st, bound = c.ping_status([(cons[0]["ServerId"], "Contacts")], 3600, timeout=wait)
+        except (TimeoutError, socket.timeout):
+            # Z-Push ends the old Ping (with more than 60 s to go) when it
+            # sees a newer one of the device, at its next check (PING_INTERVAL,
+            # 30 s), without saving its state; the newer one, of 60 s, saves
+            # the device's state when it ends: wait for it, or it would write
+            # the state again after the device's removal below.
+            try:
+                c.ping_status([(cons[0]["ServerId"], "Contacts")], 60, timeout=150)
+            except (TimeoutError, socket.timeout, OSError, eas.EASError):
+                pass
+            raise Fail("Ping with a heartbeat of 3600 s: no status 5 within %d s (no Ping bound: nginx ends it "
+                       "with 504 after its fastcgi_read_timeout)" % wait)
+        took = time.time() - t0
+    except eas.EASError as e:
+        raise Fail("%s (%s)" % (e, e.kind))
+    finally:
+        if ctx.remote.available():
+            ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
+                           % (shlex.quote(ctx.alice), devid), timeout=120)
+    if st != "5" or not (bound or "").isdigit() or not 60 <= int(bound) <= 3540 or took > 60:
+        raise Fail("Ping with a heartbeat of 3600 s: status %s, HeartbeatInterval %s after %.0f s (expected status 5 "
+                   "with the box's bound, 60-3540 s, at once)" % (st, bound, took))
+    bound = int(bound)
+    msg = "heartbeat 3600 s: status 5 with the bound %d s after %.1f s" % (bound, took)
+    if not ctx.remote.available():
+        return msg + " (nginx's timeout not checked: needs --ssh)"
+    rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("nginx -T: exit %d %s" % (rc, err.strip()[:200]))
+    timeouts, inside = [], False
+    for line in out.splitlines():
+        w = line.split()
+        if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
+            inside = True
+            timeouts.append(60)  # nginx's default, unless the location sets one
+        elif inside and w[:1] == ["fastcgi_read_timeout"]:
+            v = w[1].rstrip(";")
+            timeouts[-1] = int(v[:-1]) if v.endswith("s") else int(v)
+        elif inside and w[:1] == ["}"]:
+            inside = False
+    if not timeouts:
+        raise Fail("nginx has no location /Microsoft-Server-ActiveSync")
+    if min(timeouts) < bound + 60:
+        raise Fail("fastcgi_read_timeout %d s of /Microsoft-Server-ActiveSync is not a minute longer than the Ping "
+                   "bound %d s: nginx ends a long Ping with 504" % (min(timeouts), bound))
+    return msg + "; fastcgi_read_timeout %d s in %d locations" % (min(timeouts), len(timeouts))
 
 
 def c_zpush_autodiscover(ctx):
@@ -3715,6 +3892,7 @@ def main():
         run_check("nextcloud-caldav-propfind", c_nc_dav, ctx, "caldav")
         run_check("nextcloud-carddav-propfind", c_nc_dav, ctx, "carddav")
         run_check("nextcloud-webdav-propfind", c_nc_dav, ctx, "webdav")
+        run_check("nextcloud-dav-proxy", c_nc_dav_proxy, ctx)
         run_check("nextcloud-share-scope", c_nc_share_scope, ctx)
         run_check("roundcube-login", c_roundcube, ctx)
         run_check("zpush-options", c_zpush_options, ctx)
@@ -3725,6 +3903,7 @@ def main():
         run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
         run_check("nextcloud-forwarded-for", c_nc_forwarded_for, ctx)
         run_check("zpush-sync", c_zpush_sync, ctx)
+        run_check("zpush-ping", c_zpush_ping, ctx)
     if want("mail"):
         print("== mail flow")
         st, _ = run_check("mail-flow-send", c_mail_flow, ctx)

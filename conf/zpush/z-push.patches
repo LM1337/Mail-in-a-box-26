@@ -1,0 +1,196 @@
+# The fork's changes to Z-Push 2.7.7, applied by setup/zpush.sh on every run
+# (tools/patch_source.py; format and rules there). Each change names its bug
+# in BUGS-fork.md with a "MIAB-Bnnn" comment. Setup marks the installed tree
+# with this file's checksum (/usr/local/lib/z-push/version) and installs a
+# fresh copy of Z-Push when it changes, so a block may be edited: it is
+# always applied to the original text.
+
+# B128: Z-Push's id of a card is its name on the server without ".vcf", and
+# its CardDAV client asked only for id + ".vcf". A card whose name has no
+# extension (Nextcloud's example contact "default", the cards of some other
+# clients) was then missing from the answer, as Nextcloud leaves a name it
+# does not know out of a multiget (no 404 for it), and GetMessage() failed
+# with a fatal error that ended the whole Sync request with HTTP 500.
+
+@@ include/z_carddav.php
+<<<
+    public function get_xml_vcard($vcard_id) {
+//         ZLog::Write(LOGLEVEL_DEBUG, sprintf("BackendCardDAV->carddav_backend->get_xml_vcard"));
+        $href = $this->url_parts['path'] . str_replace($this->url_vcard_extension, null, $vcard_id) . $this->url_vcard_extension;
+
+        // If we don't ask for allprop, SOGo doesn't return the content_type
+        $xml = <<<EOFXMLGETXMLVCARD
+<?xml version="1.0" encoding="utf-8" ?>
+<C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+    <D:prop>
+        <D:getetag/>
+        <D:getlastmodified/>
+        <C:address-data>
+            <C:allprop/>
+        </C:address-data>
+    </D:prop>
+    <D:href>$href</D:href>
+</C:addressbook-multiget>
+EOFXMLGETXMLVCARD;
+
+        return $this->do_query_report($xml);
+    }
+===
+    public function get_xml_vcard($vcard_id) {
+//         ZLog::Write(LOGLEVEL_DEBUG, sprintf("BackendCardDAV->carddav_backend->get_xml_vcard"));
+        // MIAB-B128: the id is the card's name without the extension. Ask for
+        // the name with the extension first, then for the name without it: a
+        // server leaves a name it does not know out of the multiget answer.
+        $name = str_replace($this->url_vcard_extension, '', $vcard_id);
+        $names = array($name . $this->url_vcard_extension);
+        if (strlen($this->url_vcard_extension) > 0) {
+            $names[] = $name;
+        }
+        foreach ($names as $n) {
+            $href = $this->url_parts['path'] . $n;
+
+            // If we don't ask for allprop, SOGo doesn't return the content_type
+            $xml = <<<EOFXMLGETXMLVCARD
+<?xml version="1.0" encoding="utf-8" ?>
+<C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+    <D:prop>
+        <D:getetag/>
+        <D:getlastmodified/>
+        <C:address-data>
+            <C:allprop/>
+        </C:address-data>
+    </D:prop>
+    <D:href>$href</D:href>
+</C:addressbook-multiget>
+EOFXMLGETXMLVCARD;
+
+            $result = $this->do_query_report($xml);
+            $found = new SimpleXMLElement($result);
+            if (isset($found->element[0])) {
+                break;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * MIAB-B128: the name of an existing card on the server and its UID: the
+     * id with the extension, or else the id without it (Nextcloud's example
+     * contact "default"). For a card that is on the server under neither name,
+     * the name with the extension and no UID.
+     *
+     * @param	string	$vcard_id	vCard id on the CardDAV server
+     * @return	array				(name, UID or null)
+     */
+    private function existing_vcard($vcard_id) {
+        $names = array($vcard_id . $this->url_vcard_extension);
+        if (strlen($this->url_vcard_extension) > 0) {
+            $names[] = $vcard_id;
+        }
+        foreach ($names as $name) {
+            $result = $this->query($this->url . $name, 'GET');
+            if ($result['http_code'] == 200) {
+                $uid = null;
+                $unfolded = preg_replace("/\r?\n[ \t]/", '', $result['response']);
+                if (preg_match('/^UID:(.*?)\r?$/mi', $unfolded, $m) && trim($m[1]) !== '') {
+                    $uid = trim($m[1]);
+                }
+                return array($name, $uid);
+            }
+        }
+        return array($names[0], null);
+    }
+>>>
+
+@@ include/z_carddav.php
+<<<
+        $result = $this->query($this->url . $vcard_id . $this->url_vcard_extension, 'DELETE');
+===
+        // MIAB-B128: the card's own name, which may have no extension
+        list($vcard_name, ) = $this->existing_vcard($vcard_id);
+        $result = $this->query($this->url . $vcard_name, 'DELETE');
+>>>
+
+@@ include/z_carddav.php
+<<<
+        if ($vcard_id === null) {
+            $vcard_id	= $this->generate_vcard_id();
+        }
+
+        $vcard = str_replace("\nEND:VCARD","\nUID:" . $vcard_id . "\r\nEND:VCARD", $vcard);
+        $result = $this->query($this->url . $vcard_id . $this->url_vcard_extension, 'PUT', $vcard, 'text/vcard');
+===
+        if ($vcard_id === null) {
+            $vcard_id	= $this->generate_vcard_id();
+            $vcard_name = $vcard_id . $this->url_vcard_extension;
+            $vcard_uid = $vcard_id;
+        }
+        else {
+            // MIAB-B128: an update keeps the card's name on the server, which
+            // may have no extension (otherwise it would add a second card),
+            // and its UID, which must not change (RFC 6350).
+            list($vcard_name, $vcard_uid) = $this->existing_vcard($vcard_id);
+            if ($vcard_uid === null) {
+                $vcard_uid = $vcard_id;
+            }
+        }
+
+        $vcard = str_replace("\nEND:VCARD","\nUID:" . $vcard_uid . "\r\nEND:VCARD", $vcard);
+        $result = $this->query($this->url . $vcard_name, 'PUT', $vcard, 'text/vcard');
+>>>
+
+# B128: one card that is not on the server any more (or that the server does
+# not return) no longer ends the whole Sync with a fatal error: GetMessage()
+# and StatMessage() log it and return false, and Z-Push skips the card.
+
+@@ backend/carddav/carddav.php
+<<<
+            if ($xml_vcard !== false) {
+                $truncsize = Utils::GetTruncSize($contentparameters->GetTruncation());
+                $xml_data = new SimpleXMLElement($xml_vcard);
+                $message = $this->ParseFromVCard($xml_data->element[0]->vcard->__toString(), $truncsize);
+            }
+===
+            if ($xml_vcard !== false) {
+                $truncsize = Utils::GetTruncSize($contentparameters->GetTruncation());
+                $xml_data = new SimpleXMLElement($xml_vcard);
+                // MIAB-B128: no fatal error for a card the server did not return
+                if (isset($xml_data->element[0]->vcard)) {
+                    $message = $this->ParseFromVCard($xml_data->element[0]->vcard->__toString(), $truncsize);
+                }
+                else {
+                    ZLog::Write(LOGLEVEL_ERROR, sprintf("BackendCardDAV->GetMessage - The server returned no vcard '%s' in '%s'", $vcardId, $addressbookId));
+                }
+            }
+>>>
+
+@@ backend/carddav/carddav.php
+<<<
+                if ($xml_vcard !== false) {
+                    $vcard = new SimpleXMLElement($xml_vcard);
+                    $this->contactsetag[$id] = $vcard->element[0]->etag->__toString();
+                    unset($vcard);
+                }
+                unset($xml_vcard);
+            }
+        }
+        $message["mod"] = $this->contactsetag[$id];
+===
+                if ($xml_vcard !== false) {
+                    $vcard = new SimpleXMLElement($xml_vcard);
+                    // MIAB-B128: no fatal error for a card the server did not return
+                    if (isset($vcard->element[0]->etag)) {
+                        $this->contactsetag[$id] = $vcard->element[0]->etag->__toString();
+                    }
+                    unset($vcard);
+                }
+                unset($xml_vcard);
+            }
+        }
+        if (!isset($this->contactsetag[$id])) {
+            // MIAB-B128: the card is gone (or the server did not return it)
+            ZLog::Write(LOGLEVEL_WARN, sprintf("BackendCardDAV->StatMessage - vcard '%s' not found", $id));
+            return false;
+        }
+        $message["mod"] = $this->contactsetag[$id];
+>>>

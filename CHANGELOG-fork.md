@@ -159,6 +159,36 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   for nginx's 502 and 504, a timeout and a lost connection it shows a
   clear message and what to do, on every page, instead of only "Something
   went wrong, sorry." (B125).
+* ActiveSync syncs the contacts of users with a card whose name has no
+  `.vcf`, such as Nextcloud's example contact `default`, which users whose
+  first Nextcloud login was on rc3 to rc6 still have (B99 stopped new ones
+  only), and the cards of clients that name them that way. Z-Push asked
+  for every card with `.vcf` added and, for such a card, failed with a PHP
+  error: the whole Sync answered HTTP 500, every time. Setup now changes
+  Z-Push's CardDAV client on every run (conf/zpush/z-push.patches, applied
+  by the new `tools/patch_source.py`, which stops setup if a change does
+  not apply): it asks once more without `.vcf`, skips a card the server
+  does not return instead of failing, and changes or deletes such a card
+  from the phone under its own name, keeping its UID (B128).
+* A phone's ActiveSync Ping (push) with a heartbeat of more than 630 s no
+  longer ends with HTTP 504 after 10.5 minutes (seen on a production box:
+  68 in a day, all Pings of one iPhone, spread over the whole day). nginx gave up on
+  Z-Push, which waits as long as the phone asks; the PHP process went on
+  waiting, and a change it found then reached the phone only with its next
+  Ping. nginx now waits up to 3660 s on `/Microsoft-Server-ActiveSync`, and
+  Z-Push allows a heartbeat of at most 3540 s, the protocol's maximum: a
+  Ping that asks for more gets status 5 with that bound, and the phone
+  pings with it (B129).
+* The proxy of `/caldav`, `/carddav` and `/webdav` to Nextcloud passes the
+  path escaped, as the client sent it, and the query string. It passed
+  nginx's decoded path: a name with a space got HTTP 400, an escaped `?`
+  began a query string (a DELETE of a card named `?x.vcf` deleted the whole
+  address book on a test box), and a query such as `?export` was dropped.
+  Only clients set up with these short paths were affected, not those with
+  the `/cloud/remote.php/...` URLs or `.well-known`, and not Z-Push. Files
+  and cards whose names begin with `.ht`, `.git`, `.svn`, `.hg` or `.bzr`
+  pass through these paths as before (nginx's dotfile block does not apply
+  to them; B130).
 
 ### Changed
 
@@ -243,6 +273,32 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   log when a client comes in during setup's restart of OpenDKIM (also
   "Application error"), and fts-xapian's retries of its write lock when two
   processes index a new folder at once (BUGS-fork.md, known limitations).
+* Tests: the smoke test's `zpush-sync` also syncs a marked card whose name
+  has no `.vcf` (B128).
+* Tests: the smoke test's new check `zpush-ping` (group `activesync`): a
+  Ping with a heartbeat of 3600 s gets status 5 with the box's bound at
+  once, and nginx's timeout for `/Microsoft-Server-ActiveSync` is at least
+  a minute longer than that bound (B129). `tests/fork/eas.py --ping`
+  accepts status 5 and prints the bound.
+* Tests: the smoke test's new check `nextcloud-dav-proxy` (group `web`):
+  a card whose name has a space and a `?` is read, found in `?export` and
+  deleted through `/carddav`, and the address book stays; a file named
+  `.htmiab-smoke-...` put through Nextcloud's own path is read through
+  `/webdav`, and a card `.gitmiab-smoke-...vcf` through `/carddav`, as
+  nginx's dotfile block must not apply there; `/caldav` and `/webdav`
+  answer PROPFIND (B130).
+* Tests: the smoke test's `zpush-ping` waits 90 s at most for the answer
+  to its Ping of 3600 s (on a box without the bound it waited for nginx's
+  504 after 635 s, and left Z-Push waiting for up to an hour): no answer
+  within 90 s fails the check, and a Ping of 60 s of the same device ends
+  the long one in Z-Push (about 2.5 minutes in all, and no Ping is left).
+  `tests/fork/eas.py`: `ping_status()` takes a timeout.
+* Setup marks Z-Push's directory with the version and the checksum of
+  conf/zpush/z-push.patches (`/usr/local/lib/z-push/version`, such as
+  `2.7.7+patches-<16 hex digits>`), and installs a fresh copy of Z-Push
+  when either changes: a later release that changes a block of the patch
+  file would otherwise find neither its old nor its new text and stop
+  setup (B128).
 
 ### Upgrade note
 
@@ -300,6 +356,22 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * A new password with a null character or of more than 511 bytes is now
   refused with a message (B127). Before, such a password gave a hash that no
   password matched. Existing passwords are not changed.
+* Setup changes a few functions of Z-Push 2.7.7 in `/usr/local/lib/z-push`
+  (conf/zpush/z-push.patches) on every run and stops with a message if one
+  of them is not as expected, for example after changes made there by
+  hand. Nextcloud's example contact now syncs to phones like any other
+  contact; delete it in Nextcloud's Contacts if it is not wanted. A phone
+  that got HTTP 500 needs no new setup: its next Sync continues (B128).
+  The first update with this release downloads Z-Push 2.7.7 from GitHub
+  once more (its directory is marked with the patch file's checksum now);
+  changes made there by hand are lost, as at a new Z-Push version.
+* After the update, a reload of nginx keeps its old worker processes until
+  their running ActiveSync long polls end, up to an hour (before: 10.5
+  minutes). Pings of up to 59 minutes hold a PHP-FPM worker each, as they
+  already did past nginx's old timeout (B129).
+* `/caldav`, `/carddav` and `/webdav` are now prefix locations of nginx: a
+  proxy of your own for one of these paths (`www/custom.yaml`) would now
+  clash with them (B130).
 
 ### Planned
 
@@ -339,12 +411,6 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
   (`milter_default_action`). Candidates for a reload or a restart only on a
   change.
-* On a copy of a production box, Z-Push's Sync of the contacts of a new
-  ActiveSync user fails with HTTP 500 (`carddav.php` "Call to a member
-  function __toString() on null"), before and after the update: the
-  multiget of the cards of Nextcloud's system address book
-  (`z-server-generated--system`, cards named `OCA%5cUserExternal%5cIMAP:...`)
-  comes back empty. Not seen on a fresh box. To be looked at.
 * A Dovecot reload (B122) still has two client-visible moments: a login
   that the old login process hands to the new auth process at that moment
   fails as an internal failure (Nextcloud's `user_external` counts it as a

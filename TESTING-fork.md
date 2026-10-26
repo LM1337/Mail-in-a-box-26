@@ -262,7 +262,14 @@ report. The groups:
   host keys sshd serves, custom records.
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail
   password; Nextcloud sharing within the mail domain (from rc4); Roundcube
-  login; Z-Push OPTIONS and Autodiscover.
+  login; Z-Push OPTIONS and Autodiscover; `nextcloud-dav-proxy` (after rc7):
+  the proxy of `/carddav` passes an escaped name and the query string (a
+  card whose name has a space and a `?`, put through Nextcloud's own path,
+  is read, found in `?export` and deleted through `/carddav`, and the
+  address book stays; B130), nginx's dotfile block does not apply to these
+  paths (a file `.htmiab-smoke-...` put through Nextcloud's own path is read
+  through `/webdav`, a card `.gitmiab-smoke-...vcf` through `/carddav`), and
+  `/caldav` and `/webdav` answer PROPFIND.
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed
@@ -272,9 +279,16 @@ report. The groups:
   for that address, not for 127.0.0.1 (B121; its attempts are reset
   afterwards); `zpush-sync`: an ActiveSync account as a phone sets it
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
-  contact folders), and a marked event and contact put into alice's
-  Nextcloud over DAV just before arrive; both are deleted again, and the
-  test device is removed from Z-Push (with `--ssh`). Quick enough to run
+  contact folders), and a marked event and two marked contacts put into
+  alice's Nextcloud over DAV just before arrive, one of the cards with a
+  name without `.vcf`, like Nextcloud's example contact `default` (B128);
+  all are deleted again, and the test device is removed from Z-Push (with
+  `--ssh`); `zpush-ping`: a Ping with a heartbeat of 3600 s gets status 5
+  with the box's bound at once (no answer within 90 s fails it: no bound;
+  a Ping of 60 s of the device then ends the long one), and (with `--ssh`) nginx's
+  `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
+  at least a minute longer than that bound, so a long Ping does not end
+  with 504 (B129). Quick enough to run
   right after a setup run: `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail
