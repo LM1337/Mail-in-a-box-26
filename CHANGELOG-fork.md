@@ -68,6 +68,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
+* ActiveSync syncs the contacts of users with a card whose name has no
+  `.vcf`, such as Nextcloud's example contact `default`, which users whose
+  first Nextcloud login was on rc3 to rc6 still have (B99 stopped new ones
+  only), and the cards of clients that name them that way. Z-Push asked
+  for every card with `.vcf` added and, for such a card, failed with a PHP
+  error: the whole Sync answered HTTP 500, every time. Setup now changes
+  Z-Push's CardDAV client on every run (conf/zpush/z-push.patches, applied
+  by the new `tools/patch_source.py`, which stops setup if a change does
+  not apply): it asks once more without `.vcf`, skips a card the server
+  does not return instead of failing, and changes or deletes such a card
+  from the phone under its own name, keeping its UID (B128).
 
 ### Changed
 
@@ -103,6 +114,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   log when a client comes in during setup's restart of OpenDKIM (also
   "Application error"), and fts-xapian's retries of its write lock when two
   processes index a new folder at once (BUGS-fork.md, known limitations).
+* Tests: the smoke test's `zpush-sync` also syncs a marked card whose name
+  has no `.vcf` (B128).
 
 ### Upgrade note
 
@@ -117,6 +130,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   permissions in another place.
 * The first update with this release reloads Dovecot once (its open IMAP
   sessions log in again), as the checksum of its configuration is new.
+* Setup changes a few functions of Z-Push 2.7.7 in `/usr/local/lib/z-push`
+  (conf/zpush/z-push.patches) on every run and stops with a message if one
+  of them is not as expected, for example after changes made there by
+  hand. Nextcloud's example contact now syncs to phones like any other
+  contact; delete it in Nextcloud's Contacts if it is not wanted. A phone
+  that got HTTP 500 needs no new setup: its next Sync continues (B128).
 
 ### Planned
 
@@ -143,12 +162,6 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
   (`milter_default_action`). Candidates for a reload or a restart only on a
   change.
-* On a copy of a production box, Z-Push's Sync of the contacts of a new
-  ActiveSync user fails with HTTP 500 (`carddav.php` "Call to a member
-  function __toString() on null"), before and after the update: the
-  multiget of the cards of Nextcloud's system address book
-  (`z-server-generated--system`, cards named `OCA%5cUserExternal%5cIMAP:...`)
-  comes back empty. Not seen on a fresh box. To be looked at.
 * A Dovecot reload (B122) still has two client-visible moments: a login
   that the old login process hands to the new auth process at that moment
   fails as an internal failure (Nextcloud's `user_external` counts it as a

@@ -245,9 +245,11 @@ report. The groups:
   for that address, not for 127.0.0.1 (B121; its attempts are reset
   afterwards); `zpush-sync`: an ActiveSync account as a phone sets it
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
-  contact folders), and a marked event and contact put into alice's
-  Nextcloud over DAV just before arrive; both are deleted again, and the
-  test device is removed from Z-Push (with `--ssh`). Quick enough to run
+  contact folders), and a marked event and two marked contacts put into
+  alice's Nextcloud over DAV just before arrive, one of the cards with a
+  name without `.vcf`, like Nextcloud's example contact `default` (B128);
+  all are deleted again, and the test device is removed from Z-Push (with
+  `--ssh`). Quick enough to run
   right after a setup run: `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail

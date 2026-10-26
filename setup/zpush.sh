@@ -84,6 +84,19 @@ cp conf/zpush/autodiscover_config.php /usr/local/lib/z-push/autodiscover/config.
 sed -i "s/PRIMARY_HOSTNAME/$PRIMARY_HOSTNAME/" /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezone --value)');^" /usr/local/lib/z-push/autodiscover/config.php
 
+# The fork's changes to Z-Push's code (conf/zpush/z-push.patches): its CardDAV
+# client finds cards whose name has no ".vcf", such as Nextcloud's example
+# contact "default", and one card that the server does not return no longer
+# ends the whole Sync with HTTP 500 (B128). Applied on every run, so that an
+# installation from before a change gets it without a new download of
+# Z-Push; files that have it already are left alone. Setup stops if a change
+# does not apply (another Z-Push version), instead of running code that the
+# fork has not checked. /usr/local/lib/z-push belongs to root.
+if ! tools/patch_source.py /usr/local/lib/z-push conf/zpush/z-push.patches; then
+	echo "Could not apply conf/zpush/z-push.patches to Z-Push $VERSION in /usr/local/lib/z-push."
+	exit 1
+fi
+
 # Some directories it will use.
 
 mkdir -p /var/log/z-push

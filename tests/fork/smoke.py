@@ -1966,7 +1966,10 @@ def c_zpush_sync(ctx):
     # An ActiveSync account as a phone sets it up: Provision, FolderSync, and
     # a Sync of the calendars and the address books, which Z-Push reads from
     # Nextcloud over CalDAV/CardDAV from 127.0.0.1 (B99, B120). A marked event
-    # and contact, put into Nextcloud over DAV first, must arrive.
+    # and contact, put into Nextcloud over DAV first, must arrive. So must a
+    # second marked contact whose card name has no ".vcf", like Nextcloud's
+    # example contact "default" and the cards of some clients: Z-Push 2.7.7
+    # asked for it with ".vcf" and ended the whole Sync with HTTP 500 (B128).
     eas = _load_eas()
     uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
     auth = (ctx.alice, ctx.user_pw)
@@ -1978,6 +1981,8 @@ def c_zpush_sync(ctx):
         raise Fail("PROPFIND %s HTTP %d" % (cal_home, r.status))
     event = cal_home + "personal/%s.ics" % mark
     card = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/%s.vcf" % (uid, mark)
+    mark_noext = mark + "-noext"
+    card_noext = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/%s" % (uid, mark_noext)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     start = time.strftime("%Y%m%dT%H0000Z", time.gmtime(time.time() + 86400))
     end = time.strftime("%Y%m%dT%H3000Z", time.gmtime(time.time() + 86400))
@@ -1986,10 +1991,12 @@ def c_zpush_sync(ctx):
            "END:VEVENT\r\nEND:VCALENDAR\r\n" % (mark, stamp, start, end, mark))
     vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s\r\nFN:%s contact\r\nN:%s;Smoke;;;\r\n"
            "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+    vcf_noext = vcf.replace(mark, mark_noext)
     created = []
     try:
         for path, body, ctype in ((event, ics, "text/calendar; charset=utf-8"),
-                                  (card, vcf, "text/vcard; charset=utf-8")):
+                                  (card, vcf, "text/vcard; charset=utf-8"),
+                                  (card_noext, vcf_noext, "text/vcard; charset=utf-8")):
             for attempt in range(3):
                 # Nextcloud on SQLite answers 500 ("database is locked")
                 # while its cron job or a user's first login writes
@@ -2019,14 +2026,16 @@ def c_zpush_sync(ctx):
                 ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
                                % (shlex.quote(ctx.alice), devid), timeout=120)
 
-        def found(folders):
-            return any(mark in " ".join(eas.flat_strings(a)) for f in folders for a in adds.get(f["ServerId"], []))
-        missing = [what for what, folders in (("event", cals), ("contact", cons)) if not found(folders)]
+        def found(folders, m):
+            # the strings of an Add, split at the words: mark is a prefix of mark_noext
+            return any(m in " ".join(eas.flat_strings(a)).split() for f in folders for a in adds.get(f["ServerId"], []))
+        missing = [what for what, folders, m in (("event", cals, mark), ("contact", cons, mark),
+                                                 ("contact without .vcf", cons, mark_noext)) if not found(folders, m)]
         if missing:
             raise Fail("Sync ok, but the marked %s did not arrive (adds: %s)" % (
                 " and ".join(missing), {f.get("DisplayName"): len(adds.get(f["ServerId"], [])) for f in cals + cons}))
-        return "Provision, FolderSync (%d calendar, %d contact folders), Sync: event and contact arrived" % (
-            len(cals), len(cons))
+        return ("Provision, FolderSync (%d calendar, %d contact folders), Sync: event, contact and contact "
+                "without .vcf arrived" % (len(cals), len(cons)))
     finally:
         for path in created:
             http_req(ctx, "DELETE", path, auth=auth)
