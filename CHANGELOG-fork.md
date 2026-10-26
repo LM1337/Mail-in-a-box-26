@@ -304,7 +304,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `web`): `/mail/config/...` still answers 403, a missing static page
   under `/<name>/mail/config/` answers 404, and a file put into Nextcloud
   below a folder `mail/config` is read through `/cloud/remote.php` and
-  through `/webdav` (B134).
+  through `/webdav` (B134). The log audit's smoke list accepts nginx's
+  line for that missing page.
 * Tests: the smoke test's `zpush-ping` waits 90 s at most for the answer
   to its Ping of 3600 s (on a box without the bound it waited for nginx's
   504 after 635 s, and left Z-Push waiting for up to an hour): no answer
