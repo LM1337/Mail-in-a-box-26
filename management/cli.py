@@ -61,8 +61,8 @@ def setup_key_auth(mgmt_uri):
 if len(sys.argv) < 2:
 	print("""Usage:
   {cli} user                                     (lists users)
-  {cli} user add user@domain.com [password]
-  {cli} user password user@domain.com [password]
+  {cli} user add user@domain.com [password|-]
+  {cli} user password user@domain.com [password|-]
   {cli} user remove user@domain.com
   {cli} user make-admin user@domain.com
   {cli} user quota user@domain [new-quota]       (get or set user quota)
@@ -76,6 +76,10 @@ if len(sys.argv) < 2:
   {cli} alias remove incoming.name@domain.com
 
 Removing a mail user does not delete their mail folders on disk. It only prevents IMAP/SMTP login.
+
+Without a password, "user add" and "user password" ask for it. A password given
+as an argument is visible to every local process (in its command line); with
+"-" the password is read from standard input instead (its first line).
 """.format(
 	cli="management/cli.py"
 		))
@@ -97,6 +101,9 @@ elif sys.argv[1] == "user" and sys.argv[2] in {"add", "password"}:
 		pw = read_password()
 	else:
 		email, pw = sys.argv[3:5]
+		if pw == "-":
+			# The password on standard input, not in the command line (B127).
+			pw = sys.stdin.readline().rstrip("\r\n")
 
 	if sys.argv[2] == "add":
 		print(mgmt("/mail/users/add", { "email": email, "password": pw }))

@@ -77,10 +77,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   compares in constant time. It writes the same hashes as before and checks
   every form MIAB and Roundcube store (with and without `rounds=`); other
   schemes go to `doveadm pw -t`, with the password on its standard input.
-  A login with an unknown address takes as long as a wrong password (B127).
+  A login with an unknown address takes as long as a wrong password. Setup
+  no longer puts the first user's password, and tools/dns_update and
+  tools/web_update no longer the API key, on a command line either (B127).
 
 ### Changed
 
+* `management/cli.py user add EMAIL -` and `user password EMAIL -` read the
+  password from standard input (its first line) instead of the command
+  line, which every local account can read; without a password they still
+  ask for it. Its usage text says so (B127).
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
