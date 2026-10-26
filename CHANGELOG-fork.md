@@ -81,11 +81,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   duration and those of its steps (duplicity's collection-status, the list
   of the target's files) in the journal of the management daemon; what
   duplicity, rsync and ssh say on stderr is part of the error shown, no
-  longer written into that journal. New API
+  longer written into that journal. A refresh is ended after 15 minutes,
+  with the rsync and ssh that duplicity started. New API
   calls `GET /system/backup/status/saved` and
   `POST /system/backup/status/refresh`; `GET /system/backup/status` still
-  queries the target and waits for it. `tools/update-check.sh backup` no
-  longer takes such a refresh for a running backup (B125).
+  queries the target, but waits for it 30 s at most and not at all while a
+  backup runs: it then returns the saved status at once, with
+  `in_progress` saying why (it would hold the control panel for as long).
+  `tools/update-check.sh backup` no longer takes such a refresh for a
+  running backup, and still stops for any other run of `backup.py` (B125).
 * The status checks no longer stop as a whole when the status of the
   backups cannot be read (the target does not answer, or another duplicity
   runs on the same archive directory): the System Status page showed only

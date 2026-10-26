@@ -1448,7 +1448,8 @@ def c_backup_status(ctx):
     b = j.get("backups") or []
     cfg = admin_api(ctx, "GET", "system/backup/config").json()
     last = b[0].get("date_str", b[0].get("date")) if b else None
-    return "target=%s, %d backups, latest %s" % (cfg.get("target"), len(b), last)
+    return "target=%s, %d backups, latest %s%s" % (cfg.get("target"), len(b), last,
+        " (saved status as of %s: %s)" % (j.get("saved_time_str"), j["in_progress"][:100]) if j.get("in_progress") else "")
 
 
 def c_backup_saved(ctx):

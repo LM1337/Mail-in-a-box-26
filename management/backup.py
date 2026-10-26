@@ -37,9 +37,10 @@ SSH_TIMEOUT_OPTIONS = "-oConnectTimeout=10 -oConnectionAttempts=2"
 STATUS_DIR = ("var", "lib", "mailinabox", "backup-status")
 STATUS_FILE = "status.json"
 STATUS_LOCK = "lock"
-# A refresh ends after this many seconds (the process is ended, duplicity
-# with it). A target that does not answer took about 4 minutes in a test with
-# the ssh options above (duplicity's own 5 attempts), 13 minutes without them.
+# A refresh ends after this many seconds: duplicity and what it started
+# (rsync, ssh) are ended, and the failed refresh is saved. A target that does
+# not answer took about 4 minutes in a test with the ssh options above
+# (duplicity's own 5 attempts), 13 minutes without them.
 REFRESH_LIMIT = 900
 
 def reldate(date, ref, clip):
@@ -456,6 +457,39 @@ def _timings_text(timings):
 		parts.append("file list %.1f s (%d attempt%s)" % (timings["file list"], n, "" if n == 1 else "s"))
 	return ", ".join(parts)
 
+def _signal_own_group(sig):
+	# Send sig to every other process of this process's group, if this
+	# process leads it (the daemon starts the refresh in a session of its
+	# own): duplicity, and the rsync and ssh it started, which would outlive
+	# a duplicity that is killed. Run by hand inside another process group,
+	# nothing is sent (the group is not ours). A process ID cannot move into
+	# this group from elsewhere, so the list cannot name a stranger.
+	me = os.getpid()
+	if os.getpgrp() != me:
+		return 0
+	n = 0
+	for name in os.listdir("/proc"):
+		if not name.isdigit() or int(name) == me:
+			continue
+		try:
+			with open("/proc/%s/stat" % name, "rb") as f:
+				fields = f.read().rsplit(b")", 1)[1].split()
+		except (OSError, IndexError):
+			continue
+		if len(fields) > 2 and fields[2] == str(me).encode():
+			with contextlib.suppress(ProcessLookupError, PermissionError):
+				os.kill(int(name), sig)
+				n += 1
+	return n
+
+def _end_own_group():
+	# After the limit: what is left of the group gets SIGKILL after 5 s.
+	for _ in range(50):
+		if _signal_own_group(0) == 0:
+			return
+		time.sleep(0.1)
+	_signal_own_group(signal.SIGKILL)
+
 def refresh_saved_status(env):
 	# backup.py --refresh-status: one refresh, unless a refresh or a backup
 	# run holds the lock. Logs its duration and those of its steps (to the
@@ -464,7 +498,12 @@ def refresh_saved_status(env):
 	if get_backup_config(env)["target"] == "off":
 		return 0
 	log = sys.stderr
+	timed_out = []
 	def limit(signum, frame):
+		# subprocess kills duplicity when this exception reaches it; its
+		# children are ended here.
+		timed_out.append(True)
+		_signal_own_group(signal.SIGTERM)
 		raise TimeoutError("The refresh took longer than %d s and was ended." % REFRESH_LIMIT)
 	signal.signal(signal.SIGALRM, limit)
 	signal.alarm(REFRESH_LIMIT)
@@ -480,6 +519,8 @@ def refresh_saved_status(env):
 				signal.alarm(0)
 			finally:
 				os.close(lock)
+				if timed_out:
+					_end_own_group()
 		finally:
 			os.close(dfd)
 	except Exception:

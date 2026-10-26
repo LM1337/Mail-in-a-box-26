@@ -405,9 +405,14 @@ paths:
         If the list of backups is empty, this implies no backups have been made yet.
 
         The query runs as a refresh of the saved status (see
-        `/system/backup/status/saved`) and waits for it, up to 600 seconds.
-        It can take minutes when the target does not answer; the saved
-        status answers at once.
+        `/system/backup/status/saved`) and waits for it, up to 30 seconds,
+        because the control panel serves no other request meanwhile. When
+        the refresh takes longer, or while a backup run is in progress (it
+        is not waited for), the saved status is returned at once, with
+        `in_progress` saying why and `saved_time` giving its time, or an
+        `error` when no status has been saved yet. A query can take minutes
+        when the target does not answer; poll `/system/backup/status/saved`
+        for its result.
       operationId: getSystemBackupStatus
       x-codeSamples:
         - lang: curl
@@ -3040,6 +3045,18 @@ components:
         error:
           type: string
           example: Something is wrong with the backup
+        in_progress:
+          type: string
+          description: Only in `/system/backup/status`, when it returns the saved status because a refresh or a backup run is still in progress.
+          example: A refresh of the backup status is still in progress.
+        saved_time:
+          type: number
+          description: With `in_progress`, when the returned status was queried (Unix time).
+          example: 1793023200.5
+        saved_time_str:
+          type: string
+          description: With `in_progress`, saved_time as text.
+          example: 2026-10-26 03:00:12 UTC
       description: Backup status response. Lists the status for all backups.
     SystemBackupSavedStatusResponse:
       type: object

@@ -664,28 +664,45 @@ def backup_refresh_running():
 		return True
 	return status_refreshing()
 
+# How long GET /system/backup/status waits for a refresh. A query takes some
+# seconds when the target answers; the worker serves nothing else meanwhile,
+# so a slow one is not waited for (B125).
+BACKUP_STATUS_WAIT = 30
+
 @app.route('/system/backup/status')
 @authorized_personnel_only
 def backup_status():
-	# A live query, as before (for the API): refresh now, wait for it, and
-	# return what it found. The control panel uses the two views below.
+	# A live query, as before (for the API): refresh now, wait for it up to
+	# BACKUP_STATUS_WAIT, and return what it found. While a backup run holds
+	# the lock, or when the refresh takes longer, the saved status is returned
+	# at once, with in_progress saying why. The control panel uses the two
+	# views below.
 	from backup import get_backup_config, get_saved_status
 	if get_backup_config(env)["target"] == "off":
 		return json_response({})
-	started = time.time()
-	start_backup_refresh()
-	# Up to 600 s (gunicorn's --timeout is 630 s), also for a backup run in
-	# progress, which saves the status at its end.
-	while backup_refresh_running() and time.time() - started < 600:
-		time.sleep(0.5)
+	called = time.time()
 	saved = get_saved_status(env)
+	if not (saved["refreshing"] and (saved["running"] or {}).get("by") == "backup"):
+		start_backup_refresh()
+		while backup_refresh_running() and time.time() - called < BACKUP_STATUS_WAIT:
+			time.sleep(0.5)
+		saved = get_saved_status(env)
+	# A refresh that ended after this call began (also one that was already
+	# running, or the end of a backup run) is a result of now.
 	refresh = saved["refresh"] or {}
-	if saved["time"] is not None and saved["time"] >= started - 1 and isinstance(saved["status"], dict):
-		return json_response(saved["status"])
-	if refresh.get("error") and (refresh.get("started") or 0) >= started - 1:
-		return json_response({ "error": refresh["error"] })
-	if saved["refreshing"]:
-		return json_response({ "error": "A backup run or a refresh of the backup status is still in progress. Try again later." })
+	if isinstance(refresh.get("finished"), (int, float)) and refresh["finished"] >= called:
+		if refresh.get("ok") and isinstance(saved["status"], dict):
+			return json_response(saved["status"])
+		if refresh.get("error"):
+			return json_response({ "error": refresh["error"] })
+	if saved["refreshing"] or (backup_refresh_process is not None and backup_refresh_process.poll() is None):
+		if (saved["running"] or {}).get("by") == "backup":
+			why = "A backup run is in progress (since %s); the status is saved at its end." % saved["running"]["started_str"]
+		else:
+			why = "A refresh of the backup status is still in progress."
+		if isinstance(saved["status"], dict):
+			return json_response(dict(saved["status"], in_progress=why, saved_time=saved["time"], saved_time_str=saved["time_str"]))
+		return json_response({ "error": why + " No status of the backups has been saved yet. Try again later." })
 	return json_response({ "error": "The backup status could not be refreshed (see the log of the mailinabox service)." })
 
 @app.route('/system/backup/status/saved')
