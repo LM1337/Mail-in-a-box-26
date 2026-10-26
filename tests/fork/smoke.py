@@ -1593,33 +1593,33 @@ F2B_FILTER_CASES = [
     # ActiveSync message), after the user names and the e-mail address that the client chose; control
     # characters there are escaped ("\\n" below is a backslash and an n, not a line break).
     ("miab-zpush",
-     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
      "from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
      "from IP 2001:db8::5.",
      "2001:db8::5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [12345] [ WARN] [x from ip 198.51.100.7.] Failed to authenticate user "
+     "26/10/2026 10:00:00 [12345] [WARN] [x from ip 198.51.100.7.] Failed to authenticate user "
      "'x from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
      "with email 'bob@example.com' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
      "with email 'x from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [ WARN] [] Unable to complete autodiscover because login failed for user "
-     "with email 'x\\n26/10/2026 10:00:00 [1] [ WARN] [] Unable to complete autodiscover because login failed "
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'x\\n26/10/2026 10:00:00 [1] [WARN] [] Unable to complete autodiscover because login failed "
      "for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     # Z-Push's own order (before setup/zpush.sh changes it) is not read.
     ("miab-zpush",
-     "26/10/2026 10:00:00 [12345] [ WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "
      "'bob@example.com'",
      None),
 ]

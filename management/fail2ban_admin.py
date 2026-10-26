@@ -70,7 +70,7 @@ MAIL_PORTS = "465,587,993,995,4190"
 # mail ports, so a device with an old password does not lock its network out of
 # webmail and the control panel. The web jails block HTTP and HTTPS, so they
 # are a separate switch, off by default: a CalDAV/CardDAV client with an old
-# password polls Nextcloud every few minutes (a phone ActiveSync) and would
+# password polls Nextcloud every few minutes (a phone over ActiveSync too) and would
 # ban its whole network from webmail and the control panel.
 SLOW_MAIL_JAILS = [
 	# name, filter, log file, ports
@@ -687,8 +687,8 @@ RE_DOVECOT = re.compile(rb"(imap|pop3|managesieve|submission)-login: (?:Info: )?
 # conf/fail2ban/filter.d/miab-zpush.conf: the user names and the e-mail
 # address come from the client, the address is the last thing on the line
 # (setup/zpush.sh moves it there in the ActiveSync message).
-#   26/10/2026 13:00:00 [12345] [ WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' from IP 192.0.2.1.
-#   26/10/2026 13:00:00 [12345] [ WARN] [] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
+#   26/10/2026 13:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' from IP 192.0.2.1.
+#   26/10/2026 13:00:00 [12345] [WARN] [] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
 RE_ZPUSH = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Failed to authenticate user '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
 RE_AUTODISCOVER = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Unable to complete autodiscover because login failed for user with email '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
 
