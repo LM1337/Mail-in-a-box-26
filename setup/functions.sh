@@ -306,8 +306,9 @@ function load_dovecot {
 	#
 	# Nothing is done when Dovecot runs the program of the current package and
 	# already loaded this configuration (its checksum is kept in
-	# /run/mailinabox-dovecot.sha256): an update that changes nothing in
-	# Dovecot's files does not disturb its clients at all. Otherwise a reload
+	# /var/lib/mailinabox/dovecot-config.sha256; after a reboot Dovecot has
+	# loaded the same files): an update that changes nothing in Dovecot's
+	# files does not disturb its clients at all. Otherwise a reload
 	# (doveadm reload): the listening sockets stay, so no connection is
 	# refused, but Dovecot ends the running IMAP sessions (the clients log in
 	# again). Dovecot is restarted only when it does not run or runs an older
@@ -320,7 +321,7 @@ function load_dovecot {
 	# The checksum covers doveconf -n and, as Dovecot reads the certificate,
 	# key and DH files only when it loads its configuration, their size and
 	# time (stat, which reads nothing through a link).
-	local conf sum before i record=/run/mailinabox-dovecot.sha256
+	local conf sum before i record=/var/lib/mailinabox/dovecot-config.sha256
 	conf=$(doveconf -n 2>&1) || { echo; echo "FAILED: doveconf -n"; echo "$conf"; exit 1; }
 	sum=$( {
 		printf '%s\n' "$conf"
@@ -342,6 +343,7 @@ function load_dovecot {
 	else
 		hide_output service dovecot restart
 	fi
+	mkdir -p /var/lib/mailinabox
 	echo "$sum" > "$record"
 }
 
