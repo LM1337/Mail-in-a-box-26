@@ -2036,6 +2036,67 @@ def c_nc_dav_proxy(ctx):
                         http_req(ctx, "DELETE", href, auth=auth)
 
 
+def c_mail_config_path(ctx):
+    # B134: Roundcube's deny of its config directory was the unanchored regex
+    # location "~ /mail/config/.*", which came before the regex locations of
+    # Nextcloud and answered 403 for every path with /mail/config/ in it. Now
+    # "^/mail/config/": /mail/config/ itself is still denied, a Nextcloud file
+    # below a folder "mail/config" is read through /cloud/remote.php and
+    # through the /webdav proxy, and a missing static page under such a path
+    # is a 404, not a 403.
+    uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
+    auth = (ctx.alice, ctx.user_pw)
+    mark = "miab-smoke-%s" % ctx.tok
+    files = "/cloud/remote.php/dav/files/%s/" % uid
+    top = files + mark + "/"
+    body = "%s X-Miab-Test 1\n" % mark
+    propfind = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>'
+    out = []
+    r = http_req(ctx, "GET", "/mail/config/%s.txt" % mark)
+    if r.status != 403:
+        raise Fail("GET /mail/config/%s.txt: HTTP %d (Roundcube's config directory must answer 403)" % (mark, r.status))
+    out.append("/mail/config/ 403")
+    r = http_req(ctx, "GET", "/%s/mail/config/x.txt" % mark)
+    if r.status != 404:
+        raise Fail("GET /%s/mail/config/x.txt (a missing static page): HTTP %d, want 404" % (mark, r.status))
+    out.append("static /.../mail/config/ 404")
+    try:
+        for d in (top, top + "mail/", top + "mail/config/"):
+            for attempt in range(3):
+                # Nextcloud on SQLite answers 500 ("database is locked") now and then
+                r = http_req(ctx, "MKCOL", d, auth=auth)
+                if r.status not in (500, 503):
+                    break
+                time.sleep(10)
+            if r.status != 201:
+                raise Fail("MKCOL %s HTTP %d" % (d, r.status))
+        path = top + "mail/config/x.txt"
+        for attempt in range(3):
+            r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": "text/plain"})
+            if r.status not in (500, 503):
+                break
+            time.sleep(10)
+        if r.status not in (201, 204):
+            raise Fail("PUT %s HTTP %d" % (path, r.status))
+        for via in (path, "/webdav/%s/mail/config/x.txt" % mark):
+            r = http_req(ctx, "GET", via, auth=auth)
+            if r.status != 200 or mark not in r.text():
+                raise Fail("GET %s: HTTP %d (a path with /mail/config/ in it must reach Nextcloud)" % (via, r.status))
+        out.append("Nextcloud file .../mail/config/x.txt 200 through /cloud/remote.php and /webdav")
+        return "; ".join(out)
+    finally:
+        r = http_req(ctx, "DELETE", top, auth=auth)
+        if r.status == 204:
+            # and from alice's trash bin (it holds "<name>.d<time>")
+            trash = "/cloud/remote.php/dav/trashbin/%s/trash/" % uid
+            r = http_req(ctx, "PROPFIND", trash, auth=auth, body=propfind,
+                         headers={"Depth": "1", "Content-Type": "application/xml"})
+            if r.status == 207:
+                for href in re.findall(r"<d:href>([^<]+)</d:href>", r.text()):
+                    if urllib.parse.unquote(href.rstrip("/").rsplit("/", 1)[-1]).startswith(mark + ".d"):
+                        http_req(ctx, "DELETE", href, auth=auth)
+
+
 def nc_user_info(ctx, user, pw):
     r = http_req(ctx, "GET", "/cloud/ocs/v1.php/cloud/user?format=json",
                  headers={"OCS-APIRequest": "true"}, auth=(user, pw))
@@ -3995,6 +4056,7 @@ def main():
         run_check("nextcloud-carddav-propfind", c_nc_dav, ctx, "carddav")
         run_check("nextcloud-webdav-propfind", c_nc_dav, ctx, "webdav")
         run_check("nextcloud-dav-proxy", c_nc_dav_proxy, ctx)
+        run_check("nextcloud-mail-config-path", c_mail_config_path, ctx)
         run_check("nextcloud-share-scope", c_nc_share_scope, ctx)
         run_check("roundcube-login", c_roundcube, ctx)
         run_check("zpush-options", c_zpush_options, ctx)

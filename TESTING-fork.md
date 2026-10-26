@@ -269,7 +269,11 @@ report. The groups:
   address book stays; B130), nginx's dotfile block does not apply to these
   paths (a file `.htmiab-smoke-...` put through Nextcloud's own path is read
   through `/webdav`, a card `.gitmiab-smoke-...vcf` through `/carddav`), and
-  `/caldav` and `/webdav` answer PROPFIND.
+  `/caldav` and `/webdav` answer PROPFIND; `nextcloud-mail-config-path`
+  (after rc7): Roundcube's `/mail/config/` still answers 403, while a
+  missing static page under `/<name>/mail/config/` answers 404 and a
+  Nextcloud file below a folder `mail/config` is read through
+  `/cloud/remote.php` and `/webdav` (B134).
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed

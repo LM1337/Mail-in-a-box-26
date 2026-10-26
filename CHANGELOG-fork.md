@@ -192,6 +192,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   and cards whose names begin with `.ht`, `.git`, `.svn`, `.hg` or `.bzr`
   pass through these paths as before (nginx's dotfile block does not apply
   to them; B130).
+* A path with `/mail/config/` in it no longer gets HTTP 403 unless it is
+  Roundcube's config directory (`/mail/config/...` itself): nginx's deny of
+  that directory was an unanchored regex (upstream), which also caught
+  Nextcloud files and folders below a folder `mail/config` (through
+  `/cloud/remote.php` and the `/webdav` proxy) and the pages of static
+  sites under such a path. It is anchored now (`^/mail/config/`; B134).
 
 ### Changed
 
@@ -294,6 +300,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `/webdav`, and a card `.gitmiab-smoke-...vcf` through `/carddav`, as
   nginx's dotfile block must not apply there; `/caldav` and `/webdav`
   answer PROPFIND (B130).
+* Tests: the smoke test's new check `nextcloud-mail-config-path` (group
+  `web`): `/mail/config/...` still answers 403, a missing static page
+  under `/<name>/mail/config/` answers 404, and a file put into Nextcloud
+  below a folder `mail/config` is read through `/cloud/remote.php` and
+  through `/webdav` (B134).
 * Tests: the smoke test's `zpush-ping` waits 90 s at most for the answer
   to its Ping of 3600 s (on a box without the bound it waited for nginx's
   504 after 635 s, and left Z-Push waiting for up to an hour): no answer
