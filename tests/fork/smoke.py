@@ -2075,19 +2075,21 @@ def c_zpush_ping(ctx):
     rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
     if rc != 0:
         raise Fail("nginx -T: %s" % err.strip()[:200])
-    # Every server block has the location; the shortest timeout counts.
+    # Every server block has the location; the shortest timeout counts, and
+    # one without fastcgi_read_timeout has nginx's default of 60 s.
     timeouts, inside = [], False
     for line in out.splitlines():
         w = line.split()
         if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
             inside = True
+            timeouts.append(60)
         elif inside and w[:1] == ["fastcgi_read_timeout"]:
             v = w[1].rstrip(";")
-            timeouts.append(int(v[:-1]) if v.endswith("s") else int(v))
+            timeouts[-1] = int(v[:-1]) if v.endswith("s") else int(v)
         elif inside and w[:1] == ["}"]:
             inside = False
     if not timeouts:
-        raise Fail("no fastcgi_read_timeout in nginx's /Microsoft-Server-ActiveSync locations (default 60 s)")
+        raise Fail("nginx has no location /Microsoft-Server-ActiveSync")
     # Z-Push checks the mailbox every PING_INTERVAL (30 s) and needs a few
     # seconds before and after the heartbeat: keep a minute of margin.
     if min(timeouts) < bound + 60:
