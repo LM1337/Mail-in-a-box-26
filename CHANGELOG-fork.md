@@ -350,9 +350,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   error logs at its first start, and the login that setup's Dovecot reload
   cuts (B122, open finding) as the Z-Push of rc7 answers it (401) before
   setup installs the new one; and Nextcloud's IMAP check of a password that
-  such a reload cuts or fails ("Login denied"). The classes of
-  `nextcloud.log` get the prefix `[setup]` in a setup run too, as those of
-  the other logs; the rules for them accept it.
+  such a reload cuts (curl: "Failure when receiving data from the peer",
+  "Weird server reply") or fails ("Login denied"). The rule for that 401 is
+  in the new `tests/fork/log-audit-allow-from-rc7.txt`, not in the default
+  list: in a setup run of the fork's Z-Push, which answers such a login
+  with 503, a 401 would be a regression of B126. `tools/update-check.sh
+  after` adds that list by itself when the state before the update has no
+  mark of the fork's Z-Push (rc7 or earlier); a log audit of your own across
+  such an update needs `--allow-extra tests/fork/log-audit-allow-from-rc7.txt`.
+  The classes of `nextcloud.log` get the prefix `[setup]` in a setup run
+  too, as those of the other logs; the rules for them accept it.
 * Tests: the smoke test's new check `zpush-patches` (group `activesync`,
   with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
   the blocks of the checkout's conf/zpush/z-push.patches, and the installed

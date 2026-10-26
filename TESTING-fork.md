@@ -917,7 +917,13 @@ Everything is in `tests/fork/`:
   that start with `^\[setup\]` (cut connections of the restarts of the
   services) apply only there. For the old box of a migration, and for a
   box upgraded in place when `--since` lies before the tool stops mail,
-  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`. `--since`
+  add `--allow-extra tests/fork/log-audit-allow-old-box.txt`. For an
+  update from a box whose Z-Push has no mark of the fork's changes (rc7 or
+  earlier), add `--allow-extra tests/fork/log-audit-allow-from-rc7.txt`
+  (`tools/update-check.sh after` does that by itself when its state before
+  the update has no such mark): the Z-Push of rc7 answers a login cut by
+  setup's Dovecot reload with 401 until setup installs the fork's Z-Push.
+  `--since`
   also takes the short forms `-30m`, `-24h`, `-2d`. With `--baseline
   BEFORE.json` (the `--json` report of an earlier run, e.g. before an
   update) a class that was in it is listed as KNOWN with both counts and

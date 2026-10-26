@@ -606,6 +606,7 @@ log_audit_path() {
 	for f in log-audit.sh log-audit-allow.txt log-audit-allow-internet.txt; do
 		fork_file "tests/fork/$f" > /dev/null || return 1
 	done
+	fork_file tests/fork/log-audit-allow-from-rc7.txt > /dev/null 2>&1 || true
 	echo "$RUN_DIR/fetched/tests/fork/log-audit.sh"
 }
 
@@ -615,6 +616,12 @@ run_log_audit() { # OUT_PREFIX SINCE [--baseline FILE]
 	la=$(log_audit_path) || { warn "Could not get tests/fork/log-audit.sh; no log audit."; return 2; }
 	if [ -n "$OPT_INTERNET" ]; then extra+=(--internet); fi
 	local f
+	# An update from a Z-Push without the fork's mark (see do_after).
+	f=$(dirname "$la")/log-audit-allow-from-rc7.txt
+	if [ -n "${UC_FROM_UNMARKED_ZPUSH:-}" ] && [ -f "$f" ]; then
+		say "The Z-Push before the update had no mark of the fork's changes (rc7 or earlier): also $f."
+		extra+=(--allow-extra "$f")
+	fi
 	for f in "${OPT_ALLOW_EXTRA[@]+"${OPT_ALLOW_EXTRA[@]}"}"; do extra+=(--allow-extra "$f"); done
 	say "Log audit since $since ($la)..."
 	bash "$la" --since "$since" "${extra[@]+"${extra[@]}"}" "$@" --json "$out.json" > "$out.txt" 2>&1 || rc=$?
@@ -819,6 +826,14 @@ do_after() {
 		| tee "$RUN_DIR/after/changes.txt" || rc=$?
 	[ "$rc" -le 1 ] || die "Could not compare the states (exit code $rc, see above)."
 	section "Log audit of the update"
+	# A Z-Push without the fork's mark before the update (rc7 or earlier, whose
+	# update-check records no "zpush" line at all) answers a login that
+	# setup's Dovecot reload cuts with 401 until setup installs the fork's
+	# Z-Push: tests/fork/log-audit-allow-from-rc7.txt accepts that, for this
+	# update only.
+	if ! grep -qE '^zpush [0-9][0-9.]*\+patches-[0-9a-f]{16}$' "$RUN_DIR/before/version.txt"; then
+		UC_FROM_UNMARKED_ZPUSH=1
+	fi
 	local since
 	since=${OPT_SINCE:-@$(head -n 1 "$RUN_DIR/before/time.txt")}
 	if [ -f "$RUN_DIR/before/log-audit.json" ]; then

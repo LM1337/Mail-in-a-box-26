@@ -1,0 +1,12 @@
+# Additions for the log audit of an update from a box whose Z-Push has no
+# mark of the fork's changes (/usr/local/lib/z-push/version without
+# "+patches-": rc7 or earlier, B126, B128). tools/update-check.sh after adds
+# this list by itself when the state before the update has no such mark; for
+# a log audit of your own across such an update, add
+# --allow-extra tests/fork/log-audit-allow-from-rc7.txt. Not for other setup
+# runs: the Z-Push of the fork answers a login that Dovecot or Nextcloud
+# cannot check at that moment with 503, and a 401 for it in a setup run of
+# the fork's Z-Push is a regression of B126 that the log audit must show.
+# Same format as log-audit-allow.txt.
+
+^\[setup\] \[N\] \[FATAL\] \[<user>\] (Exception: \(AuthenticationRequiredException\) - Access denied\. Username or password incorrect|WBXML NK debug data: <blob>)$ # setup's Dovecot reload (B122, open finding) cuts a login that the old imap-login hands over; the Z-Push of rc7 or earlier, which runs until setup installs the fork's Z-Push later in the same run, answers it with 401 (the fork's Z-Push with 503, B126); only in a setup run (load-no-failed-login and fail2ban check the failed logins)
