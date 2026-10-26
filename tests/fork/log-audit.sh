@@ -734,8 +734,11 @@ def scan_nextcloud():
             exc = e.get("exception")
             if isinstance(exc, dict) and exc.get("Message") and exc.get("Message") not in msg:
                 msg += " (%s: %s)" % (exc.get("Exception", ""), exc.get("Message"))
+            # Only the setup runs give nextcloud.log a prefix ("[setup]"), not the
+            # phases of the in-place tool: Nextcloud does not run there.
             add(label, "nextcloud[%s] level %s" % (e.get("app", "?"), e.get("level")), msg,
-                "%s %s %s: %s" % (e.get("time"), e.get("app"), e.get("level"), msg))
+                "%s %s %s: %s" % (e.get("time"), e.get("app"), e.get("level"), msg),
+                "setup" if phase_tag(ts) == "setup" else "")
             n += 1
     source_stats.append({"source": label, "status": "read", "lines": n})
 
