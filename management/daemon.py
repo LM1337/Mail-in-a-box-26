@@ -10,7 +10,7 @@
 # DEBUG=1 management/daemon.py
 # service mailinabox start # when done debugging, start it up again
 
-import os, os.path, re, json, time
+import os, os.path, re, json, subprocess, sys, time
 import multiprocessing.pool
 
 from functools import wraps
@@ -634,14 +634,86 @@ def do_reboot():
 	return "No reboot is required, so it is not allowed."
 
 
+# The status of the backups is queried from the target by a separate process
+# (backup.py --refresh-status), which saves it (B125): a query can take
+# minutes when the target does not answer, and this daemon has one worker,
+# which would serve nothing else meanwhile. The control panel shows the saved
+# status at once and starts a refresh in the background.
+backup_refresh_process = None
+
+def start_backup_refresh():
+	# Start a refresh unless one (or a backup run) is in progress.
+	# Returns True when it started one.
+	global backup_refresh_process
+	from backup import status_refreshing
+	if backup_refresh_process is not None and backup_refresh_process.poll() is None:
+		return False
+	backup_refresh_process = None
+	if status_refreshing():
+		return False
+	here = os.path.dirname(os.path.realpath(__file__))
+	backup_refresh_process = subprocess.Popen(
+		[sys.executable, os.path.join(here, "backup.py"), "--refresh-status"],
+		cwd=here, stdin=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+	return True
+
+def backup_refresh_running():
+	# Also reaps the process of the last refresh when it has ended.
+	from backup import status_refreshing
+	if backup_refresh_process is not None and backup_refresh_process.poll() is None:
+		return True
+	return status_refreshing()
+
 @app.route('/system/backup/status')
 @authorized_personnel_only
 def backup_status():
-	from backup import backup_status
+	# A live query, as before (for the API): refresh now, wait for it, and
+	# return what it found. The control panel uses the two views below.
+	from backup import get_backup_config, get_saved_status
+	if get_backup_config(env)["target"] == "off":
+		return json_response({})
+	started = time.time()
+	start_backup_refresh()
+	# Up to 600 s (gunicorn's --timeout is 630 s), also for a backup run in
+	# progress, which saves the status at its end.
+	while backup_refresh_running() and time.time() - started < 600:
+		time.sleep(0.5)
+	saved = get_saved_status(env)
+	refresh = saved["refresh"] or {}
+	if saved["time"] is not None and saved["time"] >= started - 1 and isinstance(saved["status"], dict):
+		return json_response(saved["status"])
+	if refresh.get("error") and (refresh.get("started") or 0) >= started - 1:
+		return json_response({ "error": refresh["error"] })
+	if saved["refreshing"]:
+		return json_response({ "error": "A backup run or a refresh of the backup status is still in progress. Try again later." })
+	return json_response({ "error": "The backup status could not be refreshed (see the log of the mailinabox service)." })
+
+@app.route('/system/backup/status/saved')
+@authorized_personnel_only
+def backup_status_saved():
+	# The saved status (from the last backup run or refresh that worked),
+	# its time, the result of the last refresh, and whether one is running.
+	from backup import get_saved_status
 	try:
-		return json_response(backup_status(env))
+		saved = get_saved_status(env)
 	except Exception as e:
-		return json_response({ "error": str(e) })
+		return (str(e), 500)
+	if backup_refresh_process is not None and backup_refresh_process.poll() is None:
+		saved["refreshing"] = True
+	return json_response(saved)
+
+@app.route('/system/backup/status/refresh', methods=['POST'])
+@authorized_personnel_only
+def backup_status_refresh():
+	# Start a refresh in the background; poll the saved status for its end.
+	from backup import get_backup_config
+	if get_backup_config(env)["target"] == "off":
+		return json_response({ "started": False, "refreshing": False })
+	try:
+		started = start_backup_refresh()
+	except Exception as e:
+		return (str(e), 500)
+	return json_response({ "started": started, "refreshing": True })
 
 @app.route('/system/backup/config', methods=["GET"])
 @authorized_personnel_only

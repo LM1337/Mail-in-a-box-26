@@ -1451,6 +1451,44 @@ def c_backup_status(ctx):
     return "target=%s, %d backups, latest %s" % (cfg.get("target"), len(b), last)
 
 
+def c_backup_saved(ctx):
+    # The saved status (B125): a refresh in the background, polled until it
+    # ends; the control panel answers meanwhile; the new status is saved.
+    r = admin_api(ctx, "GET", "system/backup/status/saved")
+    api_expect(r, 200, "application/json", "saved status")
+    j = r.json()
+    if j.get("status") == {}:
+        return "backups are turned off"
+    t0 = j.get("now") or 0
+    r = admin_api(ctx, "POST", "system/backup/status/refresh")
+    api_expect(r, 200, "application/json", "refresh")
+    started = r.json().get("started")
+    slowest, polls, deadline = 0.0, 0, time.time() + 900
+    while True:
+        a = time.time()
+        api_expect(admin_api(ctx, "GET", "system/version"), 200, "text/html", "version during the refresh")
+        r = admin_api(ctx, "GET", "system/backup/status/saved")
+        slowest = max(slowest, time.time() - a)
+        api_expect(r, 200, "application/json", "saved status")
+        j = r.json()
+        polls += 1
+        if not j.get("refreshing"):
+            break
+        if time.time() > deadline:
+            raise Fail("the refresh did not end within 900 s")
+        time.sleep(2)
+    ref = j.get("refresh") or {}
+    if not ref.get("ok"):
+        raise Fail("refresh failed: %s" % str(ref.get("error"))[:200])
+    if not isinstance(j.get("status"), dict) or not isinstance(j["status"].get("backups"), list):
+        raise Fail("no saved status after the refresh")
+    if (j.get("time") or 0) < t0 - 1:
+        raise Fail("the saved status is older than the refresh (%s)" % j.get("time_str"))
+    return "refresh %s in %s s (%s), %d backups as of %s, slowest panel answer meanwhile %.1f s over %d polls" % (
+        "started" if started else "already running", ref.get("seconds"), ref.get("by"), len(j["status"]["backups"]),
+        j.get("time_str"), slowest, polls)
+
+
 def c_fail2ban_api(ctx):
     # Read-only: status of the adaptive fail2ban (intrusion protection).
     r = admin_api(ctx, "GET", "system/fail2ban")
@@ -2731,6 +2769,7 @@ API_READ_ONLY = [
     ("GET", "/system/privacy", "application/json"),
     ("GET", "/system/reboot", "application/json"),
     ("GET", "/system/backup/status", "application/json"),
+    ("GET", "/system/backup/status/saved", "application/json"),
     ("GET", "/system/backup/config", "application/json"),
     ("GET", "/system/fail2ban", "application/json"),
     ("GET", "/system/fail2ban/settings", "application/json"),
@@ -2755,8 +2794,10 @@ API_READ_ONLY = [
     ("GET", "/munin/", "text/html"),
 ]
 
-# Called by the auth check, the write round trip and the Munin checks.
+# Called by the auth check, the write round trip, the Munin checks and the
+# check of the saved backup status (admin-backup-saved).
 API_WRITES = [
+    ("POST", "/system/backup/status/refresh"),
     ("POST", "/login"),
     ("POST", "/logout"),
     ("POST", "/mail/users/add"),
@@ -2896,6 +2937,10 @@ def api_shape(ctx, path, r):
         _need(isinstance(j, dict) and (isinstance(j.get("backups"), list) or isinstance(j.get("error"), str)),
               "backup status: no backups list and no error")
         return "error" if "error" in j else "%d backups" % len(j["backups"])
+    if path == "/system/backup/status/saved":
+        _need(isinstance(j, dict) and "status" in j and isinstance(j.get("refreshing"), bool)
+              and (j["status"] is None or isinstance(j["status"], dict)), "saved backup status: keys missing")
+        return "none saved" if j["status"] is None else "as of %s" % j.get("time_str")
     if path == "/system/backup/config":
         _need(isinstance(j, dict) and isinstance(j.get("target"), str), "backup config: no target")
         return "target " + j["target"].split(":", 1)[0]
@@ -3382,6 +3427,7 @@ def main():
     if want("admin"):
         run_check("admin-api-tmp-user-alias", c_admin_tmp_user_alias, ctx)
         run_check("admin-backup-status", c_backup_status, ctx)
+        run_check("admin-backup-saved", c_backup_saved, ctx)
         run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
         run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)

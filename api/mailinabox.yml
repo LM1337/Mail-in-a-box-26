@@ -400,9 +400,14 @@ paths:
         - System
       summary: Get system backup status
       description: |
-        Returns the system backup status.
+        Returns the system backup status, queried from the backup target now.
 
         If the list of backups is empty, this implies no backups have been made yet.
+
+        The query runs as a refresh of the saved status (see
+        `/system/backup/status/saved`) and waits for it, up to 600 seconds.
+        It can take minutes when the target does not answer; the saved
+        status answers at once.
       operationId: getSystemBackupStatus
       x-codeSamples:
         - lang: curl
@@ -416,6 +421,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SystemBackupStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/backup/status/saved:
+    get:
+      tags:
+        - System
+      summary: Get the saved system backup status
+      description: |
+        Returns the status of the backups as it was saved after the last
+        backup run or refresh that worked, at once, without a query of the
+        backup target, with the time of that query, the result of the last
+        refresh (also a failed one), and whether a refresh or a backup run is
+        in progress. `status` is null when no status of the current target
+        has been saved yet, and an empty object when backups are turned off.
+      operationId: getSystemBackupStatusSaved
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/backup/status/saved" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemBackupSavedStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/backup/status/refresh:
+    post:
+      tags:
+        - System
+      summary: Refresh the saved system backup status
+      description: |
+        Starts a refresh of the saved status in the background (a query of
+        the backup target) and returns at once. `started` is false when a
+        refresh or a backup run is already in progress. Poll
+        `/system/backup/status/saved` until `refreshing` is false.
+      operationId: refreshSystemBackupStatus
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/backup/status/refresh" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemBackupRefreshResponse'
         401:
           $ref: '#/components/responses/Unauthorized'
         403:
@@ -2980,6 +3041,63 @@ components:
           type: string
           example: Something is wrong with the backup
       description: Backup status response. Lists the status for all backups.
+    SystemBackupSavedStatusResponse:
+      type: object
+      required:
+        - status
+        - refreshing
+      properties:
+        status:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SystemBackupStatusResponse'
+        time:
+          type: number
+          nullable: true
+          description: When the saved status was queried (Unix time).
+          example: 1793023200.5
+        time_str:
+          type: string
+          nullable: true
+          example: 2026-10-26 03:00:12 UTC
+        age_seconds:
+          type: integer
+          nullable: true
+          example: 3600
+        source:
+          type: string
+          nullable: true
+          enum:
+            - backup
+            - refresh
+        refreshing:
+          type: boolean
+          description: A refresh or a backup run is in progress.
+        running:
+          type: object
+          nullable: true
+          description: Which of the two is in progress, since when.
+        refresh:
+          type: object
+          nullable: true
+          description: |
+            The result of the last refresh (by, started, started_str,
+            finished, seconds, ok, error).
+        now:
+          type: number
+          example: 1793026800.1
+      description: Saved backup status response.
+    SystemBackupRefreshResponse:
+      type: object
+      required:
+        - started
+        - refreshing
+      properties:
+        started:
+          type: boolean
+        refreshing:
+          type: boolean
+      description: Backup status refresh response.
     SystemBackupStatus:
       type: object
       required:

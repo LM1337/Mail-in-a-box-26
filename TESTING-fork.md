@@ -203,7 +203,11 @@ report. The groups:
   twice, is a FAIL.
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
-  injected user names) and the Intrusion Protection page.
+  injected user names) and the Intrusion Protection page; after rc7 the
+  saved backup status (`admin-backup-saved`, B125): a refresh in the
+  background, polled until it ends, with the control panel answering
+  meanwhile (the slowest answer is in the note), and a new saved status
+  afterwards.
 * **api** (from rc7): the management API as `api/mailinabox.yml` documents
   it. Auth: 401 without credentials (text or JSON by `Accept`, 403 for an
   XMLHttpRequest) and with a wrong password, the API key works, a second
