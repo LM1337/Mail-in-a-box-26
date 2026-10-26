@@ -68,6 +68,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
+* nginx waits for the control panel as long as gunicorn lets a request
+  run (630 s) instead of its default of 60 s, so that the status checks,
+  the TLS provisioning and the backup page's live query are no longer cut
+  off with a 504 after a minute (B125).
 * The control panel says what happened when its service does not answer:
   for nginx's 502 and 504, a timeout and a lost connection it shows a
   clear message and what to do, on every page, instead of only "Something
