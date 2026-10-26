@@ -19,6 +19,9 @@ define('LOGFILE', LOGFILEDIR . 'autodiscover.log');
 define('LOGERRORFILE', LOGFILEDIR . 'autodiscover-error.log');
 define('LOGLEVEL', LOGLEVEL_INFO);
 define('LOGUSERLEVEL', LOGLEVEL);
+// Log failed logins ("... login failed for user with email '...' from IP ...")
+// for the miab-zpush jail (B126); they go to autodiscover-error.log as well.
+define('LOGAUTHFAIL', true);
 $specialLogUsers = array();
 
 // the backend data provider

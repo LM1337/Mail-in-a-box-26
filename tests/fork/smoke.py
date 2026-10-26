@@ -597,7 +597,7 @@ def source_ip(spec):
 
 # fail2ban attack (wrong passwords); runs here or on the peer.
 F2B_SNIPPET = r'''
-import base64, imaplib, poplib, smtplib, socket, ssl, time
+import base64, http.client, imaplib, poplib, smtplib, socket, ssl, time
 from concurrent.futures import ThreadPoolExecutor
 
 USER = "f2btest-nouser@invalid.example"
@@ -617,7 +617,7 @@ def _rd(f):
         if l[:2] in (b"OK", b"NO") or l[:3] == b"BYE":
             return l
 
-def one(proto, host, port):
+def one(proto, host, port, i=0):
     try:
         if proto == "imap":
             M = imaplib.IMAP4_SSL(host, port, ssl_context=_ctx(), timeout=20)
@@ -655,6 +655,46 @@ def one(proto, host, port):
                 S.quit()
             except Exception:
                 pass
+        elif proto in ("activesync", "autodiscover"):
+            # Z-Push (B126): a wrong password, as a phone with an old one sends it.
+            # Z-Push tries the IMAP login three times, and Dovecot delays each
+            # failure, so an answer can take a minute.
+            name = HOSTNAME or host
+            c = http.client.HTTPSConnection(host, port, timeout=90, context=_ctx())
+            try:
+                c.sock = _ctx().wrap_socket(socket.create_connection((host, port), 20), server_hostname=name)
+                c.sock.settimeout(90)
+                h = {"Host": name, "User-Agent": "miab-fork-smoke/1",
+                     "Authorization": "Basic " + base64.b64encode(("%s:%s" % (USER, PW)).encode()).decode()}
+                if proto == "activesync":
+                    c.request("OPTIONS", "/Microsoft-Server-ActiveSync", headers=h)
+                else:
+                    h["Content-Type"] = "text/xml"
+                    body = ('<?xml version="1.0" encoding="utf-8"?><Autodiscover xmlns="http://schemas.microsoft.com/'
+                            'exchange/autodiscover/mobilesync/requestschema/2006"><Request><EMailAddress>%s</EMailAddress>'
+                            '<AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/mobilesync/'
+                            'responseschema/2006</AcceptableResponseSchema></Request></Autodiscover>' % USER)
+                    c.request("POST", "/autodiscover/autodiscover.xml", body=body.encode(), headers=h)
+                c.getresponse().read()
+            finally:
+                c.close()
+        elif proto == "activesync-noauth":
+            # A phone's first request: a command with its user in the URL and no
+            # credentials (it waits for the 401 and its login prompt, B126).
+            name = HOSTNAME or host
+            c = http.client.HTTPSConnection(host, port, timeout=90, context=_ctx())
+            try:
+                c.sock = _ctx().wrap_socket(socket.create_connection((host, port), 20), server_hostname=name)
+                c.sock.settimeout(90)
+                q = "Cmd=Ping&User=%s&DeviceId=smokenoauth%d&DeviceType=iPhone" % (NOAUTH_USER.replace("@", "%40"), i % 4)
+                c.request("POST", "/Microsoft-Server-ActiveSync?" + q, body=b"",
+                          headers={"Host": name, "User-Agent": "miab-fork-smoke/1",
+                                   "Content-Type": "application/vnd.ms-sync.wbxml", "MS-ASProtocolVersion": "14.1"})
+                r = c.getresponse()
+                r.read()
+                return "http%d" % r.status
+            finally:
+                c.close()
         elif proto == "managesieve":
             s = socket.create_connection((host, port), 20)
             try:
@@ -678,11 +718,17 @@ def one(proto, host, port):
     except Exception as e:
         return "error:%s" % type(e).__name__
 
+HOSTNAME = None
+NOAUTH_USER = None
+
 def attack(spec):
+    global HOSTNAME, NOAUTH_USER
     host, port, proto = spec["host"], spec["port"], spec["proto"]
+    HOSTNAME = spec.get("hostname")
+    NOAUTH_USER = spec.get("user") or USER
     t0 = time.time()
     with ThreadPoolExecutor(spec.get("parallel", 8)) as ex:
-        res = list(ex.map(lambda i: one(proto, host, port), range(spec["count"])))
+        res = list(ex.map(lambda i: one(proto, host, port, i), range(spec["count"])))
     elapsed = time.time() - t0
     time.sleep(spec.get("settle", 5))
     probe = one(proto, host, port)
@@ -1461,11 +1507,18 @@ def c_fail2ban_api(ctx):
         raise Fail("fail2ban not running: %s" % j.get("error"))
     names = {x["name"] for x in j["jails"]}
     s = j["settings"]
-    want = {"dovecot", "miab-postfix587", "recidive"}
+    want = {"dovecot", "miab-postfix587", "miab-zpush", "recidive"}
     if s.get("slow_jails"):
-        want |= {"miab-slow-smtp", "miab-slow-dovecot"}
+        want |= set(j.get("slow_jails") or [])
+    if s.get("slow_web_jails"):
+        want.add("miab-slow-zpush")
     if want - names:
         raise Fail("jails missing: %s" % sorted(want - names))
+    if "miab-slow-zpush" not in (j.get("slow_web_jails") or []):
+        raise Fail("miab-slow-zpush is not among the slow web jails: %s" % j.get("slow_web_jails"))
+    kinds = {x["name"]: x.get("kind") for x in j["jails"]}
+    if kinds.get("miab-zpush") != "miab":
+        raise Fail("miab-zpush has kind %s, expected miab" % kinds.get("miab-zpush"))
     if not j.get("config_current"):
         raise Fail("rendered jail file does not match the settings")
     if "client" not in j:
@@ -1555,6 +1608,47 @@ F2B_FILTER_CASES = [
      "failed. in /usr/local/lib/roundcubemail/program/lib/Roundcube/rcube_imap.php on line 197 "
      "(POST /mail/?_task=login&_action=login)",
      "203.0.113.5"),
+    # Z-Push (B126): the address is the last thing on the line (setup/zpush.sh moves it there in the
+    # ActiveSync message), after the user names and the e-mail address that the client chose; control
+    # characters there are escaped ("\\n" below is a backslash and an n, not a line break).
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
+     "from IP 2001:db8::5.",
+     "2001:db8::5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [x from ip 198.51.100.7.] Failed to authenticate user "
+     "'x from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'bob@example.com' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'x from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'x\\n26/10/2026 10:00:00 [1] [WARN] [] Unable to complete autodiscover because login failed "
+     "for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    # A request without credentials (Z-Push logs the user 'unknown') guesses no password.
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [#unknown] Failed to authenticate user 'unknown' from IP 203.0.113.5.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [x Failed to authenticate user 'y] Failed to authenticate user "
+     "'bob@example.com' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    # Z-Push's own order (before setup/zpush.sh changes it) is not read.
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "
+     "'bob@example.com'",
+     None),
 ]
 
 
@@ -2525,7 +2619,7 @@ def f2b_banned(ctx, jail):
 
 
 def f2b_unban(ctx, ip):
-    for jail in ("dovecot", "miab-postfix587", "miab-postfix465", "postfix-sasl", "recidive"):
+    for jail in ("dovecot", "miab-postfix587", "miab-postfix465", "postfix-sasl", "miab-zpush", "recidive"):
         ctx.remote.run("fail2ban-client set %s unbanip %s" % (jail, shlex.quote(ip)), sudo=True)
     ctx.remote.run("fail2ban-client unban %s" % shlex.quote(ip), sudo=True)
 
@@ -2644,7 +2738,7 @@ def c_fail2ban_adaptive_toggle(ctx):
     return "increment %s, restored adaptive=%s" % (" -> ".join(seen), orig)
 
 
-def c_fail2ban(ctx, proto, jails, port):
+def c_fail2ban(ctx, proto, jails, port, wait=30):
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
     # Attempts of the previous protocol that were still in flight can re-ban the
@@ -2655,20 +2749,28 @@ def c_fail2ban(ctx, proto, jails, port):
         f2b_unban(ctx, src)
         time.sleep(5)
         f2b_unban(ctx, src)
+    # Only the jails that run (a slow web jail is off by default): asking
+    # fail2ban for another one logs an error in fail2ban.log.
+    rc, out, _ = ctx.remote.run("fail2ban-client status", sudo=True)
+    m = re.search(r"Jail list:\s*(.*)", out) if rc == 0 else None
+    if m:
+        running = {x.strip() for x in m.group(1).split(",")}
+        jails = [j for j in jails if j in running]
     before = {j: f2b_banned(ctx, j) for j in jails}
-    if all(v is None for v in before.values()):
+    if not jails or all(v is None for v in before.values()):
         raise Fail("none of the jails %s exist" % jails)
     if ctx.args.peer_ssh:
         spec = {"host": ctx.args.host, "port": port, "proto": proto, "count": ctx.args.fail2ban_count,
-                "parallel": ctx.args.fail2ban_parallel}
+                "parallel": ctx.args.fail2ban_parallel, "hostname": ctx.hostname}
         res = run_snippet(F2B_SNIPPET, "attack", spec, ssh_host=ctx.args.peer_ssh)
     else:
         h, p = ctx.net.addr(port)
         res = run_snippet(F2B_SNIPPET, "attack", {"host": h, "port": p, "proto": proto,
                                                   "count": ctx.args.fail2ban_count,
-                                                  "parallel": ctx.args.fail2ban_parallel})
+                                                  "parallel": ctx.args.fail2ban_parallel,
+                                                  "hostname": ctx.hostname})
     new = set()
-    deadline = time.time() + 30
+    deadline = time.time() + wait
     while time.time() < deadline:
         for j in jails:
             now = f2b_banned(ctx, j)
@@ -2694,6 +2796,51 @@ def c_fail2ban(ctx, proto, jails, port):
     if src and src not in ips:
         raise Fail("banned %s but attack source was %s" % (ips, src))
     return "banned %s in %s (probe after: %s), unbanned" % (ips, sorted({j for j, _ in new}), res["probe_after"])
+
+
+def c_fail2ban_activesync_noauth(ctx):
+    # A phone's ActiveSync request without credentials (its user in the URL, no
+    # Authorization header) guesses no password: Z-Push answers 401 and must not
+    # log it as a failed login, or every sync of a phone would count, and an
+    # office with a few phones would ban itself from HTTP and HTTPS (B126).
+    if not getattr(ctx, "f2b", None):
+        raise Skip("fail2ban preparation skipped")
+    src = ctx.f2b.get("attack_src")
+    if not src:
+        raise Skip("attack source unknown")
+    user = ctx.admin_user
+    if not user:
+        raise Skip("no user of the box (--admin-user)")
+    f2b_unban(ctx, src)
+    time.sleep(5)
+    f2b_unban(ctx, src)
+    cmd = "grep -c -F -- %s /var/log/z-push/z-push-error.log || true" % shlex.quote("' from IP %s." % src)
+    def lines():
+        rc, out, _ = ctx.remote.run(cmd, sudo=True)
+        try:
+            return int(out.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise Fail("could not read z-push-error.log: %r" % out[-200:])
+    n0 = lines()
+    count = max(25, ctx.args.fail2ban_count)
+    spec = {"host": ctx.args.host, "port": 443, "proto": "activesync-noauth", "count": count,
+            "parallel": ctx.args.fail2ban_parallel, "hostname": ctx.hostname, "user": user, "settle": 10}
+    if ctx.args.peer_ssh:
+        res = run_snippet(F2B_SNIPPET, "attack", spec, ssh_host=ctx.args.peer_ssh)
+    else:
+        h, p = ctx.net.addr(443)
+        spec.update(host=h, port=p)
+        res = run_snippet(F2B_SNIPPET, "attack", spec)
+    n1 = lines()
+    banned = src in (f2b_banned(ctx, "miab-zpush") or set())
+    if banned:
+        f2b_unban(ctx, src)
+    if res["summary"].get("http401", 0) != count:
+        raise Fail("expected %d answers 401, got %s" % (count, res["summary"]))
+    if n1 != n0 or banned:
+        raise Fail("%d requests without credentials were logged as %d failed logins (banned: %s)"
+                   % (count, n1 - n0, banned))
+    return "%d requests without credentials (User=%s in the URL): all 401, no failed login logged, not banned" % (count, user)
 
 
 def send_test_mail(ctx):
@@ -3462,6 +3609,11 @@ def main():
             run_check("fail2ban-managesieve", c_fail2ban, ctx, "managesieve", dovecot, 4190)
             run_check("fail2ban-smtp587", c_fail2ban, ctx, "smtp587", ["miab-postfix587"] + smtp, 587)
             run_check("fail2ban-smtp465", c_fail2ban, ctx, "smtp465", ["miab-postfix465"] + smtp, 465)
+            # ActiveSync and Autodiscover (B126): miab-zpush bans HTTP and HTTPS.
+            zpush = ["miab-zpush", "miab-slow-zpush"]
+            run_check("fail2ban-activesync-noauth", c_fail2ban_activesync_noauth, ctx)
+            run_check("fail2ban-activesync", c_fail2ban, ctx, "activesync", zpush, 443, 120)
+            run_check("fail2ban-autodiscover", c_fail2ban, ctx, "autodiscover", zpush, 443, 120)
 
     ctx.net.close()
     summary = {}

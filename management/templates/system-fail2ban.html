@@ -12,7 +12,7 @@
 
 <h2>Intrusion Protection</h2>
 
-<p>fail2ban watches the logs of this box and bans IP addresses that fail to log in too often. On top of Mail-in-a-Box&rsquo;s own rules (20 failures within 30 seconds, banned for 10 minutes), repeat offenders get longer bans on the mail ports each time, slow jails catch attacks that try only a few passwords per hour, and addresses on the allowlist are never banned.</p>
+<p>fail2ban watches the logs of this box (mail, webmail, Nextcloud, ActiveSync, this control panel) and bans IP addresses that fail to log in too often. On top of Mail-in-a-Box&rsquo;s own rules (20 failures within 30 seconds, banned for 10 minutes), repeat offenders get longer bans on the mail ports each time, slow jails catch attacks that try only a few passwords per hour, and addresses on the allowlist are never banned.</p>
 
 <div id="f2b-alerts"></div>
 
@@ -91,7 +91,7 @@
       <div class="checkbox">
         <label class="f2b-section"><input type="checkbox" id="f2b-adaptive" onchange="f2b_toggle_inputs()"> Adaptive banning</label>
       </div>
-      <p class="help-block">Each new ban of an address in a jail lasts twice as long as its previous ban in that jail, up to the maximum ban time, and the address is banned again after fewer failures there. Bans of the web ports (control panel, webmail, Nextcloud) keep their fixed length. Addresses banned again and again in any jail get the one-week recidive ban on all ports, as before. fail2ban keeps the ban history for the memory period, also across restarts.</p>
+      <p class="help-block">Each new ban of an address in a jail lasts twice as long as its previous ban in that jail, up to the maximum ban time, and the address is banned again after fewer failures there. Bans of the web ports (control panel, webmail, Nextcloud, ActiveSync) keep their fixed length. Addresses banned again and again in any jail get the one-week recidive ban on all ports, as before. fail2ban keeps the ban history for the memory period, also across restarts.</p>
     </div>
   </div>
   <div class="form-group">
@@ -120,9 +120,9 @@
   <div class="form-group">
     <div class="col-sm-offset-2 col-sm-8">
       <div class="checkbox">
-        <label class="f2b-section"><input type="checkbox" id="f2b-slow_web_jails" onchange="f2b_toggle_inputs()"> Slow jails for webmail, Nextcloud and the control panel</label>
+        <label class="f2b-section"><input type="checkbox" id="f2b-slow_web_jails" onchange="f2b_toggle_inputs()"> Slow jails for webmail, Nextcloud, ActiveSync and the control panel</label>
       </div>
-      <p class="help-block">The same for Roundcube, Nextcloud and this control panel, with the same thresholds. They block HTTP and HTTPS: a calendar or contacts app with an old password gets its whole network banned from webmail, Nextcloud and this control panel (for the first ban time; these bans do not grow). Turn them on only with your own networks on the allowlist.</p>
+      <p class="help-block">The same for Roundcube, Nextcloud, ActiveSync (Exchange accounts of phones, and Autodiscover) and this control panel, with the same thresholds. They block HTTP and HTTPS: a calendar or contacts app or a phone with an old password gets its whole network banned from webmail, Nextcloud, ActiveSync and this control panel (for the first ban time; these bans do not grow). Calendar and contacts apps that use the short paths <code>/caldav</code>, <code>/carddav</code> and <code>/webdav</code> are counted under their own address now, as on <code>/cloud</code>; before, these paths reached Nextcloud from the box itself and were never banned. Turn them on only with your own networks on the allowlist.</p>
     </div>
   </div>
   <div class="form-group">
@@ -428,7 +428,9 @@ function f2b_render_settings() {
   });
   $('#f2b-allowlist').val(s.allowlist.join("\n"));
   $('#f2b-help-allowlist').text("Addresses and networks (CIDR) that are never banned, one per line, at most " + f2b_state.max_allowlist
-    + ". The box's own addresses are always exempt. Put your office or home network here.");
+    + ". The box's own addresses are always exempt. Put your office or home network here, and the servers of a mail app that syncs through its provider's cloud"
+    + " (such as Outlook for iOS and Android with an Exchange ActiveSync account): all its users come from these few addresses, so one wrong password there"
+    + " 20 times within 2 minutes would ban them all from ActiveSync.");
   f2b_toggle_inputs();
   f2b_settings_dirty = false;
 }
@@ -470,7 +472,7 @@ function f2b_save_settings() {
   if (f2b_state.settings.slow_jails && values.slow_jails == "0")
     off.push("Slow jails: attacks with a few attempts per hour are no longer banned, and the addresses the slow jails banned are released (bans that have not run out yet come back if you turn them on again).");
   if (f2b_state.settings.slow_web_jails && values.slow_web_jails == "0")
-    off.push("Slow jails for webmail, Nextcloud and the control panel: the addresses they banned are released (bans that have not run out yet come back if you turn them on again).");
+    off.push("Slow jails for webmail, Nextcloud, ActiveSync and the control panel: the addresses they banned are released (bans that have not run out yet come back if you turn them on again).");
   if (off.length == 0) {
     f2b_post_settings(values);
     return;
@@ -569,14 +571,14 @@ function f2b_load_report() {
     f2b_render_report,
     function(text, xhr) {
       if (xhr && xhr.status == 403) return;
-      $('#f2b-report').html("").append($('<p class="text-danger"/>').text("The mail log could not be read: " + text));
+      $('#f2b-report').html("").append($('<p class="text-danger"/>').text("The logs could not be read: " + text));
     });
 }
 
 function f2b_render_report(r) {
   var div = $('#f2b-report');
   div.html("");
-  div.append($("<p/>").text("In the last " + r.scan_hours + " hours the mail log (SMTP AUTH, IMAP, POP3, ManageSieve) has "
+  div.append($("<p/>").text("In the last " + r.scan_hours + " hours the mail log (SMTP AUTH, IMAP, POP3, ManageSieve) and the ActiveSync log (ActiveSync, Autodiscover) have "
     + r.failures + " failed login" + (r.failures == 1 ? "" : "s") + " from " + r.distinct_ips + " address" + (r.distinct_ips == 1 ? "" : "es") + "."));
 
   // Password spraying

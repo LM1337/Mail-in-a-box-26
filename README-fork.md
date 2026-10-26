@@ -778,7 +778,7 @@ the following, on by default:
   jails and sends the second incident straight to the maximum); addresses
   banned again and again in any jail get Mail-in-a-Box's one-week recidive
   ban on all ports. Bans of the web ports (`miab-management`, `miab-munin`,
-  `miab-owncloud`, `miab-roundcube` and the slow web jails) keep their fixed
+  `miab-owncloud`, `miab-roundcube`, `miab-zpush` and the slow web jails) keep their fixed
   length, so that an office cannot lose the control panel, webmail and
   Nextcloud for days. fail2ban's database keeps the ban history for 30 days
   (`memory`, sets `dbpurgeage`; Debian's 1 day forgets a 10-minute ban after a
@@ -792,9 +792,10 @@ the following, on by default:
   Dovecot one does not count connections without a login attempt (monitoring,
   TLS probes). They block only the mail ports (465, 587, 993, 995, 4190).
   `slow_web_jails` (off by default) adds `miab-slow-roundcube`,
-  `miab-slow-owncloud` (Nextcloud) and `miab-slow-management` (control panel)
+  `miab-slow-owncloud` (Nextcloud), `miab-slow-zpush` (ActiveSync and
+  Autodiscover) and `miab-slow-management` (control panel)
   with the same thresholds. They block HTTP and HTTPS: a calendar or contacts
-  app with an old password polls Nextcloud every few minutes and would get its
+  app or a phone with an old password polls every few minutes and would get its
   whole network banned from webmail and the control panel. Turn them on only
   with your networks on the allowlist. fail2ban applies a changed ban time
   also to the current first bans of a jail (a repeat offender's longer ban
@@ -808,8 +809,35 @@ the following, on by default:
   an old password gets its network banned from the mail ports, for longer
   each time. The status checks warn about banned addresses that failed only
   as one or two existing accounts (often such a device).
+* **ActiveSync jail.** `miab-zpush` (always on, like Mail-in-a-Box's own
+  jails) bans an address after 20 failed ActiveSync or Autodiscover logins
+  within 120 seconds on HTTP and HTTPS (B126). Z-Push checks passwords against
+  Dovecot from 127.0.0.1, which the Dovecot jails ignore, so before it nothing
+  limited password guessing there. Setup has Z-Push log failed logins
+  (`LOGAUTHFAIL`) to `/var/log/z-push/z-push-error.log` and
+  `autodiscover-error.log`, with the client's address as the last thing on
+  the line and control characters escaped, so that a user name a client
+  chooses cannot name another address. Only a request with a user name and
+  a password is logged and counted: a phone's first request without
+  credentials (it waits for the login prompt, also with its user in the URL)
+  is not. A login that fails because a service
+  behind Z-Push does not answer (Dovecot, Nextcloud for calendars and
+  contacts) counts as well; setup no longer restarts these services (B120,
+  B122). Since the fix of B121 (after rc7) the paths `/caldav`, `/carddav` and
+  `/webdav` pass the client's address to Nextcloud, so `miab-owncloud` counts
+  and bans those clients too. Some mail apps sync through their provider's
+  servers, for example Outlook for iOS and Android with an Exchange
+  ActiveSync account: all their users reach the box from the same few
+  addresses, and someone who enters a wrong password there 20 times within
+  two minutes gets these addresses banned for all of them (and, repeated,
+  the one-week recidive ban). If your users sync that way, put those
+  networks on the allowlist. `/var/log/z-push` belongs to root (group
+  www-data, which may write the four log files but not replace them), so
+  that fail2ban never opens a link or a FIFO there; setup and logrotate
+  create the log files.
 * **Failed-login report.** The status checks read the mail log of the last
-  48 hours (SMTP AUTH, IMAP, POP3, ManageSieve) and report accounts with failed
+  48 hours (SMTP AUTH, IMAP, POP3, ManageSieve) and Z-Push's error logs
+  (ActiveSync, Autodiscover) and report accounts with failed
   logins from 20 or more addresses within 24 hours (`spray_min_ips`, password
   spraying) and addresses that keep failing for 12 hours or more without being
   banned once in that time (bans that have run out are looked up in
@@ -898,7 +926,7 @@ eingeschaltet:
   zweiten Vorfall auf die Höchstdauer); Adressen, die in irgendeinem Jail
   immer wieder gesperrt werden, bekommen die einwöchige recidive-Sperre von
   Mail-in-a-Box auf allen Ports. Sperren der Web-Ports (`miab-management`,
-  `miab-munin`, `miab-owncloud`, `miab-roundcube` und die langsamen Web-Jails)
+  `miab-munin`, `miab-owncloud`, `miab-roundcube`, `miab-zpush` und die langsamen Web-Jails)
   behalten ihre feste Dauer, damit ein Büro nicht tagelang Admin-Oberfläche,
   Webmail und Nextcloud verliert. Die Datenbank von fail2ban behält die
   Sperrgeschichte 30 Tage (`memory`, setzt `dbpurgeage`; mit den 1 Tag von
@@ -913,11 +941,12 @@ eingeschaltet:
   von Mail-in-a-Box; der für Dovecot zählt Verbindungen ohne Anmeldeversuch
   nicht mit (Überwachung, TLS-Prüfungen). Sie sperren nur die Mail-Ports (465,
   587, 993, 995, 4190). `slow_web_jails` (anfangs aus) ergänzt
-  `miab-slow-roundcube`, `miab-slow-owncloud` (Nextcloud) und
+  `miab-slow-roundcube`, `miab-slow-owncloud` (Nextcloud), `miab-slow-zpush`
+  (ActiveSync und Autodiscover) und
   `miab-slow-management` (Admin-Oberfläche) mit denselben Schwellen. Sie
-  sperren HTTP und HTTPS: Eine Kalender- oder Kontakte-App mit altem Passwort
-  fragt Nextcloud alle paar Minuten ab und würde ihr ganzes Netz für Webmail
-  und die Admin-Oberfläche sperren. Nur einschalten, wenn die eigenen Netze in
+  sperren HTTP und HTTPS: Eine Kalender- oder Kontakte-App oder ein Telefon
+  mit altem Passwort fragt alle paar Minuten ab und würde ihr ganzes Netz für
+  Webmail und die Admin-Oberfläche sperren. Nur einschalten, wenn die eigenen Netze in
   der Freigabeliste stehen. Eine geänderte Sperrdauer wendet fail2ban auch
   auf die laufenden ersten Sperren eines Jails an (die längere Sperre eines
   Wiederholungstäters behält ihre Dauer), und eine Adresse mit
@@ -932,8 +961,37 @@ eingeschaltet:
   für die Mail-Ports, jedes Mal länger. Die Statusprüfungen warnen vor
   gesperrten Adressen, die nur mit einem oder zwei vorhandenen Konten
   gescheitert sind (oft ein solches Gerät).
+* **ActiveSync-Jail.** `miab-zpush` (immer an, wie die Jails von
+  Mail-in-a-Box selbst) sperrt eine Adresse nach 20 fehlgeschlagenen
+  Anmeldungen über ActiveSync oder Autodiscover innerhalb von 120 Sekunden für
+  HTTP und HTTPS (B126). Z-Push prüft Passwörter von 127.0.0.1 aus bei
+  Dovecot, und diese Adresse übergehen die Dovecot-Jails; bisher bremste dort
+  also nichts das Raten von Passwörtern. Setup lässt Z-Push fehlgeschlagene
+  Anmeldungen protokollieren (`LOGAUTHFAIL`, in
+  `/var/log/z-push/z-push-error.log` und `autodiscover-error.log`), mit der
+  Adresse des Clients am Ende der Zeile und maskierten Steuerzeichen, damit
+  ein vom Client gewählter Benutzername keine andere Adresse unterschieben
+  kann. Nur eine Anfrage mit Benutzername und Passwort wird protokolliert
+  und gezählt: Die erste Anfrage eines Telefons ohne Zugangsdaten (es wartet
+  auf die Anmeldeaufforderung, auch mit seinem Benutzer in der URL) nicht.
+  Eine Anmeldung, die scheitert, weil ein Dienst hinter Z-Push nicht
+  antwortet (Dovecot, Nextcloud für Kalender und Kontakte), zählt ebenfalls;
+  Setup startet diese Dienste nicht mehr neu (B120, B122). Seit der Korrektur
+  von B121 nach rc7 geben die Pfade `/caldav`, `/carddav` und `/webdav` die
+  Adresse des Clients an Nextcloud weiter, also zählt und sperrt
+  `miab-owncloud` auch diese Clients. Manche Mail-Apps synchronisieren über
+  die Server ihres Anbieters, zum Beispiel Outlook für iOS und Android mit
+  einem Exchange-ActiveSync-Konto: Alle ihre Nutzer erreichen die Box von
+  denselben wenigen Adressen, und wer dort 20-mal in zwei Minuten ein
+  falsches Passwort eingibt, lässt diese Adressen für alle sperren (und
+  wiederholt die einwöchige recidive-Sperre). Wenn die Nutzer so
+  synchronisieren, diese Netze in die Freigabeliste setzen.
+  `/var/log/z-push` gehört root (Gruppe www-data, die die vier Logdateien
+  beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
+  oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.
 * **Bericht über Fehlanmeldungen.** Die Statusprüfungen lesen das Mail-Log der
-  letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve) und melden Konten
+  letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve) und die Fehler-Logs
+  von Z-Push (ActiveSync, Autodiscover) und melden Konten
   mit Fehlanmeldungen von 20 oder mehr Adressen innerhalb von 24 Stunden
   (`spray_min_ips`, Password Spraying) sowie Adressen, die 12 Stunden oder
   länger scheitern, ohne in dieser Zeit ein einziges Mal gesperrt worden zu

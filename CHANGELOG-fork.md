@@ -13,6 +13,21 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Fixed
 
+* ActiveSync and Autodiscover have brute-force protection now: the new
+  jail `miab-zpush` bans an address after 20 failed logins within 120 s on
+  HTTP and HTTPS. Before, nothing limited password guessing there: Z-Push
+  checks passwords against Dovecot from 127.0.0.1, which fail2ban ignores,
+  and did not log failed logins. Setup turns on Z-Push's `LOGAUTHFAIL` (the
+  lines go to `z-push-error.log` and `autodiscover-error.log`; `z-push.log`
+  gets no more lines), escapes control characters in Z-Push's log lines and
+  puts the client's address at the end of the ActiveSync message, so that a
+  user name chosen by a client can neither add a line nor name another
+  address for the jail. Z-Push writes the line only for a request with a
+  user name and a password, so a phone's first request without credentials
+  (it waits for the login prompt, also with its user in the URL) is not
+  counted. `/var/log/z-push` belongs to root now (group www-data), so that
+  www-data cannot replace the logs that fail2ban opens with a link or a
+  FIFO; setup and logrotate (as root) create the log files (B126).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
@@ -71,6 +86,29 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
+* Control panel (System > Intrusion Protection): `miab-zpush` is a web
+  jail (its bans keep their fixed length with adaptive banning), the slow
+  web jails get `miab-slow-zpush` (ActiveSync and Autodiscover), and the
+  failed-login report and its status check read Z-Push's error logs as well
+  (protocols `activesync` and `autodiscover`, also the files of the last
+  rotation). The help texts name ActiveSync and say that `/caldav`,
+  `/carddav` and `/webdav` now count under the client's address; the
+  allowlist help names the servers of mail apps that sync through their
+  provider's cloud (B126, B121).
+* Tests: the smoke test's fail2ban status check wants `miab-zpush` (and
+  `miab-slow-zpush` with the slow web jails), `fail2ban-filters` has cases
+  for the new filter (an e-mail address and user names with
+  " from IP 198.51.100.7." in them, an escaped line break, a request without
+  credentials, Z-Push's own order of the message), and the fail2ban group bans the peer through
+  failed ActiveSync and Autodiscover logins (`fail2ban-activesync`,
+  `fail2ban-autodiscover`; it asks only the jails that run, so that a slow
+  jail that is off logs no error). `fail2ban-activesync-noauth` sends 25
+  ActiveSync requests as a phone sends its first one (a user of the box in
+  the URL, no credentials) and wants 401, no failed-login line and no ban.
+  The log audit accepts what these
+  deliberate failures log (Z-Push's three IMAP tries, its exception and the
+  new warning; for Autodiscover, which names no user in brackets, only with
+  `--smoke`), and with `--internet` the same lines as password guessing.
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
@@ -106,6 +144,22 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Upgrade note
 
+* Z-Push's message for a failed ActiveSync login reads "Failed to
+  authenticate user '...' from IP ...." now (Z-Push: "IP: ... failed to
+  authenticate user '...'"), and control characters in Z-Push's log lines
+  are escaped (a multi-line message is one line with `\n`). A fail2ban
+  filter or log tool of your own for Z-Push needs the new form. A request
+  without a password no longer logs that message.
+* `/var/log/z-push` belongs to root, group www-data (0750), and Z-Push can
+  no longer create files there: setup creates `z-push.log`,
+  `z-push-error.log`, `autodiscover.log` and `autodiscover-error.log`, and
+  removes what is not a regular file there. Per-user logs of your own
+  (`$specialLogUsers` in Z-Push's `config.php`) need their files created
+  the same way (www-data, 0640).
+* Outlook for iOS and Android syncs an Exchange ActiveSync account through
+  Microsoft's servers: if your users do that, put those networks on the
+  fail2ban allowlist, or one wrong password entered there 20 times within
+  two minutes bans them for all of these users (B126).
 * Setup sets Nextcloud's `trusted_proxies` (adds 127.0.0.1, keeps the
   others) and `forwarded_for_headers` (`HTTP_X_FORWARDED_FOR` only, the
   Nextcloud default; another value there is replaced). A reverse proxy of
@@ -138,6 +192,21 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
 
 * Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
+* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
+  test of B126): Z-Push tries the IMAP login three times, and Dovecot
+  delays failed logins, possibly more for an address with many failures,
+  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
+  `miab-zpush` threshold slows down the ActiveSync logins of other users
+  is not measured.
+* `miab-zpush` counts failures per address, like the other jails, and is
+  always on: behind the shared servers of a mail app that syncs through its
+  provider's cloud (Outlook for iOS and Android with an ActiveSync
+  account), one person with a wrong password can get all users of that app
+  banned (B126). The README and the allowlist help say to put such networks
+  on the allowlist; nothing finds them on its own.
+* The failed-login report does not read `nextcloud.log` yet, which now
+  has the client's address for `/caldav`, `/carddav` and `/webdav` too
+  (B121).
 * Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
   postgrey, named, systemd-resolved, munin-node and the management daemon
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
