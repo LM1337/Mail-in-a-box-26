@@ -725,7 +725,11 @@ Seen in the runs, not fixed in rc7:
    maildrop (a temporary error for mail over SMTP). Seen once, during the
    smoke test's API write round trip. Dovecot's auth-worker has none either:
    in T3 of the first run after the review (`e967061`) one login during
-   that round trip failed once.
+   that round trip failed once. Setup's own commit at its end (the
+   automatic aliases) caused 44 such failures in one update test after
+   rc7; it no longer writes when nothing changes (B133), and Z-Push answers
+   a login that Dovecot could not check with 503 instead of counting it as
+   a failed login (B126).
 2. Setup's restart of Dovecot can store a mail in delivery twice (Postfix
    delivers it again after spampd's 421); no mail is lost.
 3. On the busy test host a new user's first Nextcloud login took 20 to 90
@@ -754,6 +758,14 @@ Seen in the runs, not fixed in rc7:
    and its files are written atomically; the log audit no longer accepts the
    message. The update of a production box from rc6 to rc7 showed what such
    failures do to Nextcloud (B121).
+9. When Ubuntu has released a new nginx package, setup's `apt-get upgrade`
+   restarts nginx (dpkg, not setup), and the requests in that second are cut:
+   Z-Push's CalDAV and CardDAV calls through 127.0.0.1:443, ActiveSync Syncs
+   that end with HTTP 500, Roundcube. Seen in the update test after rc7
+   (nginx 1.28.3-2ubuntu1.12). Before the fix of B126 after rc7, Z-Push
+   answered the failed CalDAV/CardDAV logins with 401 (a phone asks for its
+   password) and, with `LOGAUTHFAIL` on, counted them as failed logins; now
+   503.
 
 Of the open findings of rc6, 1 (the `--check` plan named the fallback SSH
 server, and from `6235572` on also says that new SSH logins and sudo fail
