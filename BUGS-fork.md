@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112 and B114 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77 and B90 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116 and B118 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -38,8 +38,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-110 bugs: 2 critical, 17 high, 42 medium, 49 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+114 bugs: 2 critical, 17 high, 43 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -47,7 +47,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 29 |
+| Fork | 33 |
 
 32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -167,6 +167,10 @@ upstream pull requests, independent of the 26.04 port.
 | [B112](#b112) | low | Tools | The fallback SSH server refuses new logins for up to 10 s after the release upgrade stops ssh.service | Fork | no | no | rc7 |
 | [B113](#b113) | low | Tools | migrate-to-2604.sh --check proposes a start command without the options it was given | Fork | no | no | rc7 |
 | [B114](#b114) | low | Tools | update-check.sh after lists munin-node's port as changed when the process shows under another name | Fork | no | no | rc7 |
+| [B115](#b115) | medium | Tools | The fallback SSH server of the in-place tool accepts keys that sshd refuses under StrictModes | Fork | no | no | rc7 |
+| [B116](#b116) | low | Tools | update-check.sh runs the status checks and the backup from a checkout that it has just rejected | Fork | no | no | rc7 |
+| [B117](#b117) | low | Tools | The tools take the backup target and passphrase, and write custom.yaml, through a directory that the user-data account can replace | Fork | no | no | rc7 |
+| [B118](#b118) | low | Tools | The fallback SSH server misses Match blocks in files included from included files | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1441,6 +1445,50 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** The repeated update test T5b of rc7 (rc6 to rc7): the record before the update (taken after a boot) had `/usr/sbin/munin`, the one after the setup run `munin-node`; `/proc/<pid>/cmdline` was `/usr/bin/perl -wT /usr/sbin/munin-node --foreground` both times. Other boxes of the test network showed `munin-node`.
 * **Found by:** rc7 certification (T5b, repeated run); **commit:** see `git log --grep B114`; **fixed in:** v78-r2604.0-rc7
+
+### B115
+
+**The fallback SSH server of the in-place tool accepts keys that sshd refuses under StrictModes** (medium, Tools)
+
+* **Symptom:** None in normal operation. During each release upgrade (and the 10 minutes of `--ssh-fallback-test`) the fallback on port 1022 accepts an administrator's key from an `authorized_keys` that sshd on port 22 ignores: one whose file, `~/.ssh`, home directory or a directory above them can be written by group or others, or belongs to another user.
+* **Cause:** sshd (`StrictModes yes`, the default) checks the owner and mode of the key file and of each directory above it up to the home directory (`auth_secure_path`) and ignores the file if one of them fails. `user_keys` read the file as the user and copied it into a root-owned file below `/etc/ssh`, which passes that check, so the fallback accepted what sshd had refused. Whoever can write such an administrator's home (for example another account in a shared group of a home with mode 0775) could add a key, log in on port 1022 as that administrator and use sudo.
+* **Fix:** With StrictModes (from `sshd -T`) the tool resolves each key file and checks it and the directories above it as sshd does: a regular file, owned by root or the user, not writable by group or others, and so each directory up to the home directory (or `/`). It skips a file that fails, with a warning, and reads the real path afterwards, which only root and the user can change. The keys file of the fallback is `root:<the user's group>` with mode 0640 (sshd reads it as the user), so other accounts no longer see the key options.
+* **Affects:** the development of rc7 only (the fallback is new in rc7, never in a tag). Origin: Fork. Only boxes where another account can write an administrator's home or `.ssh`.
+* **Evidence:** from reading the code and OpenSSH's `auth.c`. On the fresh-install test box, with the functions of the tool: an administrator's key was taken with home 0750 and skipped (with the warning) with home 0775, with `authorized_keys` 0620 or owned by another user, and through a symbolic link into a directory of mode 1777; it was taken through a symbolic link inside `.ssh`, from a root-owned `/etc/ssh/<dir>/%u` and, with `StrictModes no`, also with home 0775.
+* **Found by:** rc7 review (of the certification fixes); **commit:** see `git log --grep B115`; **fixed in:** v78-r2604.0-rc7
+
+### B116
+
+**update-check.sh runs the status checks and the backup from a checkout that it has just rejected** (low, Tools)
+
+* **Symptom:** None in normal operation. When `/root/mailinabox` (or a directory above it) is not root's own, `tools/update-check.sh` warns "not used as the Mail-in-a-Box checkout" and then, run through `curl | bash`, uses it anyway: as root it runs `management/status_checks.py` and `management/backup.py` from it, imports its Python modules for the backup target and runs its `tests/fork/log-audit.sh`. Inside an accepted checkout it checked nothing: a group-writable `management/utils.py` or a `.git/config` of another account (which git reads as root) passed.
+* **Cause:** `MIAB_DIR` started as `/root/mailinabox`, and the loop of `find_miab_dir` only skipped the rejected candidate without clearing it; `root_only_path` checked the directory and those above it, not the files in it.
+* **Fix:** `MIAB_DIR` starts empty; a candidate counts only if, besides the path, every file and directory in it is owned by root and not writable by group or others (symbolic links are not followed). Without a checkout the status checks are "not run", the version is "unknown", the system archive leaves out the checkout, and `backup` needs `--no-miab-backup`.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork. With `/root` at mode 0700, another account can hardly reach `/root/mailinabox`.
+* **Evidence:** from reading the code. On the fresh-install test box: the clean checkout was taken; with `g+w` on `management/utils.py` or a `.git/config` owned by nobody it was rejected with the warning and `MIAB_DIR` stayed empty. The check of the 254 files of the checkout took about 20 ms.
+* **Found by:** rc7 review (of the certification fixes); **commit:** see `git log --grep B116`; **fixed in:** v78-r2604.0-rc7
+
+### B117
+
+**The tools take the backup target and passphrase, and write custom.yaml, through a directory that the user-data account can replace** (low, Tools)
+
+* **Symptom:** None in normal operation. `tools/update-check.sh backup` and phase snapshot of `tools/upgrade-in-place-to-2604.sh` encrypt the system archive (`/etc` with `/etc/shadow` and the SSH host keys, the crontabs, the checkout) with `$STORAGE_ROOT/backup/secret_key.txt` and copy it to the target in `$STORAGE_ROOT/backup/custom.yaml`, both read as root by path. The in-place and the migration tool pause the backups by moving and writing `custom.yaml` there as root, by path.
+* **Cause:** `$STORAGE_ROOT` is the home of the user-data account. That account can rename `backup/` and put a directory of its own in its place, with `secret_key.txt` and `rsync://...` of its choice; the B102 checks only refuse options and shell syntax in the target. The system archive then went, encrypted with a passphrase the account knows, to a host it chose. With a dangling symbolic link as `custom.yaml` or `custom.yaml.upgrade-none` in such a directory, root's writes of the paused file created a file at the link's target.
+* **Fix:** The tools open `$STORAGE_ROOT/backup` once and check the open directory: a directory of root's own, not writable by group or others, and the same device and inode as the entry at the path (not a symbolic link). They then read the target and the passphrase and change `custom.yaml` only through that descriptor (`/proc/PID/fd/N/...`), so a directory put there later does not count, and take only regular files of root's in it. Otherwise `update-check.sh backup` stops before anything else, the in-place preflight has a blocker (not `--no-backup-check`), phase snapshot keeps the archive unencrypted in `/root/upgrade-2604` (mode 0700) and copies nothing, and pausing or resuming the backups is left to the operator with a warning. `management/backup.py`, which runs nightly as root, still reads these files by path (upstream code; see "Planned" in CHANGELOG-fork.md).
+* **Affects:** the migration tool since rc1, the in-place tool since rc3, `update-check.sh` (new in rc7). Origin: Fork. It needs code running as user-data at the time of the backup or upgrade.
+* **Evidence:** from reading the code. On the fresh-install test box, with the functions of the tool: a root-owned directory was taken and its target read through the descriptor, also after it was renamed and replaced by another directory with another target; a directory owned by nobody, a symbolic link, mode 0775 and a symbolic link as a file in it were refused; without `custom.yaml` the target was `local`.
+* **Found by:** rc7 review (of the certification fixes; in `update-check.sh`, then the same design in the in-place and the migration tool); **commit:** see `git log --grep B117`; **fixed in:** v78-r2604.0-rc7
+
+### B118
+
+**The fallback SSH server misses Match blocks in files included from included files** (low, Tools)
+
+* **Symptom:** On a box whose `sshd_config.d/*.conf` includes another file with a `Match` block (for example `Match User alice` with a second factor, or `Match Address` with `DenyUsers`), `tools/upgrade-in-place-to-2604.sh` starts the fallback SSH server, which applies none of what that block restricts on port 22.
+* **Cause:** `ssh_fallback_refusal` (B101) looked for `Match` in `sshd_config` and the files of its own `Include` lines only; sshd follows `Include` in included files as well (up to 16 levels).
+* **Fix:** It follows the `Include` lines of every included file (globs, relative paths below `/etc/ssh`, `Include=` and any case, each file once) and refuses the fallback when one of them has a `Match` block, or when the includes go deeper than 16 levels.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
+* **Evidence:** from reading the code. On the fresh-install test box, with the function of the tool: a `Match User` block two levels down and a lower-case `match address` three levels down (with a relative `include`) were found, a loop of two files ended without a refusal, and without the test files there was none.
+* **Found by:** rc7 review (of the certification fixes); **commit:** see `git log --grep B118`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

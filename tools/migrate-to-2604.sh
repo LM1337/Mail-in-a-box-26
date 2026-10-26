@@ -99,6 +99,9 @@ VERIFY_PROBLEMS=()
 CHECK_ONLY=
 CHECK_TMP=
 BACKUP_WAITED=
+BACKUP_DIR=
+BACKUP_DIR_FD=
+BACKUP_DIR_WHY=
 LOG_READY=
 IN_DIE=
 USER_STOPPED=
@@ -2321,20 +2324,69 @@ EOF
 	state_set CONF_WRITTEN 1
 }
 
+# $STORAGE_ROOT/backup, checked once and then used through one open
+# descriptor (B117). $STORAGE_ROOT is the home of the user-data account, which
+# can rename backup/ and put a directory of its own in its place, with
+# symlinks where this tool writes custom.yaml. It counts only as a directory
+# of root's own, not writable by group or others, and the same one (device
+# and inode) as at its path. Sets BACKUP_DIR to a path through the descriptor
+# (/proc/PID/fd/N), or BACKUP_DIR_WHY and returns 1; backup_dir_close closes
+# it. Keep in sync with tools/upgrade-in-place-to-2604.sh.
+backup_dir_open() {
+	local b=$STORAGE_ROOT/backup fd at st
+	[ -z "$BACKUP_DIR" ] || return 0
+	BACKUP_DIR_WHY=
+	if [ -L "$b" ] || [ ! -d "$b" ]; then
+		BACKUP_DIR_WHY="$b is missing or not a directory"
+		return 1
+	fi
+	if ! { exec {fd}< "$b"; } 2> /dev/null; then
+		BACKUP_DIR_WHY="cannot open $b"
+		return 1
+	fi
+	# The open directory (stat -L of the descriptor) and the entry at the path (no -L).
+	st=$(stat -L -c '%d:%i %u %a' "/proc/$BASHPID/fd/$fd" 2> /dev/null || true)
+	at=$(stat -c '%d:%i %F' -- "$b" 2> /dev/null || true)
+	if [ "$at" != "${st%% *} directory" ] || [ "$(cut -d' ' -f2 <<< "$st")" != 0 ] \
+		|| [ $((8#$(cut -d' ' -f3 <<< "$st") & 8#022)) != 0 ]; then
+		exec {fd}<&-
+		BACKUP_DIR_WHY="$b is not a directory of root's own (owned by root, not writable by group or others)"
+		return 1
+	fi
+	BACKUP_DIR=/proc/$BASHPID/fd/$fd
+	BACKUP_DIR_FD=$fd
+}
+
+backup_dir_close() {
+	if [ -n "$BACKUP_DIR_FD" ]; then exec {BACKUP_DIR_FD}<&-; fi
+	BACKUP_DIR='' BACKUP_DIR_FD=''
+}
+
 # Only one box may ever back up to a backup target. Until the migration is
 # finished, the copied backup/custom.yaml is replaced by "target: off" here.
+# The files are changed only in the checked backup directory (B117).
 pause_backups() {
-	local b=$STORAGE_ROOT/backup
-	[ -d "$b" ] || return 0
-	if [ -e "$b/custom.yaml.migrate-saved" ] || [ -e "$b/custom.yaml.migrate-none" ]; then return 0; fi
+	local b
+	[ -e "$STORAGE_ROOT/backup" ] || [ -L "$STORAGE_ROOT/backup" ] || return 0
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: backups are not paused on this machine. Turn them off yourself
+(System > Backup Status) until the migration is finished."
+		return 0
+	fi
+	b=$BACKUP_DIR
+	if [ -e "$b/custom.yaml.migrate-saved" ] || [ -e "$b/custom.yaml.migrate-none" ]; then
+		backup_dir_close
+		return 0
+	fi
 	if [ -f "$b/custom.yaml" ]; then
 		mv "$b/custom.yaml" "$b/custom.yaml.migrate-saved"
 	else
 		: > "$b/custom.yaml.migrate-none"
 	fi
-	printf '%s\n' "# Backups paused by migrate-to-2604.sh until the migration is finished." \
-		"# The real settings are in custom.yaml.migrate-saved." 'target: "off"' > "$b/custom.yaml"
+	(umask 077 && printf '%s\n' "# Backups paused by migrate-to-2604.sh until the migration is finished." \
+		"# The real settings are in custom.yaml.migrate-saved." 'target: "off"' > "$b/custom.yaml")
 	chmod 600 "$b/custom.yaml"
+	backup_dir_close
 	state_set BACKUPS_PAUSED 1
 	say "Backups are paused on this machine until the migration is finished (backup/custom.yaml)."
 }
@@ -2343,17 +2395,33 @@ pause_backups() {
 # box's real one and removes custom.yaml.migrate-saved/-none: pause again, with
 # the settings just copied as the saved ones.
 repause_backups() {
-	local b=$STORAGE_ROOT/backup
-	[ "$(state_get BACKUPS_PAUSED)" = 1 ] && [ -d "$b" ] || return 0
+	local b
+	[ "$(state_get BACKUPS_PAUSED)" = 1 ] && [ -d "$STORAGE_ROOT/backup" ] || return 0
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: backups are not paused again after the copy. Turn them off yourself
+(System > Backup Status) until the migration is finished."
+		return 0
+	fi
+	b=$BACKUP_DIR
 	# Still the paused file (an interrupted copy may have removed only its
 	# marker; the next copy brings the real one).
-	if grep -qs '^# Backups paused by migrate-to-2604\.sh' "$b/custom.yaml"; then return 0; fi
+	if grep -qs '^# Backups paused by migrate-to-2604\.sh' "$b/custom.yaml"; then
+		backup_dir_close
+		return 0
+	fi
 	rm -f "$b/custom.yaml.migrate-saved" "$b/custom.yaml.migrate-none"
+	backup_dir_close
 	pause_backups
 }
 
 resume_backups() {
-	local b=$STORAGE_ROOT/backup
+	local b
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: backups stay paused. Check it, then move backup/custom.yaml.migrate-saved
+back to backup/custom.yaml yourself (or remove custom.yaml and custom.yaml.migrate-none)."
+		return 0
+	fi
+	b=$BACKUP_DIR
 	if [ -e "$b/custom.yaml.migrate-saved" ]; then
 		mv "$b/custom.yaml.migrate-saved" "$b/custom.yaml"
 		say "Backups resumed with the old box's settings (backup/custom.yaml${OLD[BACKUP_TARGET]:+, target ${OLD[BACKUP_TARGET]}})."
@@ -2361,6 +2429,7 @@ resume_backups() {
 		rm -f "$b/custom.yaml" "$b/custom.yaml.migrate-none"
 		say "Backups resumed (local backups, the default)."
 	fi
+	backup_dir_close
 	state_set BACKUPS_PAUSED ""
 }
 

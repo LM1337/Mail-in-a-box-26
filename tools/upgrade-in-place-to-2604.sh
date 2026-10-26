@@ -188,6 +188,9 @@ SELF=$STATE_DIR/$SCRIPT_NAME
 SELF_FILE=
 FALLBACK_STARTED=
 SSH_WATCH_PID=
+BACKUP_DIR=
+BACKUP_DIR_FD=
+BACKUP_DIR_WHY=
 SSH_CHECK_HOSTS=()
 
 # ---------------------------------------------------------------------------
@@ -303,15 +306,16 @@ wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
 running (e.g. the nightly one) before anything is stopped.
 
 During each release upgrade the SSH server on port 22 is down for a while
-(5-40 minutes). Meanwhile a fallback SSH server listens on port 1022
+(5-45 minutes). Meanwhile a fallback SSH server listens on port 1022
 (UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
 administrators (members of the groups sudo and admin, and root if
 PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
 others), on the ListenAddress addresses of sshd and with its
 AllowUsers/AllowGroups/DenyUsers/DenyGroups, PubkeyAuthOptions, ForceCommand
-and ChrootDirectory. It does not start where sshd asks for more than a key
-(AuthenticationMethods) or sshd_config has Match blocks. ufw lets its port
-through only while it runs. The run says when port 22 answers again.
+and ChrootDirectory. With StrictModes (the default) it takes only the key
+files that sshd accepts. It does not start where sshd asks for more than a
+key (AuthenticationMethods) or sshd_config or a file it includes has Match
+blocks. ufw lets its port through only while it runs. The run says when port 22 answers again.
 UPGRADE_SSH_FALLBACK_TEST_SECONDS (default 600) is how long
 --ssh-fallback-test keeps it running.
 EOF
@@ -1144,15 +1148,67 @@ move_aside() {
 
 is_fork_dir() { [ -f "$1/setup/start.sh" ] && [ -f "$1/tools/migrate-to-2604.sh" ]; }
 
-# The backup target as Mail-in-a-Box reads it (unmasked; never printed).
+# $STORAGE_ROOT/backup, checked once and then used through one open
+# descriptor (B117). $STORAGE_ROOT is the home of the user-data account, which
+# can rename backup/ and put a directory of its own in its place: with the
+# target and the passphrase of the system archive (/etc with /etc/shadow and
+# the SSH host keys), or with symlinks where this tool writes custom.yaml. It
+# counts only as a directory of root's own, not writable by group or others,
+# and the same one (device and inode) as at its path. Sets BACKUP_DIR to a
+# path through the descriptor (/proc/PID/fd/N: the directory that was
+# checked, even if it is renamed later), or BACKUP_DIR_WHY and returns 1.
+# backup_dir_close closes it again (before release upgrades and setup run).
+# Keep in sync with tools/update-check.sh and tools/migrate-to-2604.sh.
+backup_dir_open() {
+	local b=$STORAGE_ROOT/backup fd at st
+	[ -z "$BACKUP_DIR" ] || return 0
+	BACKUP_DIR_WHY=
+	if [ -L "$b" ] || [ ! -d "$b" ]; then
+		BACKUP_DIR_WHY="$b is missing or not a directory"
+		return 1
+	fi
+	if ! { exec {fd}< "$b"; } 2> /dev/null; then
+		BACKUP_DIR_WHY="cannot open $b"
+		return 1
+	fi
+	# The open directory (stat -L of the descriptor) and the entry at the path (no -L).
+	st=$(stat -L -c '%d:%i %u %a' "/proc/$BASHPID/fd/$fd" 2> /dev/null || true)
+	at=$(stat -c '%d:%i %F' -- "$b" 2> /dev/null || true)
+	if [ "$at" != "${st%% *} directory" ] || [ "$(cut -d' ' -f2 <<< "$st")" != 0 ] \
+		|| [ $((8#$(cut -d' ' -f3 <<< "$st") & 8#022)) != 0 ]; then
+		exec {fd}<&-
+		BACKUP_DIR_WHY="$b is not a directory of root's own (owned by root, not writable by group or others)"
+		return 1
+	fi
+	BACKUP_DIR=/proc/$BASHPID/fd/$fd
+	BACKUP_DIR_FD=$fd
+}
+
+backup_dir_close() {
+	if [ -n "$BACKUP_DIR_FD" ]; then exec {BACKUP_DIR_FD}<&-; fi
+	BACKUP_DIR='' BACKUP_DIR_FD=''
+}
+
+# A file in the checked backup directory: a regular file of root's own (no
+# symlink). Prints its path through the descriptor.
+backup_file() { # NAME
+	local f=$BACKUP_DIR/$1
+	[ -n "$BACKUP_DIR" ] && [ ! -L "$f" ] && [ -f "$f" ] && [ "$(stat -c %u -- "$f")" = 0 ] || return 1
+	echo "$f"
+}
+
+# The backup target as Mail-in-a-Box reads it (unmasked; never printed), from
+# the checked backup directory; "off" when it is not one (the preflight
+# blocks then, check_backup).
 backup_target() {
-	local b=$STORAGE_ROOT/backup/custom.yaml t
+	local b t
+	backup_dir_open || { echo off; return 0; }
 	# Paused by this tool: the real settings are kept aside (or there were none).
-	if [ -e "$b.upgrade-none" ]; then
+	if [ -e "$BACKUP_DIR/custom.yaml.upgrade-none" ]; then
 		echo local
 		return 0
 	fi
-	if [ -f "$b.upgrade-saved" ]; then b=$b.upgrade-saved; fi
+	b=$(backup_file custom.yaml.upgrade-saved || backup_file custom.yaml) || b=/dev/null
 	t=$(sed -n 's/^target:[[:space:]]*//p' "$b" 2> /dev/null | head -n 1 | tr -d "\"'" || true)
 	echo "${t:-local}"
 }
@@ -1500,6 +1556,14 @@ backup_blocker() {
 
 check_backup() {
 	local target last age running=
+	# Not --no-backup-check: the system archive and the paused custom.yaml
+	# must not go where another account chooses (B117).
+	if [ -e "$STORAGE_ROOT/backup" ] && ! backup_dir_open; then
+		blocker "$BACKUP_DIR_WHY. Make it root's own again (chown root:root, chmod 755) and check custom.yaml
+and secret_key.txt in it."
+		return 0
+	fi
+	backup_dir_close
 	target=$(backup_target)
 	# Set below when the age check waits for the running backup: stop_mail
 	# checks then even if that backup has finished by itself meanwhile.
@@ -2036,6 +2100,9 @@ show_plan() {
 	if [ "$v" != 26.04 ]; then
 		n=$((n + 1))
 		say "$n. do-release-upgrade to Ubuntu 26.04, reboot (continues on its own)."
+		say "   During each release upgrade new SSH logins on port 22 fail for a while (in the tests"
+		say "   19 to 42 minutes from 22.04, 6 to 19 minutes from 24.04), and in the one to 26.04 sudo"
+		say "   is missing for 12 to 37 minutes; open connections stay."
 		if [ "$(ssh_fallback_port)" != off ]; then
 			say "   During each release upgrade a fallback SSH server listens on port $(ssh_fallback_port) (key login of"
 			say "   the administrators; try it before with --ssh-fallback-test)."
@@ -2214,18 +2281,25 @@ $out"
 }
 
 offsite_copy() {
-	local arch=$1 key=$STORAGE_ROOT/backup/secret_key.txt enc target dir dest stamp gh
+	local arch=$1 key=$STORAGE_ROOT/backup/secret_key.txt keyf enc target dir dest stamp gh
 	stamp=$(state_get SNAPSHOT_STAMP)
 	if [ -n "$NO_OFFSITE" ]; then
 		say "The system archive stays only in $STATE_DIR (--no-offsite)."
 		return 0
 	fi
-	[ -r "$key" ] || die "$key is missing; cannot encrypt the archive. Use --no-offsite."
+	# The passphrase and the target only from a backup directory of root's
+	# own (B117; the preflight blocks otherwise).
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: the system archive is not encrypted or copied; it stays in $STATE_DIR
+(root only). Copy it off the machine yourself."
+		return 0
+	fi
+	keyf=$(backup_file secret_key.txt) || die "$key is missing; cannot encrypt the archive. Use --no-offsite."
 	enc=$arch.gpg
 	gh=$STATE_DIR/gnupg
 	install -d -m 700 "$gh"
 	say "Encrypting the archive with backup/secret_key.txt (gpg, AES256)..."
-	gpg --homedir "$gh" --batch --yes --quiet --pinentry-mode loopback --passphrase-file "$key" \
+	gpg --homedir "$gh" --batch --yes --quiet --pinentry-mode loopback --passphrase-file "$keyf" \
 		--symmetric --cipher-algo AES256 -o "$enc" "$arch" < /dev/null || die "gpg could not encrypt $arch."
 	gpgconf --homedir "$gh" --kill all > /dev/null 2>&1 || true
 	(cd "$(dirname "$enc")" && sha256sum "$(basename "$enc")") > "$enc.sha256"
@@ -2256,6 +2330,7 @@ offsite_copy() {
 targets. Copy $enc off this machine yourself (it is encrypted with backup/secret_key.txt)."
 			;;
 	esac
+	backup_dir_close
 	say "To decrypt it later: gpg --batch --pinentry-mode loopback --passphrase-file secret_key.txt \\"
 	say "  -d $(basename "$enc") > $(basename "$arch")"
 }
@@ -2346,29 +2421,47 @@ masks of: $(state_get MASKED_UNITS)"
 # backup of a half-upgraded box: backup/custom.yaml says "target: off" until
 # finish (or --rollback). Keep in sync with tools/migrate-to-2604.sh (marker
 # and file names differ).
+# The files are changed only in the checked backup directory (B117); it is
+# root's own, so no other account has put symlinks there.
 pause_backups() {
-	local b=$STORAGE_ROOT/backup
-	[ -d "$b" ] || return 0
-	if [ -e "$b/custom.yaml.upgrade-saved" ] || [ -e "$b/custom.yaml.upgrade-none" ]; then return 0; fi
+	local b
+	[ -e "$STORAGE_ROOT/backup" ] || [ -L "$STORAGE_ROOT/backup" ] || return 0
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: backups are not paused. Turn them off yourself (System > Backup Status)."
+		return 0
+	fi
+	b=$BACKUP_DIR
+	if [ -e "$b/custom.yaml.upgrade-saved" ] || [ -e "$b/custom.yaml.upgrade-none" ]; then
+		backup_dir_close
+		return 0
+	fi
 	if [ -f "$b/custom.yaml" ]; then
 		mv "$b/custom.yaml" "$b/custom.yaml.upgrade-saved"
 	else
 		: > "$b/custom.yaml.upgrade-none"
 	fi
-	printf '%s\n' "# Backups paused by $SCRIPT_NAME until the upgrade is finished." \
-		"# The real settings are in custom.yaml.upgrade-saved." 'target: "off"' > "$b/custom.yaml"
+	(umask 077 && printf '%s\n' "# Backups paused by $SCRIPT_NAME until the upgrade is finished." \
+		"# The real settings are in custom.yaml.upgrade-saved." 'target: "off"' > "$b/custom.yaml")
 	chmod 600 "$b/custom.yaml"
+	backup_dir_close
 	state_set BACKUPS_PAUSED 1
 	say "Backups are paused until the upgrade is finished (backup/custom.yaml)."
 }
 
 resume_backups() {
-	local b=$STORAGE_ROOT/backup
+	local b
+	if ! backup_dir_open; then
+		warn "$BACKUP_DIR_WHY: backups stay paused. Check it, then move backup/custom.yaml.upgrade-saved
+back to backup/custom.yaml yourself (or remove custom.yaml and custom.yaml.upgrade-none)."
+		return 0
+	fi
+	b=$BACKUP_DIR
 	if [ -f "$b/custom.yaml" ] && ! grep -qs "^# Backups paused by $SCRIPT_NAME" "$b/custom.yaml" \
 		&& { [ -e "$b/custom.yaml.upgrade-saved" ] || [ -e "$b/custom.yaml.upgrade-none" ]; }; then
 		warn "backup/custom.yaml was changed during the upgrade (System > Backup Status?). Kept it;
 the settings from before the upgrade are in backup/custom.yaml.upgrade-saved (if any)."
 		rm -f "$b/custom.yaml.upgrade-none"
+		backup_dir_close
 		state_set BACKUPS_PAUSED ""
 		return 0
 	fi
@@ -2379,6 +2472,7 @@ the settings from before the upgrade are in backup/custom.yaml.upgrade-saved (if
 		rm -f "$b/custom.yaml" "$b/custom.yaml.upgrade-none"
 		say "Backups resumed (local backups, the default)."
 	fi
+	backup_dir_close
 	state_set BACKUPS_PAUSED ""
 }
 
@@ -3177,7 +3271,7 @@ ssh_banner() { # PORT
 # adds, and sshd -T (without -C) does not show what Match blocks change.
 # SSHD_T: the output of sshd -T.
 ssh_fallback_refusal() { # SSHD_T
-	local t=$1 am list ok='' f w files=(/etc/ssh/sshd_config)
+	local t=$1 am list ok='' f w files=()
 	if [ "$(sed -n 's/^pubkeyauthentication //p' <<< "$t")" = no ]; then
 		echo "sshd does not accept public keys (PubkeyAuthentication no)"
 		return 0
@@ -3194,15 +3288,33 @@ ssh_fallback_refusal() { # SSHD_T
 			return 0
 		fi
 	fi
-	# Match blocks in sshd_config and the files it includes (one level, as
-	# Ubuntu's sshd_config.d/*.conf; relative paths are below /etc/ssh).
-	while read -r -a w; do
-		for f in "${w[@]}"; do
-			[[ $f == /* ]] || f=/etc/ssh/$f
-			while IFS= read -r f; do files+=("$f"); done < <(compgen -G "$f" || true)
-		done
-	done < <(sed -nE 's/^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+//p' /etc/ssh/sshd_config 2> /dev/null || true)
-	if grep -sqiE '^[[:space:]]*match[[:space:]]' "${files[@]}"; then
+	# Match blocks in sshd_config and the files it includes, followed as sshd
+	# does: also the Include lines of included files (sshd stops at 16
+	# levels; relative paths are below /etc/ssh). The first level alone
+	# missed a Match block in a file included from sshd_config.d (B118).
+	local cur=(/etc/ssh/sshd_config) incl=() seen=" /etc/ssh/sshd_config " level=0 g
+	while [ ${#cur[@]} -gt 0 ]; do
+		if [ "$level" -gt 16 ]; then
+			echo "the sshd configuration includes files more than 16 levels deep"
+			return 0
+		fi
+		files+=("${cur[@]}")
+		incl=()
+		while read -r -a w; do
+			for f in "${w[@]}"; do
+				f=${f//\"/}
+				[[ $f == /* ]] || f=/etc/ssh/$f
+				while IFS= read -r g; do
+					[[ $seen == *" $g "* ]] && continue
+					seen+="$g "
+					incl+=("$g")
+				done < <(compgen -G "$f" || true)
+			done
+		done < <(sed -nE 's/^[[:space:]]*include([[:space:]]*=[[:space:]]*|[[:space:]]+)//Ip' "${cur[@]}" 2> /dev/null || true)
+		cur=("${incl[@]+"${incl[@]}"}")
+		level=$((level + 1))
+	done
+	if grep -sqiE '^[[:space:]]*match([[:space:]]|=)' "${files[@]}"; then
 		echo "the sshd configuration has Match blocks, which the fallback cannot take over"
 		return 0
 	fi
@@ -3228,11 +3340,42 @@ fallback_users() { # PERMITROOTLOGIN
 	done | sort -u
 }
 
+# sshd's StrictModes check of a key file (auth_secure_path in OpenSSH): by
+# its real path, the file must be a regular file of root's or the user's, not
+# writable by group or others, and so must each directory above it, up to the
+# home directory (or /). Prints the real path. A path that passes can be
+# changed only by root and the user, so reading it afterwards is safe.
+key_file_secure() { # USER UID HOME FILE
+	local u=$1 uid=$2 home=$3 f=$4 real rhome d st
+	real=$(realpath -e -- "$f" 2> /dev/null) || return 1
+	rhome=$(realpath -e -- "$home" 2> /dev/null || true)
+	d=$real
+	while :; do
+		# stat without -L: the real path has no symlinks; one now is a change.
+		st=$(stat -c '%u %a %F' -- "$d" 2> /dev/null) || return 1
+		if [ "$d" = "$real" ]; then
+			[[ ${st#* * } == regular*file ]] || { warn "Not on the fallback: $f of $u is not a regular file."; return 1; }
+		else
+			[ "${st#* * }" = directory ] || return 1
+		fi
+		if { [ "${st%% *}" != 0 ] && [ "${st%% *}" != "$uid" ]; } || [ $((8#$(cut -d' ' -f2 <<< "$st") & 8#022)) != 0 ]; then
+			warn "Not on the fallback: the keys in $f of $u, which sshd ignores too (StrictModes: $d is not
+owned by $u or root, or group or others can write it)."
+			return 1
+		fi
+		[ "$d" != "$rhome" ] && [ "$d" != / ] || break
+		d=$(dirname "$d")
+	done
+	echo "$real"
+}
+
 # The authorized keys of USER after AuthorizedKeysFile (relative to the home
-# directory; %h, %u, %U and %% expanded), read as that user.
-user_keys() { # USER FILES...
-	local u=$1 home uid f
-	shift
+# directory; %h, %u, %U and %% expanded), read as that user. With StrictModes
+# (sshd's default) only from the files that sshd accepts on port 22, so that
+# the fallback lets in no key that sshd refuses there (B115).
+user_keys() { # STRICTMODES USER FILES...
+	local strict=$1 u=$2 home uid f
+	shift 2
 	home=$(getent passwd "$u" | cut -d: -f6)
 	uid=$(id -u "$u")
 	[ -n "$home" ] || return 0
@@ -3244,6 +3387,9 @@ user_keys() { # USER FILES...
 		f=${f//%U/$uid}
 		f=${f//$'\001'/%}
 		[[ $f == /* ]] || f=$home/$f
+		if [ "$strict" != no ]; then
+			f=$(key_file_secure "$u" "$uid" "$home" "$f") || continue
+		fi
 		if [ "$u" = root ]; then
 			if [ -f "$f" ] && [ ! -L "$f" ]; then cat -- "$f"; fi
 		else
@@ -3255,7 +3401,7 @@ user_keys() { # USER FILES...
 # Start the fallback (see above). Never fatal: without it the release upgrade
 # goes on as before.
 ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
-	local until=${1:-until the release upgrade has finished} port t prl keyfiles=() users=() u n=0 key val bin out addr rest
+	local until=${1:-until the release upgrade has finished} port t prl strict keyfiles=() users=() u n=0 key val bin out addr rest
 	port=$(ssh_fallback_port)
 	if [ "$port" = off ]; then
 		say "No fallback SSH server (UPGRADE_SSH_FALLBACK_PORT=off)."
@@ -3278,6 +3424,7 @@ refuses or asks for more. Keep an SSH connection open during the release upgrade
 		return 0
 	fi
 	ssh_check_hosts
+	strict=$(sed -n 's/^strictmodes //p' <<< "$t")
 	prl=$(sed -n 's/^permitrootlogin //p' <<< "$t")
 	case "$prl" in yes | without-password | prohibit-password) prl=prohibit-password ;; forced-commands-only) ;; *) prl=no ;; esac
 	read -r -a keyfiles <<< "$(sed -n 's/^authorizedkeysfile //p' <<< "$t")"
@@ -3286,9 +3433,13 @@ refuses or asks for more. Keep an SSH connection open during the release upgrade
 	install -d -m 700 "$FALLBACK_DIR"
 	install -d -m 755 "$FALLBACK_KEYS_DIR"
 	while IFS= read -r u; do
-		user_keys "$u" "${keyfiles[@]}" | grep -E '^[^#[:space:]]' > "$FALLBACK_KEYS_DIR/$u" || true
+		# root:<the user's group> 0640: sshd reads it as the user; other
+		# accounts do not see the key options (from=, command=...).
+		install -m 600 /dev/null "$FALLBACK_KEYS_DIR/$u"
+		user_keys "${strict:-yes}" "$u" "${keyfiles[@]}" | grep -E '^[^#[:space:]]' >> "$FALLBACK_KEYS_DIR/$u" || true
 		if [ -s "$FALLBACK_KEYS_DIR/$u" ]; then
-			chmod 644 "$FALLBACK_KEYS_DIR/$u"
+			chown "root:$(id -g "$u")" "$FALLBACK_KEYS_DIR/$u"
+			chmod 640 "$FALLBACK_KEYS_DIR/$u"
 			users+=("$u")
 		else
 			rm -f "$FALLBACK_KEYS_DIR/$u"
@@ -3454,9 +3605,9 @@ ssh_watch_start() {
 				p22_down=1 since=$SECONDS
 				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on port 22: new logins fail until\n' -1
 				if [ -f "$FALLBACK_DIR/sshd.pid" ]; then
-					echo "  it is back (usually 5-40 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
+					echo "  it is back (usually 5-45 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
 				else
-					echo "  it is back (usually 5-40 minutes). Open connections stay. Do not reboot."
+					echo "  it is back (usually 5-45 minutes). Open connections stay. Do not reboot."
 				fi
 			elif [ -n "$p22_down" ] && port_listening 22 && ssh_banner 22; then
 				p22_down=
@@ -3503,9 +3654,9 @@ do_ssh_fallback_test() {
 }
 
 # What the operator runs into during a release upgrade. In the test runs
-# new SSH logins on port 22 failed for 19-36 minutes from 22.04 to 24.04
-# (while openssh-server was unpacked but not yet configured) and for 6-16
-# minutes from 24.04 to 26.04, and /usr/bin/sudo was missing for 12-31
+# of rc7 new SSH logins on port 22 failed for 19-42 minutes from 22.04 to
+# 24.04 (while openssh-server was unpacked but not yet configured) and for
+# 6-19 minutes from 24.04 to 26.04, and /usr/bin/sudo was missing for 12-37
 # minutes while sudo-rs replaced sudo; the longer times on a busy disk. Open
 # connections and the run in tmux go on.
 # From 24.04 to 26.04 tmux 3.6 replaces tmux 3.4 a few minutes in; the new
@@ -3516,8 +3667,8 @@ do_ssh_fallback_test() {
 # WHEN: now (the release upgrade starts now) or reboot (it starts by itself
 # after this reboot, before anyone can attach). Also in the motd.
 release_access_text() { # TO now|reboot
-	local mins="20 to 40" attach
-	if [ "$1" = 26.04 ]; then mins="5 to 20"; fi
+	local mins="19 to 42" attach
+	if [ "$1" = 26.04 ]; then mins="6 to 19"; fi
 	if [ "$2" = reboot ]; then
 		echo "After the reboot the release upgrade to Ubuntu $1 starts by itself. While it replaces the"
 		echo "SSH server, new SSH logins can fail for a while ($mins minutes in the test runs)."
@@ -3543,7 +3694,7 @@ release_access_text() { # TO now|reboot
 		echo "  ssh -p $fb USER@${PRIMARY_HOSTNAME:-$(hostname -f 2> /dev/null || hostname)}"
 	fi
 	if [ "$1" = 26.04 ]; then
-		echo "sudo is missing for a while (12 to 31 minutes in the test runs) while sudo-rs replaces it:"
+		echo "sudo is missing for a while (12 to 37 minutes in the test runs) while sudo-rs replaces it:"
 		if [ "$2" = reboot ]; then
 			echo "sudo then fails with \"command not found\". Wait until it is back."
 		else

@@ -54,6 +54,8 @@
 # package and configuration listings that go into the system archive (dpkg,
 # postconf -n, doveconf -n, unit files) are written in plain text first, in
 # the root-only stamp directory, and removed after it.
+# The target and the passphrase come only from a $STORAGE_ROOT/backup that
+# is root's own, read through one open descriptor (B117).
 # For an rsync target the files are copied next to the backups
 # (<path>-system/update-check-<stamp>/, with the backup SSH key, like
 # management/backup.py) and compared by checksum (rsync -c, dry run); for
@@ -79,13 +81,15 @@ STATE_ROOT=${UPDATE_CHECK_DIR:-/root/update-check}
 SCRIPT_NAME=update-check.sh
 # Raw files of the branch main (GitHub serves them from another host).
 DEFAULT_RAW=https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main
-MIAB_DIR=/root/mailinabox
+MIAB_DIR=
 STORAGE_ROOT=/home/user-data
 PRIMARY_HOSTNAME=
 PROBE_ADDRESS=
 RUN_DIR=
 SELF_REPO=
 GPG_HOME=
+BACKUP_DIR=
+BACKUP_DIR_WHY=
 
 say() { echo "$*"; }
 warn() { echo "WARNING: $*" >&2; }
@@ -123,7 +127,9 @@ Steps:
                 for its run, as in the nightly backup), then an encrypted
                 archive of /etc, the checkout, the crontabs, Z-Push,
                 Munin, Nextcloud's code and the Docker stacks you name, copied
-                next to the backups (rsync targets) and verified
+                next to the backups (rsync targets) and verified; the target
+                and the passphrase only from a STORAGE_ROOT/backup of root's
+                own (otherwise it stops)
   after         record the state again (after/), compare it with before/:
                 each change is EXPECTED (announced by the releases in
                 between, tools/expected-changes/) or UNEXPECTED; then the log
@@ -252,18 +258,29 @@ find_self_repo() {
 # /usr/local/bin/mailinabox (written by setup: "cd DIR", then setup/start.sh)
 # changes into, else /root/mailinabox, else the checkout this script runs
 # from. Upstream boxes installed with an older bootstrap.sh have /mailinabox
-# (B106). Only a git checkout of root's own (no symlink, not writable by
-# others, also the directories above it) counts: status_checks.py and
-# backup.py run from it as root.
+# (B106). Only a git checkout of root's own counts: the directory and those
+# above it (no symlink, not writable by group or others), and everything in
+# it, owned by root and not writable by group or others (status_checks.py,
+# backup.py and the modules they import run from it as root, git reads its
+# .git/config, the log audit and the lists come from it; B116). Without one,
+# MIAB_DIR stays empty: no status checks, and backup needs --no-miab-backup.
 find_miab_dir() {
-	local d c
+	local d c bad
+	MIAB_DIR=
 	d=$(sed -nE 's|^cd (/[A-Za-z0-9._/-]+)$|\1|p' /usr/local/bin/mailinabox 2> /dev/null | head -n 1 || true)
 	# No "." or ".." parts: root_only_path checks the path as written.
 	if [[ /$d/ == */./* || /$d/ == */../* ]]; then d=; fi
+	if [ "$d" = /root/mailinabox ]; then d=; fi
 	for c in "$d" /root/mailinabox; do
 		[ -n "$c" ] && [ -d "$c/.git" ] && [ -f "$c/management/status_checks.py" ] || continue
 		if ! root_only_path "$c"; then
 			warn "$c is not root's own (or a directory above it is not); not used as the Mail-in-a-Box checkout."
+			continue
+		fi
+		# find does not follow symlinks; their mode bits mean nothing.
+		bad=$(find "$c" \( ! -user 0 -o \( ! -type l -perm /022 \) \) -print -quit 2> /dev/null) || bad=$c
+		if [ -n "$bad" ]; then
+			warn "$bad is not root's own or can be written by group or others; $c is not used as the Mail-in-a-Box checkout."
 			continue
 		fi
 		MIAB_DIR=$c
@@ -337,7 +354,9 @@ record_doveconf() {
 
 record_status_checks() { # DIR
 	local d=$1
-	if [ -x "$MIAB_DIR/management/status_checks.py" ]; then
+	if [ -z "$MIAB_DIR" ]; then
+		echo "(no Mail-in-a-Box checkout of root's own found)" > "$d/status.txt"
+	elif [ -x "$MIAB_DIR/management/status_checks.py" ]; then
 		(cd "$MIAB_DIR" && umask 022 && timeout 900 management/status_checks.py) > "$d/status-full.txt" 2>&1 < /dev/null || true
 		# The error (✖) and warning (?) lines; numbers vary (days to expiry...).
 		grep -E '^[[:space:]]*(✖|\?)' "$d/status-full.txt" | sed -E 's/^[[:space:]]+//; s/[0-9]+/N/g' | sort > "$d/status.txt" || true
@@ -419,19 +438,66 @@ record_packages() {
 		opendmarc postgrey fail2ban nsd bind9 munin munin-node duplicity openssh-server 2> /dev/null | awk 'NF == 2' | sort || true
 }
 
-# The backup target as Mail-in-a-Box reads it (unmasked; never printed).
-# management/backup.py reads custom.yaml with rtyaml, so quoted and unquoted
-# values work; without its Python environment, a plain parse.
-backup_target() {
-	local t py=/usr/local/lib/mailinabox/env/bin/python
-	if [ -x "$py" ] && [ -f "$MIAB_DIR/management/backup.py" ]; then
-		if t=$(cd "$MIAB_DIR/management" && "$py" -c 'import backup, utils
-print(backup.get_backup_config(utils.load_environment())["target"])' 2> /dev/null); then
-			echo "${t#file://"$STORAGE_ROOT"/backup/encrypted}" | sed 's|^$|local|'
-			return 0
-		fi
+# $STORAGE_ROOT/backup, checked once and then used through one open
+# descriptor (B117). $STORAGE_ROOT is the home of the user-data account, which
+# can rename backup/ and put a directory of its own in its place, with a
+# target and a passphrase of its choice for the system archive (/etc with
+# /etc/shadow and the SSH host keys). It counts only as a directory of root's
+# own, not writable by group or others, and the same one (device and inode)
+# as at its path. Sets BACKUP_DIR to a path through the descriptor
+# (/proc/PID/fd/N: the directory that was checked, even if it is renamed
+# later), or BACKUP_DIR_WHY and returns 1. As in upgrade-in-place-to-2604.sh.
+backup_dir_open() {
+	local b=$STORAGE_ROOT/backup fd at st
+	[ -z "$BACKUP_DIR" ] || return 0
+	BACKUP_DIR_WHY=
+	if [ -L "$b" ] || [ ! -d "$b" ]; then
+		BACKUP_DIR_WHY="$b is missing or not a directory"
+		return 1
 	fi
-	t=$(sed -nE "s/^target:[[:space:]]*['\"]?([^'\"[:space:]]*)['\"]?[[:space:]]*$/\1/p" "$STORAGE_ROOT/backup/custom.yaml" 2> /dev/null | head -n 1 || true)
+	if ! { exec {fd}< "$b"; } 2> /dev/null; then
+		BACKUP_DIR_WHY="cannot open $b"
+		return 1
+	fi
+	# The open directory (stat -L of the descriptor) and the entry at the path (no -L).
+	st=$(stat -L -c '%d:%i %u %a' "/proc/$BASHPID/fd/$fd" 2> /dev/null || true)
+	at=$(stat -c '%d:%i %F' -- "$b" 2> /dev/null || true)
+	if [ "$at" != "${st%% *} directory" ] || [ "$(cut -d' ' -f2 <<< "$st")" != 0 ] \
+		|| [ $((8#$(cut -d' ' -f3 <<< "$st") & 8#022)) != 0 ]; then
+		exec {fd}<&-
+		BACKUP_DIR_WHY="$b is not a directory of root's own (owned by root, not writable by group or others)"
+		return 1
+	fi
+	BACKUP_DIR=/proc/$BASHPID/fd/$fd
+}
+
+# A file in the checked backup directory: a regular file of root's own (no
+# symlink). Prints its path through the descriptor.
+backup_file() { # NAME
+	local f=$BACKUP_DIR/$1
+	[ -n "$BACKUP_DIR" ] && [ ! -L "$f" ] && [ -f "$f" ] && [ "$(stat -c %u -- "$f")" = 0 ] || return 1
+	echo "$f"
+}
+
+# The backup target as Mail-in-a-Box reads it (unmasked; never printed), from
+# the checked backup directory (backup_dir_open first). management/backup.py
+# reads custom.yaml with rtyaml (quoted and unquoted values, the default
+# "local" for a missing file, a missing target or a file it cannot parse);
+# without its Python environment, a plain parse.
+backup_target() {
+	local t f py=/usr/local/lib/mailinabox/env/bin/python
+	f=$(backup_file custom.yaml) || f=/dev/null
+	if [ -x "$py" ] && t=$("$py" -I -c 'import sys, rtyaml
+try:
+	with open(sys.argv[1], encoding="utf-8") as f:
+		c = rtyaml.load(f)
+except Exception:
+	c = None
+print(c.get("target", "local") if isinstance(c, dict) else "local")' "$f" 2> /dev/null); then
+		echo "${t#file://"$STORAGE_ROOT"/backup/encrypted}" | sed 's|^$|local|'
+		return 0
+	fi
+	t=$(sed -nE "s/^target:[[:space:]]*['\"]?([^'\"[:space:]]*)['\"]?[[:space:]]*$/\1/p" "$f" 2> /dev/null | head -n 1 || true)
 	echo "${t:-local}"
 }
 
@@ -442,9 +508,13 @@ masked_target() {
 
 record_backup() {
 	local t
+	if ! backup_dir_open; then
+		echo "backup directory: $BACKUP_DIR_WHY"
+		return 0
+	fi
 	t=$(backup_target)
 	echo "target: $(masked_target "$t")"
-	echo "secret_key.txt: $([ -r "$STORAGE_ROOT/backup/secret_key.txt" ] && echo present || echo missing)"
+	echo "secret_key.txt: $(backup_file secret_key.txt > /dev/null && echo present || echo missing)"
 }
 
 record_queue() {
@@ -461,8 +531,13 @@ record_state() { # DIR
 	date -u +%s > "$d/time.txt"
 	date -u +%FT%TZ >> "$d/time.txt"
 	{
-		echo "miab $(git -C "$MIAB_DIR" describe --tags --always 2> /dev/null || echo unknown)"
-		echo "origin $(git -C "$MIAB_DIR" remote get-url origin 2> /dev/null || echo unknown)"
+		if [ -n "$MIAB_DIR" ]; then
+			echo "miab $(git -C "$MIAB_DIR" describe --tags --always 2> /dev/null || echo unknown)"
+			echo "origin $(git -C "$MIAB_DIR" remote get-url origin 2> /dev/null || echo unknown)"
+		else
+			echo "miab unknown"
+			echo "origin unknown"
+		fi
 		echo "ubuntu $(. /etc/os-release 2> /dev/null && echo "${VERSION_ID:-unknown}")"
 		echo "storage version $(cat "$STORAGE_ROOT/mailinabox.version" 2> /dev/null || echo unknown)"
 	} > "$d/version.txt"
@@ -662,9 +737,10 @@ expected_rule_files() { # BEFORE_VERSION AFTER_VERSION
 	local from=$1 to=$2 d f v seen=" " any=
 	local dirs=()
 	if [ -n "$SELF_REPO" ]; then dirs+=("$SELF_REPO/tools/expected-changes"); fi
-	dirs+=("$MIAB_DIR/tools/expected-changes")
+	if [ -n "$MIAB_DIR" ] && [ "$MIAB_DIR" != "$SELF_REPO" ]; then dirs+=("$MIAB_DIR/tools/expected-changes"); fi
 	# The list of the new release itself, if no checkout has it.
-	if [ -n "$to" ] && [ ! -f "${dirs[0]}/$to.txt" ] && [ ! -f "$MIAB_DIR/tools/expected-changes/$to.txt" ]; then
+	if [ -n "$to" ] && { [ ${#dirs[@]} = 0 ] || [ ! -f "${dirs[0]}/$to.txt" ]; } \
+		&& { [ -z "$MIAB_DIR" ] || [ ! -f "$MIAB_DIR/tools/expected-changes/$to.txt" ]; }; then
 		if f=$(fork_file "tools/expected-changes/$to.txt" 2> /dev/null); then dirs+=("$(dirname "$f")"); else rm -f "$f"; fi
 	fi
 	for d in "${dirs[@]}"; do
@@ -764,10 +840,13 @@ do_after() {
 # ---------------------------------------------------------------------------
 # backup
 
-# gpg with a home of its own (no agent or keyring of root's).
+# gpg with a home of its own (no agent or keyring of root's), with the
+# passphrase from the checked backup directory (backup_dir_open).
 gpg_enc() { # OUT (reads stdin)
+	local key
+	key=$(backup_file secret_key.txt) || return 1
 	gpg --homedir "$GPG_HOME" --batch --yes --quiet --pinentry-mode loopback \
-		--passphrase-file "$STORAGE_ROOT/backup/secret_key.txt" --symmetric --cipher-algo AES256 -o "$1"
+		--passphrase-file "$key" --symmetric --cipher-algo AES256 -o "$1"
 }
 
 # tar of PATHS (relative to /) | gpg. tar's exit code 1 (a file changed while
@@ -824,7 +903,12 @@ do_backup() {
 	if [ -z "$RUN_DIR" ]; then new_run_dir; fi
 	exec > >(tee -a "$RUN_DIR/update-check.log") 2>&1
 	local key=$STORAGE_ROOT/backup/secret_key.txt target out=$RUN_DIR/backup paths=() p n v c
-	[ -r "$key" ] || die "$key is missing; cannot encrypt."
+	# The target and the passphrase of the system archive only from a backup
+	# directory of root's own (B117), checked before anything is stopped.
+	backup_dir_open || die "$BACKUP_DIR_WHY. A directory there that is not root's own could choose the
+target and the passphrase of the system archive. Make it root's own again (chown root:root, chmod 755)
+and check custom.yaml and secret_key.txt in it."
+	backup_file secret_key.txt > /dev/null || die "$key is missing (or not a regular file of root's); cannot encrypt."
 	target=$(backup_target)
 	for p in "${OPT_DOCKER_DIRS[@]+"${OPT_DOCKER_DIRS[@]}"}"; do
 		[[ $p == /* ]] && [ -d "$p" ] && [ ! -L "$p" ] || die "--docker-dir $p: not an absolute path of a directory."
@@ -850,6 +934,7 @@ do_backup() {
 	elif [ "$target" = off ]; then
 		say "Backups are turned off (System > Backup Status): no Mail-in-a-Box backup."
 	else
+		[ -n "$MIAB_DIR" ] || die "No Mail-in-a-Box checkout of root's own found (see the warning above); use --no-miab-backup."
 		[ -x "$MIAB_DIR/management/backup.py" ] || die "$MIAB_DIR/management/backup.py is missing (or use --no-miab-backup)."
 		if pgrep -f 'management/backup\.py' > /dev/null; then
 			die "A Mail-in-a-Box backup is running already. Wait until it is finished and run this again."
@@ -873,8 +958,8 @@ do_backup() {
 	doveconf -n > "$out/meta/doveconf-n.txt" 2>&1 || true
 	postconf -n > "$out/meta/postconf-n.txt" 2> /dev/null || true
 	systemctl list-unit-files --no-legend --no-pager > "$out/meta/unit-files.txt" 2> /dev/null || true
-	git -C "$MIAB_DIR" describe --tags --always > "$out/meta/miab-version.txt" 2> /dev/null || true
-	for p in etc "${MIAB_DIR#/}" var/spool/cron var/lib/z-push var/lib/munin usr/local/lib/owncloud; do
+	if [ -n "$MIAB_DIR" ]; then git -C "$MIAB_DIR" describe --tags --always > "$out/meta/miab-version.txt" 2> /dev/null || true; fi
+	for p in etc ${MIAB_DIR:+"${MIAB_DIR#/}"} var/spool/cron var/lib/z-push var/lib/munin usr/local/lib/owncloud; do
 		if [ -e "/$p" ]; then paths+=("$p"); fi
 	done
 	for p in "${OPT_DOCKER_DIRS[@]+"${OPT_DOCKER_DIRS[@]}"}"; do paths+=("${p#/}"); done

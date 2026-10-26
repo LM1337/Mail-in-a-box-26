@@ -171,7 +171,10 @@ name your Docker stacks if there are any, then update, then run `after` and
 
 `backup` stops mail for the run of the Mail-in-a-Box backup (as the
 nightly one does; in the tests about 15 seconds for an incremental one).
-Leave the backup settings alone between `before` and `after`: a changed
+It takes the target and the passphrase only from a `$STORAGE_ROOT/backup`
+of root's own (owned by root, not writable by group or others, as setup
+makes it) and otherwise stops before anything else; the tool uses a
+checkout only when every file in it is root's own. Leave the backup settings alone between `before` and `after`: a changed
 target shows up as a change of the status checks. What `after` says:
 "RESULT: OK" (exit code 0) when every change is EXPECTED and the log audit
 found no new message class; otherwise it names the unexpected changes
@@ -304,7 +307,11 @@ aktualisieren, dann `after` und `mailcheck` aus dem neuen Checkout:
 	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
 
 `backup` hält die Mail für den Lauf der Mail-in-a-Box-Sicherung an (wie die
-nächtliche; in den Tests etwa 15 Sekunden für eine inkrementelle). Die
+nächtliche; in den Tests etwa 15 Sekunden für eine inkrementelle). Ziel und
+Passphrase nimmt es nur aus einem `$STORAGE_ROOT/backup`, das root gehört
+und weder für die Gruppe noch für andere beschreibbar ist (wie Setup es
+anlegt), sonst bricht es vor allem anderen ab; einen Checkout nimmt das
+Werkzeug nur, wenn jede Datei darin root gehört. Die
 Einstellungen der Sicherung zwischen `before` und `after` nicht ändern: Ein
 geändertes Ziel erscheint als Änderung der Statusprüfungen. Was `after`
 meldet: „RESULT: OK“ (Exit-Code 0), wenn jede Änderung EXPECTED ist und das
@@ -1124,9 +1131,12 @@ admin, and root if `PermitRootLogin` allows keys;
 `UPGRADE_SSH_FALLBACK_USERS="..."` names others), listens on the addresses
 of `sshd_config` (ListenAddress), keeps its AllowUsers, AllowGroups,
 DenyUsers, DenyGroups, PubkeyAuthOptions, ForceCommand and ChrootDirectory
-and allows no forwarding. Where sshd asks for more than a key
+and allows no forwarding. With StrictModes (sshd's default) it takes only
+the key files that sshd accepts: one whose path up to the home directory
+another account can write is skipped with a warning, as sshd ignores it.
+Where sshd asks for more than a key
 (`AuthenticationMethods`, e.g. a key and a one-time password) or
-`sshd_config` has `Match` blocks, there is no fallback (it would let in with
+`sshd_config` or a file it includes has `Match` blocks, there is no fallback (it would let in with
 a key alone); keep a connection open instead. ufw lets the port through
 only while it runs; a firewall of the provider must allow it too. Try it before the upgrade with
 `--ssh-fallback-test` (10 minutes). The run says when port 22 stops
@@ -1308,9 +1318,14 @@ Administratoren (Mitglieder der Gruppen sudo und admin, und root, wenn
 `PermitRootLogin` Schlüssel erlaubt; `UPGRADE_SSH_FALLBACK_USERS="..."` nennt
 andere), hört auf den Adressen aus `sshd_config` (ListenAddress), behält
 dessen AllowUsers, AllowGroups, DenyUsers, DenyGroups, PubkeyAuthOptions,
-ForceCommand und ChrootDirectory und erlaubt keine Weiterleitungen. Wo sshd
+ForceCommand und ChrootDirectory und erlaubt keine Weiterleitungen. Mit
+StrictModes (Voreinstellung von sshd) nimmt er nur die Schlüsseldateien,
+die sshd annimmt: Eine, deren Pfad bis zum Heimatverzeichnis ein anderes
+Konto beschreiben kann, lässt er mit einer Warnung aus, wie sshd sie
+übergeht. Wo sshd
 mehr als einen Schlüssel verlangt (`AuthenticationMethods`, etwa Schlüssel
-und Einmalpasswort) oder `sshd_config` `Match`-Blöcke hat, gibt es keinen
+und Einmalpasswort) oder `sshd_config` oder eine eingebundene Datei
+`Match`-Blöcke hat, gibt es keinen
 Ersatz-Server (er ließe mit dem Schlüssel allein herein); dann eine
 Verbindung offen halten. ufw lässt den Port nur durch, solange er läuft;
 eine Firewall des Anbieters muss ihn ebenfalls erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`

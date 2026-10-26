@@ -35,10 +35,12 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
 * Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
   `management/backup.py` and `management/dns_update.py` still write
   `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the backup (also `tools/update-check.sh backup`)
-  reads its target and `secret_key.txt` there by path. An account that can
-  replace `backup/` could point the backups to a server of its own with a
-  passphrase it knows.
+  `settings.yaml`), and the nightly backup reads its target and
+  `secret_key.txt` there by path. An account that can replace `backup/`
+  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
+  its own with a passphrase it knows. The fork's tools read them, and write
+  the paused `custom.yaml`, only through a checked `backup/` of root's own
+  (B117).
 
 ## v78-r2604.0-rc7 (2026-10-25)
 
@@ -59,7 +61,9 @@ fallback SSH server, the update tools and the log audit, and B102 in the
 in-place tool's copy to an rsync target (all fixed). The certification runs
 of rc7 (T1 to T5b) found B106 to B110 and B114 in `tools/update-check.sh` and
 its lists of expected changes, B111 and B112 in the fallback SSH server and
-B113 in the migration tool's check (all fixed).
+B113 in the migration tool's check; the review of those fixes found B115 and
+B118 in the fallback SSH server, B116 in `tools/update-check.sh` and B117 in
+how the tools use `$STORAGE_ROOT/backup` (all fixed).
 
 ### New
 
@@ -350,7 +354,8 @@ B113 in the migration tool's check (all fixed).
 * Tools: the in-place tool puts back `/run/sshd`, which the fallback SSH
   server needs, within 2 s after the release upgrade stops ssh.service (it
   looked every 10 s, and new logins on port 1022 failed meanwhile). Its
-  texts give the outage times of the rc7 tests (B112).
+  texts gave the outage times of the first rc7 run (B112); they now give
+  those of all rc7 runs (see "Changed").
 * Tools: `tools/migrate-to-2604.sh --check` proposes the start command with
   all options of the check (`--public-ip`, `--public-ipv6`,
   `--private-ip`, `--hostname`, ...); it named only `--from`, the SSH options
@@ -359,6 +364,31 @@ B113 in the migration tool's check (all fixed).
 * Tools: `tools/update-check.sh after` accepts both names under which
   munin-node holds its port (`munin-node`, or its path cut to 15
   characters, `/usr/sbin/munin`) (B114).
+* Tools: the fallback SSH server of the in-place tool takes, with
+  StrictModes (sshd's default), only the key files that sshd accepts on
+  port 22: a file whose path up to the home directory another account can
+  write (or that belongs to another user) is skipped with a warning, as
+  sshd ignores it. It accepted such keys, so whoever could write an
+  administrator's home could log in on port 1022 as that administrator.
+  Its copy of the keys is `root:<the user's group>`, mode 0640 (B115).
+* Tools: `tools/update-check.sh` no longer uses a checkout it rejected (it
+  warned and, through curl, ran the status checks and `backup.py` from
+  `/root/mailinabox` anyway), and a checkout counts only when every file in
+  it is root's own and not writable by group or others (B116).
+* Tools: `tools/update-check.sh backup`, the in-place tool's system archive
+  and the pause of the backups in the in-place and the migration tool use
+  `$STORAGE_ROOT/backup` only when it is a directory of root's own, not
+  writable by group or others, and then only through one open descriptor:
+  the user-data account, which owns `$STORAGE_ROOT`, could put a directory
+  of its own there and have the system archive (with `/etc/shadow` and the
+  SSH host keys) encrypted with its passphrase and sent to its host, or make
+  root create a file through a symbolic link. Otherwise `backup` stops, the
+  in-place preflight has a blocker, the archive stays unencrypted in
+  `/root/upgrade-2604`, and pausing the backups is left to the operator
+  (B117).
+* Tools: the fallback SSH server also refuses to start when a file included
+  from an included file (for example from `sshd_config.d/*.conf`) has a
+  `Match` block; it looked one level deep only (B118).
 
 ### Changed
 
@@ -389,7 +419,11 @@ B113 in the migration tool's check (all fixed).
   says so.
 * Tools: the messages before a release upgrade (and in the motd) name the
   fallback SSH server and how to reach it. The help of
-  `tools/upgrade-in-place-to-2604.sh` describes it.
+  `tools/upgrade-in-place-to-2604.sh` describes it. The plan of `--check`
+  says that new SSH logins on port 22 fail and sudo is missing for a while
+  during the release upgrades; the tool gives the times of all rc7 runs
+  (port 22: 19 to 42 minutes from 22.04, 6 to 19 minutes from 24.04; sudo:
+  12 to 37 minutes), which were 20 to 40, 5 to 20 and 12 to 31.
 * Tests: `tests/fork/log-audit.sh --since` also takes the short forms `-90s`,
   `-30m`, `-24h`, `-2d` and `-1w`; `date -d` fails on them ("-24h" reads the
   "h" as a time zone).
