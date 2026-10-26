@@ -13,3 +13,4 @@
 ^postfix/pickup: warning: maildrop/<hex>: error writing <hex>: queue file write error$ # the same event, see the line above
 ^postfix/master: warning: process /usr/lib/postfix/sbin/cleanup pid N exit status N$ # the same event, see the line above
 ^postfix/master: warning: /usr/lib/postfix/sbin/cleanup: bad command startup -- throttling$ # the same event: master waits a minute before it starts cleanup again
+^auth-worker: (Warning: sqlite: finalize failed: database is locked \(N\)|request \[N\]: Error: sql: User query failed: database is locked \(N\))$ # smoke test: api-write-roundtrip commits to users.sqlite while Dovecot looks up a user; its sqlite driver has no busy timeout either, so that one login gets a temporary failure (the same event as the Postfix lines above)
