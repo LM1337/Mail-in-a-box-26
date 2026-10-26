@@ -77,7 +77,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   compares in constant time. It writes the same hashes as before and checks
   every form MIAB and Roundcube store (with and without `rounds=`); other
   schemes go to `doveadm pw -t`, with the password on its standard input;
-  a password stored in plain text by hand (`{PLAIN}`, `{CLEARTEXT}`,
+  a password stored in plain text by hand (`{PLAIN}`, `{CLEAR}`, `{CLEARTEXT}`,
   `{PLAIN-TRUNC}`) is compared by the daemon itself, so that it is not in
   doveadm's arguments either. A login with an unknown address takes as long as a wrong password. Setup
   no longer puts the first user's password, and tools/dns_update and

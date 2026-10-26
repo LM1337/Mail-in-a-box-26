@@ -236,8 +236,9 @@ report. The groups:
   `tests/fork/password-hash.py` (after rc7; no box needed, with `--doveadm`
   on a box as root) checks the control panel's SHA-512 crypt (B127): the
   test vectors of its specification, the stored forms it checks itself, the
-  plain-text schemes (`{PLAIN}`, `{CLEARTEXT}`, `{PLAIN-TRUNC}`, HEX and B64
-  encodings; doveadm must not be called for them), its limits, and with
+  plain-text schemes (`{PLAIN}`, `{CLEAR}`, `{CLEARTEXT}`, `{PLAIN-TRUNC}`,
+  HEX and B64 encodings; doveadm must not be called for them), its limits,
+  and with
   `--doveadm` random passwords (8 to 511 bytes, no line breaks: doveadm
   reads only one line, so these are tested offline) against Dovecot's
   `doveadm pw` both ways, wrong passwords, other schemes through the

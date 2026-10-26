@@ -11,7 +11,7 @@
 # Python 3.13 removed the crypt module, so SHA-512 crypt is implemented here
 # with hashlib, as specified in https://www.akkadia.org/drepper/SHA-crypt.txt
 # (the algorithm of glibc and libxcrypt, which Dovecot uses). A password
-# stored in plain text by hand ({PLAIN}, {CLEARTEXT}, {PLAIN-TRUNC}) is
+# stored in plain text by hand ({PLAIN}, {CLEAR}, {CLEARTEXT}, {PLAIN-TRUNC}) is
 # compared here too, as 'doveadm pw -t' would have it in its arguments.
 # Hashes of any other form (another scheme set by hand, an unusual salt, very
 # many rounds) are checked by 'doveadm pw -t' with the password on its
@@ -51,7 +51,7 @@ _RE_SHA512_CRYPT = re.compile(
 # Dovecot's schemes that store the password itself, with an optional encoding
 # suffix ("{PLAIN.B64}", "{PLAIN.HEX}"). A value with such a scheme is never
 # given to doveadm, which would put it into its arguments.
-_PLAIN_SCHEMES = ("PLAIN", "CLEARTEXT", "PLAIN-TRUNC")
+_PLAIN_SCHEMES = ("PLAIN", "CLEAR", "CLEARTEXT", "PLAIN-TRUNC")
 _RE_SCHEME = re.compile(r"\{([^{}]*)\}(.*)", re.DOTALL)
 
 def _b64_from_24bit(b2, b1, b0, n):

@@ -3,7 +3,7 @@
 
 Without options (no box needed): the test vectors of the specification
 (https://www.akkadia.org/drepper/SHA-crypt.txt), the forms of stored hashes it
-checks itself, passwords stored in plain text ({PLAIN}, {CLEARTEXT},
+checks itself, passwords stored in plain text ({PLAIN}, {CLEAR}, {CLEARTEXT},
 {PLAIN-TRUNC}, with HEX and B64 encodings; compared without doveadm) and the
 limits (null character, 512 bytes).
 
@@ -99,6 +99,8 @@ PLAIN_CASES = [
 	("{plain}Plain pw 1", "Plain pw 1", True),
 	("{CLEARTEXT}Plain pw 1", "Plain pw 1", True),
 	("{CLEARTEXT}Plain pw 1", "Plain pw", False),
+	("{CLEAR}Plain pw 1", "Plain pw 1", True),
+	("{CLEAR}Plain pw 1", "Plain pw 2", False),
 	("{PLAIN}Grüße 😀", "Grüße 😀", True),
 	("{PLAIN.B64}UGxhaW4gcHcgMQ==", "Plain pw 1", True),
 	("{PLAIN.BASE64}UGxhaW4gcHcgMQ==", "Plain pw 2", False),
