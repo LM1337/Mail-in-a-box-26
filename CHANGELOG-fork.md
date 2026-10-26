@@ -328,6 +328,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
   the checkout's conf/zpush/z-push.patches, and the installed tree has
   every change of it (B126, B128).
+* `tools/update-check.sh after` also uses `tools/expected-changes/unreleased.txt`,
+  the changes since the newest release, when the checkout after the update
+  is not at a release tag (bootstrap.sh with `TAG=<branch or commit>`) or
+  the new version has no list of its own; before, such an update matched no
+  release list and every change of the release was UNEXPECTED. The new list
+  names the jail `miab-zpush` (and `miab-slow-zpush`, B126) and the mark of
+  Z-Push (B126, B128), which the tool now records (`version.txt`: `zpush
+  2.7.7+patches-<16 hex digits>`). Every update may also change the version
+  named by the status checks, and an update to a branch or commit records
+  its commit id as the version (`any.txt`).
 
 ### Upgrade note
 
@@ -421,7 +431,8 @@ For the final release v78-r2604.0 (from rc7):
   `mailcheck` with a real external probe) before the final release
   v78-r2604.0.
 * `tools/expected-changes/` needs a list for each release, also an empty
-  one for the final release.
+  one for the final release: at the release, `unreleased.txt` is renamed to
+  the release's `<version>.txt`, and a new, empty `unreleased.txt` starts.
 
 Seen in the rc7 work, not done (the certification runs of rc7 add their
 open findings in TESTING-fork.md, "Open findings of rc7"):

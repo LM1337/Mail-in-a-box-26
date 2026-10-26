@@ -1,0 +1,12 @@
+# Expected changes of an update to the release after v78-r2604.0-rc7, for
+# tools/update-check.sh after: what this release changes in the recorded
+# state. "after" uses this list (with any.txt) when the checkout after the
+# update is not at a release tag (bootstrap.sh with TAG=<branch or commit>),
+# or when the version after the update has no list of its own. When the
+# release is tagged, rename this file to <version>.txt and start a new,
+# empty unreleased.txt. The format is in any.txt.
+
+fail2ban.txt + ^jail miab-zpush$ # B126: the new jail for failed ActiveSync and Autodiscover logins (always on)
+fail2ban.txt + ^jail miab-slow-zpush$ # B126: miab-slow-zpush joins the slow web jails (only with slow_web_jails on)
+version.txt + ^zpush 2\.7\.7\+patches-[0-9a-f]{16}$ # B126, B128: setup/zpush.sh marks Z-Push with the checksum of conf/zpush/z-push.patches and installs it again once; update-check records the mark from this release on, so the state before has no such line (rc7) or another checksum
+version.txt - ^zpush 2\.7\.7(\+patches-[0-9a-f]{16})?$ # B126, B128: the mark of the Z-Push installed before, see the line above

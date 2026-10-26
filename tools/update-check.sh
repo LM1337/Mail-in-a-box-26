@@ -36,7 +36,8 @@
 # versions of the mail services. "before" also runs tests/fork/log-audit.sh
 # (default: the last 24 hours) as the baseline; "after" compares each file
 # with "before" and marks the changes that the releases in between announce
-# as EXPECTED (tools/expected-changes/<version>.txt, see there), the others as
+# as EXPECTED (tools/expected-changes/<version>.txt, see there; for a branch
+# or commit after the newest release also unreleased.txt), the others as
 # UNEXPECTED, and runs the log audit since "before" against that baseline
 # (only new message classes count). The lists cover updates of this fork on
 # one Ubuntu release: after a release upgrade or the first update from
@@ -525,7 +526,7 @@ record_queue() {
 }
 
 record_state() { # DIR
-	local d=$1
+	local d=$1 zv
 	rm -rf "$d"
 	mkdir -m 700 "$d"
 	date -u +%s > "$d/time.txt"
@@ -539,6 +540,10 @@ record_state() { # DIR
 			echo "origin unknown"
 		fi
 		echo "ubuntu $(. /etc/os-release 2> /dev/null && echo "${VERSION_ID:-unknown}")"
+		# Z-Push's version, with the checksum of the fork's changes to it
+		# (setup/zpush.sh, after rc7: "2.7.7+patches-<16 hex digits>").
+		zv=$(head -n 1 /usr/local/lib/z-push/version 2> /dev/null | tr -cd '[:alnum:].+-' || true)
+		echo "zpush ${zv:-none}"
 		echo "storage version $(cat "$STORAGE_ROOT/mailinabox.version" 2> /dev/null || echo unknown)"
 	} > "$d/version.txt"
 	say "  version, units..."
@@ -725,6 +730,13 @@ PY
 # "v78-r2604.0-rc7-3-gabc1234" -> "v78-r2604.0-rc7"
 release_of() { sed -nE 's/^miab (v[0-9][^ ]*)$/\1/p' "$1/version.txt" | sed -E 's/-[0-9]+-g[0-9a-f]+$//'; }
 
+# Is the checkout of a state at a release tag? "v78-r2604.0-rc7" is;
+# "v78-r2604.0-rc7-3-gabc1234" and "abc1234" (bootstrap.sh with TAG=<branch
+# or commit>: a shallow checkout without tags) are not.
+at_release() { # DIR
+	grep -qE '^miab v[0-9][^ ]*$' "$1/version.txt" && ! grep -qE '^miab v[0-9][^ ]*-[0-9]+-g[0-9a-f]+$' "$1/version.txt"
+}
+
 # Is version A older than version B? Final releases come after their rcs.
 version_lt() { # A B
 	local a=${1#v} b=${2#v}
@@ -732,9 +744,13 @@ version_lt() { # A B
 }
 
 # The expected-change lists of the releases after BEFORE up to AFTER, and
-# any.txt (what every update changes).
-expected_rule_files() { # BEFORE_VERSION AFTER_VERSION
-	local from=$1 to=$2 d f v seen=" " any=
+# any.txt (what every update changes). unreleased.txt (the changes made since
+# the newest release; renamed to <version>.txt when that version is released)
+# is added when the checkout after the update is not at a release tag (DEV
+# given: a branch or commit, a test of the next release), or when AFTER has
+# no list of its own.
+expected_rule_files() { # BEFORE_VERSION AFTER_VERSION [DEV]
+	local from=$1 to=$2 dev=${3:-} d f v seen=" " any= unreleased= own=
 	local dirs=()
 	if [ -n "$SELF_REPO" ]; then dirs+=("$SELF_REPO/tools/expected-changes"); fi
 	if [ -n "$MIAB_DIR" ] && [ "$MIAB_DIR" != "$SELF_REPO" ]; then dirs+=("$MIAB_DIR/tools/expected-changes"); fi
@@ -755,9 +771,12 @@ expected_rule_files() { # BEFORE_VERSION AFTER_VERSION
 			if [ -n "$from" ] && ! version_lt "$from" "$v"; then continue; fi
 			if [ -n "$to" ] && version_lt "$to" "$v"; then continue; fi
 			seen+="$v "
+			[ "$v" = "$to" ] && own=1
 			echo "$f"
 		done
+		if [ -z "$unreleased" ] && [ -f "$d/unreleased.txt" ]; then unreleased=$d/unreleased.txt; fi
 	done
+	if [ -n "$unreleased" ] && { [ -n "$dev" ] || [ -z "$own" ]; }; then echo "$unreleased"; fi
 }
 
 do_after() {
@@ -771,7 +790,9 @@ do_after() {
 	local from to rules=() f rc=0 arc=0
 	from=$(release_of "$RUN_DIR/before")
 	to=$(release_of "$RUN_DIR/after")
-	while IFS= read -r f; do rules+=("$f"); done < <(expected_rule_files "$from" "$to")
+	local dev=
+	at_release "$RUN_DIR/after" || dev=1
+	while IFS= read -r f; do rules+=("$f"); done < <(expected_rule_files "$from" "$to" "$dev")
 	# The lists know the updates of this fork on one Ubuntu release, not a
 	# release upgrade or the step from upstream Mail-in-a-Box (B110).
 	local ub_before ub_after not_judged=

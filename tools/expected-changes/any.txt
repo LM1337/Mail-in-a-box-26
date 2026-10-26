@@ -19,6 +19,8 @@
 version.txt ~ ^miab v78-r2604\.0 # the update itself: the new version of /root/mailinabox
 version.txt + ^origin https://github\.com/LM1337/Mail-in-a-box-26(\.git)?$ # "Updating the fork" in README-fork.md: rc1 to rc3 change the origin to the fork's repository (git remote set-url)
 version.txt - ^origin # the old origin, see the line above
+version.txt + ^miab [0-9a-f]{7,40}$ # an update to a branch or commit that is not a release tag (bootstrap.sh with TAG=<branch or commit>, a test of the next release): the shallow checkout has no tag, and git describe names the commit
+status.txt ~ You are running version # the version that the status checks name (digits as N) is the new one; it reads differently for a commit that is not a release tag
 failed.txt - . # a unit that had failed before and no longer has (setup restarts the services); not a regression
 status.txt - . # a status check error or warning from before is gone; not a regression
 config-warnings.txt - . # a warning of doveconf or postconf from before is gone; not a regression

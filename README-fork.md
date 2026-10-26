@@ -139,7 +139,8 @@ and the Docker stacks you name (`--docker-dir`, `--docker-volume`,
 `--postgres` for a pg_dump) next to the backups (rsync targets; verified by
 checksum) or in `/root/update-check`. After the update, `after` records the
 state again and lists each change as EXPECTED (announced by the releases in
-between, `tools/expected-changes/`) or UNEXPECTED, and runs the log audit
+between, `tools/expected-changes/`; for an update to a branch or commit
+after the newest release also `unreleased.txt` there) or UNEXPECTED, and runs the log audit
 against the baseline: only new message classes count (`--internet` accepts
 the usual noise of a public box). The lists cover updates of this fork on
 one Ubuntu release: after an in-place upgrade or a migration from upstream
@@ -274,7 +275,8 @@ Z-Push, Munin, dem Code von Nextcloud und den genannten Docker-Stacks
 Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
 `/root/update-check`. Nach dem Update hält `after` den Zustand erneut fest,
 führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
-`tools/expected-changes/`) oder UNEXPECTED auf und lässt das Log-Audit gegen
+`tools/expected-changes/`; bei einem Update auf einen Zweig oder Commit nach
+dem neuesten Release auch `unreleased.txt` dort) oder UNEXPECTED auf und lässt das Log-Audit gegen
 die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
 (`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin). Die
 Listen decken Updates dieses Forks auf einem Ubuntu-Release ab: Nach einem
