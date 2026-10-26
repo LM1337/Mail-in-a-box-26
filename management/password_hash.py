@@ -1,4 +1,3 @@
-#!/usr/local/lib/mailinabox/env/bin/python
 # Password hashes of mail users, without the password on a command line (B127).
 #
 # Mail-in-a-Box has always stored Dovecot-style SHA512-CRYPT hashes,
