@@ -277,7 +277,7 @@ def check_backup(rounded_values, env, output):
 		output.print_ok("Backups are enabled")
 	
 	# Get the age of the most recent backup. A target that cannot be read is
-	# one failed check, not the end of all checks (B128).
+	# one failed check, not the end of all checks (B132).
 	backup_stat, saved_at, error = status_for_checks(env)
 	if error is not None:
 		output.print_error("The status of the backups could not be read from the backup target.")

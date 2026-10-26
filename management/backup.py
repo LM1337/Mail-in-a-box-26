@@ -495,7 +495,7 @@ def refresh_saved_status(env):
 	return 1
 
 def status_for_checks(env):
-	# For the status checks (B128): a query of the target that saves its
+	# For the status checks (B132): a query of the target that saves its
 	# result as a refresh does, or, while a backup run or a refresh holds the
 	# lock (a second duplicity on the same archive directory would fail),
 	# the saved status. Never raises for a failed query.

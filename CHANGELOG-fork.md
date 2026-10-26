@@ -92,7 +92,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   "Something went wrong" and the nightly check mailed a traceback. The
   backup check now fails alone with duplicity's message, and while a backup
   run or a refresh of the backup page queries the target it uses the saved
-  status (B128).
+  status (B132).
 * nginx waits for the control panel as long as gunicorn lets a request
   run (630 s) instead of its default of 60 s, so that the status checks,
   the TLS provisioning and the backup page's live query are no longer cut
