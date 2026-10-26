@@ -58,6 +58,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `doveconf -n` names), and is recorded only once Dovecot has loaded the
   configuration; if it has not within 10 s of the reload, setup restarts it
   (B122).
+* The backup page of the control panel and the backups no longer hang for
+  a minute or more when the rsync target does not answer a connection
+  request at once (seen on a production box with a Hetzner Storage Box: ssh
+  waited 11 s for an answer over IPv6, and twice the page showed only
+  "Something went wrong" after 60 s). ssh to the target now gives an
+  address 10 s for the connection and the SSH banner, then tries the next
+  one, and makes two attempts, instead of waiting for the kernel's TCP
+  retries; the list of the target's files (status page, and the nightly
+  backup's choice between a full and an incremental backup) is tried three
+  times (B125).
 
 ### Changed
 
@@ -117,6 +127,11 @@ For the final release v78-r2604.0 (from rc7):
   v78-r2604.0.
 * `tools/expected-changes/` needs a list for each release, also an empty
   one for the final release.
+* The backup page shows the status of the last backup at once (kept after
+  each backup run, with its time) and refreshes it in the background, so
+  that it no longer waits for the target; nginx waits for the control
+  panel as long as gunicorn does, and a timeout gets a clear message
+  (B125).
 
 Seen in the rc7 work, not done (the certification runs of rc7 add their
 open findings in TESTING-fork.md, "Open findings of rc7"):

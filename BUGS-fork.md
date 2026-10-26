@@ -39,18 +39,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-120 bugs: 2 critical, 18 high, 48 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+121 bugs: 2 critical, 18 high, 48 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 36 |
+| Upstream | 37 |
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
 | Fork | 34 |
 
-37 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124). They are candidates for
+38 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -178,6 +178,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B122](#b122) | medium | Setup | Setup restarts Dovecot, Postfix, PHP-FPM and fail2ban several times per run; each restart cuts the clients, and fail2ban lifts all bans for a moment | Upstream | yes | yes | after rc7 |
 | [B124](#b124) | medium | Nextcloud | Setup replaces Nextcloud's config.php with a file only root can read, for a moment, and Nextcloud fails the requests in that moment (an ActiveSync login gets HTTP 401) | Upstream | yes | yes | after rc7 |
 | [B123](#b123) | medium | Dovecot | /etc/dovecot belongs to the account mail, which can change the configuration that Dovecot's root processes read and the files that setup writes there as root | Upstream | yes | yes | after rc7 |
+| [B125](#b125) | low | Backup | The backup page and the backups wait up to two minutes when the rsync target does not answer a connection request | Upstream | yes | yes | after rc7 |
 
 ## Details
 
@@ -1562,6 +1563,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes (the same code), PR #2603 yes, the fork up to rc7. Origin: Upstream. Needs a request in the moment between the two commands; with a few phones per user seen once per setup run or less.
 * **Evidence:** The update test T5b with client load after the review of B120-B123 (copy of a production box, rc6 to the fixed branch, second run): one FolderSync of an ActiveSync device from another host got HTTP 401 at the moment setup rewrote `config.php`, with the messages above; no other failed login in the run.
 * **Found by:** update test (with client load, after the review of B120-B123); **commit:** see `git log --grep B124`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B125
+
+**The backup page and the backups wait up to two minutes when the rsync target does not answer a connection request** (low, backup)
+
+* **Symptom:** The backup page of the control panel (`/admin#system_backup`) sometimes loads for a long time, and now and then shows only "Something went wrong, sorry." after exactly 60 s (nginx answers 504). On a production box with a Hetzner Storage Box as rsync target the page usually needed 6-11 s; once ssh waited 11-13 s in `SYN-SENT` for the Storage Box to answer over IPv6, and twice the request ran into nginx's 60 s limit. Right after, connections to both addresses of the Storage Box took 0.01-0.2 s: the target (or the way to it) drops a connection request now and then.
+* **Cause:** management/backup.py runs ssh (through duplicity and rsync, for the status page twice per call: duplicity's `collection-status` and the list of the target's files) without `ConnectTimeout`. ssh then waits for the kernel's TCP retries (6 by default, after 1, 3, 7, 15, 31 and 63 s, about two minutes in all) before it gives up or tries the target's next address, so one dropped connection request costs 1 s, 3 s, 7 s or more.
+* **Fix:** Every ssh connection to the rsync target gets `-oConnectTimeout=10 -oConnectionAttempts=2` (duplicity's `--ssh-options` and `--rsync-options`, and the list of the target's files): ssh gives an address 10 s for the TCP connection and the SSH banner together (OpenSSH counts both against `ConnectTimeout`), then tries the next one (IPv4 after IPv6), and makes two such attempts. A dropped connection request now costs at most 10 s per connection. A target that does not answer at all fails each ssh call after about 21 s (one address) or 41 s (IPv6 and IPv4) instead of about two minutes per address. duplicity retries its own failed calls (5 times, 30 s apart); the list of the target's files, which MIAB makes itself (status page, and `should_force_full` before each nightly backup, which ends the run when it fails), is now tried three times, 5 s apart, unless the target refused the key or the path. 5 s would have left too little time for the banner after a retried SYN, and a failed file list would have cost a night's backup. The status page itself still waits for the target; showing the status of the last backup at once is planned (CHANGELOG-fork.md, Planned).
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc7. Origin: Upstream.
+* **Evidence:** A trace of the processes of `mailinabox.service` on the production box (ssh in `SYN-SENT` for 11-13 s, kernel stack `__inet_stream_connect`) and the nginx log (two 504 after 60 s, each the first visit of the page after a backup). After the fix: ssh with the new options against an address that does not answer gives up after about 21 s (before: about 130 s); on the production box with the new options, the status page answered in 8 s and its ssh calls carry the options (process trace); the nightly backup with them is still to be checked.
+* **Found by:** user report (backup page shows only an error); **commit:** see `git log --grep B125`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 

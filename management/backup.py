@@ -7,7 +7,7 @@
 # 4) The stopped services are restarted.
 # 5) STORAGE_ROOT/backup/after-backup is executed if it exists.
 
-import os, os.path, re, datetime, sys
+import os, os.path, re, datetime, sys, time
 import dateutil.parser, dateutil.relativedelta, dateutil.tz
 from datetime import date
 import rtyaml
@@ -15,6 +15,14 @@ from exclusiveprocess import Lock
 
 from utils import load_environment, shell, wait_for_service
 import operator
+
+# Options for every ssh connection to an rsync target (B125). Without them, ssh
+# waits for the kernel's TCP retries (about two minutes) when the target does
+# not answer a connection request, and a target address that does not answer
+# (the IPv6 address, say) delays the next one by as long. With them, ssh gives
+# an address 10 s for the connection and the SSH banner together, then tries
+# the next address, and makes two such attempts.
+SSH_TIMEOUT_OPTIONS = "-oConnectTimeout=10 -oConnectionAttempts=2"
 
 def backup_status(env):
 	# If backups are disabled, return no status.
@@ -232,8 +240,8 @@ def get_duplicity_additional_args(env):
 			port = 22
 
 		return [
-			f"--ssh-options='-i /root/.ssh/id_rsa_miab -p {port}'",
-			f"--rsync-options='-e \"/usr/bin/ssh -oStrictHostKeyChecking=no -oBatchMode=yes -p {port} -i /root/.ssh/id_rsa_miab\"'",
+			f"--ssh-options='-i /root/.ssh/id_rsa_miab -p {port} {SSH_TIMEOUT_OPTIONS}'",
+			f"--rsync-options='-e \"/usr/bin/ssh -oStrictHostKeyChecking=no -oBatchMode=yes {SSH_TIMEOUT_OPTIONS} -p {port} -i /root/.ssh/id_rsa_miab\"'",
 		]
 	if get_target_type(config) == 's3':
 		# See note about hostname in get_duplicity_target_url.
@@ -469,7 +477,7 @@ def list_target_files(config):
 
 		rsync_command = [ 'rsync',
 					'-e',
-					f'/usr/bin/ssh -i /root/.ssh/id_rsa_miab -oStrictHostKeyChecking=no -oBatchMode=yes -p {port}',
+					f'/usr/bin/ssh -i /root/.ssh/id_rsa_miab -oStrictHostKeyChecking=no -oBatchMode=yes {SSH_TIMEOUT_OPTIONS} -p {port}',
 					'--list-only',
 					'-r',
 					rsync_target.format(
@@ -477,7 +485,14 @@ def list_target_files(config):
 						path=target_path)
 				]
 
-		code, listing = shell('check_output', rsync_command, trap=True, capture_stderr=True)
+		# duplicity retries its own connections, this one is ours: try twice
+		# more (B125), unless the target turned us away. The nightly backup
+		# stops when it fails (should_force_full).
+		for attempt in range(3):
+			code, listing = shell('check_output', rsync_command, trap=True, capture_stderr=True)
+			if code == 0 or attempt == 2 or 'Permission denied (' in listing or 'No such file or directory' in listing:
+				break
+			time.sleep(5)
 		if code == 0:
 			ret = []
 			for l in listing.split('\n'):
