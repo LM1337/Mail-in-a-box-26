@@ -336,13 +336,16 @@ class Client:
             raise EASError("status", "Ping status %s" % st, "Ping", status=st)
         return st
 
-    def ping_status(self, folders, heartbeat):
+    def ping_status(self, folders, heartbeat, timeout=None):
         """One Ping, whatever its status: returns (status, the answer's
         HeartbeatInterval or None). Status 5: the heartbeat is out of the
         server's range, and HeartbeatInterval is the bound it allows
-        (MS-ASCMD 2.2.3.88.1). An HTTP error (such as 504) raises EASError."""
+        (MS-ASCMD 2.2.3.88.1). An HTTP error (such as 504) raises EASError;
+        no answer within timeout (default: the heartbeat and two minutes)
+        raises TimeoutError."""
         t = self.request("Ping", encode(13, ("Ping", [("HeartbeatInterval", str(heartbeat)), ("Folders", [
-            ("Folder", [("Id", fid), ("Class", cls)]) for fid, cls in folders])])), timeout=heartbeat + 120)
+            ("Folder", [("Id", fid), ("Class", cls)]) for fid, cls in folders])])),
+            timeout=heartbeat + 120 if timeout is None else timeout)
         return first(t, "Status"), first(t, "HeartbeatInterval")
 
 

@@ -1715,7 +1715,12 @@ def c_nc_dav_proxy(ctx):
     # (?export) and deleted through /carddav; the address book must stay.
     # The DELETE is only sent when the reads worked (on a box with the old
     # proxy it would reach another name, never the address book: the name
-    # does not begin with "?").
+    # does not begin with "?"). And nginx's dotfile block (the regex location
+    # at the end of nginx-alldomains.conf) must not apply to these paths, as
+    # it did not with the old regex location (users' own files, #414): a
+    # file named ".htmiab-smoke-..." and a card ".gitmiab-smoke-....vcf",
+    # put through Nextcloud's own path, are read through /webdav and
+    # /carddav (403 with plain prefix locations).
     uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
     auth = (ctx.alice, ctx.user_pw)
     mark = "miab-smoke-%s" % ctx.tok
@@ -1725,16 +1730,24 @@ def c_nc_dav_proxy(ctx):
     vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s-proxy\r\nFN:%s proxy\r\nN:%s;Proxy;;;\r\n"
            "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
     propfind = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>'
-    try:
+    dotfile = ".htmiab-smoke-%s" % ctx.tok
+    files = "/cloud/remote.php/dav/files/%s/" % uid
+    dotcard = ".gitmiab-smoke-%s.vcf" % ctx.tok
+    dotvcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s-dot\r\nFN:%s dot\r\nN:%s;Dot;;;\r\n"
+              "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+
+    def put(path, body, ctype):
         for attempt in range(3):
             # Nextcloud on SQLite answers 500 ("database is locked") now and then
-            r = http_req(ctx, "PUT", book + name, auth=auth, body=vcf,
-                         headers={"Content-Type": "text/vcard; charset=utf-8"})
+            r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": ctype})
             if r.status not in (500, 503):
                 break
             time.sleep(10)
         if r.status not in (201, 204):
-            raise Fail("PUT %s HTTP %d" % (book + name, r.status))
+            raise Fail("PUT %s HTTP %d" % (path, r.status))
+
+    try:
+        put(book + name, vcf, "text/vcard; charset=utf-8")
         r = http_req(ctx, "GET", proxied_book + name, auth=auth)
         if r.status != 200 or mark not in r.text():
             raise Fail("GET of the card %s through /carddav: HTTP %d (the proxy does not pass the escaped name)"
@@ -1753,6 +1766,16 @@ def c_nc_dav_proxy(ctx):
         if r.status != 404:
             raise Fail("after the DELETE through /carddav the card answers HTTP %d" % r.status)
         out = ["/carddav: card with space and ? read, exported, deleted (the address book stays)"]
+        put(files + dotfile, "%s X-Miab-Test 1\n" % mark, "text/plain")
+        r = http_req(ctx, "GET", "/webdav/" + dotfile, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET /webdav/%s: HTTP %d (nginx's dotfile block applies to the proxy)" % (dotfile, r.status))
+        put(book + dotcard, dotvcf, "text/vcard; charset=utf-8")
+        r = http_req(ctx, "GET", proxied_book + dotcard, auth=auth)
+        if r.status != 200 or mark not in r.text():
+            raise Fail("GET of the card %s through /carddav: HTTP %d (nginx's dotfile block applies to the proxy)"
+                       % (dotcard, r.status))
+        out.append("dotfiles %s, %s through /webdav, /carddav 200" % (dotfile, dotcard))
         for kind, path in (("caldav", "/caldav/calendars/%s/" % uid), ("webdav", "/webdav/")):
             r = http_req(ctx, "PROPFIND", path, auth=auth, body=propfind,
                          headers={"Depth": "0", "Content-Type": "application/xml"})
@@ -1762,6 +1785,17 @@ def c_nc_dav_proxy(ctx):
         return "; ".join(out)
     finally:
         http_req(ctx, "DELETE", book + name, auth=auth)
+        http_req(ctx, "DELETE", book + dotcard, auth=auth)
+        r = http_req(ctx, "DELETE", files + dotfile, auth=auth)
+        if r.status == 204:
+            # and from alice's trash bin (it holds "<name>.d<time>")
+            trash = "/cloud/remote.php/dav/trashbin/%s/trash/" % uid
+            r = http_req(ctx, "PROPFIND", trash, auth=auth, body=propfind,
+                         headers={"Depth": "1", "Content-Type": "application/xml"})
+            if r.status == 207:
+                for href in re.findall(r"<d:href>([^<]+)</d:href>", r.text()):
+                    if urllib.parse.unquote(href.rstrip("/").rsplit("/", 1)[-1]).startswith(dotfile + ".d"):
+                        http_req(ctx, "DELETE", href, auth=auth)
 
 
 def nc_user_info(ctx, user, pw):
@@ -2108,8 +2142,11 @@ def c_zpush_ping(ctx):
     # fastcgi_read_timeout for /Microsoft-Server-ActiveSync (630 s) with 504.
     # A Ping longer than the box allows gets status 5 with the bound at once,
     # and (with --ssh) the timeout of every such location is at least a
-    # minute longer than that bound.
+    # minute longer than that bound. The Ping waits 90 s at most: a box
+    # without a bound keeps it open (until nginx's 504), and a newer Ping of
+    # the device ends that wait in Z-Push.
     eas = _load_eas()
+    wait = 90
     devid = "miabsmokeping" + ctx.tok
     c = eas.Client(ctx.hostname, ctx.alice, ctx.user_pw, devid, addr=ctx.net.addr(443),
                    user_agent="miab-fork-smoke/1")
@@ -2121,7 +2158,18 @@ def c_zpush_ping(ctx):
             raise Fail("FolderSync: no contact folder")
         c.sync([cons[0]["ServerId"]])
         t0 = time.time()
-        st, bound = c.ping_status([(cons[0]["ServerId"], "Contacts")], 3600)
+        try:
+            st, bound = c.ping_status([(cons[0]["ServerId"], "Contacts")], 3600, timeout=wait)
+        except (TimeoutError, socket.timeout):
+            # Z-Push ends the old Ping (with more than 60 s to go) when it
+            # sees a newer one of the device, at its next check (PING_INTERVAL,
+            # 30 s); the newer one, of 60 s, is not waited for: it ends itself.
+            try:
+                c.ping_status([(cons[0]["ServerId"], "Contacts")], 60, timeout=5)
+            except (TimeoutError, socket.timeout, OSError, eas.EASError):
+                pass
+            raise Fail("Ping with a heartbeat of 3600 s: no status 5 within %d s (no Ping bound: nginx ends it "
+                       "with 504 after its fastcgi_read_timeout)" % wait)
         took = time.time() - t0
     except eas.EASError as e:
         raise Fail("%s (%s)" % (e, e.kind))

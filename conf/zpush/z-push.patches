@@ -1,6 +1,9 @@
 # The fork's changes to Z-Push 2.7.7, applied by setup/zpush.sh on every run
 # (tools/patch_source.py; format and rules there). Each change names its bug
-# in BUGS-fork.md with a "MIAB-Bnnn" comment.
+# in BUGS-fork.md with a "MIAB-Bnnn" comment. Setup marks the installed tree
+# with this file's checksum (/usr/local/lib/z-push/version) and installs a
+# fresh copy of Z-Push when it changes, so a block may be edited: it is
+# always applied to the original text.
 
 # B128: Z-Push's id of a card is its name on the server without ".vcf", and
 # its CardDAV client asked only for id + ".vcf". A card whose name has no

@@ -24,11 +24,18 @@ phpenmod -v "$PHP_VER" imap
 # Copy Z-Push into place.
 VERSION=2.7.7
 TARGETHASH=7a8e0094adf216521ee491078f78e709cd68257d05a868b3992d5665c01d8790 # SHA256 of the GitHub tag archive (no upstream checksum published)
+# The installed tree is marked with the version and the checksum of the
+# fork's changes to it (conf/zpush/z-push.patches, applied below). In a tree
+# with an earlier revision of a block, tools/patch_source.py finds neither the
+# block's old text (the earlier revision replaced it) nor its new text, and
+# stops setup; so a changed patch file gets a fresh copy of Z-Push to apply
+# it to, like a new version.
+ZPUSH_STAMP="$VERSION+patches-$(sha256sum conf/zpush/z-push.patches | cut -c1-16)"
 needs_update=0 #NODOC
 if [ ! -f /usr/local/lib/z-push/version ]; then
 	needs_update=1 #NODOC
-elif [[ $VERSION != $(cat /usr/local/lib/z-push/version) ]]; then
-	# checks if the version
+elif [[ $ZPUSH_STAMP != $(cat /usr/local/lib/z-push/version) ]]; then
+	# checks if the version (or the fork's patch file) changed
 	needs_update=1 #NODOC
 fi
 if [ $needs_update == 1 ]; then
@@ -52,7 +59,7 @@ if [ $needs_update == 1 ]; then
     echo php"$PHP_VER" /usr/local/lib/z-push/z-push-top.php '"$@"' >> /usr/sbin/z-push-top
     chmod 755 /usr/sbin/z-push-top
 	
-	echo $VERSION > /usr/local/lib/z-push/version
+	echo "$ZPUSH_STAMP" > /usr/local/lib/z-push/version
 fi
 
 # Configure default config.
@@ -104,7 +111,8 @@ fi
 # installation from before a change gets it without a new download of
 # Z-Push; files that have it already are left alone. Setup stops if a change
 # does not apply (another Z-Push version), instead of running code that the
-# fork has not checked. /usr/local/lib/z-push belongs to root.
+# fork has not checked. A change of the patch file gets a fresh copy of
+# Z-Push first (ZPUSH_STAMP above). /usr/local/lib/z-push belongs to root.
 if ! tools/patch_source.py /usr/local/lib/z-push conf/zpush/z-push.patches; then
 	echo "Could not apply conf/zpush/z-push.patches to Z-Push $VERSION in /usr/local/lib/z-push."
 	exit 1

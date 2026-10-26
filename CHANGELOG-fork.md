@@ -81,7 +81,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   from the phone under its own name, keeping its UID (B128).
 * A phone's ActiveSync Ping (push) with a heartbeat of more than 630 s no
   longer ends with HTTP 504 after 10.5 minutes (seen on a production box:
-  all Pings of an iPhone, 4 to 10 an hour, all day). nginx gave up on
+  68 in a day, all Pings of one iPhone, spread over the whole day). nginx gave up on
   Z-Push, which waits as long as the phone asks; the PHP process went on
   waiting, and a change it found then reached the phone only with its next
   Ping. nginx now waits up to 3660 s on `/Microsoft-Server-ActiveSync`, and
@@ -94,7 +94,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   began a query string (a DELETE of a card named `?x.vcf` deleted the whole
   address book on a test box), and a query such as `?export` was dropped.
   Only clients set up with these short paths were affected, not those with
-  the `/cloud/remote.php/...` URLs or `.well-known`, and not Z-Push (B130).
+  the `/cloud/remote.php/...` URLs or `.well-known`, and not Z-Push. Files
+  and cards whose names begin with `.ht`, `.git`, `.svn`, `.hg` or `.bzr`
+  pass through these paths as before (nginx's dotfile block does not apply
+  to them), and a path with `/mail/config/` in it below them is now passed
+  too instead of 403 (B130).
 
 ### Changed
 
@@ -139,8 +143,22 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   accepts status 5 and prints the bound.
 * Tests: the smoke test's new check `nextcloud-dav-proxy` (group `web`):
   a card whose name has a space and a `?` is read, found in `?export` and
-  deleted through `/carddav`, and the address book stays; `/caldav` and
-  `/webdav` answer PROPFIND (B130).
+  deleted through `/carddav`, and the address book stays; a file named
+  `.htmiab-smoke-...` put through Nextcloud's own path is read through
+  `/webdav`, and a card `.gitmiab-smoke-...vcf` through `/carddav`, as
+  nginx's dotfile block must not apply there; `/caldav` and `/webdav`
+  answer PROPFIND (B130).
+* Tests: the smoke test's `zpush-ping` waits 90 s at most for the answer
+  to its Ping of 3600 s (on a box without the bound it waited for nginx's
+  504 after 635 s, and left Z-Push waiting for up to an hour): no answer
+  within 90 s fails the check, and a short Ping of the same device ends the
+  long one in Z-Push. `tests/fork/eas.py`: `ping_status()` takes a timeout.
+* Setup marks Z-Push's directory with the version and the checksum of
+  conf/zpush/z-push.patches (`/usr/local/lib/z-push/version`, such as
+  `2.7.7+patches-<16 hex digits>`), and installs a fresh copy of Z-Push
+  when either changes: a later release that changes a block of the patch
+  file would otherwise find neither its old nor its new text and stop
+  setup (B128).
 
 ### Upgrade note
 
@@ -161,6 +179,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   hand. Nextcloud's example contact now syncs to phones like any other
   contact; delete it in Nextcloud's Contacts if it is not wanted. A phone
   that got HTTP 500 needs no new setup: its next Sync continues (B128).
+  The first update with this release downloads Z-Push 2.7.7 from GitHub
+  once more (its directory is marked with the patch file's checksum now);
+  changes made there by hand are lost, as at a new Z-Push version.
 * After the update, a reload of nginx keeps its old worker processes until
   their running ActiveSync long polls end, up to an hour (before: 10.5
   minutes). Pings of up to 59 minutes hold a PHP-FPM worker each, as they

@@ -239,7 +239,10 @@ report. The groups:
   the proxy of `/carddav` passes an escaped name and the query string (a
   card whose name has a space and a `?`, put through Nextcloud's own path,
   is read, found in `?export` and deleted through `/carddav`, and the
-  address book stays; B130), and `/caldav` and `/webdav` answer PROPFIND.
+  address book stays; B130), nginx's dotfile block does not apply to these
+  paths (a file `.htmiab-smoke-...` put through Nextcloud's own path is read
+  through `/webdav`, a card `.gitmiab-smoke-...vcf` through `/carddav`), and
+  `/caldav` and `/webdav` answer PROPFIND.
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed
@@ -254,7 +257,8 @@ report. The groups:
   name without `.vcf`, like Nextcloud's example contact `default` (B128);
   all are deleted again, and the test device is removed from Z-Push (with
   `--ssh`); `zpush-ping`: a Ping with a heartbeat of 3600 s gets status 5
-  with the box's bound at once, and (with `--ssh`) nginx's
+  with the box's bound at once (no answer within 90 s fails it: no bound,
+  and a short Ping of the device ends the long one), and (with `--ssh`) nginx's
   `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
   at least a minute longer than that bound, so a long Ping does not end
   with 504 (B129). Quick enough to run
