@@ -820,18 +820,22 @@ the following, on by default:
   chooses cannot name another address. Only a request with a user name and
   a password is logged and counted: a phone's first request without
   credentials (it waits for the login prompt, also with its user in the URL)
-  is not. A login that fails because a service
-  behind Z-Push does not answer (Dovecot, Nextcloud for calendars and
-  contacts) counts as well; setup no longer restarts these services (B120,
-  B122). Since the fix of B121 (after rc7) the paths `/caldav`, `/carddav` and
+  is not. Nor is a login that Dovecot or Nextcloud cannot check at that
+  moment (a temporary failure, e.g. while Dovecot does not answer): Z-Push
+  answers it with HTTP 503 and `Retry-After`, so the phone tries again later
+  without asking for its password. Each line starts with the user names in
+  brackets, escaped, and the filter counts a line only when its message
+  belongs to them, so no other warning can pass for a failed login. Since
+  the fix of B121 (after rc7) the paths `/caldav`, `/carddav` and
   `/webdav` pass the client's address to Nextcloud, so `miab-owncloud` counts
   and bans those clients too. Some mail apps sync through their provider's
   servers, for example Outlook for iOS and Android with an Exchange
   ActiveSync account: all their users reach the box from the same few
-  addresses, and someone who enters a wrong password there 20 times within
-  two minutes gets these addresses banned for all of them (and, repeated,
-  the one-week recidive ban). If your users sync that way, put those
-  networks on the allowlist. `/var/log/z-push` belongs to root (group
+  addresses, and 20 wrong passwords there within two minutes get these
+  addresses banned for all of them. Anyone can do that on purpose: an
+  account name and a wrong password entered in the app are enough. Repeated,
+  such bans lead to recidive's one-week ban of these addresses on all ports.
+  If your users sync that way, put those networks on the allowlist. `/var/log/z-push` belongs to root (group
   www-data, which may write the four log files but not replace them), so
   that fail2ban never opens a link or a FIFO there; setup and logrotate
   create the log files.
@@ -974,18 +978,24 @@ eingeschaltet:
   kann. Nur eine Anfrage mit Benutzername und Passwort wird protokolliert
   und gezählt: Die erste Anfrage eines Telefons ohne Zugangsdaten (es wartet
   auf die Anmeldeaufforderung, auch mit seinem Benutzer in der URL) nicht.
-  Eine Anmeldung, die scheitert, weil ein Dienst hinter Z-Push nicht
-  antwortet (Dovecot, Nextcloud für Kalender und Kontakte), zählt ebenfalls;
-  Setup startet diese Dienste nicht mehr neu (B120, B122). Seit der Korrektur
+  Ebenso wenig eine Anmeldung, die Dovecot oder Nextcloud in dem Moment
+  nicht prüfen kann (ein vorübergehender Fehler, etwa wenn Dovecot nicht
+  antwortet): Z-Push beantwortet sie mit HTTP 503 und `Retry-After`, und das
+  Telefon versucht es später wieder, ohne nach dem Passwort zu fragen. Jede
+  Zeile beginnt mit den Benutzernamen in eckigen Klammern, maskiert, und der
+  Filter zählt eine Zeile nur, wenn ihre Meldung zu ihnen gehört; so kann
+  keine andere Warnung als Fehlanmeldung durchgehen. Seit der Korrektur
   von B121 nach rc7 geben die Pfade `/caldav`, `/carddav` und `/webdav` die
   Adresse des Clients an Nextcloud weiter, also zählt und sperrt
   `miab-owncloud` auch diese Clients. Manche Mail-Apps synchronisieren über
   die Server ihres Anbieters, zum Beispiel Outlook für iOS und Android mit
   einem Exchange-ActiveSync-Konto: Alle ihre Nutzer erreichen die Box von
-  denselben wenigen Adressen, und wer dort 20-mal in zwei Minuten ein
-  falsches Passwort eingibt, lässt diese Adressen für alle sperren (und
-  wiederholt die einwöchige recidive-Sperre). Wenn die Nutzer so
-  synchronisieren, diese Netze in die Freigabeliste setzen.
+  denselben wenigen Adressen, und 20 falsche Passwörter dort in zwei Minuten
+  lassen diese Adressen für alle sperren. Das kann jeder mit Absicht tun:
+  Ein Kontoname und ein falsches Passwort in der App genügen. Wiederholt
+  führen solche Sperren zur einwöchigen recidive-Sperre dieser Adressen auf
+  allen Ports. Wenn die Nutzer so synchronisieren, diese Netze in die
+  Freigabeliste setzen.
   `/var/log/z-push` gehört root (Gruppe www-data, die die vier Logdateien
   beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
   oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.

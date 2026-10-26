@@ -81,6 +81,29 @@ if ! grep -qF "MIAB-B126" "$ZPUSH_FILELOG"; then
 fi
 grep -qF 'return addcslashes($log, "\0..\37\177"); // MIAB-B126' "$ZPUSH_FILELOG" \
 	|| { echo "Could not patch $ZPUSH_FILELOG (Z-Push $VERSION); its log lines would not be escaped."; exit 1; }
+# Each line starts with the user names in brackets ("[<user>]", or
+# "[<user>#<user of the URL>]"), as the client sent them. With a "]" in them
+# the jail's filter could not tell where the brackets end, and a warning that
+# ends in text from a client could pass for a failed login with any address.
+# Escape "]" and "\" there (as "\]" and "\\"), so that the first unescaped "]"
+# ends the user names, and the filter requires the message that follows to be
+# the failed login of that same user (B126).
+IFS= read -r ZPUSH_PREFIX_SAME <<'PHP'
+                $log .= ' ['. addcslashes($this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
+PHP
+IFS= read -r ZPUSH_PREFIX_BOTH <<'PHP'
+                $log .= ' ['. addcslashes($this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
+PHP
+if ! grep -qF "MIAB-B126: the user names escaped" "$ZPUSH_FILELOG"; then
+	sed -f <(cat <<'SED'
+s/^                \$log \.= ' \['\. \$this->GetUser() \.'\]';$/                $log .= ' ['. addcslashes($this->GetUser(), '\\\\]') .']'; \/\/ MIAB-B126: the user names escaped/
+s/^                \$log \.= ' \['\. \$this->GetAuthUser() \. Request::IMPERSONATE_DELIM \. \$this->GetUser() \.'\]';$/                $log .= ' ['. addcslashes($this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser(), '\\\\]') .']'; \/\/ MIAB-B126: the user names escaped/
+SED
+) "$ZPUSH_FILELOG" | tools/write_conf.py "$ZPUSH_FILELOG"
+fi
+[ "$(grep -cxF "$ZPUSH_PREFIX_SAME" "$ZPUSH_FILELOG")" = 1 ] && [ "$(grep -cxF "$ZPUSH_PREFIX_BOTH" "$ZPUSH_FILELOG")" = 1 ] \
+	&& ! grep -qE "' \\['\\. \\\$this->Get(Auth)?User\\(\\)" "$ZPUSH_FILELOG" \
+	|| { echo "Could not patch $ZPUSH_FILELOG (Z-Push $VERSION); the user names at the start of its log lines would not be escaped."; exit 1; }
 
 # Z-Push logs a failed ActiveSync login as "[<user>] IP: <address> failed to
 # authenticate user '<user>'": text that the client chooses on both sides of
@@ -105,6 +128,34 @@ SED
 fi
 grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" && [ "$(grep -cF "$ZPUSH_AUTHFAIL_IF" "$ZPUSH_INDEX")" = 1 ] \
 	|| { echo "Could not patch $ZPUSH_INDEX (Z-Push $VERSION); the miab-zpush jail would not see the failed ActiveSync logins, or would count requests without a password."; exit 1; }
+
+# A login that fails because Dovecot or Nextcloud cannot check the password
+# at that moment (Dovecot answers "[UNAVAILABLE] Temporary authentication
+# failure" while users.sqlite is locked, closes the connection, or does not
+# run) is no wrong password, but Z-Push reported it as one: HTTP 401, which
+# makes a phone ask for its password, and the failed-login line that the
+# miab-zpush jail counts. Every user behind one address (a NAT, or the few
+# relays of the Outlook app) could be banned so in such a window (B126).
+# Z-Push answers it with 503 and Retry-After instead, which a client retries
+# later, and logs no failed login. A wrong password is what Dovecot answers
+# with "[AUTHENTICATIONFAILED]" (on any of c-client's tries); any other IMAP
+# failure is temporary. When IMAP accepted the password, a failed CalDAV or
+# CardDAV login (Nextcloud) is temporary too.
+ZPUSH_IMAP=/usr/local/lib/z-push/backend/imap/imap.php
+ZPUSH_COMBINED=/usr/local/lib/z-push/backend/combined/combined.php
+ZPUSH_IMAP_TEMPFAIL="            if (strpos(implode(' ', (array) imap_errors()), '[AUTHENTICATIONFAILED]') === false) throw new ServiceUnavailableException(\"BackendIMAP->Logon(): Dovecot did not check the password (a temporary failure, not a wrong password)\"); // MIAB-B126"
+ZPUSH_COMBINED_TEMPFAIL="                if (\$i !== array_key_first(\$this->backends)) throw new ServiceUnavailableException(sprintf(\"Combined->Logon(): %s failed after the password was accepted (a temporary failure, not a wrong password)\", \$this->config['backends'][\$i]['name'])); // MIAB-B126"
+if ! grep -qF "// MIAB-B126" "$ZPUSH_IMAP"; then
+	sed "s|^\(            ZLog::Write(LOGLEVEL_ERROR, sprintf(\"BackendIMAP->Logon(): can't connect as user .*\)\$|\1\n$ZPUSH_IMAP_TEMPFAIL|" "$ZPUSH_IMAP" \
+		| tools/write_conf.py "$ZPUSH_IMAP"
+fi
+if ! grep -qF "// MIAB-B126" "$ZPUSH_COMBINED"; then
+	sed "s|^\(                ZLog::Write(LOGLEVEL_DEBUG, sprintf(\"Combined->Logon() failed on %s \".*\)\$|\1\n$ZPUSH_COMBINED_TEMPFAIL|" "$ZPUSH_COMBINED" \
+		| tools/write_conf.py "$ZPUSH_COMBINED"
+fi
+[ "$(grep -cxF "$ZPUSH_IMAP_TEMPFAIL" "$ZPUSH_IMAP")" = 1 ] && [ "$(grep -cF "MIAB-B126" "$ZPUSH_IMAP")" = 1 ] \
+	&& [ "$(grep -cxF "$ZPUSH_COMBINED_TEMPFAIL" "$ZPUSH_COMBINED")" = 1 ] && [ "$(grep -cF "MIAB-B126" "$ZPUSH_COMBINED")" = 1 ] \
+	|| { echo "Could not patch $ZPUSH_IMAP and $ZPUSH_COMBINED (Z-Push $VERSION); a temporary login failure would count as a failed login."; exit 1; }
 
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php
@@ -150,6 +201,11 @@ fi
 chown root:www-data /var/log/z-push
 chmod 750 /var/log/z-push
 find /var/log/z-push -mindepth 1 -maxdepth 1 ! -type f -exec rm -rf -- {} +
+# A file with more than one link may be a hard link that www-data made to a
+# file of another account: the chown and chmod below would change that file
+# (only fs.protected_hardlinks prevents such a link). Remove the name; the
+# loop creates the log file again (B126).
+find /var/log/z-push -mindepth 1 -maxdepth 1 -type f -links +1 -delete
 for f in z-push.log z-push-error.log autodiscover.log autodiscover-error.log; do
 	[ -f "/var/log/z-push/$f" ] || install -o www-data -g www-data -m 640 /dev/null "/var/log/z-push/$f"
 	chown -h www-data:www-data "/var/log/z-push/$f"

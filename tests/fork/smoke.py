@@ -1504,6 +1504,60 @@ def c_admin_journal_no_hash(ctx):
     return "no password hash or doveadm pw output in %d lines of mailinabox's journal of the last %d s" % (len(lines), secs)
 
 
+# Run on the box (as root): the fail2ban "Found" lines and Z-Push's failed-login lines of the given addresses
+# since an epoch time. fail2ban and Z-Push log local time, which time.mktime reads as the box's own.
+LOAD_SCAN = r"""
+import re, sys, time
+since, ips = float(sys.argv[1]), set(sys.argv[2:])
+def epoch(s, fmt):
+    try:
+        return time.mktime(time.strptime(s, fmt))
+    except ValueError:
+        return None
+F2B = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ fail2ban\.filter\s+\[\d+\]: INFO\s+\[([\w-]+)\] Found (\S+)")
+ZP = re.compile(r"^(\d\d/\d\d/\d{4} \d\d:\d\d:\d\d) .*\] (Failed to authenticate user|Unable to complete autodiscover because login failed).* from IP ([0-9A-Fa-f:.]+)\.$")
+hits = []
+for fn, rx, fmt in (("/var/log/fail2ban.log.1", F2B, "%Y-%m-%d %H:%M:%S"), ("/var/log/fail2ban.log", F2B, "%Y-%m-%d %H:%M:%S"),
+                    ("/var/log/z-push/z-push-error.log.1", ZP, "%d/%m/%Y %H:%M:%S"), ("/var/log/z-push/z-push-error.log", ZP, "%d/%m/%Y %H:%M:%S"),
+                    ("/var/log/z-push/autodiscover-error.log.1", ZP, "%d/%m/%Y %H:%M:%S"), ("/var/log/z-push/autodiscover-error.log", ZP, "%d/%m/%Y %H:%M:%S")):
+    try:
+        f = open(fn, errors="replace")
+    except OSError:
+        continue
+    with f:
+        for line in f:
+            m = rx.match(line.rstrip("\n"))
+            if m and m.group(3) in ips:
+                t = epoch(m.group(1), fmt)
+                if t is not None and t >= since:
+                    hits.append("%s %s: %s %s" % (fn.rsplit("/", 1)[1], m.group(1), m.group(2), m.group(3)))
+print(len(hits))
+for h in hits[:10]:
+    print(h)
+"""
+
+
+def c_load_no_failed_login(ctx):
+    # A client-load run (tests/fork/client-load.py, correct passwords only) during an update must not make any
+    # jail count a failure of its addresses (B126): no fail2ban "Found" and no failed ActiveSync or Autodiscover
+    # login of these addresses since --load-since. Run before the smoke test's own failed logins.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    ips = ctx.args.load_ip or ([ctx.args.peer] if ctx.args.peer else [])
+    if not ips:
+        raise Fail("--load-since needs --load-ip (or --peer)")
+    script = "S=$(date -d %s +%%s) && exec python3 -I -c %s \"$S\" %s" % (
+        shlex.quote(ctx.args.load_since), shlex.quote(LOAD_SCAN), " ".join(shlex.quote(i) for i in ips))
+    code, out, err = ctx.remote.run("bash -c %s" % shlex.quote(script), sudo=True, timeout=120)
+    lines = out.splitlines()
+    if code != 0 or not lines or not lines[0].isdigit():
+        raise Fail("scan failed (%d): %s" % (code, err.strip()[:200]))
+    if int(lines[0]):
+        raise Fail("%s failed login(s) or fail2ban Found of %s since %s: %s"
+                   % (lines[0], ",".join(ips), ctx.args.load_since, "; ".join(lines[1:4])))
+    return "no fail2ban Found and no failed ActiveSync/Autodiscover login of %s since %s" % (",".join(ips), ctx.args.load_since)
+
+
 def c_backup_status(ctx):
     r = admin_api(ctx, "GET", "system/backup/status")
     if r.status != 200:
@@ -1669,7 +1723,9 @@ F2B_FILTER_CASES = [
      "203.0.113.5"),
     # Z-Push (B126): the address is the last thing on the line (setup/zpush.sh moves it there in the
     # ActiveSync message), after the user names and the e-mail address that the client chose; control
-    # characters there are escaped ("\\n" below is a backslash and an n, not a line break).
+    # characters there are escaped ("\\n" below is a backslash and an n, not a line break). The message
+    # must follow the user names in brackets that belong to it: "[<user>]" (apart from case),
+    # "[<user>#<user of the request>]" ("]" and "\\" escaped there), Autodiscover's "[#unknown]".
     ("miab-zpush",
      "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' "
      "from IP 203.0.113.5.",
@@ -1679,30 +1735,59 @@ F2B_FILTER_CASES = [
      "from IP 2001:db8::5.",
      "2001:db8::5"),
     ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'Bob@Example.com' "
+     "from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
      "26/10/2026 10:00:00 [12345] [WARN] [x from ip 198.51.100.7.] Failed to authenticate user "
      "'x from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com#bob] Failed to authenticate user 'bob@example.com' "
+     "from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com#x\\] failed to authenticate user 'y] Failed to "
+     "authenticate user 'bob@example.com' from IP 203.0.113.5.",
+     "203.0.113.5"),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [#unknown] Unable to complete autodiscover because login failed for user "
      "with email 'bob@example.com' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "26/10/2026 10:00:00 [  999] [WARN] [#unknown] Unable to complete autodiscover because login failed for user "
      "with email 'x from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     ("miab-zpush",
-     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
-     "with email 'x\\n26/10/2026 10:00:00 [1] [WARN] [] Unable to complete autodiscover because login failed "
-     "for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
+     "26/10/2026 10:00:00 [  999] [WARN] [#unknown] Unable to complete autodiscover because login failed for user "
+     "with email 'x\\n26/10/2026 10:00:00 [1] [WARN] [#unknown] Unable to complete autodiscover because login "
+     "failed for user with email 'y' from IP 198.51.100.7.' from IP 203.0.113.5.",
      "203.0.113.5"),
     # A request without credentials (Z-Push logs the user 'unknown') guesses no password.
     ("miab-zpush",
      "26/10/2026 10:00:00 [12345] [WARN] [#unknown] Failed to authenticate user 'unknown' from IP 203.0.113.5.",
      None),
+    # Another warning whose end a client chose is no failed login, whatever text that end has.
     ("miab-zpush",
-     "26/10/2026 10:00:00 [12345] [WARN] [x Failed to authenticate user 'y] Failed to authenticate user "
-     "'bob@example.com' from IP 203.0.113.5.",
-     "203.0.113.5"),
+     "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] BackendIMAP->close_connection(): IMAP said: x] Failed "
+     "to authenticate user 'bob@example.com' from IP 198.51.100.7.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [x] BackendIMAP->close_connection(): IMAP said: ] Failed to authenticate "
+     "user 'x] BackendIMAP->close_connection(): IMAP said: ' from IP 198.51.100.7.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [12345] [WARN] [x#y] BackendIMAP->close_connection(): IMAP said: ] Failed to "
+     "authenticate user 'x' from IP 198.51.100.7.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [#unknown] The backend was not able to find attribute 'x] [#unknown] "
+     "Unable to complete autodiscover because login failed for user with email 'y' from IP 198.51.100.7.",
+     None),
+    ("miab-zpush",
+     "26/10/2026 10:00:00 [  999] [WARN] [] Unable to complete autodiscover because login failed for user "
+     "with email 'bob@example.com' from IP 198.51.100.7.",
+     None),
     # Z-Push's own order (before setup/zpush.sh changes it) is not read.
     ("miab-zpush",
      "26/10/2026 10:00:00 [12345] [WARN] [bob@example.com] IP: 203.0.113.5 failed to authenticate user "
@@ -3479,6 +3564,9 @@ def main():
     ap.add_argument("--peer-ssh", help="ssh host of a second MIAB: port-25 mail and fail2ban attacks are sent from there")
     ap.add_argument("--provision", action="store_true", help="create alice/bob/carol, aliases and sieve scripts via API")
     ap.add_argument("--fail2ban", action="store_true", help="run the fail2ban ban/unban test (opt-in)")
+    ap.add_argument("--load-since", help="check first that no jail counted a failure of the client load's addresses "
+                    "(--load-ip) since this time (date -d on the box), e.g. the start of a client-load run (B126)")
+    ap.add_argument("--load-ip", action="append", default=[], help="an address of the client load (repeatable; default --peer)")
     ap.add_argument("--fail2ban-force", action="store_true", help="allow attacks from here/the jump host")
     ap.add_argument("--fail2ban-count", type=int, default=26, help="failed logins per protocol (maxretry is 20)")
     ap.add_argument("--fail2ban-parallel", type=int, default=13,
@@ -3565,6 +3653,9 @@ def main():
         finally:
             ctx.net.close()
 
+    if args.load_since:
+        print("== load (no failed login of the client load, B126)")
+        run_check("load-no-failed-login", c_load_no_failed_login, ctx)
     if want("admin") or want("api") or want("provision") or want("migrated") or want("dns"):
         print("== admin")
         run_check("admin-api-login", c_admin_login, ctx)

@@ -683,14 +683,18 @@ RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-F
 #   dovecot: imap-login: Login aborted: ... (auth failed, 3 attempts in 9 secs) (auth_failed): user=<a@b>, method=PLAIN, rip=192.0.2.1, lip=...
 # The user name is logged unescaped, so the greedy user=<.*> takes the last rip= (see filter.d/dovecotimap.conf).
 RE_DOVECOT = re.compile(rb"(imap|pop3|managesieve|submission)-login: (?:Info: )?.*?\((?:auth failed|authorization failed|user disabled)(?:, (\d+) attempts)?[^)]*\)(?: \(\w+\))?: user=<(.*)>, (?:method=\S+, )?rip=([0-9A-Fa-f:.]+), lip=")
-# Z-Push (LOGAUTHFAIL, B126), anchored at the end of the line like
+# Z-Push (LOGAUTHFAIL, B126), anchored like
 # conf/fail2ban/filter.d/miab-zpush.conf: the user names and the e-mail
 # address come from the client, the address is the last thing on the line
-# (setup/zpush.sh moves it there in the ActiveSync message).
+# (setup/zpush.sh moves it there in the ActiveSync message), and the message
+# must follow the user names in brackets that belong to it (setup/zpush.sh
+# escapes "]" and "\" in them): the user of "[<user>]" (apart from case), or
+# the first user of "[<user>#<user of the request>]"; Autodiscover's are
+# always "[#unknown]".
 #   26/10/2026 13:00:00 [12345] [WARN] [bob@example.com] Failed to authenticate user 'bob@example.com' from IP 192.0.2.1.
-#   26/10/2026 13:00:00 [12345] [WARN] [] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
-RE_ZPUSH = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Failed to authenticate user '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
-RE_AUTODISCOVER = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[.*\] Unable to complete autodiscover because login failed for user with email '(.*)' from IP ([0-9A-Fa-f:.]+)\.\r?\n?$")
+#   26/10/2026 13:00:00 [12345] [WARN] [#unknown] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
+RE_ZPUSH = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[(?:(?P<same>[^\]\\#]*)|(?P<auth>[^\]\\#]+)#(?:[^\]\\]|\\.)*)\] Failed to authenticate user '(?P<user>(?i:(?P=same))|(?P=auth))' from IP (?P<ip>[0-9A-Fa-f:.]+)\.\r?\n?$")
+RE_AUTODISCOVER = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[#unknown\] Unable to complete autodiscover because login failed for user with email '(?P<user>.*)' from IP (?P<ip>[0-9A-Fa-f:.]+)\.\r?\n?$")
 
 def _line_time(line, now):
 	m = RE_TS_ISO.match(line)
@@ -782,13 +786,13 @@ def scan_failed_logins(hours=SCAN_HOURS, files=SCAN_LOGS, now=None):
 					if b"] Failed to authenticate user '" in line:
 						m = RE_ZPUSH.match(line)
 						if not m: continue
-						user, ip, proto, count = m.group(1), m.group(2), "activesync", 1
+						user, ip, proto, count = m.group("user"), m.group("ip"), "activesync", 1
 						if user == b"unknown":
 							continue # names no user (setup/zpush.sh logs only requests with a password; miab-zpush skips it too)
 					elif b"Unable to complete autodiscover because login failed" in line:
 						m = RE_AUTODISCOVER.match(line)
 						if not m: continue
-						user, ip, proto, count = m.group(1), m.group(2), "autodiscover", 1
+						user, ip, proto, count = m.group("user"), m.group("ip"), "autodiscover", 1
 					else:
 						continue
 				elif b"authentication failed" in line:

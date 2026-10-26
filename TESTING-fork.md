@@ -183,7 +183,12 @@ brute-force attempts for it (`occ security:bruteforce:attempts`) during the
 window; unavailable results and disconnects only while setup restarts or
 reloads a service. An IMAP IDLE or ActiveSync Ping that a reload cuts and
 that reconnects is fine, a failed login is not. Afterwards `smoke.py --only
-activesync`.
+activesync`. The smoke test checks the fail2ban part itself with
+`--load-since TIME --load-ip ADDR` (the start of the load and the addresses
+of both instances, the peer's and 127.0.0.1): its first check
+`load-no-failed-login` fails on a fail2ban `Found` of these addresses or a
+failed ActiveSync or Autodiscover login from them since TIME, before the
+smoke test's own failed logins (B126).
 
 ### What the smoke test checks
 

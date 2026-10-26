@@ -28,6 +28,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   counted. `/var/log/z-push` belongs to root now (group www-data), so that
   www-data cannot replace the logs that fail2ban opens with a link or a
   FIFO; setup and logrotate (as root) create the log files (B126).
+  A login that Dovecot or Nextcloud cannot check at that moment (Dovecot's
+  "Temporary authentication failure", a connection that it closes or
+  refuses) no longer counts as a failed login: Z-Push answers it with HTTP
+  503 and `Retry-After`, which a phone retries without asking for its
+  password, and logs no failed login. Before, such a login with the right
+  password was counted (seen once in the update test under client load,
+  while users.sqlite was locked, B133), and behind one shared address a
+  few such moments could ban all its users from the web ports. Z-Push now
+  escapes "]" and "\" in the user names at the start of its log lines, and
+  the filter counts a line only when its message names the user of these
+  brackets, so that no other warning, even one that ends in text from a
+  client, can pass for a failed login. Setup removes a log file with more
+  than one link (a hard link that www-data could have made to a file of
+  another account) before it gives the log files to www-data (B126).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
@@ -156,6 +170,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   jail that is off logs no error). `fail2ban-activesync-noauth` sends 25
   ActiveSync requests as a phone sends its first one (a user of the box in
   the URL, no credentials) and wants 401, no failed-login line and no ban.
+  More filter cases: user names that differ in case, the form
+  `[<user>#<user of the request>]` with an escaped "]", Autodiscover's
+  `[#unknown]`, and other warnings that end in the text of a failed login
+  (none may match). With `--load-since TIME` (and `--load-ip ADDR`, default
+  `--peer`) the new first check `load-no-failed-login` fails when fail2ban
+  found a failure of these addresses, or Z-Push logged a failed login from
+  them, since TIME: for the client load of an update test, which uses the
+  right passwords only (B126).
   The log audit accepts what these
   deliberate failures log (Z-Push's three IMAP tries, its exception and the
   new warning; for Autodiscover, which names no user in brackets, only with
@@ -225,8 +247,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the same way (www-data, 0640).
 * Outlook for iOS and Android syncs an Exchange ActiveSync account through
   Microsoft's servers: if your users do that, put those networks on the
-  fail2ban allowlist, or one wrong password entered there 20 times within
-  two minutes bans them for all of these users (B126).
+  fail2ban allowlist, or 20 wrong passwords entered there within two
+  minutes ban these servers from the web ports for all of these users.
+  Not only a user can cause that by mistake: anyone can do it on purpose,
+  with any account name and a wrong password in the app, and repeated bans
+  of these addresses lead to recidive's ban of one week on all ports
+  (B126).
+* Z-Push escapes "]" and "\" in the user names at the start of its log
+  lines (`[a\]b]`), and Autodiscover's lines start with `[#unknown]`. A
+  filter of your own that reads the user names there needs to allow for
+  that. A temporary login failure (Dovecot or Nextcloud cannot check the
+  password at that moment) is answered with HTTP 503 now and logs
+  `Exception: (ServiceUnavailableException)` instead of a failed login
+  (B126).
 * The backup page shows "No status of this backup target has been saved
   yet" on the first visit after the update, until its first refresh (or
   the next backup run) ends. The saved status is kept in
@@ -279,9 +312,12 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
 * `miab-zpush` counts failures per address, like the other jails, and is
   always on: behind the shared servers of a mail app that syncs through its
   provider's cloud (Outlook for iOS and Android with an ActiveSync
-  account), one person with a wrong password can get all users of that app
-  banned (B126). The README and the allowlist help say to put such networks
-  on the allowlist; nothing finds them on its own.
+  account), one person with a wrong password, or anyone on purpose, can get
+  all users of that app banned, and repeated bans reach recidive's week on
+  all ports (B126). The README, the upgrade note and the allowlist help say
+  to put such networks on the allowlist; nothing finds them on its own.
+  Leaving `miab-zpush` out of recidive would let an attacker guess 20
+  passwords every few minutes for good, so it still counts there.
 * The failed-login report does not read `nextcloud.log` yet, which now
   has the client's address for `/caldav`, `/carddav` and `/webdav` too
   (B121).
