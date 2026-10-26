@@ -796,6 +796,38 @@ server, and from `6235572` on also says that new SSH logins and sudo fail
 for a while), 2 (the fallback SSH server and the run's notes) and 3 (B113)
 are done; 4 to 7 remain.
 
+### After rc7 (unreleased, 2026-10-26)
+
+The fixes after rc7 were tested on branches of their own and then merged;
+this run tested the merge of the two Z-Push branches (B128 to B130, the Ping
+fix of both as B129), the one patch mechanism for Z-Push (B126, B128), B134
+and the lists of `tools/update-check.sh`. Both boxes installed the branch
+from the lab's repository.
+
+| Run | Commit | Result |
+|---|---|---|
+| T1 (fresh 26.04) | `c269370` (setup code as at `67d0c10`: only test tools and docs changed after it) | install exit 0 in 1202 s; smoke 80/80 with `--fail2ban` (`zpush-sync` with a card without `.vcf`, `zpush-ping`, `zpush-patches`, `nextcloud-dav-proxy`, `nextcloud-mail-config-path`); the ActiveSync ban test from the peer: 10 correct logins no ban, 26 failed ones banned by `miab-zpush`; the peer unbanned. Log audit since the install: 0 unknown with the lists of the box and the lab's lists; with the lists of `67d0c10` and no lab list 6 unknown, all of the lab (4 classes of the ban test's deliberate wrong passwords, 2 of chronyd after the VM's rollback) |
+| T5b (published rc7 → branch head, the production path) | `6174f6c` under client load, then `67d0c10` (second setup run) | the copy of the production box at rc6 (snapshot), 4 users whose first Nextcloud login was on rc6 (each with the example contact `default`), updated to the tag `v78-r2604.0-rc7` from GitHub (exit 0); on rc7 a new ActiveSync device of such a user got HTTP 500 (B128). The two hotpatches of the production box by hand: the ssh options of B125 in the checkout's `management/backup.py`, and the Ping hotfix (`conf/nginx-alldomains.conf` of the checkout, `local.conf`, Z-Push's `config.php`). Then the operator's steps: origin set to the repository of the branch, `update-check.sh before` and `backup` with the tool of rc7 (exit 0), both files put back with `git checkout --`, the update in a pty with the dialogs answered (exit 0, 203 s) under the client load of both instances (5 minutes before setup until 10 minutes after): both RESULT OK, `load-no-failed-login` PASS, no fail2ban `Found` of the load's addresses in the load window. `after`: "RESULT: OK - 0 unexpected, 8 expected changes" (`unreleased.txt`: `miab-zpush`, Z-Push's mark; `any.txt`: the commit as version, the status checks' version line, the nightly minute); its log audit named 1 class (Nextcloud's IMAP check cut by setup's Dovecot reload with curl's "Weird server reply", allowed in `67d0c10`). Smoke 92/92 with `--fail2ban`; the user with the example contact synced 7 contacts on a new device; 12 ActiveSync locations with 3660 s, the bound 3540, `2.7.7+patches-ca0fd9cddf8d4e39`; `mailcheck` RESULT OK. A second setup run to `67d0c10` (exit 0, 86 s) left Z-Push alone; `after` with the repo's smoke list (the smoke test ran in between) and the lab's list: "RESULT: OK - no unexpected change, no new log message class" (exit code 0). Log audit since the start of the run with `--smoke` and the lab's list: 0 unknown, 22 known from the baseline, 105 allowed |
+
+The lab's list for T5b names 4 artefacts of the lab only: the push hook of the
+production box's own web mail stack, whose endpoint is a stand-in in the
+lab (404),
+PHP-FPM's "seems busy" when the deliberately heavy client load starts, a
+Nextcloud cron job of the snapshot marked as crashed after the rollback, and
+Roundcube's race when the client load logs in to Roundcube with a new user
+from two hosts in the same second.
+
+Two earlier update tests of the same path found what the fixes of the run
+changed: the first (`9bca224`) the copy of the new Z-Push tree from `/tmp`
+(two requests with "Permission denied" and a PHP fatal error, B128) and the
+first start of `miab-zpush` and the cut login of setup's Dovecot reload as
+the Z-Push of rc7 answers it (new rules of the log audit for a setup run);
+the second (`c269370`) Nextcloud's "Login denied" for a CardDAV login cut by
+that reload, which `nextcloud.log` logged without the `[setup]` prefix
+(`6174f6c`). A third one was not counted: the control panel's API answered
+two of the four user additions of the lab script with HTTP 502 right after
+the boot, and the client load then used accounts that did not exist.
+
 ### Production use
 
 rc3 was used to upgrade a production box in place: Ubuntu 24.04 (release-
