@@ -165,9 +165,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   only), and the cards of clients that name them that way. Z-Push asked
   for every card with `.vcf` added and, for such a card, failed with a PHP
   error: the whole Sync answered HTTP 500, every time. Setup now changes
-  Z-Push's CardDAV client on every run (conf/zpush/z-push.patches, applied
-  by the new `tools/patch_source.py`, which stops setup if a change does
-  not apply): it asks once more without `.vcf`, skips a card the server
+  Z-Push's CardDAV client (conf/zpush/z-push.patches, applied by the new
+  `tools/patch_source.py`, which stops setup if a change does not apply):
+  it asks once more without `.vcf`, skips a card the server
   does not return instead of failing, and changes or deletes such a card
   from the phone under its own name, keeping its UID (B128).
 * A phone's ActiveSync Ping (push) with a heartbeat of more than 630 s no
@@ -299,12 +299,24 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   504 after 635 s, and left Z-Push waiting for up to an hour): no answer
   within 90 s fails the check, and a Ping of 60 s of the same device ends
   the long one in Z-Push (about 2.5 minutes in all, and no Ping is left).
-* Setup marks Z-Push's directory with the version and the checksum of
-  conf/zpush/z-push.patches (`/usr/local/lib/z-push/version`, such as
-  `2.7.7+patches-<16 hex digits>`), and installs a fresh copy of Z-Push
-  when either changes: a later release that changes a block of the patch
-  file would otherwise find neither its old nor its new text and stop
-  setup (B128).
+* Setup makes every change of the fork to Z-Push's code in one way: the
+  changes of B126 (the escaped log lines and user names, the message and
+  condition of a failed login, the 503 for a temporary login failure in
+  the IMAP and combined backends), which it made with sed in the installed
+  tree, are blocks of conf/zpush/z-push.patches now, with those of B128.
+  Setup applies the file to a fresh copy of Z-Push in a directory of
+  root's own before it moves the tree to `/usr/local/lib/z-push`, and stops
+  if a block does not apply; for the lines the miab-zpush jail relies on,
+  the file also names text that must not be left. The tree is marked with
+  the version and the checksum of the whole file
+  (`/usr/local/lib/z-push/version`, such as `2.7.7+patches-<16 hex digits>`):
+  a change of any block, or a tree that no longer has every change (a file
+  changed by hand, checked with `tools/patch_source.py --check` on every
+  run), gets a fresh copy of Z-Push on the next setup run (B126, B128).
+* Tests: the smoke test's new check `zpush-patches` (group `activesync`,
+  with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
+  the checkout's conf/zpush/z-push.patches, and the installed tree has
+  every change of it (B126, B128).
 
 ### Upgrade note
 
@@ -362,15 +374,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * A new password with a null character or of more than 511 bytes is now
   refused with a message (B127). Before, such a password gave a hash that no
   password matched. Existing passwords are not changed.
-* Setup changes a few functions of Z-Push 2.7.7 in `/usr/local/lib/z-push`
-  (conf/zpush/z-push.patches) on every run and stops with a message if one
-  of them is not as expected, for example after changes made there by
-  hand. Nextcloud's example contact now syncs to phones like any other
-  contact; delete it in Nextcloud's Contacts if it is not wanted. A phone
-  that got HTTP 500 needs no new setup: its next Sync continues (B128).
-  The first update with this release downloads Z-Push 2.7.7 from GitHub
-  once more (its directory is marked with the patch file's checksum now);
-  changes made there by hand are lost, as at a new Z-Push version.
+* Setup changes a few functions of Z-Push 2.7.7 (conf/zpush/z-push.patches)
+  in a fresh copy before it installs it in `/usr/local/lib/z-push`, and
+  stops with a message if one of them does not apply. A tree in
+  `/usr/local/lib/z-push` that no longer has every change (changes made
+  there by hand) is replaced by a fresh copy at the next setup run, and
+  the changes made by hand are lost. The first update with this release
+  downloads Z-Push 2.7.7 from GitHub once more (its directory is marked
+  with the patch file's checksum now), so the box needs to reach GitHub
+  during the update, as at a new Z-Push version. Nextcloud's example
+  contact now syncs to phones like any other contact; delete it in
+  Nextcloud's Contacts if it is not wanted. A phone that got HTTP 500 needs
+  no new setup: its next Sync continues (B128).
 * After the update, a reload of nginx keeps its old worker processes until
   their running ActiveSync long polls end, up to an hour (before: 10.5
   minutes). Pings of up to 59 minutes hold a PHP-FPM worker each, as they

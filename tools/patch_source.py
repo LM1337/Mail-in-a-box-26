@@ -1,12 +1,14 @@
 #!/usr/bin/python3
 #
 # Apply the fork's changes to a third-party source tree that setup installs
-# (such as Z-Push in /usr/local/lib/z-push), for setup:
+# (such as Z-Push, before setup/zpush.sh moves it to /usr/local/lib/z-push),
+# or check that a tree has them:
 #
-#   tools/patch_source.py DIR PATCHFILE
+#   tools/patch_source.py DIR PATCHFILE           apply the changes
+#   tools/patch_source.py --check DIR PATCHFILE   check, write nothing
 #
-# PATCHFILE holds blocks of exact text replacements, each for a file below
-# DIR (lines starting with "#" outside a block are comments):
+# PATCHFILE holds blocks, each for a file below DIR (lines starting with "#"
+# outside a block are comments). A replacement of exact text:
 #
 #   @@ relative/path/of/the/file.php
 #   <<<
@@ -15,24 +17,35 @@
 #   the new text
 #   >>>
 #
-# A block is applied when its old text occurs exactly once in the file. It
-# counts as applied already when its new text occurs exactly once and the old
-# text does not occur, so setup can run this on every run: an installation
-# from before the change is changed, one with the change is left alone. Any
-# other state (the old text missing or found twice, e.g. after a version
-# change of the third-party code) is an error, and no file is written: every
-# file is checked before the first one is written, and setup stops instead of
-# running code that the fork has not checked.
+# and text that must not be in the file once all its replacements are made,
+# one piece of text per line (to make sure that no other copy of a line that
+# a replacement changes is left, e.g. in a later version of the code):
+#
+#   @@ relative/path/of/the/file.php
+#   !!!
+#   text that must not occur
+#   >>>
+#
+# A replacement is applied when its old text occurs exactly once in the file.
+# It counts as applied already when its new text occurs exactly once and the
+# old text occurs no more often than within the new text, so a second run
+# leaves a changed tree alone. Any other state (the old text missing or found
+# twice, e.g. after a version change of the third-party code), and text that
+# must not occur, is an error, and no file is written: every file is checked
+# before the first one is written, and setup stops instead of running code
+# that the fork has not checked. --check succeeds only when every replacement
+# counts as applied and no text that must not occur is found.
 #
 # Files are read and written as tools/write_conf.py does: the path is opened
 # one directory at a time without following a symbolic link that another
 # account could have put there, and a changed file is replaced atomically (a
 # new file in the same directory, renamed over it), keeping owner and mode.
-# Each file must be in a directory of root's own (no write permission for a
-# group or others): this is for code that root installed.
+# Each file must be a regular file in a directory of root's own (no write
+# permission for a group or others): this is for code that root installed.
 #
-# Prints one line per changed file. Exit code 0 (also when nothing changed),
-# 1 on an error.
+# Prints one line per changed file (with --check: per block that is not
+# applied). Exit code 0 (also when nothing changed), 1 on an error or, with
+# --check, when the tree does not have every change.
 
 import os
 import stat
@@ -43,23 +56,31 @@ import write_conf  # noqa: E402
 
 
 def parse(text):
-	"""[(path, old, new)] from the text of a patch file."""
-	blocks = []
+	"""[(path, old, new)] and [(path, forbidden text)] from the text of a
+	patch file."""
+	blocks, forbidden = [], []
 	path = None
-	state = None  # None, "old", "new"
+	state = None  # None, "old", "new", "forbid"
 	old, new = [], []
 	for n, line in enumerate(text.split("\n"), 1):
 		if state is None:
 			if line.startswith("@@ "):
 				path = line[3:].strip()
-			elif line == "<<<":
+			elif line in ("<<<", "!!!"):
 				if not path:
 					raise ValueError("line %d: a block without a file (@@ path)" % n)
-				state, old, new = "old", [], []
+				state, old, new = ("old" if line == "<<<" else "forbid"), [], []
 			elif line.strip() == "" or line.startswith("#"):
 				pass
 			else:
 				raise ValueError("line %d: unexpected text outside a block" % n)
+		elif state == "forbid":
+			if line == ">>>":
+				state = None
+			elif line == "":
+				raise ValueError("line %d: an empty line in a block of text that must not occur" % n)
+			else:
+				forbidden.append((path, line))
 		elif state == "old":
 			if line == "===":
 				state = "new"
@@ -75,7 +96,7 @@ def parse(text):
 				new.append(line)
 	if state is not None:
 		raise ValueError("the last block is not closed (>>>)")
-	return blocks
+	return blocks, forbidden
 
 
 def read_file(path):
@@ -90,47 +111,77 @@ def read_file(path):
 			raise OSError("%s is not a regular file" % path)
 		fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
 		with os.fdopen(fd, "rb") as f:
+			if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+				raise OSError("%s is not a regular file" % path)
 			return f.read()
 	finally:
 		os.close(dfd)
 
 
-def apply(directory, blocks):
-	"""Apply the blocks to the files below directory; every file is checked
-	before the first one is written."""
+def applied(data, old, new):
+	"""Whether the replacement old -> new is made in data."""
+	return bool(new) and data.count(new) == 1 and data.count(old) == new.count(old)
+
+
+def run(directory, blocks, forbidden, check=False):
+	"""Apply the blocks to the files below directory (every file is checked
+	before the first one is written), or with check=True only report the
+	blocks that are not applied. Returns the list of problems (check) or
+	raises ValueError."""
 	files = []
 	for path, _, _ in blocks:
 		if path not in files:
 			files.append(path)
-	result = []
+	for path, _ in forbidden:
+		if path not in files:
+			files.append(path)
+	result, problems = [], []
 	for rel in files:
 		if rel.startswith("/") or ".." in rel.split("/"):
 			raise ValueError("%s: the path must be relative and stay below %s" % (rel, directory))
 		full = os.path.join(directory, rel)
 		data = read_file(full).decode("utf-8")
 		for n, (path, old, new) in enumerate(blocks, 1):
-			if path != rel:
+			if path != rel or applied(data, old, new):
 				continue
-			if new and data.count(new) == 1 and old not in data:
+			if check:
+				problems.append("%s: change %d is not applied" % (full, n))
 				continue
 			if data.count(old) != 1:
 				raise ValueError("%s: change %d does not apply (its old text is found %d times, its new text %d times)"
 					% (full, n, data.count(old), data.count(new) if new else 0))
 			data = data.replace(old, new)
+		for path, text in forbidden:
+			if path == rel and text in data:
+				msg = "%s: still has text that the fork's changes must remove or replace: %s" % (full, text.strip())
+				if check:
+					problems.append(msg)
+				else:
+					raise ValueError(msg)
 		result.append((full, data.encode("utf-8")))
+	if check:
+		return problems
 	for full, data in result:
 		if write_conf.write_if_changed(full, data):
 			print("patched %s" % full)
+	return []
 
 
 if __name__ == "__main__":
-	if len(sys.argv) != 3:
-		print("usage: tools/patch_source.py DIR PATCHFILE", file=sys.stderr)
+	args = sys.argv[1:]
+	check = args[:1] == ["--check"]
+	if check:
+		args = args[1:]
+	if len(args) != 2 or args[0].startswith("-"):
+		print("usage: tools/patch_source.py [--check] DIR PATCHFILE", file=sys.stderr)
 		sys.exit(1)
 	try:
-		with open(sys.argv[2], encoding="utf-8") as f:
-			blocks = parse(f.read())
-		apply(sys.argv[1], blocks)
+		with open(args[1], encoding="utf-8") as f:
+			blocks, forbidden = parse(f.read())
+		problems = run(args[0], blocks, forbidden, check)
 	except (OSError, ValueError, UnicodeDecodeError) as e:
 		print("patch_source.py: %s" % e, file=sys.stderr)
 		sys.exit(1)
+	for p in problems:
+		print("patch_source.py: %s" % p, file=sys.stderr)
+	sys.exit(1 if problems else 0)

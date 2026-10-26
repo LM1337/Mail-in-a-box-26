@@ -1,9 +1,130 @@
-# The fork's changes to Z-Push 2.7.7, applied by setup/zpush.sh on every run
-# (tools/patch_source.py; format and rules there). Each change names its bug
-# in BUGS-fork.md with a "MIAB-Bnnn" comment. Setup marks the installed tree
-# with this file's checksum (/usr/local/lib/z-push/version) and installs a
-# fresh copy of Z-Push when it changes, so a block may be edited: it is
-# always applied to the original text.
+# The fork's changes to the code of Z-Push 2.7.7 (tools/patch_source.py; the
+# format and its rules are described there). setup/zpush.sh applies them to
+# a fresh copy of Z-Push in a directory of root's own, before it moves the
+# tree to /usr/local/lib/z-push, and stops if one does not apply. Each change
+# names its bug in BUGS-fork.md with a "MIAB-Bnnn" comment. The installed
+# tree is marked with Z-Push's version and this file's checksum
+# (/usr/local/lib/z-push/version, "2.7.7+patches-<16 hex digits>"): when this
+# file changes, or the installed tree no longer has every change (a file
+# changed by hand), setup installs a fresh copy, so a block is always applied
+# to the original text and may be edited. Z-Push's configuration
+# (config.php, the backends' config.php) is not changed here: setup sets it
+# on every run.
+
+# B126: the logs that the miab-zpush jail reads. Z-Push writes text that a
+# client chooses (the user name of the Authorization header, the e-mail
+# address of an autodiscover request) unescaped into its logs. Each line
+# starts with the user names in brackets ("[<user>]", or
+# "[<user>#<user of the URL>]"), as the client sent them: with a "]" in them
+# the jail's filter could not tell where the brackets end, and a warning that
+# ends in text from a client could pass for a failed login with any address.
+# Escape "]" and "\" there (as "\]" and "\\"), so that the first unescaped
+# "]" ends the user names; the filter requires the message that follows to be
+# the failed login of that same user. No other unescaped copy of these
+# prefixes may be left.
+
+@@ lib/log/filelog.php
+<<<
+            if (strcasecmp($this->GetAuthUser(), $this->GetUser()) == 0) {
+                $log .= ' ['. $this->GetUser() .']';
+            }
+            else {
+                $log .= ' ['. $this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser() .']';
+            }
+===
+            if (strcasecmp($this->GetAuthUser(), $this->GetUser()) == 0) {
+                $log .= ' ['. addcslashes($this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
+            }
+            else {
+                $log .= ' ['. addcslashes($this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
+            }
+>>>
+
+@@ lib/log/filelog.php
+!!!
+' ['. $this->GetUser()
+' ['. $this->GetAuthUser()
+>>>
+
+# B126: with a line break in such text, a client could add a whole line of its
+# own, with any address in it, to the log. Escape the control characters of
+# each log line (a line break becomes "\n").
+
+@@ lib/log/filelog.php
+<<<
+        $log .= ' ' . $message;
+        return $log;
+===
+        $log .= ' ' . $message;
+        return addcslashes($log, "\0..\37\177"); // MIAB-B126: no line breaks from clients
+>>>
+
+@@ lib/log/filelog.php
+!!!
+return $log;
+>>>
+
+# B126: Z-Push logged a failed ActiveSync login as "[<user>] IP: <address>
+# failed to authenticate user '<user>'": text that the client chooses on both
+# sides of the address, so no filter can tell which address Z-Push wrote. Put
+# the address last, as in the autodiscover message, where the jail's filter
+# anchors it at the end of the line. Only the format string changes: its
+# arguments stay the same, in their positions (%1$s, %2$s). Z-Push also wrote
+# that line for a request without a password (with the user name of the URL,
+# "User=", or "unknown"): a phone sends its first request without credentials
+# and waits for the login prompt, so each sync of a phone would count as a
+# failed login. Write it only when the request had a user name and a
+# password, i.e. when Z-Push checked a password.
+
+@@ index.php
+<<<
+            // log the failed login attemt e.g. for fail2ban
+            if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false)
+                ZLog::Write(LOGLEVEL_WARN, sprintf("IP: %s failed to authenticate user '%s'",  Request::GetRemoteAddr(), Request::GetAuthUser()? Request::GetAuthUser(): Request::GetGETUser() ));
+===
+            // log the failed login attemt e.g. for fail2ban
+            if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false && Request::HasAuthenticationInfo()) // MIAB-B126: only when a password was sent
+                ZLog::Write(LOGLEVEL_WARN, sprintf("Failed to authenticate user '%2\$s' from IP %1\$s.",  Request::GetRemoteAddr(), Request::GetAuthUser()? Request::GetAuthUser(): Request::GetGETUser() ));
+>>>
+
+@@ index.php
+!!!
+failed to authenticate user
+LOGAUTHFAIL != false)
+>>>
+
+# B126: a login that fails because Dovecot or Nextcloud cannot check the
+# password at that moment (Dovecot answers "[UNAVAILABLE] Temporary
+# authentication failure" while users.sqlite is locked, closes the
+# connection, or does not run) is no wrong password, but Z-Push reported it as
+# one: HTTP 401, which makes a phone ask for its password, and the failed-login
+# line that the miab-zpush jail counts. Every user behind one address (a NAT,
+# or the few relays of the Outlook app) could be banned so in such a window.
+# Z-Push answers it with 503 and Retry-After instead, which a client retries
+# later, and logs no failed login. A wrong password is what Dovecot answers
+# with "[AUTHENTICATIONFAILED]" (on any of c-client's tries); any other IMAP
+# failure is temporary. When IMAP accepted the password, a failed CalDAV or
+# CardDAV login (Nextcloud) is temporary too.
+
+@@ backend/imap/imap.php
+<<<
+            ZLog::Write(LOGLEVEL_ERROR, sprintf("BackendIMAP->Logon(): can't connect as user '%s' on '%s': %s", $username, $this->server, imap_last_error()));
+            return false;
+===
+            ZLog::Write(LOGLEVEL_ERROR, sprintf("BackendIMAP->Logon(): can't connect as user '%s' on '%s': %s", $username, $this->server, imap_last_error()));
+            if (strpos(implode(' ', (array) imap_errors()), '[AUTHENTICATIONFAILED]') === false) throw new ServiceUnavailableException("BackendIMAP->Logon(): Dovecot did not check the password (a temporary failure, not a wrong password)"); // MIAB-B126
+            return false;
+>>>
+
+@@ backend/combined/combined.php
+<<<
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("Combined->Logon() failed on %s ", $this->config['backends'][$i]['name']));
+                return false;
+===
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("Combined->Logon() failed on %s ", $this->config['backends'][$i]['name']));
+                if ($i !== array_key_first($this->backends)) throw new ServiceUnavailableException(sprintf("Combined->Logon(): %s failed after the password was accepted (a temporary failure, not a wrong password)", $this->config['backends'][$i]['name'])); // MIAB-B126
+                return false;
+>>>
 
 # B128: Z-Push's id of a card is its name on the server without ".vcf", and
 # its CardDAV client asked only for id + ".vcf". A card whose name has no

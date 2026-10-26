@@ -24,31 +24,59 @@ phpenmod -v "$PHP_VER" imap
 # Copy Z-Push into place.
 VERSION=2.7.7
 TARGETHASH=7a8e0094adf216521ee491078f78e709cd68257d05a868b3992d5665c01d8790 # SHA256 of the GitHub tag archive (no upstream checksum published)
-# The installed tree is marked with the version and the checksum of the
-# fork's changes to it (conf/zpush/z-push.patches, applied below). In a tree
-# with an earlier revision of a block, tools/patch_source.py finds neither the
-# block's old text (the earlier revision replaced it) nor its new text, and
-# stops setup; so a changed patch file gets a fresh copy of Z-Push to apply
-# it to, like a new version.
-ZPUSH_STAMP="$VERSION+patches-$(sha256sum conf/zpush/z-push.patches | cut -c1-16)"
+# Every change of the fork to Z-Push's code is a block of
+# conf/zpush/z-push.patches (B126, B128; tools/patch_source.py). They are
+# applied to a fresh copy of Z-Push before it is moved into place, and the
+# installed tree is marked with the version and the checksum of that file. A
+# tree with another mark (another version, another revision of the patch
+# file, or none: Z-Push as installed up to rc7), or one that no longer has
+# every change (a file changed by hand), is replaced by a fresh copy: a
+# block is always applied to Z-Push's original text.
+ZPUSH_PATCHES=conf/zpush/z-push.patches
+ZPUSH_STAMP="$VERSION+patches-$(sha256sum "$ZPUSH_PATCHES" | cut -c1-16)"
 needs_update=0 #NODOC
 if [ ! -f /usr/local/lib/z-push/version ]; then
 	needs_update=1 #NODOC
 elif [[ $ZPUSH_STAMP != $(cat /usr/local/lib/z-push/version) ]]; then
 	# checks if the version (or the fork's patch file) changed
 	needs_update=1 #NODOC
+elif ! tools/patch_source.py --check /usr/local/lib/z-push "$ZPUSH_PATCHES"; then
+	echo "Z-Push in /usr/local/lib/z-push does not have all of the fork's changes; installing it again."
+	needs_update=1 #NODOC
 fi
 if [ $needs_update == 1 ]; then
-	# Download into a directory of root's own, not under a fixed name in /tmp
-	# that another local user could create first (B97).
+	# Download, extract and patch in a directory of root's own (mktemp -d:
+	# root, 0700), not under a fixed name in /tmp that another local user
+	# could create first (B97), and nowhere another account can write.
 	ZPUSH_TMP=$(mktemp -d)
 	wget_verify "https://github.com/Z-Hub/Z-Push/archive/refs/tags/$VERSION.zip" $TARGETHASH "$ZPUSH_TMP/z-push.zip"
-
-	# Extract into place.
-	rm -rf /usr/local/lib/z-push
 	unzip -q "$ZPUSH_TMP/z-push.zip" -d "$ZPUSH_TMP/z-push"
-	mv "$ZPUSH_TMP"/z-push/*/src /usr/local/lib/z-push
-	rm -rf "$ZPUSH_TMP"
+	ZPUSH_SRC="$ZPUSH_TMP/z-push/Z-Push-$VERSION/src"
+	if [ -L "$ZPUSH_SRC" ] || [ ! -d "$ZPUSH_SRC" ]; then
+		echo "The Z-Push $VERSION archive has no directory Z-Push-$VERSION/src."
+		rm -rf "$ZPUSH_TMP"
+		exit 1
+	fi
+
+	# The fork's changes (see above and conf/zpush/z-push.patches). Setup
+	# stops if one does not apply, instead of running code that the fork has
+	# not checked: the miab-zpush jail relies on the changes of B126.
+	if ! tools/patch_source.py "$ZPUSH_SRC" "$ZPUSH_PATCHES" > /dev/null \
+		|| ! tools/patch_source.py --check "$ZPUSH_SRC" "$ZPUSH_PATCHES"; then
+		echo "Could not apply $ZPUSH_PATCHES to Z-Push $VERSION."
+		rm -rf "$ZPUSH_TMP"
+		exit 1
+	fi
+	echo "$ZPUSH_STAMP" > "$ZPUSH_SRC/version"
+
+	# Move the patched tree into place. The old one is renamed away first and
+	# removed after, so that Z-Push is missing only between two renames.
+	rm -rf /usr/local/lib/z-push.old
+	if [ -e /usr/local/lib/z-push ]; then
+		mv /usr/local/lib/z-push /usr/local/lib/z-push.old
+	fi
+	mv "$ZPUSH_SRC" /usr/local/lib/z-push
+	rm -rf /usr/local/lib/z-push.old "$ZPUSH_TMP"
 
 	# Create admin and top scripts with PHP_VER  
 	rm -f /usr/sbin/z-push-{admin,top}
@@ -58,8 +86,6 @@ if [ $needs_update == 1 ]; then
     echo '#!/bin/bash' > /usr/sbin/z-push-top
     echo php"$PHP_VER" /usr/local/lib/z-push/z-push-top.php '"$@"' >> /usr/sbin/z-push-top
     chmod 755 /usr/sbin/z-push-top
-	
-	echo "$ZPUSH_STAMP" > /usr/local/lib/z-push/version
 fi
 
 # Configure default config.
@@ -67,102 +93,14 @@ sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezo
 sed -i "s/define('BACKEND_PROVIDER', .*/define('BACKEND_PROVIDER', 'BackendCombined');/" /usr/local/lib/z-push/config.php
 sed -i "s/define('USE_FULLEMAIL_FOR_LOGIN', .*/define('USE_FULLEMAIL_FOR_LOGIN', true);/" /usr/local/lib/z-push/config.php
 sed -i "s/define('LOGLEVEL', .*/define('LOGLEVEL', LOGLEVEL_ERROR);/" /usr/local/lib/z-push/config.php
-# Log failed logins ("Failed to authenticate user '...' from IP ...", see
-# below) for the miab-zpush jail (B126). They are warnings: Z-Push writes warnings and errors
+# Log failed logins ("Failed to authenticate user '...' from IP ...", the
+# message as conf/zpush/z-push.patches changes it) for the miab-zpush jail
+# (B126). They are warnings: Z-Push writes warnings and errors
 # to z-push-error.log whatever LOGLEVEL is, so z-push.log stays as quiet as
 # before. autodiscover/config.php sets the same.
 sed -i "s/define('LOGAUTHFAIL', .*/define('LOGAUTHFAIL', true);/" /usr/local/lib/z-push/config.php
 grep -qF "define('LOGAUTHFAIL', true);" /usr/local/lib/z-push/config.php \
 	|| { echo "Z-Push's config.php has no LOGAUTHFAIL setting; the miab-zpush jail would see no failed login."; exit 1; }
-
-# Z-Push writes text that a client chooses (the user name of the Authorization
-# header, the e-mail address of an autodiscover request) unescaped into its
-# logs. With a line break in it, a client could add a whole line of its own,
-# with any address in it, to the log that the miab-zpush jail reads (B126).
-# Escape the control characters of each log line (a line break becomes "\n").
-# The file belongs to root, in a directory of root's own.
-ZPUSH_FILELOG=/usr/local/lib/z-push/lib/log/filelog.php
-if ! grep -qF "MIAB-B126" "$ZPUSH_FILELOG"; then
-	sed 's/^        return \$log;$/        return addcslashes($log, "\\0..\\37\\177"); \/\/ MIAB-B126: no line breaks from clients/' "$ZPUSH_FILELOG" \
-		| tools/write_conf.py "$ZPUSH_FILELOG"
-fi
-grep -qF 'return addcslashes($log, "\0..\37\177"); // MIAB-B126' "$ZPUSH_FILELOG" \
-	|| { echo "Could not patch $ZPUSH_FILELOG (Z-Push $VERSION); its log lines would not be escaped."; exit 1; }
-# Each line starts with the user names in brackets ("[<user>]", or
-# "[<user>#<user of the URL>]"), as the client sent them. With a "]" in them
-# the jail's filter could not tell where the brackets end, and a warning that
-# ends in text from a client could pass for a failed login with any address.
-# Escape "]" and "\" there (as "\]" and "\\"), so that the first unescaped "]"
-# ends the user names, and the filter requires the message that follows to be
-# the failed login of that same user (B126).
-IFS= read -r ZPUSH_PREFIX_SAME <<'PHP'
-                $log .= ' ['. addcslashes($this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
-PHP
-IFS= read -r ZPUSH_PREFIX_BOTH <<'PHP'
-                $log .= ' ['. addcslashes($this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser(), '\\]') .']'; // MIAB-B126: the user names escaped
-PHP
-if ! grep -qF "MIAB-B126: the user names escaped" "$ZPUSH_FILELOG"; then
-	sed -f <(cat <<'SED'
-s/^                \$log \.= ' \['\. \$this->GetUser() \.'\]';$/                $log .= ' ['. addcslashes($this->GetUser(), '\\\\]') .']'; \/\/ MIAB-B126: the user names escaped/
-s/^                \$log \.= ' \['\. \$this->GetAuthUser() \. Request::IMPERSONATE_DELIM \. \$this->GetUser() \.'\]';$/                $log .= ' ['. addcslashes($this->GetAuthUser() . Request::IMPERSONATE_DELIM . $this->GetUser(), '\\\\]') .']'; \/\/ MIAB-B126: the user names escaped/
-SED
-) "$ZPUSH_FILELOG" | tools/write_conf.py "$ZPUSH_FILELOG"
-fi
-[ "$(grep -cxF "$ZPUSH_PREFIX_SAME" "$ZPUSH_FILELOG")" = 1 ] && [ "$(grep -cxF "$ZPUSH_PREFIX_BOTH" "$ZPUSH_FILELOG")" = 1 ] \
-	&& ! grep -qE "' \\['\\. \\\$this->Get(Auth)?User\\(\\)" "$ZPUSH_FILELOG" \
-	|| { echo "Could not patch $ZPUSH_FILELOG (Z-Push $VERSION); the user names at the start of its log lines would not be escaped."; exit 1; }
-
-# Z-Push logs a failed ActiveSync login as "[<user>] IP: <address> failed to
-# authenticate user '<user>'": text that the client chooses on both sides of
-# the address, so no filter can tell which address Z-Push wrote. Put the
-# address last, as in the autodiscover message, where the jail's filter
-# anchors it at the end of the line (B126). Only the format string changes:
-# its arguments stay the same, in their positions (%1$s, %2$s).
-# Z-Push also writes that line for a request without a password (with the
-# user name of the URL, "User=", or "unknown"): a phone sends its first
-# request without credentials and waits for the login prompt, so each sync
-# of a phone would count as a failed login. Write it only when the request
-# had a user name and a password, i.e. when Z-Push checked a password.
-ZPUSH_INDEX=/usr/local/lib/z-push/index.php
-ZPUSH_AUTHFAIL_FORMAT="\"Failed to authenticate user '%2\\\$s' from IP %1\\\$s.\""
-ZPUSH_AUTHFAIL_IF="if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false && Request::HasAuthenticationInfo()) // MIAB-B126"
-if ! grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" || ! grep -qF "$ZPUSH_AUTHFAIL_IF" "$ZPUSH_INDEX"; then
-	sed -f <(cat <<'SED'
-s/sprintf("IP: %s failed to authenticate user '%s'",/sprintf("Failed to authenticate user '%2\\$s' from IP %1\\$s.",/
-s/^            if (defined('LOGAUTHFAIL') && LOGAUTHFAIL != false)$/            if (defined('LOGAUTHFAIL') \&\& LOGAUTHFAIL != false \&\& Request::HasAuthenticationInfo()) \/\/ MIAB-B126: only when a password was sent/
-SED
-) "$ZPUSH_INDEX" | tools/write_conf.py "$ZPUSH_INDEX"
-fi
-grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" && [ "$(grep -cF "$ZPUSH_AUTHFAIL_IF" "$ZPUSH_INDEX")" = 1 ] \
-	|| { echo "Could not patch $ZPUSH_INDEX (Z-Push $VERSION); the miab-zpush jail would not see the failed ActiveSync logins, or would count requests without a password."; exit 1; }
-
-# A login that fails because Dovecot or Nextcloud cannot check the password
-# at that moment (Dovecot answers "[UNAVAILABLE] Temporary authentication
-# failure" while users.sqlite is locked, closes the connection, or does not
-# run) is no wrong password, but Z-Push reported it as one: HTTP 401, which
-# makes a phone ask for its password, and the failed-login line that the
-# miab-zpush jail counts. Every user behind one address (a NAT, or the few
-# relays of the Outlook app) could be banned so in such a window (B126).
-# Z-Push answers it with 503 and Retry-After instead, which a client retries
-# later, and logs no failed login. A wrong password is what Dovecot answers
-# with "[AUTHENTICATIONFAILED]" (on any of c-client's tries); any other IMAP
-# failure is temporary. When IMAP accepted the password, a failed CalDAV or
-# CardDAV login (Nextcloud) is temporary too.
-ZPUSH_IMAP=/usr/local/lib/z-push/backend/imap/imap.php
-ZPUSH_COMBINED=/usr/local/lib/z-push/backend/combined/combined.php
-ZPUSH_IMAP_TEMPFAIL="            if (strpos(implode(' ', (array) imap_errors()), '[AUTHENTICATIONFAILED]') === false) throw new ServiceUnavailableException(\"BackendIMAP->Logon(): Dovecot did not check the password (a temporary failure, not a wrong password)\"); // MIAB-B126"
-ZPUSH_COMBINED_TEMPFAIL="                if (\$i !== array_key_first(\$this->backends)) throw new ServiceUnavailableException(sprintf(\"Combined->Logon(): %s failed after the password was accepted (a temporary failure, not a wrong password)\", \$this->config['backends'][\$i]['name'])); // MIAB-B126"
-if ! grep -qF "// MIAB-B126" "$ZPUSH_IMAP"; then
-	sed "s|^\(            ZLog::Write(LOGLEVEL_ERROR, sprintf(\"BackendIMAP->Logon(): can't connect as user .*\)\$|\1\n$ZPUSH_IMAP_TEMPFAIL|" "$ZPUSH_IMAP" \
-		| tools/write_conf.py "$ZPUSH_IMAP"
-fi
-if ! grep -qF "// MIAB-B126" "$ZPUSH_COMBINED"; then
-	sed "s|^\(                ZLog::Write(LOGLEVEL_DEBUG, sprintf(\"Combined->Logon() failed on %s \".*\)\$|\1\n$ZPUSH_COMBINED_TEMPFAIL|" "$ZPUSH_COMBINED" \
-		| tools/write_conf.py "$ZPUSH_COMBINED"
-fi
-[ "$(grep -cxF "$ZPUSH_IMAP_TEMPFAIL" "$ZPUSH_IMAP")" = 1 ] && [ "$(grep -cF "MIAB-B126" "$ZPUSH_IMAP")" = 1 ] \
-	&& [ "$(grep -cxF "$ZPUSH_COMBINED_TEMPFAIL" "$ZPUSH_COMBINED")" = 1 ] && [ "$(grep -cF "MIAB-B126" "$ZPUSH_COMBINED")" = 1 ] \
-	|| { echo "Could not patch $ZPUSH_IMAP and $ZPUSH_COMBINED (Z-Push $VERSION); a temporary login failure would count as a failed login."; exit 1; }
 
 # Longest Ping (push long poll) a phone may ask for: 3540 s (59 min), Z-Push's
 # own maximum and the server heartbeat Apple advises. A longer request gets
@@ -200,20 +138,6 @@ rm -f /usr/local/lib/z-push/autodiscover/config.php
 cp conf/zpush/autodiscover_config.php /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s/PRIMARY_HOSTNAME/$PRIMARY_HOSTNAME/" /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezone --value)');^" /usr/local/lib/z-push/autodiscover/config.php
-
-# The fork's changes to Z-Push's code (conf/zpush/z-push.patches): its CardDAV
-# client finds cards whose name has no ".vcf", such as Nextcloud's example
-# contact "default", and one card that the server does not return no longer
-# ends the whole Sync with HTTP 500 (B128). Applied on every run, so that an
-# installation from before a change gets it without a new download of
-# Z-Push; files that have it already are left alone. Setup stops if a change
-# does not apply (another Z-Push version), instead of running code that the
-# fork has not checked. A change of the patch file gets a fresh copy of
-# Z-Push first (ZPUSH_STAMP above). /usr/local/lib/z-push belongs to root.
-if ! tools/patch_source.py /usr/local/lib/z-push conf/zpush/z-push.patches; then
-	echo "Could not apply conf/zpush/z-push.patches to Z-Push $VERSION in /usr/local/lib/z-push."
-	exit 1
-fi
 
 # Some directories it will use.
 
