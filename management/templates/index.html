@@ -323,10 +323,29 @@ function show_modal_confirm(title, question, verb, yes_callback, cancel_callback
   return false; // handy when called from onclick
 }
 
+// A clear message for a request that the management daemon did not answer
+// itself: nginx's 502 and 504, a timeout in the browser, or no connection.
+// null for an answer of the daemon (its own text, if any, says more).
+function ajax_error_message(jqxhr, text_status) {
+  if (jqxhr.status == 504)
+    return "The control panel did not answer in time (HTTP 504). A long operation may still be running on the box. Try again in a few minutes.";
+  if (jqxhr.status == 502)
+    return "The control panel's service did not answer (HTTP 502). It may be restarting (for example during an update), or a request took longer than its limit of about ten minutes. Try again in a minute.";
+  if (jqxhr.status == 0 && text_status == "timeout")
+    return "The box did not answer in time. Try again in a minute.";
+  if (jqxhr.status == 0 && text_status != "abort")
+    return "The box could not be reached (no connection, or the connection was lost). Try again in a minute.";
+  return null;
+}
+
 var ajax_num_executing_requests = 0;
 function ajax_with_indicator(options) {
-  setTimeout("if (ajax_num_executing_requests > 0) $('#ajax_loading_indicator').fadeIn()", 100);
+  // options.quiet: no loading indicator (for background polling).
+  var quiet = options.quiet;
+  if (!quiet)
+    setTimeout("if (ajax_num_executing_requests > 0) $('#ajax_loading_indicator').fadeIn()", 100);
   function hide_loading_indicator() {
+    if (quiet) return;
     ajax_num_executing_requests--;
     if (ajax_num_executing_requests == 0)
       $('#ajax_loading_indicator').stop(true).hide(); // stop() prevents an ongoing fade from causing the thing to be shown again after this call
@@ -340,20 +359,25 @@ function ajax_with_indicator(options) {
     else if (old_success)
       old_success(data);
   };
-  options.error = function(jqxhr) {
+  options.error = function(jqxhr, text_status) {
     hide_loading_indicator();
+    // nginx's error pages are HTML: give the callers a clear message instead.
+    var message = ajax_error_message(jqxhr, text_status);
+    jqxhr.miab_error_message = message;
     if (!old_error)
-      show_modal_error("Error", "Something went wrong, sorry.")
+      show_modal_error("Error", message || ("Something went wrong, sorry (HTTP " + jqxhr.status + ")."))
     else
-      old_error(jqxhr.responseText, jqxhr);
+      old_error(message || jqxhr.responseText, jqxhr);
   };
-  ajax_num_executing_requests++;
+  if (!quiet)
+    ajax_num_executing_requests++;
   $.ajax(options);
   return false; // handy when called from onclick
 }
 
 var api_credentials = null;
-function api(url, method, data, callback, callback_error, headers) {
+function api(url, method, data, callback, callback_error, headers, options) {
+  // options: { quiet: true } for no loading indicator, { timeout: ms }.
   // from http://www.webtoolkit.info/javascript-base64.html
   function base64encode(input) {
     _keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
@@ -383,10 +407,13 @@ function api(url, method, data, callback, callback_error, headers) {
 
   function default_error(text, xhr) {
     if (xhr.status != 403) // else handled below
-      show_modal_error("Error", "Something went wrong, sorry.")
+      show_modal_error("Error", xhr.miab_error_message || ("Something went wrong, sorry (HTTP " + xhr.status + ")."))
   }
 
+  options = options || {};
   ajax_with_indicator({
+    quiet: options.quiet,
+    timeout: options.timeout,
     url: "/admin" + url,
     method: method,
     cache: false,

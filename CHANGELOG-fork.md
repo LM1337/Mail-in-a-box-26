@@ -68,6 +68,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
+* The control panel says what happened when its service does not answer:
+  for nginx's 502 and 504, a timeout and a lost connection it shows a
+  clear message and what to do, on every page, instead of only "Something
+  went wrong, sorry." (B125).
 
 ### Changed
 
