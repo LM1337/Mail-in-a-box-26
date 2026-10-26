@@ -420,7 +420,7 @@ def _mark_running(dfd, config, by):
 
 def _save_status_locked(env, dfd, by):
 	# Query the target and save the result; the caller holds the lock.
-	# Returns (seconds, timings, error or None).
+	# Returns (seconds, timings, error or None, status or None).
 	config = get_backup_config(env)
 	timings = {}
 	started_at = time.time()
@@ -445,7 +445,7 @@ def _save_status_locked(env, dfd, by):
 	if error is None:
 		saved.update({ "status": status, "time": started_at, "source": by })
 	_write_saved_status(dfd, saved)
-	return seconds, timings, error
+	return seconds, timings, error, status
 
 def _timings_text(timings):
 	parts = []
@@ -476,7 +476,7 @@ def refresh_saved_status(env):
 				print("backup status: not refreshed, a backup run or another refresh is in progress", file=log)
 				return 0
 			try:
-				seconds, timings, error = _save_status_locked(env, dfd, "refresh")
+				seconds, timings, error, _ = _save_status_locked(env, dfd, "refresh")
 				signal.alarm(0)
 			finally:
 				os.close(lock)
@@ -493,6 +493,35 @@ def refresh_saved_status(env):
 		return 0
 	print("backup status: the refresh failed after %.1f s: %s" % (seconds, _timings_text(timings) or "no step finished"), file=log)
 	return 1
+
+def status_for_checks(env):
+	# For the status checks (B128): a query of the target that saves its
+	# result as a refresh does, or, while a backup run or a refresh holds the
+	# lock (a second duplicity on the same archive directory would fail),
+	# the saved status. Never raises for a failed query.
+	# Returns (status or None, time_str of the saved status or None when it
+	# was queried now, error or None).
+	try:
+		dfd = _open_status_dir(create=True)
+	except OSError:
+		dfd = None
+	if dfd is None:
+		try:
+			return backup_status(env), None, None
+		except Exception as e:
+			return None, None, str(e) or e.__class__.__name__
+	try:
+		lock = _lock_status(dfd, wait=False)
+		if lock is not None:
+			try:
+				_, _, error, status = _save_status_locked(env, dfd, "status checks")
+			finally:
+				os.close(lock)
+			return status, None, error
+	finally:
+		os.close(dfd)
+	saved = get_saved_status(env)
+	return saved["status"], saved["time_str"] or "never", None
 
 def get_saved_status(env):
 	# The saved status for the control panel (GET /system/backup/status/saved).

@@ -3070,6 +3070,7 @@ components:
           enum:
             - backup
             - refresh
+            - status checks
         refreshing:
           type: boolean
           description: A refresh or a backup run is in progress.

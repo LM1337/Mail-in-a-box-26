@@ -86,6 +86,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `POST /system/backup/status/refresh`; `GET /system/backup/status` still
   queries the target and waits for it. `tools/update-check.sh backup` no
   longer takes such a refresh for a running backup (B125).
+* The status checks no longer stop as a whole when the status of the
+  backups cannot be read (the target does not answer, or another duplicity
+  runs on the same archive directory): the System Status page showed only
+  "Something went wrong" and the nightly check mailed a traceback. The
+  backup check now fails alone with duplicity's message, and while a backup
+  run or a refresh of the backup page queries the target it uses the saved
+  status (B128).
 * nginx waits for the control panel as long as gunicorn lets a request
   run (630 s) instead of its default of 60 s, so that the status checks,
   the TLS provisioning and the backup page's live query are no longer cut

@@ -311,7 +311,7 @@ function show_saved_backup_status(r) {
     show_backup_refreshing(r.running);
   } else if (refresh && !refresh.ok && (r.time === null || refresh.started >= r.time)) {
     var d = $('<div class="alert alert-warning" role="alert"/>');
-    d.append($('<p/>').text("The last refresh of the status (" + (refresh.by == "backup" ? "after the backup run of " : "")
+    d.append($('<p/>').text("The last refresh of the status (" + (refresh.by == "backup" ? "after the backup run of " : refresh.by == "status checks" ? "by the status checks of " : "")
       + refresh.started_str + ") did not work after " + refresh.seconds + " s:"));
     d.append($('<pre style="white-space: pre-wrap"/>').text(refresh.error));
     d.append($('<p/>').text(r.time === null ? "No status of this backup target has been saved yet."
@@ -335,7 +335,7 @@ function show_saved_backup_status(r) {
     return;
   }
   $('#backup-status-info').text("Status as of " + r.time_str + " (" + backup_time_ago(r.age_seconds) + "), "
-    + (r.source == "backup" ? "saved after the backup run." : "from a refresh of the control panel."));
+    + (r.source == "backup" ? "saved after the backup run." : r.source == "status checks" ? "from the status checks." : "from a refresh of the control panel."));
 
   $('#backup-status tbody').html("");
   var total_disk_size = 0;

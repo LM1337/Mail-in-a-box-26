@@ -39,18 +39,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-121 bugs: 2 critical, 18 high, 48 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+122 bugs: 2 critical, 18 high, 49 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B128 in the work on B125 (in the status checks since upstream). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 37 |
+| Upstream | 38 |
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
 | Fork | 34 |
 
-38 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125). They are candidates for
+39 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B128). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -179,6 +179,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B124](#b124) | medium | Nextcloud | Setup replaces Nextcloud's config.php with a file only root can read, for a moment, and Nextcloud fails the requests in that moment (an ActiveSync login gets HTTP 401) | Upstream | yes | yes | after rc7 |
 | [B123](#b123) | medium | Dovecot | /etc/dovecot belongs to the account mail, which can change the configuration that Dovecot's root processes read and the files that setup writes there as root | Upstream | yes | yes | after rc7 |
 | [B125](#b125) | low | Backup | The backup page and the backups wait up to two minutes when the rsync target does not answer a connection request | Upstream | yes | yes | after rc7 |
+| [B128](#b128) | medium | Management | The status checks stop with an error as a whole when the status of the backups cannot be read (the System Status page shows only "Something went wrong", the nightly check mails a traceback) | Upstream | yes | yes | after rc7 |
 
 ## Details
 
@@ -1574,6 +1575,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes, PR #2603 yes, the fork up to rc7. Origin: Upstream.
 * **Evidence:** A trace of the processes of `mailinabox.service` on the production box (ssh in `SYN-SENT` for 11-13 s, kernel stack `__inet_stream_connect`) and the nginx log (two 504 after 60 s, each the first visit of the page after a backup). After the fix: ssh with the new options against an address that does not answer gives up after about 21 s (before: about 130 s); on the production box with the new options, the status page answered in 8 s and its ssh calls carry the options (process trace); the nightly backup with them is still to be checked.
 * **Found by:** user report (backup page shows only an error); **commit:** see `git log --grep B125`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B128
+
+**The status checks stop with an error as a whole when the status of the backups cannot be read** (medium, Management)
+
+* **Symptom:** When the backup target does not answer or refuses the query, the System Status Checks page of the control panel shows only an error (HTTP 500: "Something went wrong, sorry.") after the query has given up (minutes, B125), and `status_checks.py`, which runs each night after the backup, ends with a traceback instead of its report, so the nightly mail about changed checks says nothing about the other checks. The same happened when a second duplicity ran on the same archive directory at that moment ("Another duplicity instance is already running with this archive directory"): with the backup page's refresh in the background (B125) that became likely.
+* **Cause:** `check_backup` in management/status_checks.py calls `backup_status()`, which raises an exception when duplicity's collection-status fails, and nothing catches it; `run_checks` and the control panel's view end with it.
+* **Fix:** The backup check queries the target the way the backup page's refresh does (`status_for_checks` in management/backup.py): with the lock of the saved status, saving the result; while a backup run or a refresh holds that lock, it uses the saved status and says so. A failed query is one failed check ("The status of the backups could not be read from the backup target.", with duplicity's message below it); the other checks run and are shown.
+* **Affects:** v78 yes (the same check), PR #2603 yes, the fork up to rc7. Origin: Upstream.
+* **Evidence:** In the lab on the copy of a production box with the backup target's port 22 dropped on the box's own firewall: during a refresh of the backup page, the status checks answered in 4 s (before the fix: HTTP 500 with "Another duplicity instance is already running" in the journal) and used the saved status; with the target dropped and no refresh running, they answered after 229 s with HTTP 200, the backup check failed with duplicity's message, and the other checks were listed (50 entries with the headings).
+* **Found by:** rc7 development (the lab checks of B125); **commit:** see `git log --grep B128`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 
