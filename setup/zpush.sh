@@ -84,6 +84,19 @@ cp conf/zpush/autodiscover_config.php /usr/local/lib/z-push/autodiscover/config.
 sed -i "s/PRIMARY_HOSTNAME/$PRIMARY_HOSTNAME/" /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezone --value)');^" /usr/local/lib/z-push/autodiscover/config.php
 
+# The longest Ping (the push long poll) a phone may ask for: 3540 s, the
+# protocol's maximum. A Ping with a longer heartbeat gets status 5 with this
+# bound at once, and the phone pings with it. Without a bound Z-Push kept any
+# heartbeat open, past nginx's fastcgi_read_timeout for
+# /Microsoft-Server-ActiveSync, which must stay longer than this (3660 s,
+# conf/nginx-alldomains.conf; it was 630 s, and iPhones got 504 after
+# 10.5 minutes for every Ping, B129).
+sed -i "s/define('PING_HIGHER_BOUND_LIFETIME', .*/define('PING_HIGHER_BOUND_LIFETIME', 3540);/" /usr/local/lib/z-push/config.php
+if ! grep -qF "define('PING_HIGHER_BOUND_LIFETIME', 3540);" /usr/local/lib/z-push/config.php; then
+	echo "Z-Push's config.php has no PING_HIGHER_BOUND_LIFETIME setting."
+	exit 1
+fi
+
 # The fork's changes to Z-Push's code (conf/zpush/z-push.patches): its CardDAV
 # client finds cards whose name has no ".vcf", such as Nextcloud's example
 # contact "default", and one card that the server does not return no longer

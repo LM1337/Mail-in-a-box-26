@@ -79,6 +79,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   not apply): it asks once more without `.vcf`, skips a card the server
   does not return instead of failing, and changes or deletes such a card
   from the phone under its own name, keeping its UID (B128).
+* A phone's ActiveSync Ping (push) with a heartbeat of more than 630 s no
+  longer ends with HTTP 504 after 10.5 minutes (seen on a production box:
+  all Pings of an iPhone, 4 to 10 an hour, all day). nginx gave up on
+  Z-Push, which waits as long as the phone asks; the PHP process went on
+  waiting, and a change it found then reached the phone only with its next
+  Ping. nginx now waits up to 3660 s on `/Microsoft-Server-ActiveSync`, and
+  Z-Push allows a heartbeat of at most 3540 s, the protocol's maximum: a
+  Ping that asks for more gets status 5 with that bound, and the phone
+  pings with it (B129).
 
 ### Changed
 
@@ -116,6 +125,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   processes index a new folder at once (BUGS-fork.md, known limitations).
 * Tests: the smoke test's `zpush-sync` also syncs a marked card whose name
   has no `.vcf` (B128).
+* Tests: the smoke test's new check `zpush-ping` (group `activesync`): a
+  Ping with a heartbeat of 3600 s gets status 5 with the box's bound at
+  once, and nginx's timeout for `/Microsoft-Server-ActiveSync` is at least
+  a minute longer than that bound (B129). `tests/fork/eas.py --ping`
+  accepts status 5 and prints the bound.
 
 ### Upgrade note
 
@@ -136,6 +150,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   hand. Nextcloud's example contact now syncs to phones like any other
   contact; delete it in Nextcloud's Contacts if it is not wanted. A phone
   that got HTTP 500 needs no new setup: its next Sync continues (B128).
+* After the update, a reload of nginx keeps its old worker processes until
+  their running ActiveSync long polls end, up to an hour (before: 10.5
+  minutes). Pings of up to 59 minutes hold a PHP-FPM worker each, as they
+  already did past nginx's old timeout (B129).
 
 ### Planned
 

@@ -249,7 +249,11 @@ report. The groups:
   alice's Nextcloud over DAV just before arrive, one of the cards with a
   name without `.vcf`, like Nextcloud's example contact `default` (B128);
   all are deleted again, and the test device is removed from Z-Push (with
-  `--ssh`). Quick enough to run
+  `--ssh`); `zpush-ping`: a Ping with a heartbeat of 3600 s gets status 5
+  with the box's bound at once, and (with `--ssh`) nginx's
+  `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
+  at least a minute longer than that bound, so a long Ping does not end
+  with 504 (B129). Quick enough to run
   right after a setup run: `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail

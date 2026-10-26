@@ -44,8 +44,9 @@ examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
         --ssh legacy-box --expect-nc 26
 
   Right after a setup run (an update), --only activesync checks within a
-  minute that Nextcloud does not throttle the box's own services and that an
-  ActiveSync account syncs its calendar and contacts.
+  minute that Nextcloud does not throttle the box's own services, that an
+  ActiveSync account syncs its calendar and contacts, and that a Ping with a
+  long heartbeat gets the box's bound instead of a 504 from nginx.
 
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
@@ -2041,6 +2042,62 @@ def c_zpush_sync(ctx):
             http_req(ctx, "DELETE", path, auth=auth)
 
 
+def c_zpush_ping(ctx):
+    # B129: a Ping (the push long poll) lasts as long as the heartbeat the
+    # phone asks for, and nginx ended every Ping longer than its
+    # fastcgi_read_timeout for /Microsoft-Server-ActiveSync (630 s) with 504.
+    # A Ping longer than the box allows gets status 5 with the bound at once,
+    # and (with --ssh) the timeout of every such location is at least a
+    # minute longer than that bound.
+    eas = _load_eas()
+    devid = "miabsmokeping" + ctx.tok
+    c = eas.Client(ctx.hostname, ctx.alice, ctx.user_pw, devid, addr=ctx.net.addr(443),
+                   user_agent="miab-fork-smoke/1")
+    try:
+        c.provision()
+        c.folder_sync()
+        cons = c.folders_of(eas.TYPE_CONTACTS, eas.TYPE_USER_CONTACTS)
+        if not cons:
+            raise Fail("FolderSync: no contact folder")
+        c.sync([cons[0]["ServerId"]])
+        t0 = time.time()
+        st, bound = c.ping_status([(cons[0]["ServerId"], "Contacts")], 3600)
+        took = time.time() - t0
+    except eas.EASError as e:
+        raise Fail("%s (%s)" % (e, e.kind))
+    finally:
+        if ctx.remote.available():
+            ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
+                           % (shlex.quote(ctx.alice), devid), timeout=120)
+    if st != "5" or not (bound or "").isdigit() or not 60 <= int(bound) <= 3540 or took > 60:
+        raise Fail("Ping with a heartbeat of 3600 s: status %s, HeartbeatInterval %s after %.0f s (expected status 5 "
+                   "with the box's bound, 60-3540 s, at once)" % (st, bound, took))
+    bound = int(bound)
+    msg = "heartbeat 3600 s: status 5 with the bound %d s after %.1f s" % (bound, took)
+    if not ctx.remote.available():
+        return msg + " (nginx's timeout not checked: needs --ssh)"
+    rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
+    if rc != 0:
+        raise Fail("nginx -T: exit %d %s" % (rc, err.strip()[:200]))
+    timeouts, inside = [], False
+    for line in out.splitlines():
+        w = line.split()
+        if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
+            inside = True
+            timeouts.append(60)  # nginx's default, unless the location sets one
+        elif inside and w[:1] == ["fastcgi_read_timeout"]:
+            v = w[1].rstrip(";")
+            timeouts[-1] = int(v[:-1]) if v.endswith("s") else int(v)
+        elif inside and w[:1] == ["}"]:
+            inside = False
+    if not timeouts:
+        raise Fail("nginx has no location /Microsoft-Server-ActiveSync")
+    if min(timeouts) < bound + 60:
+        raise Fail("fastcgi_read_timeout %d s of /Microsoft-Server-ActiveSync is not a minute longer than the Ping "
+                   "bound %d s: nginx ends a long Ping with 504" % (min(timeouts), bound))
+    return msg + "; fastcgi_read_timeout %d s in %d locations" % (min(timeouts), len(timeouts))
+
+
 def c_zpush_autodiscover(ctx):
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006">'
@@ -3426,6 +3483,7 @@ def main():
         run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
         run_check("nextcloud-forwarded-for", c_nc_forwarded_for, ctx)
         run_check("zpush-sync", c_zpush_sync, ctx)
+        run_check("zpush-ping", c_zpush_ping, ctx)
     if want("mail"):
         print("== mail flow")
         st, _ = run_check("mail-flow-send", c_mail_flow, ctx)
