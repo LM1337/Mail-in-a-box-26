@@ -10,8 +10,8 @@ its own:
 
 It does what a phone does on a new account: Provision (twice, the second
 acknowledges the policy), FolderSync, an initial Sync and a Sync with
-GetChanges of the default calendar and the contacts folder, and optionally a
-Ping (the long poll) on both. Z-Push serves calendars and contacts from
+GetChanges of the default calendar and the contacts folder (with --inbox
+also of the inbox), and optionally a Ping (the long poll) on them. Z-Push serves calendars and contacts from
 Nextcloud over CalDAV/CardDAV (from 127.0.0.1), with the user's password, so
 this also exercises Nextcloud's login of the box's own services.
 
@@ -52,11 +52,12 @@ for _page, _tags in PAGES.items():
         TOKENS.setdefault(_name, {})[_page] = _tok
 
 # FolderSync folder types (MS-ASCMD 2.2.3.186.3)
+TYPE_INBOX = "2"
 TYPE_CALENDAR = "8"
 TYPE_CONTACTS = "9"
 TYPE_USER_CALENDAR = "13"
 TYPE_USER_CONTACTS = "14"
-CLASS_OF_TYPE = {TYPE_CALENDAR: "Calendar", TYPE_USER_CALENDAR: "Calendar",
+CLASS_OF_TYPE = {TYPE_INBOX: "Email", TYPE_CALENDAR: "Calendar", TYPE_USER_CALENDAR: "Calendar",
                  TYPE_CONTACTS: "Contacts", TYPE_USER_CONTACTS: "Contacts"}
 
 
@@ -174,14 +175,19 @@ def ssl_ctx():
 
 
 class EASError(Exception):
-    """A request that did not succeed. kind: "auth" (HTTP 401: the server
-    refused the login), "unavailable" (no connection, HTTP 5xx), "disconnect"
-    (the connection broke during a request), "status" (an EAS status other
-    than success), "error" (anything else)."""
+    """A request that did not succeed. kind: "auth" (HTTP 401 or 403: the
+    server refused the login or the device), "throttled" (HTTP 429),
+    "provision" (HTTP 449: the device must Provision again), "unavailable"
+    (no connection, HTTP 502/503/504), "disconnect" (the connection broke
+    during a request), "status" (an EAS status other than success: .cmd and
+    .status tell which), "error" (anything else, e.g. HTTP 500; .http)."""
 
-    def __init__(self, kind, msg):
+    def __init__(self, kind, msg, cmd=None, http=None, status=None):
         super().__init__(msg)
         self.kind = kind
+        self.cmd = cmd
+        self.http = http
+        self.status = status
 
 
 def classify_exception(e):
@@ -212,6 +218,7 @@ class Client:
         self.user_agent = user_agent
         self.policy_key = "0"
         self.folders = []
+        self.folder_key = "0"
         self.sync_keys = {}
 
     def request(self, cmd, body, timeout=None):
@@ -229,12 +236,17 @@ class Client:
             data = r.read()
         finally:
             conn.close()
-        if r.status == 401:
-            raise EASError("auth", "%s: HTTP 401 (login refused)" % cmd)
+        if r.status in (401, 403):
+            raise EASError("auth", "%s: HTTP %d (login refused)" % (cmd, r.status), cmd, r.status)
+        if r.status == 429:
+            raise EASError("throttled", "%s: HTTP 429" % cmd, cmd, r.status)
+        if r.status == 449:
+            self.policy_key = "0"
+            raise EASError("provision", "%s: HTTP 449 (Provision again)" % cmd, cmd, r.status)
         if r.status in (502, 503, 504):
-            raise EASError("unavailable", "%s: HTTP %d" % (cmd, r.status))
+            raise EASError("unavailable", "%s: HTTP %d" % (cmd, r.status), cmd, r.status)
         if r.status != 200:
-            raise EASError("error", "%s: HTTP %d" % (cmd, r.status))
+            raise EASError("error", "%s: HTTP %d" % (cmd, r.status), cmd, r.status)
         return decode(data) if data else None
 
     def provision(self):
@@ -242,7 +254,8 @@ class Client:
         t = self.request("Provision", encode(14, ("Provision", [("Policies", [("Policy", [("PolicyType", pt)])])])))
         key = first(t, "PolicyKey")
         if not key:
-            raise EASError("status", "Provision: no policy key (status %s)" % first(t, "Status"))
+            st = first(t, "Status")
+            raise EASError("status", "Provision: no policy key (status %s)" % st, "Provision", status=st)
         self.policy_key = key
         t = self.request("Provision", encode(14, ("Provision", [("Policies", [("Policy", [
             ("PolicyType", pt), ("PolicyKey", key), ("Status", "1")])])])))
@@ -251,13 +264,24 @@ class Client:
             self.policy_key = key
         return self.policy_key
 
-    def folder_sync(self):
-        t = self.request("FolderSync", encode(7, ("FolderSync", [("SyncKey", "0")])))
+    def folder_sync(self, incremental=False):
+        """FolderSync: the whole hierarchy (SyncKey 0), or with incremental
+        only the changes since the last one, as a phone does each time it
+        syncs. Status 9 (the key is no longer valid) resets the key: the next
+        call starts over."""
+        key = self.folder_key if incremental else "0"
+        t = self.request("FolderSync", encode(7, ("FolderSync", [("SyncKey", key)])))
         st = first(t, "Status")
         if st != "1":
-            raise EASError("status", "FolderSync status %s" % st)
-        self.folders = []
-        self.sync_keys = {}  # a new folder hierarchy: every folder starts with SyncKey 0
+            if st == "9":
+                self.folder_key = "0"
+            raise EASError("status", "FolderSync status %s" % st, "FolderSync", status=st)
+        if key == "0":
+            self.folders = []
+            self.sync_keys = {}  # a new folder hierarchy: every folder starts with SyncKey 0
+        self.folder_key = first(t, "SyncKey") or self.folder_key
+        gone = {text(d) for el in find(t, "Delete") for d in find(el, "ServerId")}
+        self.folders = [f for f in self.folders if f.get("ServerId") not in gone]
         for f in find(t, "Add"):
             self.folders.append({c[0]: text(c) for c in f[1] if isinstance(c, tuple)})
         return self.folders
@@ -290,7 +314,11 @@ class Client:
             col = next(find(t, "Collection"), None)
             st = first(col, "Status") if col else first(t, "Status")
             if st != "1":
-                raise EASError("status", "Sync of folder %s: status %s" % (fid, st))
+                if st in ("3", "12"):
+                    # 3: invalid sync key, 12: the folder hierarchy changed;
+                    # the folder starts over with SyncKey 0
+                    self.sync_keys.pop(fid, None)
+                raise EASError("status", "Sync of folder %s: status %s" % (fid, st), "Sync", status=st)
             adds.extend(find(col, "Add"))
             initial = key == "0"
             key = first(col, "SyncKey") or key
@@ -306,7 +334,7 @@ class Client:
             ("Folder", [("Id", fid), ("Class", cls)]) for fid, cls in folders])])), timeout=heartbeat + 120)
         st = first(t, "Status")
         if st not in ("1", "2"):
-            raise EASError("status", "Ping status %s" % st)
+            raise EASError("status", "Ping status %s" % st, "Ping", status=st)
         return st
 
 
@@ -327,6 +355,7 @@ def main():
     ap.add_argument("--port", type=int, default=443)
     ap.add_argument("--device-id", default="miabforktest%04d" % (os.getpid() % 10000))
     ap.add_argument("--ping", type=int, default=0, metavar="SECONDS", help="also run one Ping with this heartbeat")
+    ap.add_argument("--inbox", action="store_true", help="also sync the inbox")
     args = ap.parse_args()
     user, pw = os.environ.get("EAS_USER"), os.environ.get("EAS_PW")
     if not user or not pw:
@@ -343,13 +372,14 @@ def main():
         log("foldersync", [(f.get("DisplayName"), f.get("Type")) for f in folders])
         cals = c.folders_of(TYPE_CALENDAR, TYPE_USER_CALENDAR)
         cons = c.folders_of(TYPE_CONTACTS, TYPE_USER_CONTACTS)
-        if not cals or not cons:
-            log("missing folders: %d calendar, %d contact folders" % (len(cals), len(cons)))
+        inbox = c.folders_of(TYPE_INBOX) if args.inbox else []
+        if not cals or not cons or (args.inbox and not inbox):
+            log("missing folders: %d calendar, %d contact folders, %d inbox" % (len(cals), len(cons), len(inbox)))
             return 1
-        adds = c.sync([f["ServerId"] for f in cals + cons])
+        adds = c.sync([f["ServerId"] for f in inbox + cals + cons])
         log("sync", {fid: len(v) for fid, v in adds.items()})
         if args.ping:
-            log("ping", c.ping([(f["ServerId"], CLASS_OF_TYPE[f["Type"]]) for f in cals + cons], args.ping))
+            log("ping", c.ping([(f["ServerId"], CLASS_OF_TYPE[f["Type"]]) for f in inbox + cals + cons], args.ping))
     except Exception as e:
         log("failed (%s): %s" % (classify_exception(e), e))
         return 1

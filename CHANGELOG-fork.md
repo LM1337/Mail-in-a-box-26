@@ -20,24 +20,40 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   from 127.0.0.1 failed (12 in two seconds). Nextcloud then answered Z-Push
   with `TooManyRequests` for every user for about 30 minutes, and kept a
   25 s delay after that, so ActiveSync calendars and contacts did not sync.
-  Setup now puts 127.0.0.1 and ::1 on Nextcloud's brute-force bypass list
-  (Z-Push and the other local callers check the password against Dovecot
-  first), on a fresh install, a migration and an update, and resets the
-  attempts of these addresses when it adds them, so a throttled box syncs
-  again after the update (B121).
+  Setup now puts 127.0.0.1 on Nextcloud's brute-force bypass list (Z-Push
+  checks each password against Dovecot first), on a fresh install, a
+  migration and an update, unless Nextcloud already bypasses it, and resets
+  its attempts when it adds it, so a throttled box syncs again after the
+  update. So that clients on the Internet do not get that bypass too, the
+  proxy of `/caldav`, `/carddav` and `/webdav`, which connects to Nextcloud
+  from 127.0.0.1, now passes the client's address (`X-Forwarded-For`), and
+  Nextcloud takes it from 127.0.0.1 only (`trusted_proxies`): these clients
+  are throttled under their own address, and the miab-owncloud jail can ban
+  them, which it never could on these paths (B121).
+* `/etc/dovecot` belongs to root now (group `mail` may read): it belonged
+  to the account `mail`, which all IMAP, POP3 and LMTP processes run as and
+  which could therefore change Dovecot's configuration (read by its root
+  processes) and the files that setup writes there as root (B123).
 * Dovecot no longer runs without a passdb for two seconds during setup:
   setup restarted it before rewriting `auth-sql.conf.ext`, and a login in
   that moment made Dovecot's config process read the truncated file;
   logins then failed as wrong passwords. Dovecot's configuration is now
   loaded once, after all of it is written, and setup writes Dovecot's files
   (and every file of `tools/editconf.py`) atomically and only when they
-  change (B120).
+  change, following a symbolic link only in a directory of root's own
+  (B120).
 * Setup disturbs the clients less: Dovecot, Postfix and fail2ban reload
   instead of restarting (Dovecot not at all when its configuration did not
   change), PHP-FPM restarts once per run instead of four times, and
   fail2ban keeps its bans through setup (it lifted all of them for about
   two seconds at each of its two restarts). A service is still restarted
-  when it does not run or runs the program of an older package (B122).
+  when it does not run, runs the program of an older package, or still
+  uses a library that an upgrade replaced (such as libssl or python3; the
+  restarts of earlier versions picked these up on every run). Dovecot's
+  checksum covers its settings only (not the kernel and OS version that
+  `doveconf -n` names), and is recorded only once Dovecot has loaded the
+  configuration; if it has not within 10 s of the reload, setup restarts it
+  (B122).
 
 ### Changed
 
@@ -46,17 +62,47 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
   The GitHub counter-test of rc7 (rc6 to rc7) logged it once.
 * Tests: the smoke test's new group `activesync` (also right after a setup
-  run with `--only activesync`) checks that 127.0.0.1 and ::1 are on
-  Nextcloud's bypass list with no attempts (`nextcloud-bruteforce-loopback`)
-  and syncs a marked event and contact through ActiveSync
-  (`zpush-sync`, with the new small client `tests/fork/eas.py`).
-* Tests: `tests/fork/client-load.py` keeps ActiveSync, CalDAV/CardDAV,
-  IMAP (logins and IDLE), SMTP AUTH and Roundcube clients busy while setup
-  runs and summarizes what failed; the update scenarios run it during setup
-  (TESTING-fork.md, "Client load during updates"). The log audit no longer
-  accepts "No passdbs specified" during setup (B120); it accepts what
-  Dovecot logs when setup reloads it, and what nginx and OpenDKIM log when
-  a client comes in during setup's restart of PHP-FPM or OpenDKIM.
+  run with `--only activesync`) checks Nextcloud's bypass list (127.0.0.1
+  listed, no entry twice: `nextcloud-bruteforce-loopback`), that a failed
+  login through the `/webdav` proxy is counted for the client's address and
+  not for 127.0.0.1 (`nextcloud-forwarded-for`), and syncs a marked event
+  and contact through ActiveSync (`zpush-sync`, with the new small client
+  `tests/fork/eas.py`).
+* Tests: `tests/fork/client-load.py` keeps the clients of a few users busy
+  while setup runs, at the rate that reproduced the production incident:
+  per user several ActiveSync devices (`--ping-devices`, `--sync-devices`;
+  Sync of the inbox, the calendars and the contacts, Ping, recovery as a
+  phone does it after HTTP 449 and resync statuses), CalDAV/CardDAV (also
+  through the `/caldav` proxy), IMAP logins and IDLE, SMTP AUTH and
+  Roundcube. `--seed` puts a marked event, contact and mail into each
+  account first, `--log` records every request with its latency, and with
+  `--marker-file` the results before setup are a baseline: an error that
+  already occurred there does not fail the run. Outages are counted per
+  client and user. The update scenarios run one instance on the box and one
+  on another host of the test network, which fail2ban and Nextcloud count
+  under a real address (TESTING-fork.md, "Client load during updates").
+* Tests: the log audit no longer accepts "No passdbs specified" during
+  setup (B120). It accepts what Dovecot logs when setup reloads it (also the
+  SIGTERM of the IMAP, POP3, ManageSieve and login processes of the old
+  configuration), what nginx logs for the ActiveSync and CalDAV/CardDAV
+  requests that the one PHP-FPM restart ends, and what Postfix and OpenDKIM
+  log when a client comes in during setup's restart of OpenDKIM (also
+  "Application error"), and fts-xapian's retries of its write lock when two
+  processes index a new folder at once (BUGS-fork.md, known limitations).
+
+### Upgrade note
+
+* Setup sets Nextcloud's `trusted_proxies` (adds 127.0.0.1, keeps the
+  others) and `forwarded_for_headers` (`HTTP_X_FORWARDED_FOR` only, the
+  Nextcloud default; another value there is replaced). A reverse proxy of
+  your own in front of the box keeps working when it sends
+  `X-Forwarded-For`.
+* `/etc/dovecot` changes from `mail:dovecot` to `root:mail` (no write for
+  the group, nothing for others). Your own files there stay readable by the
+  mail processes; give a file that other processes must read other
+  permissions in another place.
+* The first update with this release reloads Dovecot once (its open IMAP
+  sessions log in again), as the checksum of its configuration is new.
 
 ### Planned
 
@@ -73,6 +119,20 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
 
 * Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
+* Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
+  postgrey, named, systemd-resolved, munin-node and the management daemon
+  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
+  (`milter_default_action`). Candidates for a reload or a restart only on a
+  change.
+* On a copy of a production box, Z-Push's Sync of the contacts of a new
+  ActiveSync user fails with HTTP 500 (`carddav.php` "Call to a member
+  function __toString() on null"), before and after the update: the
+  multiget of the cards of Nextcloud's system address book
+  (`z-server-generated--system`, cards named `OCA%5cUserExternal%5cIMAP:...`)
+  comes back empty. Not seen on a fresh box. To be looked at.
+* Roundcube's CardDAV plugin can log "duplicate column name: account_id"
+  when several sessions log in at the same moment for the first time after
+  an upgrade of the plugin (a race in its schema migration).
 * A Dovecot reload ends the open IMAP sessions (their clients log in
   again); setup reloads Dovecot only when its configuration changed (B122).
 * Critical only (Munin's alerts) never mails the return to normal.

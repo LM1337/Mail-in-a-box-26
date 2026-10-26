@@ -235,18 +235,27 @@ function restart_service {
 # service does not run or runs the program of an older package.
 
 function service_runs_current_package {
-	# True if the unit is active and was started after the package was last
-	# installed or upgraded. An upgrade normally restarts its service (dpkg);
-	# one that left the old process running (or a service started before the
-	# package of a plugin it loads) needs a restart, a reload is not enough.
-	local unit=$1 pkg=$2 started installed
+	# True if the unit is active, was started after the package was last
+	# installed or upgraded, and its main process uses no program or library
+	# file that has been replaced since it started. An upgrade normally
+	# restarts its service (dpkg); one that left the old process running (or a
+	# service started before the package of a plugin it loads) needs a
+	# restart, a reload is not enough. The same holds after an upgrade of a
+	# library or of the interpreter (system.sh's apt upgrade: libssl,
+	# python3), which the restarts of earlier versions picked up on every
+	# run: the kernel shows a replaced file of a process's mappings as
+	# "(deleted)" in /proc/PID/maps (what needrestart looks at, too).
+	local unit=$1 pkg=$2 started installed pid
 	systemctl is-active --quiet "$unit" || return 1
 	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
 	[ -n "$started" ] || return 1
 	started=$(date -d "$started" +%s 2> /dev/null) || return 1
 	installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
 	[[ $installed =~ ^[0-9]+$ ]] || return 1
-	[ "$installed" -le "$started" ]
+	[ "$installed" -le "$started" ] || return 1
+	pid=$(systemctl show -P MainPID "$unit" 2> /dev/null || true)
+	[[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
 }
 
 function reload_fail2ban {
@@ -318,13 +327,22 @@ function load_dovecot {
 	# configuration (it writes its binary copy again) before the caller runs
 	# doveadm against it.
 	#
-	# The checksum covers doveconf -n and, as Dovecot reads the certificate,
-	# key and DH files only when it loads its configuration, their size and
-	# time (stat, which reads nothing through a link).
-	local conf sum before i record=/var/lib/mailinabox/dovecot-config.sha256
+	# The checksum covers the settings of doveconf -n (not its comment lines,
+	# which name the Dovecot version, the kernel and the OS release and
+	# change with them; the package check above covers the version) and, as
+	# Dovecot reads the certificate, key and DH files only when it loads its
+	# configuration, their size and time (stat, which reads nothing through
+	# a link).
+	#
+	# The checksum is recorded only once Dovecot has loaded the configuration:
+	# when the master has not written its binary copy again within 10 seconds
+	# of the reload (it keeps the old configuration when the new one fails at
+	# runtime, e.g. a listener it cannot bind, which doveconf -n does not
+	# see), Dovecot is restarted, which fails loudly then.
+	local conf sum before i reloaded record=/var/lib/mailinabox/dovecot-config.sha256
 	conf=$(doveconf -n 2>&1) || { echo; echo "FAILED: doveconf -n"; echo "$conf"; exit 1; }
 	sum=$( {
-		printf '%s\n' "$conf"
+		grep -v '^#' <<< "$conf"
 		sed -nE 's/^ *(ssl_server_)?(cert|key|dh)_file = //p' <<< "$conf" | while read -r f; do
 			stat -L -c '%n %i %s %Y' -- "$f" 2> /dev/null || echo "$f missing"
 		done
@@ -336,10 +354,18 @@ function load_dovecot {
 		fi
 		before=$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)
 		hide_output systemctl reload dovecot
+		reloaded=
 		for i in $(seq 100); do
-			[ "$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)" != "$before" ] && break
+			if [ "$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)" != "$before" ]; then
+				reloaded=1
+				break
+			fi
 			sleep 0.1
 		done
+		if [ -z "$reloaded" ]; then
+			echo "Dovecot did not load its new configuration within 10 seconds of the reload; restarting it."
+			hide_output service dovecot restart
+		fi
 	else
 		hide_output service dovecot restart
 	fi

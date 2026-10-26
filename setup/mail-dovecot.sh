@@ -31,6 +31,20 @@ apt_install \
 # The `dovecot-imapd`, `dovecot-pop3d`, and `dovecot-lmtpd` packages automatically
 # enable IMAP, POP and LMTP protocols.
 
+# /etc/dovecot belongs to root, and the group mail may read it, before setup
+# writes anything there. Up to rc7 the whole directory belonged to the account
+# mail (upstream), which all IMAP, POP and LMTP processes run as: they could
+# change the configuration that Dovecot's master and config processes (root)
+# read, and the files that setup writes there as root by path. The mail
+# processes only need to read in it (the global sieve script and its compiled
+# copy, and an administrator's own files such as a Lua script), which the
+# group gives them; Dovecot's other processes get their settings from its
+# config process. tools/write_conf.py --own-tree changes the tree through open
+# descriptors, top down, and follows no symbolic link, so it is safe while the
+# old owner could still change it. Again at the end of this file, for the new
+# files.
+tools/write_conf.py --own-tree /etc/dovecot root mail
+
 # Set basic daemon options.
 
 ## The 'default_client_limit' is 1000, which is lower than required, if
@@ -276,15 +290,15 @@ fi
 
 # Copy the global sieve script into where we've told Dovecot to look for it. Then
 # compile it. Global scripts must be compiled now because Dovecot won't have
-# permission later.
-cp conf/sieve-spam.txt /etc/dovecot/sieve-spam.sieve
+# permission later (the mail processes cannot write in /etc/dovecot).
+tools/write_conf.py /etc/dovecot/sieve-spam.sieve < conf/sieve-spam.txt
 sievec /etc/dovecot/sieve-spam.sieve
 
 # PERMISSIONS
 
-# Ensure configuration files are owned by dovecot and not world readable.
-chown -R mail:dovecot /etc/dovecot
-chmod -R o-rwx /etc/dovecot
+# Configuration files belong to root, the group mail may read them, others
+# nothing (see the top of this file).
+tools/write_conf.py --own-tree /etc/dovecot root mail
 
 # Ensure mailbox files have a directory that exists and are owned by the mail user.
 mkdir -p "$STORAGE_ROOT/mail/mailboxes"

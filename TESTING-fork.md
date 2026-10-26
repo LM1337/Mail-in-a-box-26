@@ -127,33 +127,60 @@ test (results in "rc7" below):
 ### Client load during updates
 
 The smoke test runs after a setup run, so it does not see what clients see
-while setup runs (B120 to B123 were found on a production box with phones
+while setup runs (B120 to B122 were found on a production box with phones
 and webmail open during an update). `tests/fork/client-load.py` keeps the
-clients of two test users busy (ActiveSync Sync and Ping on their calendars
-and contacts, CalDAV and CardDAV PROPFIND, an IMAP login every second, an
-IMAP IDLE connection, SMTP AUTH on 587, a Roundcube session refreshing its
-inbox) and sorts each request into ok, auth (login refused), throttled
-(Nextcloud's brute-force protection), unavailable (no connection, HTTP 5xx,
-a temporary failure), disconnect (a Ping, IDLE or Roundcube session cut) or
-error. Its summary has the counts per client type, the longest outage and
-the first failures with their times; `--report` writes them as JSON.
+clients of a few test users busy at about the rate of a box with several
+phones per user: per user 4 ActiveSync devices that Sync the inbox, the
+calendars and the address books and then long-poll with Ping, 2 that
+FolderSync and Sync every 8 s, CalDAV and CardDAV requests (also through
+the box's `/caldav` proxy, the path of Z-Push), an IMAP login every second,
+an IMAP IDLE connection, SMTP AUTH on 587 and a Roundcube session that
+refreshes its inbox. The ActiveSync devices recover as phones do (Provision
+again after HTTP 449, resync after FolderSync status 9, Sync status 3 or 12
+and Ping status 7). `--seed` first puts a marked event, contact and mail
+into each user's account, so that the Syncs return items. Each request is
+ok, auth (login refused), throttled (HTTP 429, Nextcloud's brute-force
+protection), unavailable (no connection, HTTP 502/503/504, a temporary
+failure), disconnect (a Ping or IDLE cut, a resync) or error; `--log`
+records every request with its latency. With `--marker-file` the results
+before setup starts are the baseline: an error that already occurred there
+(a problem of the box before the update) is listed, but does not fail the
+run. The summary gives the counts per client and phase, the longest outage
+per client and user, the first failures and the seconds with failures;
+`--report` writes them as JSON.
 
-The update scenarios (T3, T4 and T5b; also T1's second setup runs) run it
-on the box under test, as a normal user with the clients on 127.0.0.1 (as
-Z-Push's own calls; fail2ban ignores that address), from a minute before
-setup starts until three minutes after it ends (Nextcloud's throttle
-showed only after setup), for example:
+The update scenarios (T3, T4 and T5b; also T1's second setup runs) run two
+instances with 3 test users, from 2 minutes before setup starts until 10
+minutes after it ends (Nextcloud's throttle showed only after setup; on the
+production box it lasted 30 minutes):
+
+* one on the box under test, as a normal user, with the clients on
+  127.0.0.1 (like Z-Push's own calls);
+* one on another host of the test network (the peer, never the jump host,
+  whose failed logins would count against the other tests), with another
+  `--device-prefix`: only these requests come from a real address, which
+  fail2ban and Nextcloud's brute-force protection count.
+
+For example (on the box, and the same on the peer with `--host` the box's
+address):
 
     tests/fork/client-load.py --host 127.0.0.1 --hostname box.example.net \
         --user alice@example.net --user bob@seed2.example.net \
-        --env-file credentials.env --duration 1200 --report load.json
+        --user carol@example.net --env-file credentials.env --seed \
+        --device-prefix box --marker-file /tmp/setup-started \
+        --duration 1800 --log load.jsonl --report load.json
 
-For the in-place upgrades (T3, T4) it runs around the setup phase only:
-mail is offline during the release upgrades. Pass criterion: no auth,
-throttled or error result; unavailable results and disconnects only while
-setup restarts a service, each outage shorter than `--max-outage` (30 s).
-An IMAP IDLE or ActiveSync Ping that a restart cuts and that reconnects is
-fine, a failed login is not. Afterwards `smoke.py --only activesync`.
+The update driver creates the marker file when it starts setup (or sends
+SIGUSR1). For the in-place upgrades (T3, T4) the load runs around the setup
+phase only: mail is offline during the release upgrades. Pass criteria:
+both instances RESULT OK (no auth or throttled result, no error that did not
+occur before setup, each outage shorter than `--max-outage`, 30 s); no
+fail2ban `Found` for the peer's address in `/var/log/fail2ban.log` and no
+brute-force attempts for it (`occ security:bruteforce:attempts`) during the
+window; unavailable results and disconnects only while setup restarts or
+reloads a service. An IMAP IDLE or ActiveSync Ping that a reload cuts and
+that reconnects is fine, a failed login is not. Afterwards `smoke.py --only
+activesync`.
 
 ### What the smoke test checks
 
@@ -207,8 +234,13 @@ report. The groups:
   password; Nextcloud sharing within the mail domain (from rc4); Roundcube
   login; Z-Push OPTIONS and Autodiscover.
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
-  and ::1 are on Nextcloud's brute-force bypass list, with 0 attempts and
-  no delay (B121); `zpush-sync`: an ActiveSync account as a phone sets it
+  is on Nextcloud's brute-force bypass list, and no entry is there twice
+  (B121; a check of the list: Nextcloud counts no attempts for a listed
+  address); `nextcloud-forwarded-for`: a failed login (a user that does not
+  exist) from the box's public address through the `/webdav` proxy, which
+  connects to Nextcloud from 127.0.0.1, is logged and counted by Nextcloud
+  for that address, not for 127.0.0.1 (B121; its attempts are reset
+  afterwards); `zpush-sync`: an ActiveSync account as a phone sets it
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
   contact folders), and a marked event and contact put into alice's
   Nextcloud over DAV just before arrive; both are deleted again, and the
@@ -682,9 +714,11 @@ Seen in the runs, not fixed in rc7:
 8. Setup restarts Dovecot (setup/mail-dovecot.sh) before
    setup/mail-users.sh has written its passdb, and again two seconds later:
    a login in between fails once ("No passdbs specified"; seen once, from
-   the lab's probe in T5b). The client tries again. Fixed after rc7 (B120):
-   the update of a production box from rc6 to rc7 showed what such failures
-   do to Nextcloud (B121).
+   the lab's probe in T5b). The client tries again. **Fixed after rc7**
+   (B120): Dovecot is loaded once, after its whole configuration is written,
+   and its files are written atomically; the log audit no longer accepts the
+   message. The update of a production box from rc6 to rc7 showed what such
+   failures do to Nextcloud (B121).
 
 Of the open findings of rc6, 1 (the `--check` plan named the fallback SSH
 server, and from `6235572` on also says that new SSH logins and sudo fail

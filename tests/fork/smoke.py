@@ -1857,26 +1857,95 @@ def c_zpush_options(ctx):
 
 
 def c_nc_bruteforce_loopback(ctx):
-    # setup/nextcloud.sh puts the box's own services (127.0.0.1, ::1) on
-    # Nextcloud's brute-force bypass list (B120): bypass-listed, no attempts
-    # counted and no delay, also right after a setup run.
+    # A check of Nextcloud's brute-force bypass list (B121): setup/nextcloud.sh
+    # puts 127.0.0.1 (the box's own services, Z-Push above all) on it, once.
+    # Nextcloud reports no attempts for a listed address at all, so this only
+    # proves the address is listed (and was not added twice by repeated
+    # setup runs). ::1 is shown, not required: no service of the box uses it.
+    occ = "cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ "
     out = []
     bad = []
     for ip in ("127.0.0.1", "::1"):
-        rc, so, se = ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ "
-                                    "security:bruteforce:attempts %s --output=json" % ip, timeout=120)
+        rc, so, se = ctx.remote.run(occ + "security:bruteforce:attempts %s --output=json" % ip, timeout=120)
         if rc != 0:
             raise Fail("occ security:bruteforce:attempts %s: exit %d %s" % (ip, rc, se.strip()[:200]))
         try:
             j = json.loads(so.strip().splitlines()[-1])
         except (ValueError, IndexError):
             raise Fail("unexpected output for %s: %s" % (ip, so.strip()[:200]))
-        out.append("%s bypass=%s attempts=%s delay=%s" % (ip, j.get("bypass-listed"), j.get("attempts"), j.get("delay")))
-        if j.get("bypass-listed") is not True or j.get("attempts") != 0 or j.get("delay") != 0:
+        out.append("%s bypass-listed=%s" % (ip, j.get("bypass-listed")))
+        if ip == "127.0.0.1" and j.get("bypass-listed") is not True:
             bad.append(out[-1])
+    rc, so, se = ctx.remote.run(occ + "config:list bruteForce", timeout=120)
+    if rc != 0:
+        raise Fail("occ config:list bruteForce: exit %d %s" % (rc, se.strip()[:200]))
+    try:
+        keys = json.loads(so).get("apps", {}).get("bruteForce") or {}
+    except ValueError:
+        raise Fail("unexpected output of occ config:list bruteForce: %s" % so.strip()[:200])
+    entries = [str(v).strip() for k, v in sorted(keys.items()) if k.startswith("whitelist_")]
+    dup = [e for e in set(entries) if entries.count(e) > 1]
+    out.append("%d bypass entries" % len(entries))
+    if dup:
+        bad.append("listed more than once: %s" % ", ".join(sorted(dup)))
     if bad:
         raise Fail("; ".join(bad))
     return "; ".join(out)
+
+
+XFF_USER = "xfftest-nouser@invalid.example"
+
+
+def c_nc_forwarded_for(ctx):
+    # The proxy of /caldav, /carddav and /webdav connects to Nextcloud from
+    # 127.0.0.1, which is on the brute-force bypass list (B121): it must pass
+    # the client's address (X-Forwarded-For, trusted from 127.0.0.1 only), or
+    # every client on the Internet would skip the throttle there. One failed
+    # login of a user that does not exist, from the box's public address
+    # (fail2ban ignores it), to /webdav/: Nextcloud must log it and count it
+    # for that address, not for 127.0.0.1. Its attempts are reset afterwards.
+    occ = "sudo -n -u www-data php /usr/local/lib/owncloud/occ"
+    script = r"""
+set -u
+. /etc/mailinabox.conf
+cd /
+log="$STORAGE_ROOT/owncloud/nextcloud.log"
+before=$(sudo -n stat -c %%s "$log" 2> /dev/null || echo 0)
+code=$(curl -sk -o /dev/null -w '%%{http_code}' --max-time 60 --resolve "$PRIMARY_HOSTNAME:443:$PUBLIC_IP" \
+    -u '%(user)s:not-the-password' -X PROPFIND -H 'Depth: 0' "https://$PRIMARY_HOSTNAME/webdav/")
+echo "http=$code"
+echo "public=$PUBLIC_IP"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    line=$(sudo -n tail -c +$((before + 1)) "$log" | grep -F "Login failed: '%(user)s'" | tail -1)
+    [ -n "$line" ] && break
+    sleep 1
+done
+echo "log=$line"
+echo "pub=$(%(occ)s security:bruteforce:attempts "$PUBLIC_IP" --output=json 2>&1 | tail -1)"
+%(occ)s security:bruteforce:reset "$PUBLIC_IP" > /dev/null 2>&1
+echo "reset=$?"
+""" % {"user": XFF_USER, "occ": occ}
+    rc, so, se = ctx.remote.run("bash -c %s" % shlex.quote(script), timeout=300)
+    vals = dict(l.split("=", 1) for l in so.splitlines() if "=" in l)
+    public = vals.get("public", "")
+    if vals.get("http") != "401":
+        raise Fail("PROPFIND /webdav/ with a wrong login: HTTP %s (expected 401)" % vals.get("http"))
+    try:
+        remote = json.loads(vals.get("log", "")).get("remoteAddr")
+    except ValueError:
+        raise Fail("no 'Login failed' line for the test login in nextcloud.log")
+    try:
+        attempts = json.loads(vals.get("pub", "")).get("attempts")
+    except ValueError:
+        raise Fail("occ security:bruteforce:attempts %s: %s" % (public, vals.get("pub", "")[:200]))
+    if vals.get("reset") != "0":
+        raise Fail("occ security:bruteforce:reset %s failed" % public)
+    if remote != public:
+        raise Fail("Nextcloud saw the login from %s, not from the client %s (X-Forwarded-For through the "
+                   "/webdav proxy, trusted_proxies)" % (remote, public))
+    if not attempts:
+        raise Fail("Nextcloud counted no attempt for %s" % public)
+    return "remoteAddr %s, attempts %s (reset)" % (remote, attempts)
 
 
 def _load_eas():
@@ -3341,6 +3410,7 @@ def main():
         # Quick enough to run right after a setup run: --only activesync
         print("== activesync (calendars and contacts through Z-Push and Nextcloud)")
         run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
+        run_check("nextcloud-forwarded-for", c_nc_forwarded_for, ctx)
         run_check("zpush-sync", c_zpush_sync, ctx)
     if want("mail"):
         print("== mail flow")
