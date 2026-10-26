@@ -10,11 +10,15 @@
 #
 # Python 3.13 removed the crypt module, so SHA-512 crypt is implemented here
 # with hashlib, as specified in https://www.akkadia.org/drepper/SHA-crypt.txt
-# (the algorithm of glibc and libxcrypt, which Dovecot uses). Hashes of any
-# other form (another scheme set by hand, an unusual salt, very many rounds)
-# are checked by 'doveadm pw -t' with the password on its standard input and
-# its output discarded.
+# (the algorithm of glibc and libxcrypt, which Dovecot uses). A password
+# stored in plain text by hand ({PLAIN}, {CLEARTEXT}, {PLAIN-TRUNC}) is
+# compared here too, as 'doveadm pw -t' would have it in its arguments.
+# Hashes of any other form (another scheme set by hand, an unusual salt, very
+# many rounds) are checked by 'doveadm pw -t' with the password on its
+# standard input and its output discarded.
 
+import base64
+import binascii
 import hashlib
 import hmac
 import re
@@ -43,6 +47,12 @@ _RE_SHA512_CRYPT = re.compile(
 	r"(?i:\{(?:SHA512-CRYPT|CRYPT)\})?"
 	r"(\$6\$(?:rounds=([1-9][0-9]{0,8})\$)?([./0-9A-Za-z]{1,16})\$[./0-9A-Za-z]{86})",
 	re.ASCII)
+
+# Dovecot's schemes that store the password itself, with an optional encoding
+# suffix ("{PLAIN.B64}", "{PLAIN.HEX}"). A value with such a scheme is never
+# given to doveadm, which would put it into its arguments.
+_PLAIN_SCHEMES = ("PLAIN", "CLEARTEXT", "PLAIN-TRUNC")
+_RE_SCHEME = re.compile(r"\{([^{}]*)\}(.*)", re.DOTALL)
 
 def _b64_from_24bit(b2, b1, b0, n):
 	w = (b2 << 16) | (b1 << 8) | b0
@@ -128,7 +138,7 @@ def verify_password(pw, stored):
 	except UnicodeEncodeError:
 		return False
 	if b"\0" in pwb or len(pwb) > PASSWORD_MAX_BYTES:
-		# What crypt(3) cannot hash, Dovecot does not accept either.
+		# What crypt(3) cannot hash, the control panel does not accept.
 		return False
 	m = _RE_SHA512_CRYPT.fullmatch(stored)
 	if m:
@@ -136,7 +146,44 @@ def verify_password(pw, stored):
 		if rounds is None or ROUNDS_MIN <= rounds <= ROUNDS_MAX_PYTHON:
 			computed = sha512_crypt(pwb, m.group(3), rounds)
 			return hmac.compare_digest(computed.encode("ascii"), m.group(1).encode("ascii"))
+	m = _RE_SCHEME.fullmatch(stored)
+	if m:
+		scheme, _, encoding = m.group(1).upper().partition(".")
+		if scheme in _PLAIN_SCHEMES:
+			return _plain_verify(pwb, scheme, encoding, m.group(2))
+	elif not stored.startswith("$"):
+		# No scheme and no crypt(3) string: maybe a password in plain text
+		# by mistake. Not for doveadm's arguments; Dovecot would take it as
+		# a SHA512-CRYPT string, which it is not, so no password matches.
+		return False
 	return _doveadm_verify(pwb, stored)
+
+def _plain_verify(pwb, scheme, encoding, value):
+	# A password stored in plain text, compared as Dovecot does (its
+	# password-scheme.c), in constant time for equal lengths. No encoding is
+	# the default of these schemes; HEX and B64/BASE64 are decoded first.
+	try:
+		if encoding == "":
+			raw = value.encode("utf-8", "surrogateescape")
+		elif encoding == "HEX":
+			raw = binascii.unhexlify(value.strip())
+		elif encoding in ("B64", "BASE64"):
+			raw = base64.b64decode(value.strip(), validate=True)
+		else:
+			return False
+	except (ValueError, UnicodeEncodeError):
+		return False
+	if scheme == "PLAIN-TRUNC":
+		# "<length>-<password>": a stored password of exactly <length> bytes
+		# may be a cut one; then the given password matches when it starts
+		# with it.
+		m = re.fullmatch(rb"([0-9]{1,6})-(.*)", raw, re.DOTALL)
+		if not m:
+			return False
+		trunc_len, raw = int(m.group(1)), m.group(2)
+		if len(raw) == trunc_len and len(pwb) >= trunc_len:
+			return hmac.compare_digest(pwb[:trunc_len], raw)
+	return hmac.compare_digest(pwb, raw)
 
 def _doveadm_verify(pwb, stored):
 	# Any other scheme: 'doveadm pw -t' reads the password from its standard
@@ -144,7 +191,8 @@ def _doveadm_verify(pwb, stored):
 	# password with a line break cannot be checked that way (it would be
 	# shortened), so it fails. doveadm prints the hash with "(verified)", or
 	# an error; both are discarded, only the exit code counts. The hash
-	# itself is in doveadm's arguments for that moment (not the password).
+	# itself is in doveadm's arguments for that moment (not the password;
+	# verify_password does not send plain-text schemes here).
 	if b"\n" in pwb or b"\r" in pwb:
 		return False
 	try:

@@ -3,15 +3,20 @@
 
 Without options (no box needed): the test vectors of the specification
 (https://www.akkadia.org/drepper/SHA-crypt.txt), the forms of stored hashes it
-checks itself and the limits (null character, 512 bytes).
+checks itself, passwords stored in plain text ({PLAIN}, {CLEARTEXT},
+{PLAIN-TRUNC}, with HEX and B64 encodings; compared without doveadm) and the
+limits (null character, 512 bytes).
 
 With --doveadm (on a box, as root): random passwords (ASCII and UTF-8, 8 to 511
-bytes, line breaks too) against Dovecot's own 'doveadm pw': each hash of
+bytes; line breaks are tested offline only, as doveadm reads its standard
+input only up to one) against Dovecot's own 'doveadm pw': each hash of
 hash_password() verified by 'doveadm pw -t', each hash of 'doveadm pw' (default
 rounds and -r) by verify_password(), wrong passwords refused by both, and
-other schemes (BLF-CRYPT, ARGON2ID, ...) through the doveadm fallback. The
-passwords go to doveadm on its standard input, never in its arguments, and
-are not printed.
+other schemes (BLF-CRYPT, ARGON2ID, ...) through the doveadm fallback, and the
+plain-text schemes compared with doveadm's own result. The random passwords
+go to doveadm on its standard input, never in its arguments, and are not
+printed (the plain-text cases give doveadm a fixed test password as the
+stored value, which is the point of not doing so in verify_password).
 
 Usage: python3 -I tests/fork/password-hash.py [--doveadm [--count N]]
 Exit code 0 when every check passed.
@@ -84,6 +89,43 @@ def offline():
 	check("hash-511-bytes", ph.verify_password("ü" * 255 + "a", ph.hash_password("ü" * 255 + "a")))
 	check("verify-512-bytes", not ph.verify_password("a" * 512, "{SHA512-CRYPT}" + ph.sha512_crypt(b"a" * 512, "abc")))
 	check("dummy-hash", ph.DUMMY_HASH.startswith("{SHA512-CRYPT}$6$") and not ph.verify_password("Correct horse 1", ph.DUMMY_HASH))
+	plain()
+
+# (stored value, password, expected) for the plain-text schemes, as Dovecot compares them.
+PLAIN_CASES = [
+	("{PLAIN}Plain pw 1", "Plain pw 1", True),
+	("{PLAIN}Plain pw 1", "Plain pw 2", False),
+	("{PLAIN}Plain pw 1", "Plain pw 1 ", False),
+	("{plain}Plain pw 1", "Plain pw 1", True),
+	("{CLEARTEXT}Plain pw 1", "Plain pw 1", True),
+	("{CLEARTEXT}Plain pw 1", "Plain pw", False),
+	("{PLAIN}Grüße 😀", "Grüße 😀", True),
+	("{PLAIN.B64}UGxhaW4gcHcgMQ==", "Plain pw 1", True),
+	("{PLAIN.BASE64}UGxhaW4gcHcgMQ==", "Plain pw 2", False),
+	("{PLAIN.HEX}506c61696e2070772031", "Plain pw 1", True),
+	("{PLAIN.HEX}zz", "Plain pw 1", False),
+	("{PLAIN-TRUNC}5-Plain", "Plain pw 1", True),
+	("{PLAIN-TRUNC}5-Plain", "Plai", False),
+	("{PLAIN-TRUNC}5-Plain", "Other pw 1", False),
+	("{PLAIN-TRUNC}20-Plain pw 1", "Plain pw 1", True),
+	("{PLAIN-TRUNC}20-Plain pw 1", "Plain pw 12", False),
+	("{PLAIN-TRUNC}Plain pw 1", "Plain pw 1", False),
+	("{PLAIN.XYZ}Plain pw 1", "Plain pw 1", False),
+	("Plain pw 1", "Plain pw 1", False),
+]
+
+def plain():
+	# The plain-text schemes are compared in Python; doveadm, which would have the
+	# stored password in its arguments, must not be called for them.
+	called = []
+	saved = ph._doveadm_verify
+	ph._doveadm_verify = lambda pwb, stored: called.append(stored) or False
+	try:
+		bad = [i for i, (stored, pw, want) in enumerate(PLAIN_CASES) if ph.verify_password(pw, stored) is not want]
+	finally:
+		ph._doveadm_verify = saved
+	check("plain-schemes-%d" % len(PLAIN_CASES), not bad, "cases %s" % bad if bad else "")
+	check("plain-schemes-no-doveadm", not called, "%d doveadm call(s)" % len(called))
 
 def doveadm(args, stdin):
 	# doveadm reads the password from standard input (not a terminal) up to a line break.
@@ -113,7 +155,7 @@ def with_doveadm(count):
 	check("doveadm-random-%d" % count, bad == 0, "%d failed" % bad)
 	pw = "line\nbreak-pw"
 	check("doveadm-line-break-not-cut", not ph.verify_password("line", ph.hash_password(pw)))
-	for scheme in ("BLF-CRYPT", "SHA256-CRYPT", "MD5-CRYPT", "ARGON2ID", "SSHA512", "PLAIN", "CRAM-MD5"):
+	for scheme in ("BLF-CRYPT", "SHA256-CRYPT", "MD5-CRYPT", "ARGON2ID", "SSHA512", "CRAM-MD5"):
 		rc, h = doveadm(["-s", scheme], b"Fallback pw 1\nFallback pw 1\n")
 		if rc != 0:
 			print("SKIP fallback-%s: doveadm has no such scheme" % scheme)
@@ -121,6 +163,15 @@ def with_doveadm(count):
 		check("fallback-" + scheme, ph.verify_password("Fallback pw 1", h) and not ph.verify_password("Fallback pw 2", h))
 	rc, h = doveadm(["-s", "SHA512-CRYPT", "-r", str(ph.ROUNDS_MAX_PYTHON * 2)], b"Fallback pw 1\nFallback pw 1\n")
 	check("fallback-many-rounds", rc == 0 and ph.verify_password("Fallback pw 1", h) and not ph.verify_password("Fallback pw 2", h))
+	# Plain-text schemes: our result must be doveadm's (here doveadm gets the fixed test value as its argument).
+	diff = []
+	for i, (stored, pw, want) in enumerate(PLAIN_CASES):
+		if not stored.startswith("{"):
+			continue
+		rc, _ = doveadm(["-t", stored], pw.encode() + b"\n")
+		if (rc == 0) is not ph.verify_password(pw, stored):
+			diff.append(i)
+	check("plain-schemes-as-doveadm", not diff, "cases %s differ" % diff if diff else "")
 
 def main():
 	ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

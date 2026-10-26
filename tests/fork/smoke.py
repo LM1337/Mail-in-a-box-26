@@ -1443,16 +1443,19 @@ def c_admin_journal_no_hash(ctx):
     # ("{SHA512-CRYPT}$6$... (verified)" or "reverse password verification check failed") went to the journal
     # of mailinabox.service. Since the start of this run (its logins, the wrong password of api-auth, the
     # password change of api-write-roundtrip) the journal must have no such line. Prints counts only.
+    # journalctl runs on its own (no pipe), so that a failed sudo or journalctl, or a journal it may not read,
+    # is a Fail and not an empty count; the lines are counted here and never printed.
     secs = int(time.time() - ctx.t0) + 60
-    pat = r"\(verified\)|reverse password verification|\{[A-Z0-9.-]*CRYPT[A-Z0-9.-]*\}|\$[0-9a-z]{1,2}\$[./0-9A-Za-z=$]{8,}"
-    code, out, err = ctx.remote.run("journalctl -u mailinabox --no-pager -q -o cat --since %s | grep -c -E %s"
-                                    % (shlex.quote("-%ds" % secs), shlex.quote(pat)), sudo=True, timeout=60)
-    n = out.strip().splitlines()[-1] if out.strip() else ""
-    if code not in (0, 1) or not n.isdigit():
-        raise Fail("journalctl/grep failed (%d): %s" % (code, err.strip()[:200]))
-    if int(n):
-        raise Fail("%s line(s) of mailinabox's journal of the last %d s look like a password hash or doveadm pw's output" % (n, secs))
-    return "no password hash or doveadm pw output in mailinabox's journal of the last %d s" % secs
+    pat = re.compile(r"\(verified\)|reverse password verification|\{[A-Z0-9.-]*CRYPT[A-Z0-9.-]*\}|\$[0-9a-z]{1,2}\$[./0-9A-Za-z=$]{8,}")
+    code, out, err = ctx.remote.run("journalctl -u mailinabox --no-pager -o cat --since %s"
+                                    % shlex.quote("-%ds" % secs), sudo=True, timeout=60)
+    if code != 0 or re.search(r"insufficient permissions|not seeing messages|No journal files", err + out):
+        raise Fail("journalctl failed or may not read the journal (%d): %s" % (code, err.strip()[:200]))
+    lines = [x for x in out.splitlines() if x.strip() and not x.startswith("-- ")]
+    n = sum(1 for x in lines if pat.search(x))
+    if n:
+        raise Fail("%d line(s) of mailinabox's journal of the last %d s look like a password hash or doveadm pw's output" % (n, secs))
+    return "no password hash or doveadm pw output in %d lines of mailinabox's journal of the last %d s" % (len(lines), secs)
 
 
 def c_backup_status(ctx):
