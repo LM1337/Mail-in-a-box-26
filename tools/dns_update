@@ -3,4 +3,6 @@ POSTDATA=dummy
 if [ "$1" == "--force" ]; then
 	POSTDATA=force=1
 fi
-curl -s -d $POSTDATA --user "$(</var/lib/mailinabox/api.key):" http://127.0.0.1:10222/dns/update
+# The API key goes to curl as a config line on its standard input (printf is a
+# shell builtin), not on its command line, which every local process can read (B127).
+printf 'user = "%s:"\n' "$(</var/lib/mailinabox/api.key)" | curl -s -K - -d $POSTDATA http://127.0.0.1:10222/dns/update

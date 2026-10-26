@@ -48,7 +48,13 @@ if [ -z "$(management/cli.py user)" ]; then
 	fi
 
 	# Create the user's mail account. This will ask for a password if none was given above.
-	management/cli.py user add "$EMAIL_ADDR" ${EMAIL_PW:+"$EMAIL_PW"}
+	# A given password goes through standard input (printf is a shell builtin), not
+	# into the command line of cli.py, which every local process can read (B127).
+	if [ -n "${EMAIL_PW:-}" ]; then
+		printf '%s\n' "$EMAIL_PW" | management/cli.py user add "$EMAIL_ADDR" -
+	else
+		management/cli.py user add "$EMAIL_ADDR"
+	fi
 
 	# Make it an admin.
 	hide_output management/cli.py user make-admin "$EMAIL_ADDR"

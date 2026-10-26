@@ -3,9 +3,9 @@ from datetime import timedelta
 
 from expiringdict import ExpiringDict
 
-import utils
 from mailconfig import get_mail_password, get_mail_user_privileges
 from mfa import get_hash_mfa_state, validate_auth_mfa
+from password_hash import DUMMY_HASH, verify_password
 
 DEFAULT_KEY_PATH   = '/var/lib/mailinabox/api.key'
 DEFAULT_AUTH_REALM = 'Mail-in-a-Box Management Server'
@@ -105,16 +105,19 @@ class AuthService:
 			# email address does not correspond to a user. But wrap it in the
 			# same exception as if a password fails so we don't easily reveal
 			# if an email address is valid.
-			pw_hash = get_mail_password(email, env)
+			try:
+				pw_hash = get_mail_password(email, env)
+			except ValueError:
+				pw_hash = None
 
-			# Use 'doveadm pw' to check credentials. doveadm will return
-			# a non-zero exit status if the credentials are no good,
-			# and check_call will raise an exception in that case.
-			utils.shell('check_call', [
-				"/usr/bin/doveadm", "pw",
-				"-p", pw,
-				"-t", pw_hash,
-				])
+			# Check the password against the hash (B127: no longer with
+			# 'doveadm pw -p PASSWORD -t HASH', which put the password in the
+			# process arguments and printed the hash into the journal). An
+			# address that is no user is checked against a dummy hash, so it
+			# takes as long as a wrong password.
+			ok = verify_password(pw, pw_hash if pw_hash is not None else DUMMY_HASH)
+			if pw_hash is None or not ok:
+				raise ValueError
 		except:
 			# Login failed.
 			msg = "Incorrect email address or password."

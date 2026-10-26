@@ -83,6 +83,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
+* The control panel no longer writes the password hash of a user into the
+  journal at each login (`{SHA512-CRYPT}$6$... (verified)` or "reverse
+  password verification check failed", the output of `doveadm pw`), and a
+  password that the management daemon checks or sets is no longer in a
+  command line, which every local account can read: the daemon hashes and
+  checks SHA512-CRYPT itself (Python's crypt module is gone since 3.13) and
+  compares in constant time. It writes the same hashes as before and checks
+  every form MIAB and Roundcube store (with and without `rounds=`); other
+  schemes go to `doveadm pw -t`, with the password on its standard input;
+  a password stored in plain text by hand (`{PLAIN}`, `{CLEAR}`, `{CLEARTEXT}`,
+  `{PLAIN-TRUNC}`) is compared by the daemon itself, so that it is not in
+  doveadm's arguments either. A login with an unknown address takes as long as a wrong password. Setup
+  no longer puts the first user's password, and tools/dns_update and
+  tools/web_update no longer the API key, on a command line either (B127).
 
 ### Changed
 
@@ -109,6 +123,22 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   deliberate failures log (Z-Push's three IMAP tries, its exception and the
   new warning; for Autodiscover, which names no user in brackets, only with
   `--smoke`), and with `--internet` the same lines as password guessing.
+* `management/cli.py user add EMAIL -` and `user password EMAIL -` read the
+  password from standard input (its first line) instead of the command
+  line, which every local account can read; without a password they still
+  ask for it. Its usage text says so (B127).
+* Tests: the smoke test's new check `admin-journal-no-hash` (with `--ssh`)
+  fails when a line of the journal of `mailinabox.service` since the start
+  of the run looks like a password hash or the output of `doveadm pw`, and
+  when journalctl fails or may not read the journal (B127).
+  `tests/fork/password-hash.py` checks the control panel's SHA-512 crypt:
+  the test vectors of its specification, the plain-text schemes (without a
+  call of doveadm) and its limits without a box, and with `--doveadm` (on a
+  box, as root) random passwords against Dovecot's `doveadm pw` both ways,
+  other schemes through the fallback and the plain-text schemes against
+  doveadm's own result.
+  The log audit no longer accepts doveadm's "reverse password verification
+  check failed" (smoke and Internet lists): the daemon no longer logs it.
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
@@ -171,6 +201,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   permissions in another place.
 * The first update with this release reloads Dovecot once (its open IMAP
   sessions log in again), as the checksum of its configuration is new.
+* The password hashes that the control panel's logins wrote before (B127)
+  stay in the journal and in `/var/log/syslog` until these are rotated
+  away. To remove them at once: `journalctl --rotate` and
+  `journalctl --vacuum-time=1s` (this deletes the whole journal up to now),
+  and delete the syslog files that hold such lines, the compressed rotated
+  ones (`syslog.2.gz` and older) too: `zgrep -l 'verified)'
+  /var/log/syslog*` lists them all (plain `grep` does not look into the
+  `.gz` files). Otherwise they stay until logrotate drops them. The nightly
+  backups do not contain `/var/log`.
+* A new password with a null character or of more than 511 bytes is now
+  refused with a message (B127). Before, such a password gave a hash that no
+  password matched. Existing passwords are not changed.
 
 ### Planned
 

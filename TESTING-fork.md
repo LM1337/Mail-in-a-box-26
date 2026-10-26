@@ -204,7 +204,14 @@ report. The groups:
 * **admin**: admin API login, creating and deleting a user and an alias,
   backup status; from rc4 the fail2ban API, settings, report, filters (with
   injected user names) and the Intrusion Protection page; after rc7 the
-  status wants `miab-zpush`, and the filter cases cover it (B126).
+  status wants `miab-zpush`, and the filter cases cover it (B126). After
+  rc7, with `--ssh` and after the **api** group: `admin-journal-no-hash`,
+  no line of the journal of `mailinabox.service` since the start of the run
+  looks like a password hash or the output of `doveadm pw` (B127; the run's
+  logins, wrong passwords and password changes included). It reads the
+  journal with journalctl alone and counts on the test host: a failed
+  `sudo` or journalctl, or a journal it may not read, is a FAIL, not an
+  empty count.
 * **api** (from rc7): the management API as `api/mailinabox.yml` documents
   it. Auth: 401 without credentials (text or JSON by `Accept`, 403 for an
   XMLHttpRequest) and with a wrong password, the API key works, a second
@@ -228,6 +235,17 @@ report. The groups:
   fail2ban). While `api-munin-alerts` has the alerts set to off or to a
   custom address (a few seconds), a real alert of Munin in that moment is
   not sent or goes to the test mailbox.
+  `tests/fork/password-hash.py` (after rc7; no box needed, with `--doveadm`
+  on a box as root) checks the control panel's SHA-512 crypt (B127): the
+  test vectors of its specification, the stored forms it checks itself, the
+  plain-text schemes (`{PLAIN}`, `{CLEAR}`, `{CLEARTEXT}`, `{PLAIN-TRUNC}`,
+  HEX and B64 encodings; doveadm must not be called for them), its limits,
+  and with
+  `--doveadm` random passwords (8 to 511 bytes, no line breaks: doveadm
+  reads only one line, so these are tested offline) against Dovecot's
+  `doveadm pw` both ways, wrong passwords, other schemes through the
+  doveadm fallback, and the plain-text cases against doveadm's own result.
+  The random passwords go to doveadm on its standard input.
   `tests/fork/api-routes.py` (no box needed) checks that every route of
   `management/daemon.py` is documented and every documented operation has a
   route, that `smoke.py` calls or excludes each of them, and the content

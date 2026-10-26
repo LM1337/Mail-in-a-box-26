@@ -1484,6 +1484,26 @@ def c_admin_tmp_user_alias(ctx):
     return "add/list/remove of user and alias ok, %s" % remove_test_mailbox(ctx, tmp)
 
 
+def c_admin_journal_no_hash(ctx):
+    # B127: the management daemon checked panel logins with 'doveadm pw -p PASSWORD -t HASH', whose output
+    # ("{SHA512-CRYPT}$6$... (verified)" or "reverse password verification check failed") went to the journal
+    # of mailinabox.service. Since the start of this run (its logins, the wrong password of api-auth, the
+    # password change of api-write-roundtrip) the journal must have no such line. Prints counts only.
+    # journalctl runs on its own (no pipe), so that a failed sudo or journalctl, or a journal it may not read,
+    # is a Fail and not an empty count; the lines are counted here and never printed.
+    secs = int(time.time() - ctx.t0) + 60
+    pat = re.compile(r"\(verified\)|reverse password verification|\{[A-Z0-9.-]*CRYPT[A-Z0-9.-]*\}|\$[0-9a-z]{1,2}\$[./0-9A-Za-z=$]{8,}")
+    code, out, err = ctx.remote.run("journalctl -u mailinabox --no-pager -o cat --since %s"
+                                    % shlex.quote("-%ds" % secs), sudo=True, timeout=60)
+    if code != 0 or re.search(r"insufficient permissions|not seeing messages|No journal files", err + out):
+        raise Fail("journalctl failed or may not read the journal (%d): %s" % (code, err.strip()[:200]))
+    lines = [x for x in out.splitlines() if x.strip() and not x.startswith("-- ")]
+    n = sum(1 for x in lines if pat.search(x))
+    if n:
+        raise Fail("%d line(s) of mailinabox's journal of the last %d s look like a password hash or doveadm pw's output" % (n, secs))
+    return "no password hash or doveadm pw output in %d lines of mailinabox's journal of the last %d s" % (len(lines), secs)
+
+
 def c_backup_status(ctx):
     r = admin_api(ctx, "GET", "system/backup/status")
     if r.status != 200:
@@ -3479,6 +3499,7 @@ def main():
     ctx.admin_auth = None
     ctx.nc_ids = {}
     ctx.tok = uuid.uuid4().hex[:10]
+    ctx.t0 = time.time()
     ctx.remote = Remote(args.ssh)
     SECRETS.update({ctx.user_pw, ctx.admin_pw or ""})
     if not ctx.user_pw and not (args.send_test_mail and args.via == "25"):
@@ -3540,6 +3561,8 @@ def main():
         run_check("api-read-only", c_api_read_only, ctx)
         run_check("api-write-roundtrip", c_api_write_roundtrip, ctx)
         run_check("api-munin-alerts", c_api_munin_alerts, ctx)
+    if want("admin") or want("api"):
+        run_check("admin-journal-no-hash", c_admin_journal_no_hash, ctx)
     if want("dns"):
         print("== dns")
         for zone in (ctx.domain, ctx.seed2, ctx.seed3):

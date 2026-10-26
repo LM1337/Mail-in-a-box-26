@@ -12,6 +12,7 @@
 import os, sqlite3, re
 
 import utils
+import password_hash
 from email_validator import validate_email as validate_email_, EmailNotValidError
 import idna
 import operator
@@ -405,7 +406,9 @@ def hash_password(pw):
 	# Turn the plain password into a Dovecot-format hashed password, meaning
 	# something like "{SCHEME}hashedpassworddata".
 	# http://wiki2.dovecot.org/Authentication/PasswordSchemes
-	return utils.shell('check_output', ["/usr/bin/doveadm", "pw", "-s", "SHA512-CRYPT", "-p", pw]).strip()
+	# SHA512-CRYPT, computed in Python (management/password_hash.py): through
+	# 'doveadm pw -p PASSWORD' the password was in the process arguments (B127).
+	return password_hash.hash_password(pw)
 
 
 def get_mail_quota(email, env):
@@ -752,6 +755,14 @@ def validate_password(pw):
 		raise ValueError(msg)
 	if len(pw) < 8:
 		msg = "Passwords must be at least eight characters."
+		raise ValueError(msg)
+	# What Dovecot's crypt(3) cannot hash (B127): it ends the password at a
+	# null character, and refuses one of 512 bytes or more.
+	if "\0" in pw:
+		msg = "Passwords cannot contain a null character."
+		raise ValueError(msg)
+	if len(pw.encode("utf-8", "surrogateescape")) > password_hash.PASSWORD_MAX_BYTES:
+		msg = f"Passwords cannot be longer than {password_hash.PASSWORD_MAX_BYTES} bytes (in UTF-8)."
 		raise ValueError(msg)
 
 if __name__ == "__main__":
