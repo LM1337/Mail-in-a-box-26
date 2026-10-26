@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116 and B118 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116, B118 and B119 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -38,8 +38,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-114 bugs: 2 critical, 17 high, 43 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+115 bugs: 2 critical, 17 high, 44 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -47,7 +47,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 33 |
+| Fork | 34 |
 
 32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -171,6 +171,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B116](#b116) | low | Tools | update-check.sh runs the status checks and the backup from a checkout that it has just rejected | Fork | no | no | rc7 |
 | [B117](#b117) | low | Tools | The tools take the backup target and passphrase, and write custom.yaml, through a directory that the user-data account can replace | Fork | no | no | rc7 |
 | [B118](#b118) | low | Tools | The fallback SSH server misses Match blocks in files included from included files | Fork | no | no | rc7 |
+| [B119](#b119) | medium | Tools | The fallback SSH server does not start for the release upgrade that begins right after the reboot into 24.04 | Fork | no | no | rc7 |
 
 ## Details
 
@@ -1408,9 +1409,9 @@ upstream pull requests, independent of the 26.04 port.
 
 * **Symptom:** After `tools/upgrade-in-place-to-2604.sh --ssh-fallback-test` on a box that never ran the tool, an empty directory `/root/upgrade-2604` (root, mode 0700) is left.
 * **Cause:** The test creates the tool's state directory for the files of the fallback and removed only those files afterwards.
-* **Fix:** The test removes the state directory again when it made it and it is empty (`rmdir`, which removes neither a symbolic link nor a directory with files).
+* **Fix:** The test removes the state directory again when it made it and it is empty (`rmdir`, which removes neither a symbolic link nor a directory with files), from the exit handler, so also when the fallback does not start (a refusal) or the test is ended with Ctrl-C; the first fix covered only a test that ran to its end.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
-* **Evidence:** The in-place test T3 of rc7. With the fix, on the fresh-install test box: after a test of 30 s neither `/root/upgrade-2604` nor the ufw rule for port 1022 nor files of the fallback were left.
+* **Evidence:** The in-place test T3 of rc7. With the fix, on the fresh-install test box: after a test of 30 s neither `/root/upgrade-2604` nor the ufw rule for port 1022 nor files of the fallback were left. The review run of the fixes (T4) left an empty `/root/upgrade-2604` after a test that refused to start (a `Match` block); with the second fix, on the 24.04 test box, nothing was left after such a refusal.
 * **Found by:** rc7 certification (T3); **commit:** see `git log --grep B111`; **fixed in:** v78-r2604.0-rc7
 
 ### B112
@@ -1489,6 +1490,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork.
 * **Evidence:** from reading the code. On the fresh-install test box, with the function of the tool: a `Match User` block two levels down and a lower-case `match address` three levels down (with a relative `include`) were found, a loop of two files ended without a refusal, and without the test files there was none.
 * **Found by:** rc7 review (of the certification fixes); **commit:** see `git log --grep B118`; **fixed in:** v78-r2604.0-rc7
+
+### B119
+
+**The fallback SSH server does not start for the release upgrade that begins right after the reboot into 24.04** (medium, Tools)
+
+* **Symptom:** On a box upgraded from 22.04, the second release upgrade (24.04 to 26.04) starts by itself after the reboot, and the tool says "WARNING: sshd -T fails; no fallback SSH server." New SSH logins then fail while that release upgrade replaces OpenSSH, as before rc7. The first release upgrade, and a release upgrade started from an SSH session, are not affected.
+* **Cause:** `sshd -T` (and the fallback itself) needs `/run/sshd`, the privilege separation directory, and fails with "Missing privilege separation directory: /run/sshd" without it. On 24.04 sshd is socket activated: ssh.service, whose RuntimeDirectory is `/run/sshd`, starts only with the first SSH connection after the boot. The tool resumes at boot, before anyone has logged in. The test runs before had not shown it, because the outage monitor of the lab logged in every few seconds.
+* **Fix:** Before `sshd -T` (for the fallback and for the listen addresses of the banner check) the tool creates `/run/sshd` (mode 0755) when it is missing, as its watcher already did during the release upgrade: `/run` is root's own, `mkdir` follows no symbolic link, and a symbolic link there is left alone.
+* **Affects:** the development of rc7 only (never in a tag). Origin: Fork. Every in-place upgrade from 22.04 (the second release upgrade always starts after a reboot), unless someone logs in over SSH between the boot and its start.
+* **Evidence:** The review run of the fixes, T4: the warning above at the start of the release upgrade to 26.04. On the 24.04 test box right after a boot, through the guest agent (no SSH login): `/run/sshd` missing, `sshd -T` exit code 255 with that message, ssh.socket active and ssh.service inactive; with the fix, `--ssh-fallback-test` there started the fallback on port 1022 and created `/run/sshd`.
+* **Found by:** rc7 review run (T4 after the review fixes); **commit:** see `git log --grep B119`; **fixed in:** v78-r2604.0-rc7
 
 ## Not counted above
 

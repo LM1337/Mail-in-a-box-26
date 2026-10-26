@@ -187,6 +187,7 @@ MIAB_DIR=
 SELF=$STATE_DIR/$SCRIPT_NAME
 SELF_FILE=
 FALLBACK_STARTED=
+FALLBACK_TEST_RMDIR=
 SSH_WATCH_PID=
 BACKUP_DIR=
 BACKUP_DIR_FD=
@@ -403,6 +404,10 @@ on_exit() {
 		if [ -n "$FALLBACK_STARTED" ]; then ssh_fallback_stop if-ssh-works; fi
 	} || true
 	if [ -n "$LOCKED" ] && [ "$(cat "$STATE_DIR/pid" 2> /dev/null || true)" = "$$" ]; then rm -f "$STATE_DIR/pid"; fi
+	# --ssh-fallback-test that stopped (a refusal, Ctrl-C): its state
+	# directory, if it made it and it is empty (B111). rmdir removes neither
+	# a link nor a directory with files.
+	if [ -n "$FALLBACK_TEST_RMDIR" ]; then rmdir "$STATE_DIR" 2> /dev/null || true; fi
 	[ "$rc" != 0 ] || return 0
 	[ -z "$CHECK_ONLY" ] || return 0
 	{
@@ -3230,6 +3235,7 @@ port_listening() { # PORT
 ssh_check_hosts() {
 	[ ${#SSH_CHECK_HOSTS[@]} = 0 ] || return 0
 	local key val host
+	ensure_run_sshd
 	while read -r key val; do
 		[ "$key" = listenaddress ] || continue
 		host=${val%% *}
@@ -3243,6 +3249,16 @@ ssh_check_hosts() {
 		[[ " ${SSH_CHECK_HOSTS[*]} " == *" $host "* ]] || SSH_CHECK_HOSTS+=("$host")
 	done < <(sshd -T 2> /dev/null < /dev/null || true)
 	[ ${#SSH_CHECK_HOSTS[@]} -gt 0 ] || SSH_CHECK_HOSTS=(127.0.0.1 ::1)
+}
+
+# /run/sshd (privilege separation), without which sshd -T and the fallback
+# fail ("Missing privilege separation directory"). With socket activation
+# (24.04) it exists only once ssh.service has run since the boot: after the
+# reboot into 24.04 the second release upgrade starts before anyone logs in,
+# and there was no fallback for it (B119). As the watcher: /run is root's
+# own, mkdir follows no symlink, and a symlink there is left alone.
+ensure_run_sshd() {
+	if [ ! -d /run/sshd ] && [ ! -L /run/sshd ]; then mkdir -m 0755 /run/sshd 2> /dev/null || true; fi
 }
 
 # Does an SSH server answer on PORT of one of these addresses (its banner)? It
@@ -3437,6 +3453,7 @@ ssh_fallback_start() { # [UNTIL (how long it runs, for the message)]
 		return 0
 	fi
 	[ -x /usr/sbin/sshd ] || { warn "/usr/sbin/sshd is missing; no fallback SSH server."; return 0; }
+	ensure_run_sshd
 	if ! t=$(sshd -T 2> /dev/null < /dev/null); then
 		warn "sshd -T fails; no fallback SSH server."
 		return 0
@@ -4885,14 +4902,12 @@ main() {
 		return 0
 	fi
 	if [ "$COMMAND" = ssh_fallback_test ]; then
-		local had_state=
-		if [ -e "$STATE_DIR" ] || [ -L "$STATE_DIR" ]; then had_state=1; fi
+		# The state directory, if it was made only for the test, is removed
+		# again when it is empty (on_exit, also after a refusal; B111).
+		if [ ! -e "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ]; then FALLBACK_TEST_RMDIR=1; fi
 		(umask 077 && mkdir -p "$STATE_DIR")
 		chmod 700 "$STATE_DIR"
 		do_ssh_fallback_test
-		# The state directory, if it was made only for the test and is empty
-		# again (B111). rmdir removes neither a link nor a directory with files.
-		if [ -z "$had_state" ]; then rmdir "$STATE_DIR" 2> /dev/null || true; fi
 		return 0
 	fi
 

@@ -63,7 +63,8 @@ of rc7 (T1 to T5b) found B106 to B110 and B114 in `tools/update-check.sh` and
 its lists of expected changes, B111 and B112 in the fallback SSH server and
 B113 in the migration tool's check; the review of those fixes found B115 and
 B118 in the fallback SSH server, B116 in `tools/update-check.sh` and B117 in
-how the tools use `$STORAGE_ROOT/backup` (all fixed).
+how the tools use `$STORAGE_ROOT/backup`, and the test runs after it B119 in
+the fallback SSH server (all fixed).
 
 ### New
 
@@ -390,6 +391,12 @@ how the tools use `$STORAGE_ROOT/backup` (all fixed).
 * Tools: the fallback SSH server also refuses to start when a file included
   from an included file (for example from `sshd_config.d/*.conf`) has a
   `Match` block; it looked one level deep only (B118).
+* Tools: the fallback SSH server also starts for the release upgrade that
+  begins by itself after the reboot into 24.04: with socket activation
+  `/run/sshd` is missing until the first SSH login, so `sshd -T` failed and
+  there was no fallback (B119). The tool creates the directory first. A
+  `--ssh-fallback-test` that does not start no longer leaves an empty
+  `/root/upgrade-2604` either (B111).
 
 ### Changed
 
