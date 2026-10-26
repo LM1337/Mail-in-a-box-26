@@ -147,7 +147,10 @@ elif [ -n "$PROBE_ADDRESS" ]; then
 	echo "PROBE_ADDRESS=$PROBE_ADDRESS is not a plain mail address; it is left out of /etc/mailinabox.conf."
 fi
 
-# Start service configuration.
+# Start service configuration. PHP-FPM is restarted once, after zpush.sh, not
+# by each script that changes its configuration (restart_php_fpm in
+# setup/functions.sh).
+PHP_FPM_RESTART=later
 source setup/system.sh
 source setup/ssl.sh
 source setup/dns.sh
@@ -160,6 +163,8 @@ source setup/web.sh
 source setup/webmail.sh
 source setup/nextcloud.sh
 source setup/zpush.sh
+PHP_FPM_RESTART=
+restart_php_fpm
 source setup/management.sh
 source setup/munin.sh
 
@@ -178,12 +183,22 @@ tools/web_update
 # Write the adaptive fail2ban configuration (repeat offenders get longer bans,
 # slow jails, allowlist) from the "fail2ban" settings in settings.yaml. It is
 # written here and not in system.sh because it needs the management venv and
-# the log files of the slow jails.
-management/fail2ban_admin.py --setup
+# the log files of the slow jails. Exit code 3: the bantime.* options changed,
+# and the jails must be restarted to drop removed ones.
+f2b_setup_rc=0
+management/fail2ban_admin.py --setup || f2b_setup_rc=$?
 
-# Give fail2ban another restart. The log files may not all have been present when
-# fail2ban was first configured, but they should exist now.
-restart_service fail2ban
+# Load fail2ban's configuration (system.sh and the adaptive one). The log files
+# may not all have been present when fail2ban was first configured, but they
+# should exist now. A reload keeps the bans; fail2ban is restarted only when it
+# does not run (B122).
+if [ "$f2b_setup_rc" = 3 ]; then
+	reload_fail2ban --restart
+elif [ "$f2b_setup_rc" = 0 ]; then
+	reload_fail2ban
+else
+	exit "$f2b_setup_rc"
+fi
 
 # If there aren't any mail users yet, create one.
 source setup/firstuser.sh

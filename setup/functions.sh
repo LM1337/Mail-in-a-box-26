@@ -225,6 +225,126 @@ function restart_service {
 	hide_output service "$1" restart
 }
 
+# Setup restarted the mail services several times per run: Dovecot 3, Postfix
+# 3, PHP-FPM 4, fail2ban 2 times. Each restart closes the listening sockets for
+# a second or two, and the clients of the box notice: IMAP logins fail, and
+# Nextcloud's IMAP login (user_external), which Z-Push's CalDAV/CardDAV calls
+# go through, counted each of those as a failed login of 127.0.0.1 (B121,
+# B122). The functions below load a new configuration with a reload where the
+# service supports it (the listening sockets stay), and restart only when the
+# service does not run or runs the program of an older package.
+
+function service_runs_current_package {
+	# True if the unit is active and was started after the package was last
+	# installed or upgraded. An upgrade normally restarts its service (dpkg);
+	# one that left the old process running (or a service started before the
+	# package of a plugin it loads) needs a restart, a reload is not enough.
+	local unit=$1 pkg=$2 started installed
+	systemctl is-active --quiet "$unit" || return 1
+	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
+	[ -n "$started" ] || return 1
+	started=$(date -d "$started" +%s 2> /dev/null) || return 1
+	installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
+	[[ $installed =~ ^[0-9]+$ ]] || return 1
+	[ "$installed" -le "$started" ]
+}
+
+function reload_fail2ban {
+	# fail2ban unbans every address when it stops and bans them again from its
+	# database only after it has started (about 2 seconds without any ban). A
+	# reload keeps the running jails and their bans, starts the new jails and
+	# stops the removed ones. "reload_fail2ban --restart" also restarts the
+	# jails (needed when bantime.* options were removed, see
+	# management/fail2ban_admin.py); their bans come back from the database.
+	# fail2ban is restarted only when it does not run, runs an older package,
+	# or refuses the reload (then the restart shows the same error in its log,
+	# as before).
+	enable_service fail2ban
+	if service_runs_current_package fail2ban.service fail2ban && fail2ban-client ping > /dev/null 2>&1; then
+		if fail2ban-client reload "$@" > /dev/null 2>&1; then
+			return 0
+		fi
+		echo "fail2ban did not reload its configuration; restarting it."
+	fi
+	hide_output service fail2ban restart
+}
+
+function reload_postfix {
+	# Postfix reads main.cf and master.cf again on a reload; its processes
+	# finish their sessions first. Only inet_interfaces and inet_protocols
+	# need a restart: pass "restart" when they changed. Postfix is also
+	# restarted when it does not run or runs an older package.
+	enable_service postfix
+	if [ "${1:-}" != restart ] && service_runs_current_package postfix.service postfix \
+			&& postfix status > /dev/null 2>&1; then
+		hide_output postfix check
+		hide_output service postfix reload
+		return
+	fi
+	hide_output service postfix restart
+}
+
+function restart_php_fpm {
+	# setup/web.sh, webmail.sh, nextcloud.sh and zpush.sh each change PHP-FPM's
+	# configuration (php.ini, the pool, PHP modules). A restart ends the running
+	# requests, ActiveSync's long polls among them, and nginx answers 502 for
+	# a moment. setup/start.sh sets PHP_FPM_RESTART=later and restarts PHP-FPM
+	# once, after the last of them; a script run on its own restarts it at
+	# once. Not a reload: with process_control_timeout at 0 (the package's
+	# default) a reload ends the running requests just the same, and a reload
+	# that fails leaves PHP-FPM stopped.
+	if [ "${PHP_FPM_RESTART:-}" = later ]; then
+		return 0
+	fi
+	restart_service php"$PHP_VER"-fpm
+}
+
+function load_dovecot {
+	# Load Dovecot's configuration after setup has written all of it.
+	# doveconf -n first: a configuration that Dovecot refuses stops setup with
+	# Dovecot's message, and the running Dovecot keeps the old one.
+	#
+	# Nothing is done when Dovecot runs the program of the current package and
+	# already loaded this configuration (its checksum is kept in
+	# /run/mailinabox-dovecot.sha256): an update that changes nothing in
+	# Dovecot's files does not disturb its clients at all. Otherwise a reload
+	# (doveadm reload): the listening sockets stay, so no connection is
+	# refused, but Dovecot ends the running IMAP sessions (the clients log in
+	# again). Dovecot is restarted only when it does not run or runs an older
+	# package.
+	#
+	# The reload is asynchronous: wait until the master has read the new
+	# configuration (it writes its binary copy again) before the caller runs
+	# doveadm against it.
+	#
+	# The checksum covers doveconf -n and, as Dovecot reads the certificate,
+	# key and DH files only when it loads its configuration, their size and
+	# time (stat, which reads nothing through a link).
+	local conf sum before i record=/run/mailinabox-dovecot.sha256
+	conf=$(doveconf -n 2>&1) || { echo; echo "FAILED: doveconf -n"; echo "$conf"; exit 1; }
+	sum=$( {
+		printf '%s\n' "$conf"
+		sed -nE 's/^ *(ssl_server_)?(cert|key|dh)_file = //p' <<< "$conf" | while read -r f; do
+			stat -L -c '%n %i %s %Y' -- "$f" 2> /dev/null || echo "$f missing"
+		done
+	} | sha256sum | cut -d' ' -f1)
+	enable_service dovecot
+	if service_runs_current_package dovecot.service dovecot-core && doveadm process status > /dev/null 2>&1; then
+		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+			return 0
+		fi
+		before=$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)
+		hide_output systemctl reload dovecot
+		for i in $(seq 100); do
+			[ "$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)" != "$before" ] && break
+			sleep 0.1
+		done
+	else
+		hide_output service dovecot restart
+	fi
+	echo "$sum" > "$record"
+}
+
 function reload_nginx {
 	# Load a new nginx configuration. A reload lets the old workers finish
 	# their requests; a restart gives them only the unit's stop timeout (5 s

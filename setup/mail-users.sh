@@ -38,7 +38,9 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # On Dovecot 2.3 MIAB allowed deliveries to overshoot the quota by 10%; 2.4's
 # quota_storage_grace only takes a size, so the userdb computes 10% of each
 # user's quota (G and M are 2^30/2^20 bytes, divided by 10 and rounded down).
-cat > /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
+# Written atomically (tools/write_conf.py): a Dovecot config process that
+# started while this file was truncated ran without a passdb (B120).
+tools/write_conf.py /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
 
@@ -53,7 +55,7 @@ userdb sql {
 EOF
 
 # Have Dovecot provide an authorization service that Postfix can access & use.
-cat > /etc/dovecot/conf.d/99-local-auth.conf << EOF;
+tools/write_conf.py /etc/dovecot/conf.d/99-local-auth.conf << EOF;
 service auth {
   unix_listener /var/spool/postfix/private/auth {
     mode = 0666
@@ -149,11 +151,17 @@ dbpath=$db_path
 query = SELECT destination from (SELECT destination, 0 as priority FROM aliases WHERE source='%s' AND destination<>'' UNION SELECT email as destination, 1 as priority FROM users WHERE email='%s' UNION SELECT destination, 2 as priority FROM auto_aliases WHERE source='%s' AND destination<>'') ORDER BY priority LIMIT 1;
 EOF
 
-# Restart Services
-##################
+# Load the new configuration
+############################
 
-restart_service postfix
-restart_service dovecot
+# A reload instead of a restart, so that the listening sockets never close
+# (B122), and for Dovecot nothing at all when its configuration did not
+# change. Dovecot gets its whole configuration (setup/mail-dovecot.sh and the
+# passdb and userdb above) at once, and before the doveadm commands below,
+# which need the userdb (B120).
+
+reload_postfix
+load_dovecot
 
 # force a recalculation of all user quotas
 doveadm quota recalc -A

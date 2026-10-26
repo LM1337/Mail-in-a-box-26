@@ -124,6 +124,37 @@ test (results in "rc7" below):
   real external probe address (delivery to another provider and back, DKIM
   and SPF there), Let's Encrypt, a box on the Internet.
 
+### Client load during updates
+
+The smoke test runs after a setup run, so it does not see what clients see
+while setup runs (B120 to B123 were found on a production box with phones
+and webmail open during an update). `tests/fork/client-load.py` keeps the
+clients of two test users busy (ActiveSync Sync and Ping on their calendars
+and contacts, CalDAV and CardDAV PROPFIND, an IMAP login every second, an
+IMAP IDLE connection, SMTP AUTH on 587, a Roundcube session refreshing its
+inbox) and sorts each request into ok, auth (login refused), throttled
+(Nextcloud's brute-force protection), unavailable (no connection, HTTP 5xx,
+a temporary failure), disconnect (a Ping, IDLE or Roundcube session cut) or
+error. Its summary has the counts per client type, the longest outage and
+the first failures with their times; `--report` writes them as JSON.
+
+The update scenarios (T3, T4 and T5b; also T1's second setup runs) run it
+on the box under test, as a normal user with the clients on 127.0.0.1 (as
+Z-Push's own calls; fail2ban ignores that address), from a minute before
+setup starts until three minutes after it ends (Nextcloud's throttle
+showed only after setup), for example:
+
+    tests/fork/client-load.py --host 127.0.0.1 --hostname box.example.net \
+        --user alice@example.net --user bob@seed2.example.net \
+        --env-file credentials.env --duration 1200 --report load.json
+
+For the in-place upgrades (T3, T4) it runs around the setup phase only:
+mail is offline during the release upgrades. Pass criterion: no auth,
+throttled or error result; unavailable results and disconnects only while
+setup restarts a service, each outage shorter than `--max-outage` (30 s).
+An IMAP IDLE or ActiveSync Ping that a restart cuts and that reconnects is
+fine, a failed login is not. Afterwards `smoke.py --only activesync`.
+
 ### What the smoke test checks
 
 `tests/fork/smoke.py` prints PASS, FAIL or SKIP per check and writes a JSON
@@ -175,6 +206,14 @@ report. The groups:
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail
   password; Nextcloud sharing within the mail domain (from rc4); Roundcube
   login; Z-Push OPTIONS and Autodiscover.
+* **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
+  and ::1 are on Nextcloud's brute-force bypass list, with 0 attempts and
+  no delay (B121); `zpush-sync`: an ActiveSync account as a phone sets it
+  up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
+  contact folders), and a marked event and contact put into alice's
+  Nextcloud over DAV just before arrive; both are deleted again, and the
+  test device is removed from Z-Push (with `--ssh`). Quick enough to run
+  right after a setup run: `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail
   to the 10 MB mailbox rejected at RCPT; GETQUOTAROOT; the greylisting
@@ -643,7 +682,9 @@ Seen in the runs, not fixed in rc7:
 8. Setup restarts Dovecot (setup/mail-dovecot.sh) before
    setup/mail-users.sh has written its passdb, and again two seconds later:
    a login in between fails once ("No passdbs specified"; seen once, from
-   the lab's probe in T5b). The client tries again.
+   the lab's probe in T5b). The client tries again. Fixed after rc7 (B120):
+   the update of a production box from rc6 to rc7 showed what such failures
+   do to Nextcloud (B121).
 
 Of the open findings of rc6, 1 (the `--check` plan named the fallback SSH
 server, and from `6235572` on also says that new SSH logins and sudo fail
@@ -712,6 +753,10 @@ Everything is in `tests/fork/`:
   never a production box. Run it as root after every install or upgrade.
 * `smoke.py` runs the checks. `tests/fork/smoke.py --help` lists the options;
   the header of the script has the typical runs for T1, T2 and the baseline.
+* `client-load.py` keeps clients busy during an update and counts what
+  failed (see "Client load during updates"); `eas.py` is the small
+  ActiveSync client that it and `smoke.py` use, also on its own
+  (`EAS_USER=... EAS_PW=... tests/fork/eas.py HOSTNAME`).
 * `log-audit.sh` audits the logs of a box under test (as root, on the box,
   read-only): all warnings and errors since `--since TIME` (default: the last
   boot), as message classes with counts and examples (secrets masked),

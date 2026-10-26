@@ -147,7 +147,7 @@ chown -R "$STORAGE_USER" "$STORAGE_ROOT/www"
 
 # Start services.
 reload_nginx
-restart_service php"$PHP_VER"-fpm
+restart_php_fpm
 
 # Open ports.
 ufw_allow http

@@ -26,7 +26,7 @@
 # NAME VAL
 #   UE
 
-import sys, re
+import os, sys, re
 
 # sanity check
 if len(sys.argv) < 3:
@@ -143,9 +143,16 @@ for i in range(len(settings)):
 			buf += name + delimiter + val + "\n"
 
 if not testing:
-	# Write out the new file.
-	with open(filename, "w", encoding="utf-8") as f:
-		f.write(buf)
+	# Write out the new file, only if it changed, and atomically (a new file
+	# renamed over the old one): a service that reads its configuration in
+	# that moment must not see it empty (B120). See tools/write_conf.py.
+	sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+	from write_conf import write_if_changed
+	try:
+		write_if_changed(filename, buf.encode("utf-8"))
+	except OSError as e:
+		print("editconf.py: %s" % e, file=sys.stderr)
+		sys.exit(1)
 else:
 	# Just print the new file to stdout.
 	print(buf)

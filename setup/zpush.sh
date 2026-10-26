@@ -108,7 +108,7 @@ EOF
 
 # Restart service.
 
-restart_service php"$PHP_VER"-fpm
+restart_php_fpm
 
 # Fix states after upgrade
 

@@ -22,7 +22,8 @@
 # allowlist no file is written, which is exactly Mail-in-a-Box's own setup.
 #
 # Command line (as root, from the Mail-in-a-Box directory):
-#   management/fail2ban_admin.py --setup        write the files, no reload (setup/start.sh)
+#   management/fail2ban_admin.py --setup        write the files, no reload (setup/start.sh;
+#                                               exit code 3: the jails need a restart)
 #   management/fail2ban_admin.py --apply        write the files, reload fail2ban if they changed
 #   management/fail2ban_admin.py --print        show what would be written
 #   management/fail2ban_admin.py --allow NET    add an address or network to the allowlist and apply
@@ -411,6 +412,7 @@ def apply_config(env, settings=None, reload=True):
 	# restored from fail2ban's database, only the failures counted so far are
 	# lost.
 	restart = _bantime_options(old[JAIL_FILE]) != _bantime_options(files[JAIL_FILE])
+	result["restart_jails"] = restart
 	reload_args = ["reload", "--restart"] if restart else ["reload"]
 	if reload and is_running():
 		try:
@@ -1011,8 +1013,10 @@ if __name__ == "__main__":
 	env = utils.load_environment()
 	args = sys.argv[1:]
 	if args == ["--setup"]:
-		# Called by setup/start.sh right before fail2ban is restarted. Never
+		# Called by setup/start.sh right before fail2ban is reloaded. Never
 		# stops setup: on a problem Mail-in-a-Box's own jails stay in effect.
+		# Exit code 3 when the bantime.* options changed: setup then has
+		# fail2ban restart its jails ("reload --restart", see apply_config).
 		settings, warnings = get_settings(env)
 		for w in warnings:
 			print(w)
@@ -1022,9 +1026,12 @@ if __name__ == "__main__":
 			print("Adaptive fail2ban was not configured:", e)
 			for path in (JAIL_FILE, SERVER_FILE):
 				_write(path, None)
-			sys.exit(0)
+			# The removed files may have had bantime.* options.
+			sys.exit(3)
 		for j in result["skipped_jails"]:
 			print(f"fail2ban: {j} left out, its log file does not exist yet.")
+		if result.get("restart_jails"):
+			sys.exit(3)
 	elif args == ["--apply"]:
 		print(json.dumps(apply_config(env), indent=2))
 	elif args == ["--print"]:

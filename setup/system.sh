@@ -553,8 +553,9 @@ cp -f conf/fail2ban/filter.d/* /etc/fail2ban/filter.d/
 # On first installation, the log files that the jails look at don't all exist.
 # e.g., The roundcube error log isn't normally created until someone logs into
 # Roundcube for the first time. This causes fail2ban to fail to start. Later
-# scripts will ensure the files exist and then fail2ban is given another
-# restart at the very end of setup.
-restart_service fail2ban
+# scripts will ensure the files exist, and setup/start.sh loads the new
+# configuration at the very end of setup, with a reload that keeps the bans
+# (reload_fail2ban). It is not restarted here: each restart lifted all bans for
+# a moment (B122).
 
 systemctl enable fail2ban

@@ -44,6 +44,10 @@ source /etc/mailinabox.conf # load global vars
 echo "Installing Postfix (SMTP server)..."
 apt_install postfix postfix-sqlite postfix-pcre postgrey ca-certificates
 
+# The listen settings as they were before this run: Postfix needs a restart
+# (not a reload) only when they change, see the end of this file.
+postfix_listen_before=$(postconf -h inet_interfaces inet_protocols 2> /dev/null || true)
+
 # ### Basic Settings
 
 # Set some basic settings...
@@ -351,7 +355,12 @@ if [ "$(cat "$POSTFIX_DROPIN" 2> /dev/null)" != "$POSTFIX_DROPIN_TEXT" ]; then
 	systemctl daemon-reload
 fi
 
-# Restart services
+# Restart services. Postfix reloads (B122): a restart only when the listen
+# settings changed (on the first run) or Postfix does not run.
 
-restart_service postfix
+if [ "$(postconf -h inet_interfaces inet_protocols)" != "$postfix_listen_before" ]; then
+	reload_postfix restart
+else
+	reload_postfix
+fi
 restart_service postgrey

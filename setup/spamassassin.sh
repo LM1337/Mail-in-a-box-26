@@ -224,10 +224,12 @@ sudo -u spampd /usr/bin/sa-learn --sync 2>/dev/null
 chmod -R 660 "$STORAGE_ROOT/mail/spamassassin"
 chmod 770 "$STORAGE_ROOT/mail/spamassassin"
 
-# Kick services.
+# Kick services. Dovecot reloads only if the settings above changed its
+# configuration (mail_access_groups on the first run), see load_dovecot
+# (B122).
 restart_service spampd
 rm -rf /run/spampd
-restart_service dovecot
+load_dovecot
 
 # Fetch current rules once now instead of waiting for the first 06:00 timer run
 # (Persistent=true does not catch up when the timer has never run). This runs

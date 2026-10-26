@@ -30,6 +30,7 @@ reproduced on a box, the evidence line says so.
   * *test run*: the T1/T2 smoke tests on VMs.
   * *in-place test*: T3, the in-place upgrade of a copy of a production box, and T4, the in-place upgrade of the 22.04 test box.
   * *production upgrade*: the in-place upgrade of a production box with rc3.
+  * *production update*: the update of a production box from rc6 to rc7 (setup of the published tag, with phones and calendars syncing) and its analysis.
   * *update test*: the update of a copy of that production box from rc3 to a later release (rc4 to rc6; T5b in rc6), and the fresh rc4 test box.
   * *log audit*: `tests/fork/log-audit.sh` on the boxes of the certification runs of rc6 (T1 to T5b), each warning and error classified.
   * *rc7 development*: the work on the changes of rc7 and their checks on a test box (new smoke test groups, setup runs, the log audit of the restart window).
@@ -38,18 +39,18 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-115 bugs: 2 critical, 17 high, 44 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+118 bugs: 2 critical, 18 high, 46 medium, 52 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7. B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
-| Upstream | 31 |
+| Upstream | 34 |
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
 | Fork | 34 |
 
-32 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98). They are candidates for
+35 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -172,6 +173,9 @@ upstream pull requests, independent of the 26.04 port.
 | [B117](#b117) | low | Tools | The tools take the backup target and passphrase, and write custom.yaml, through a directory that the user-data account can replace | Fork | no | no | rc7 |
 | [B118](#b118) | low | Tools | The fallback SSH server misses Match blocks in files included from included files | Fork | no | no | rc7 |
 | [B119](#b119) | medium | Tools | The fallback SSH server does not start for the release upgrade that begins right after the reboot into 24.04 | Fork | no | no | rc7 |
+| [B120](#b120) | medium | Dovecot | Setup restarts Dovecot before it rewrites the passdb, and logins can fail as wrong passwords for two seconds | Upstream | yes | yes | after rc7 |
+| [B121](#b121) | high | Nextcloud | Nextcloud throttles 127.0.0.1 after a setup run, and ActiveSync stops syncing calendars and contacts for every user | Upstream | yes | yes | after rc7 |
+| [B122](#b122) | medium | Setup | Setup restarts Dovecot, Postfix, PHP-FPM and fail2ban several times per run; each restart cuts the clients, and fail2ban lifts all bans for a moment | Upstream | yes | yes | after rc7 |
 
 ## Details
 
@@ -1501,6 +1505,39 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** the development of rc7 only (never in a tag). Origin: Fork. Every in-place upgrade from 22.04 (the second release upgrade always starts after a reboot), unless someone logs in over SSH between the boot and its start.
 * **Evidence:** The review run of the fixes, T4: the warning above at the start of the release upgrade to 26.04. On the 24.04 test box right after a boot, through the guest agent (no SSH login): `/run/sshd` missing, `sshd -T` exit code 255 with that message, ssh.socket active and ssh.service inactive; with the fix, `--ssh-fallback-test` there started the fallback on port 1022 and created `/run/sshd`. In the final run of rc7 (T4) the fallback started at the boot into 24.04 and ran OpenSSH 9.6p1 while port 22 was down.
 * **Found by:** rc7 review run (T4 after the review fixes); **commit:** see `git log --grep B119`; **fixed in:** v78-r2604.0-rc7
+
+### B120
+
+**Setup restarts Dovecot before it rewrites the passdb, and logins can fail as wrong passwords for two seconds** (medium, Dovecot)
+
+* **Symptom:** During a setup run (an update, too) Dovecot logs "auth: Fatal: No passdbs specified in configuration file. PLAIN mechanism needs one" and "master: Error: service(auth): command startup failed, throttling for 2.000 secs". Logins in the next two seconds fail like a wrong password (IMAP `NO`), not like a server that is down. Nextcloud's IMAP login (user_external) counts each such failure as a failed login (see B121); phones and mail programs may ask for the password.
+* **Cause:** setup/mail-dovecot.sh restarted Dovecot, and setup/mail-users.sh then rewrote `auth-sql.conf.ext` (the passdb and userdb) with `cat >`: the file is truncated and then written. Dovecot 2.4 starts its config process on demand, at the first login after a (re)start, and that process parses the configuration files at that moment; one that started while the file was empty gave Dovecot no passdb. setup/mail-users.sh restarted Dovecot again two seconds later, which ended it.
+* **Fix:** Dovecot is loaded once per run, in setup/mail-users.sh after its whole configuration (with the passdb) is written, before the `doveadm` commands that need it, and not at all when the configuration did not change (`load_dovecot` in setup/functions.sh, see B122). Setup writes Dovecot's files atomically and only when they change: a new file in the same directory, renamed over the old one, through the new `tools/write_conf.py` (no symbolic link is followed in `/etc/dovecot`, which belongs to the account `mail`); `tools/editconf.py` writes the same way, and `10-mail.conf` is put together in a directory of root's own before it is written once. The log audit's rule that accepted the two messages during setup is removed.
+* **Affects:** v78 yes (from reading the code: the same order of restarts and writes; not reproduced on 22.04), PR #2603 yes, the fork up to rc7. Origin: Upstream. Seen only now and then: the config process has to start in the moment of the write.
+* **Evidence:** The update test T5b of rc7: a probe every 2 s got one failed IMAP login between setup's two Dovecot restarts, with the messages above. On the fresh-install test box, with a loop that rewrote `auth-sql.conf.ext` the way setup did: 6 of 10 config processes started by a login (after killing the config and auth processes) had no passdb; with writes through a renamed file, 0 of 14. On that box, setup runs with clients running (see `tests/fork/client-load.py`): without the fix 3 Dovecot restarts per run, failed CalDAV logins (HTTP 401) of the test users in the restart windows; with the fix no restart, one reload in the first run (none in the next), no failed login. The production box's own log of the update (B121) was not checked for the message.
+* **Found by:** production update (rc6 to rc7, its analysis; the message was an open finding of the rc7 certification); **commit:** see `git log --grep B120`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B121
+
+**Nextcloud throttles 127.0.0.1 after a setup run, and ActiveSync stops syncing calendars and contacts for every user** (high, Nextcloud)
+
+* **Symptom:** After an update, phones stop syncing calendars (and some contacts) over ActiveSync, for every user at once, for about 30 minutes; after that every request waits 25 seconds. `nextcloud.log` shows `OCA\DAV\Connector\Sabre\Exception\TooManyRequests` for the CalDAV and CardDAV requests of all users, and `z-push-error.log` "BackendCalDAV->Logon(): User '...' is not authenticated on CalDAV 'https://127.0.0.1:443/caldav/...'" and `AuthenticationRequiredException`. `occ security:bruteforce:attempts 127.0.0.1` shows attempts and a delay of 25000 ms, bypass-listed false.
+* **Cause:** Z-Push syncs calendars and contacts from Nextcloud over `https://127.0.0.1` with each user's password, and Roundcube's CardDAV plugin calls Nextcloud from 127.0.0.1 too. Nextcloud checks these logins against Dovecot over IMAP (user_external). While setup restarted Dovecot (B120, B122), they failed ("Could not connect to imap server via curl", "IMAP server returned an error"), and Nextcloud's brute-force protection counted them as failed logins of 127.0.0.1, of all users together. After more than 10 attempts it answers every login from that address with `TooManyRequests` for 30 minutes; a successful login would reset only that user's attempts, but none got through.
+* **Fix:** setup/nextcloud.sh puts 127.0.0.1/32 and ::1/128 on Nextcloud's brute-force bypass list (app config `bruteForce`, keys `whitelist_N`, which Nextcloud's core reads, as Administration > Security does), on a fresh install, a migration and an update; entries of an administrator are kept, and nothing is added when a range on the list covers the address. When it adds an address, it first resets its attempts, so a box that is throttled now syncs again after the update. Only processes on the box connect from these addresses (nginx passes the connection's address, Nextcloud has no `trusted_proxies`), and Z-Push checks each password against Dovecot before it calls Nextcloud, so the throttle never slowed down a password guesser there. The smoke test checks the bypass list and an ActiveSync sync of a calendar and the contacts (group `activesync`).
+* **Affects:** v78 yes (the same Nextcloud brute-force protection, user_external and Z-Push backends), PR #2603 yes, the fork up to rc7. Origin: Upstream. A box with few ActiveSync users may stay below the 10 attempts.
+* **Evidence:** A production box at the update from rc6 to rc7: 12 failed logins from 127.0.0.1 during one Dovecot restart, then 136 `TooManyRequests` in about 30 minutes, attempts 12 and a delay of 25000 ms until `occ security:bruteforce:reset 127.0.0.1`. On the fresh-install test box: during a setup run without the fix, the CalDAV requests of the test users from 127.0.0.1 failed with HTTP 401 in Dovecot's restart windows ("Login failed ... (Remote IP: '127.0.0.1')", also from Z-Push's CardDAV backend); 11 failed logins of other users from 127.0.0.1 gave attempts 11 and a delay of 25000 ms, and then a valid login of a test user got HTTP 429 and its ActiveSync Provision HTTP 401. The next setup run with the fix reset the attempts and listed both addresses (bypass-listed true, attempts 0); ActiveSync and CalDAV worked again at once, and a setup run with clients running had no failed login.
+* **Found by:** production update (rc6 to rc7); **commit:** see `git log --grep B121`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B122
+
+**Setup restarts Dovecot, Postfix, PHP-FPM and fail2ban several times per run; each restart cuts the clients, and fail2ban lifts all bans for a moment** (medium, Setup)
+
+* **Symptom:** Each setup run, also an update without changes, restarted Dovecot 3 times, Postfix 3, PHP-FPM 4 and fail2ban 2 times. Each restart refused connections for a second or two: IMAP and SMTP logins failed, ActiveSync and Nextcloud requests got HTTP 502, Nextcloud counted the failed IMAP logins (B121). fail2ban unbanned every address when it stopped and banned them again from its database about two seconds later.
+* **Cause:** Each script that changes a service's configuration restarted it (`restart_service`), and setup/start.sh restarted fail2ban once more at the end.
+* **Fix:** New functions in setup/functions.sh load a configuration with a reload where the service supports it (the listening sockets stay) and restart a service only when it does not run, or runs the program of an older package (the service started before its package was last installed or upgraded). Dovecot: one `doveadm reload` per run, in setup/mail-users.sh, and none when its configuration is the one it loaded last (a checksum in `/run`); a reload still ends Dovecot's open IMAP sessions, whose clients log in again. Postfix: `postfix reload` (a restart only when `inet_interfaces` or `inet_protocols` change). PHP-FPM: one restart after setup/zpush.sh instead of one per script (a reload ends the running requests just the same with the package's `process_control_timeout`). fail2ban: `fail2ban-client reload`, which keeps the bans (`reload --restart` when the `bantime.*` options of the adaptive configuration change, see `management/fail2ban_admin.py --setup`).
+* **Affects:** v78 yes, PR #2603 yes, the fork up to rc7. Origin: Upstream.
+* **Evidence:** A production box at the update from rc6 to rc7: the restarts above, fail2ban without bans for about 2 s. On the fresh-install test box, a setup run with clients running (`tests/fork/client-load.py`: ActiveSync, CalDAV/CardDAV, IMAP logins every second and IDLE, SMTP AUTH, Roundcube) without the fix: Dovecot 3, Postfix 3, PHP-FPM 4 and fail2ban 2 restarts, failed CalDAV logins, refused IMAP connections, a temporary SMTP AUTH failure (454) and HTTP 502 for ActiveSync. With the fix: Postfix 3 reloads, PHP-FPM 1 restart (2 ActiveSync requests got 502), fail2ban 1 reload with a test ban kept, Dovecot 1 reload in the first run (its 2 IDLE connections reconnected) and none in the next; no failed login, no refused connection.
+* **Found by:** production update (rc6 to rc7); **commit:** see `git log --grep B122`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 

@@ -43,6 +43,10 @@ examples use a legacy box 192.0.2.10 (ssh alias legacy-box), a new 26.04 box
         --mode migrated --manifest seed-manifest.json --jump jump-host \\
         --ssh legacy-box --expect-nc 26
 
+  Right after a setup run (an update), --only activesync checks within a
+  minute that Nextcloud does not throttle the box's own services and that an
+  ActiveSync account syncs its calendar and contacts.
+
   Add --fail2ban (last group, opt-in) to ban/unban the attacking IP. It refuses
   to run when the attack source would be the same IP the --ssh session uses.
 
@@ -104,7 +108,7 @@ if "MOVE" not in imaplib.Commands:
     imaplib.Commands["MOVE"] = ("SELECTED",)
 
 DEFAULT_ENV_FILE = os.environ.get("MIAB_TEST_ENV") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.env")
-GROUPS = ["login", "provision", "migrated", "admin", "api", "dns", "web", "mail", "imapsieve", "fail2ban"]
+GROUPS = ["login", "provision", "migrated", "admin", "api", "dns", "web", "activesync", "mail", "imapsieve", "fail2ban"]
 
 SIEVE_FILTER_NAME = "seedfilter"
 SIEVE_VACATION_NAME = "seedvacation"
@@ -1852,6 +1856,102 @@ def c_zpush_options(ctx):
     return "versions %s; commands %s" % (v[0], (r.header("MS-ASProtocolCommands") or ["?"])[0][:60])
 
 
+def c_nc_bruteforce_loopback(ctx):
+    # setup/nextcloud.sh puts the box's own services (127.0.0.1, ::1) on
+    # Nextcloud's brute-force bypass list (B120): bypass-listed, no attempts
+    # counted and no delay, also right after a setup run.
+    out = []
+    bad = []
+    for ip in ("127.0.0.1", "::1"):
+        rc, so, se = ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ "
+                                    "security:bruteforce:attempts %s --output=json" % ip, timeout=120)
+        if rc != 0:
+            raise Fail("occ security:bruteforce:attempts %s: exit %d %s" % (ip, rc, se.strip()[:200]))
+        try:
+            j = json.loads(so.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise Fail("unexpected output for %s: %s" % (ip, so.strip()[:200]))
+        out.append("%s bypass=%s attempts=%s delay=%s" % (ip, j.get("bypass-listed"), j.get("attempts"), j.get("delay")))
+        if j.get("bypass-listed") is not True or j.get("attempts") != 0 or j.get("delay") != 0:
+            bad.append(out[-1])
+    if bad:
+        raise Fail("; ".join(bad))
+    return "; ".join(out)
+
+
+def _load_eas():
+    # tests/fork/eas.py, next to this script (also when run with python3 -I)
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import eas
+    return eas
+
+
+def c_zpush_sync(ctx):
+    # An ActiveSync account as a phone sets it up: Provision, FolderSync, and
+    # a Sync of the calendars and the address books, which Z-Push reads from
+    # Nextcloud over CalDAV/CardDAV from 127.0.0.1 (B99, B120). A marked event
+    # and contact, put into Nextcloud over DAV first, must arrive.
+    eas = _load_eas()
+    uid = urllib.parse.quote(nc_userid(ctx, ctx.alice))
+    auth = (ctx.alice, ctx.user_pw)
+    mark = "miab-smoke-%s" % ctx.tok
+    cal_home = "/cloud/remote.php/dav/calendars/%s/" % uid
+    r = http_req(ctx, "PROPFIND", cal_home, auth=auth, headers={"Depth": "1", "Content-Type": "application/xml"},
+                 body='<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>')
+    if r.status != 207:
+        raise Fail("PROPFIND %s HTTP %d" % (cal_home, r.status))
+    event = cal_home + "personal/%s.ics" % mark
+    card = "/cloud/remote.php/dav/addressbooks/users/%s/contacts/%s.vcf" % (uid, mark)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    start = time.strftime("%Y%m%dT%H0000Z", time.gmtime(time.time() + 86400))
+    end = time.strftime("%Y%m%dT%H3000Z", time.gmtime(time.time() + 86400))
+    ics = ("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//miab-fork-smoke//EN\r\nBEGIN:VEVENT\r\nUID:%s\r\n"
+           "DTSTAMP:%s\r\nDTSTART:%s\r\nDTEND:%s\r\nSUMMARY:%s event\r\nDESCRIPTION:X-Miab-Test 1\r\n"
+           "END:VEVENT\r\nEND:VCALENDAR\r\n" % (mark, stamp, start, end, mark))
+    vcf = ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:%s\r\nFN:%s contact\r\nN:%s;Smoke;;;\r\n"
+           "NOTE:X-Miab-Test 1\r\nEND:VCARD\r\n" % (mark, mark, mark))
+    created = []
+    try:
+        for path, body, ctype in ((event, ics, "text/calendar; charset=utf-8"),
+                                  (card, vcf, "text/vcard; charset=utf-8")):
+            r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": ctype})
+            if r.status not in (201, 204):
+                raise Fail("PUT %s HTTP %d" % (path, r.status))
+            created.append(path)
+        devid = "miabsmoke" + ctx.tok
+        c = eas.Client(ctx.hostname, ctx.alice, ctx.user_pw, devid, addr=ctx.net.addr(443),
+                       user_agent="miab-fork-smoke/1")
+        try:
+            c.provision()
+            c.folder_sync()
+            cals = c.folders_of(eas.TYPE_CALENDAR, eas.TYPE_USER_CALENDAR)
+            cons = c.folders_of(eas.TYPE_CONTACTS, eas.TYPE_USER_CONTACTS)
+            if not cals or not cons:
+                raise Fail("FolderSync: %d calendar and %d contact folders" % (len(cals), len(cons)))
+            adds = c.sync([f["ServerId"] for f in cals + cons])
+        except eas.EASError as e:
+            raise Fail("%s (%s)" % (e, e.kind))
+        finally:
+            if ctx.remote.available():
+                # as www-data: Z-Push's state files belong to it
+                ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
+                               % (shlex.quote(ctx.alice), devid), timeout=120)
+
+        def found(folders):
+            return any(mark in " ".join(eas.flat_strings(a)) for f in folders for a in adds.get(f["ServerId"], []))
+        missing = [what for what, folders in (("event", cals), ("contact", cons)) if not found(folders)]
+        if missing:
+            raise Fail("Sync ok, but the marked %s did not arrive (adds: %s)" % (
+                " and ".join(missing), {f.get("DisplayName"): len(adds.get(f["ServerId"], [])) for f in cals + cons}))
+        return "Provision, FolderSync (%d calendar, %d contact folders), Sync: event and contact arrived" % (
+            len(cals), len(cons))
+    finally:
+        for path in created:
+            http_req(ctx, "DELETE", path, auth=auth)
+
+
 def c_zpush_autodiscover(ctx):
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006">'
@@ -3231,6 +3331,11 @@ def main():
         run_check("roundcube-login", c_roundcube, ctx)
         run_check("zpush-options", c_zpush_options, ctx)
         run_check("zpush-autodiscover", c_zpush_autodiscover, ctx)
+    if want("activesync"):
+        # Quick enough to run right after a setup run: --only activesync
+        print("== activesync (calendars and contacts through Z-Push and Nextcloud)")
+        run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
+        run_check("zpush-sync", c_zpush_sync, ctx)
     if want("mail"):
         print("== mail flow")
         st, _ = run_check("mail-flow-send", c_mail_flow, ctx)

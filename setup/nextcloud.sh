@@ -560,6 +560,78 @@ hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config
 # book (the Sync request failed with a PHP error, B99).
 hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config:app:set dav enableDefaultContact --value false --type boolean
 
+# Nextcloud's brute-force protection must not throttle the box's own services
+# (B121). Z-Push syncs every ActiveSync user's calendars and contacts through
+# https://127.0.0.1/caldav and /carddav, and Roundcube's CardDAV plugin also
+# calls Nextcloud from 127.0.0.1; Nextcloud checks each of their logins against
+# Dovecot (user_external). While Dovecot restarts, these logins fail, and
+# Nextcloud counted them as failed logins of 127.0.0.1: after a dozen it
+# answered every CalDAV request of every user with "TooManyRequests" for half
+# an hour, and delayed them by 25 s after that.
+#
+# So 127.0.0.1/32 and ::1/128 go on the bypass list (the "whitelist_N" keys of
+# the app config "bruteForce", which Nextcloud's core reads, the same keys as
+# Administration > Security; that app need not be enabled). This is safe:
+# * Only processes on the box itself connect from these addresses. nginx
+#   gives PHP the address of the TCP connection (REMOTE_ADDR, no real_ip
+#   module), and Nextcloud takes another address from a header only from a
+#   proxy in its trusted_proxies, which setup does not set. A client on the
+#   Internet therefore never appears as 127.0.0.1, unless an administrator
+#   adds a reverse proxy on the box itself in front of /cloud (a proxy of
+#   www/custom.yaml to the box's own address, or trusted_proxies with a
+#   forwarded-for header): then Nextcloud sees that proxy's address instead.
+# * The services from 127.0.0.1 pass on the passwords of their own users.
+#   Z-Push checks each one against Dovecot (IMAP) before it calls Nextcloud,
+#   so Nextcloud's throttle of 127.0.0.1 never slowed down a password guesser
+#   there; it only stopped the sync of everyone. Roundcube's logins are
+#   watched by fail2ban (miab-roundcube). Logins to Nextcloud from other
+#   addresses keep the throttle and the miab-owncloud jail. A local account
+#   that wanted to guess passwords could ask Dovecot on 127.0.0.1:143
+#   directly, and fail2ban ignores 127.0.0.1 anyway.
+# Entries an administrator made are kept, and nothing is added when a range on
+# the list already covers the address. When an address is added, its old
+# attempts are reset first (afterwards Nextcloud ignores them, and a reset of a
+# listed address does nothing), so a box that was throttled gets going again.
+nextcloud_bruteforce_loopback() {
+	local occ=(sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ) list missing key net
+	if ! list=$("${occ[@]}" config:list bruteForce 2> /dev/null); then
+		echo "Nextcloud: could not read the brute-force bypass list (occ config:list bruteForce)." >&2
+		return 0
+	fi
+	# Prints "whitelist_N NET" for each loopback network that no entry covers,
+	# with N after the highest number in use.
+	missing=$(python3 -I -c '
+import ipaddress, json, sys
+keys = json.loads(sys.stdin.read() or "{}").get("apps", {}).get("bruteForce") or {}
+if not isinstance(keys, dict):
+    keys = {}
+nets, used = [], [0]
+for k, v in keys.items():
+    if not k.startswith("whitelist_"):
+        continue
+    if k[len("whitelist_"):].isdigit():
+        used.append(int(k[len("whitelist_"):]))
+    try:
+        nets.append(ipaddress.ip_network(str(v).strip(), strict=False))
+    except ValueError:
+        pass
+n = max(used)
+for want in ("127.0.0.1/32", "::1/128"):
+    w = ipaddress.ip_network(want)
+    if not any(w.version == x.version and w.subnet_of(x) for x in nets):
+        n += 1
+        print("whitelist_%d %s" % (n, want))
+' <<< "$list") || { echo "Nextcloud: could not parse the brute-force bypass list." >&2; return 0; }
+	while read -r key net; do
+		[ -n "$key" ] || continue
+		hide_output "${occ[@]}" security:bruteforce:reset "${net%/*}"
+		hide_output "${occ[@]}" config:app:set bruteForce "$key" --value "$net" --type string
+		echo "Nextcloud: $net is now on the brute-force bypass list (the box's own services)."
+	done <<< "$missing"
+	return 0
+}
+nextcloud_bruteforce_loopback
+
 # Sharing within the own mail domain (NEXTCLOUD_SHARE_SCOPE=domain, the default):
 # users only see and share with the accounts of their mail domain, members of the
 # group "admin" with everyone. The script sets the sharing options and puts all
@@ -654,4 +726,4 @@ apt_get_quiet purge "php${PHP_LEGACY_VER}*"
 rm -rf /etc/php/"$PHP_LEGACY_VER"
 
 # Enable PHP modules and restart PHP.
-restart_service php"$PHP_VER"-fpm
+restart_php_fpm

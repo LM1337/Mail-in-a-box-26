@@ -259,4 +259,4 @@ hide_output sqlite3 "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" 'PRAGMA jour
 
 # Enable PHP modules.
 phpenmod -v "$PHP_VER" imap
-restart_service php"$PHP_VER"-fpm
+restart_php_fpm

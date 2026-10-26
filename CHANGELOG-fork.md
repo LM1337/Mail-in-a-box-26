@@ -11,28 +11,56 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Fixed
+
+* Nextcloud's brute-force protection no longer throttles the box's own
+  services (seen on a production box at the update from rc6 to rc7):
+  setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
+  for about two seconds, and the CalDAV/CardDAV logins that Z-Push makes
+  from 127.0.0.1 failed (12 in two seconds). Nextcloud then answered Z-Push
+  with `TooManyRequests` for every user for about 30 minutes, and kept a
+  25 s delay after that, so ActiveSync calendars and contacts did not sync.
+  Setup now puts 127.0.0.1 and ::1 on Nextcloud's brute-force bypass list
+  (Z-Push and the other local callers check the password against Dovecot
+  first), on a fresh install, a migration and an update, and resets the
+  attempts of these addresses when it adds them, so a throttled box syncs
+  again after the update (B121).
+* Dovecot no longer runs without a passdb for two seconds during setup:
+  setup restarted it before rewriting `auth-sql.conf.ext`, and a login in
+  that moment made Dovecot's config process read the truncated file;
+  logins then failed as wrong passwords. Dovecot's configuration is now
+  loaded once, after all of it is written, and setup writes Dovecot's files
+  (and every file of `tools/editconf.py`) atomically and only when they
+  change (B120).
+* Setup disturbs the clients less: Dovecot, Postfix and fail2ban reload
+  instead of restarting (Dovecot not at all when its configuration did not
+  change), PHP-FPM restarts once per run instead of four times, and
+  fail2ban keeps its bans through setup (it lifted all of them for about
+  two seconds at each of its two restarts). A service is still restarted
+  when it does not run or runs the program of an older package (B122).
+
 ### Changed
 
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.
   The GitHub counter-test of rc7 (rc6 to rc7) logged it once.
+* Tests: the smoke test's new group `activesync` (also right after a setup
+  run with `--only activesync`) checks that 127.0.0.1 and ::1 are on
+  Nextcloud's bypass list with no attempts (`nextcloud-bruteforce-loopback`)
+  and syncs a marked event and contact through ActiveSync
+  (`zpush-sync`, with the new small client `tests/fork/eas.py`).
+* Tests: `tests/fork/client-load.py` keeps ActiveSync, CalDAV/CardDAV,
+  IMAP (logins and IDLE), SMTP AUTH and Roundcube clients busy while setup
+  runs and summarizes what failed; the update scenarios run it during setup
+  (TESTING-fork.md, "Client load during updates"). The log audit no longer
+  accepts "No passdbs specified" during setup (B120), and accepts what
+  Dovecot logs when setup reloads it.
 
 ### Planned
 
 For the final release v78-r2604.0 (from rc7):
 
-* Nextcloud's brute-force protection throttles 127.0.0.1 after a setup run
-  (seen on a production box at the update from rc6 to rc7): setup restarts
-  Dovecot, Nextcloud's `user_external` cannot reach IMAP for about two
-  seconds, and the CalDAV/CardDAV logins that Z-Push makes from 127.0.0.1
-  fail (12 in two seconds). Nextcloud then answers Z-Push with
-  `TooManyRequests` for every user for about 30 minutes, and keeps a 25 s
-  delay after that, so ActiveSync calendars and contacts do not sync.
-  Planned: setup puts 127.0.0.1 and ::1 on the bypass list of
-  `bruteforcesettings` (Z-Push and the other local callers authenticate
-  against Dovecot first, where fail2ban watches), and the smoke test syncs
-  a calendar over ActiveSync right after a setup run.
 * T6 (on the Internet: Let's Encrypt, delivery to other providers, and
   `mailcheck` with a real external probe) before the final release
   v78-r2604.0.
@@ -42,10 +70,10 @@ For the final release v78-r2604.0 (from rc7):
 Seen in the rc7 work, not done (the certification runs of rc7 add their
 open findings in TESTING-fork.md, "Open findings of rc7"):
 
-* Setup restarts PHP-FPM four times per run, which ends ActiveSync long
-  polls; a reload (with `process_control_timeout`) would keep them.
-* The smoke test checks ActiveSync only with `OPTIONS`; a Sync of the
-  contacts folder would have caught B99.
+* Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
+  polls; a reload with a `process_control_timeout` would keep them.
+* A Dovecot reload ends the open IMAP sessions (their clients log in
+  again); setup reloads Dovecot only when its configuration changed (B122).
 * Critical only (Munin's alerts) never mails the return to normal.
 * The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
   not installed (nginx 404).

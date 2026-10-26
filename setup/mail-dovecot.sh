@@ -84,22 +84,28 @@ EOF
 hide_output sysctl --system
 
 
-# Copy in preconfigured dovecot configuration files
-cp -f conf/dovecot-10-mail.conf /etc/dovecot/conf.d/10-mail.conf
-cp -f conf/dovecot-mailboxes.conf /etc/dovecot/conf.d/15-mailboxes.conf
-cp -f conf/dovecot-20-imap.conf /etc/dovecot/conf.d/20-imap.conf
-cp -f conf/dovecot-20-pop3.conf /etc/dovecot/conf.d/20-pop3.conf
-cp -f conf/dovecot-20-lmtp.conf /etc/dovecot/conf.d/20-lmtp.conf
-cp -f conf/dovecot-90-quota.conf /etc/dovecot/conf.d/90-quota.conf
+# Copy in preconfigured dovecot configuration files. Dovecot may be running:
+# its config process starts on demand and parses the files at that moment, so
+# every file is replaced atomically, and only when it changes
+# (tools/write_conf.py, B120; editconf.py does the same). 10-mail.conf is
+# put together in a directory of root's own first and written once below,
+# so that Dovecot never sees the template without the settings added to it.
+DOVECOT_MAIL_CONF=$(mktemp -d)/10-mail.conf
+cp conf/dovecot-10-mail.conf "$DOVECOT_MAIL_CONF"
+tools/write_conf.py /etc/dovecot/conf.d/15-mailboxes.conf < conf/dovecot-mailboxes.conf
+tools/write_conf.py /etc/dovecot/conf.d/20-imap.conf < conf/dovecot-20-imap.conf
+tools/write_conf.py /etc/dovecot/conf.d/20-pop3.conf < conf/dovecot-20-pop3.conf
+tools/write_conf.py /etc/dovecot/conf.d/20-lmtp.conf < conf/dovecot-20-lmtp.conf
+tools/write_conf.py /etc/dovecot/conf.d/90-quota.conf < conf/dovecot-90-quota.conf
 # The sieve config names paths under $STORAGE_ROOT, which a plain copy would
 # leave as literal text. Only that one variable is substituted, Dovecot's own
 # %{...} variables stay as they are.
-sed "s|\$STORAGE_ROOT|$STORAGE_ROOT|g" conf/dovecot-99-local-sieve.conf > /etc/dovecot/conf.d/99-local-sieve.conf
+sed "s|\$STORAGE_ROOT|$STORAGE_ROOT|g" conf/dovecot-99-local-sieve.conf | tools/write_conf.py /etc/dovecot/conf.d/99-local-sieve.conf
 
 # Set the location where we'll store user mailboxes. '%{user|domain}' is the domain name and '%{user|username}' is the
 # username part of the user's email address. We'll ensure that no bad domains or email addresses
 # are created within the management daemon.
-tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
+tools/editconf.py "$DOVECOT_MAIL_CONF" \
     mail_path="$STORAGE_ROOT/mail/mailboxes/%{user|domain}/%{user|username}"
 
 # The user's home (userdb "home" in mail-users.sh) is that same directory, the
@@ -119,9 +125,18 @@ cat > /etc/tmpfiles.d/mailinabox-dovecot.conf << EOF;
 d /run/dovecot-volatile 0700 mail mail -
 EOF
 hide_output systemd-tmpfiles --create /etc/tmpfiles.d/mailinabox-dovecot.conf
-tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
+tools/editconf.py "$DOVECOT_MAIL_CONF" \
     mail_volatile_path="/run/dovecot-volatile/%{user|domain}/%{user|username}" \
     maildir_stat_dirs=yes
+
+# setup/spamassassin.sh gives Dovecot's mail processes the group spampd (for
+# the Bayes files). Keep it from the second run on, when the group exists, so
+# that the file does not lose it here and get it back there.
+if getent group spampd > /dev/null; then
+	tools/editconf.py "$DOVECOT_MAIL_CONF" mail_access_groups=spampd
+fi
+tools/write_conf.py /etc/dovecot/conf.d/10-mail.conf < "$DOVECOT_MAIL_CONF"
+rm -rf "$(dirname "$DOVECOT_MAIL_CONF")"
 
 # ### IMAP/POP
 
@@ -167,7 +182,7 @@ sed -i "s/#port = 110/port = 0/" /etc/dovecot/conf.d/10-master.conf
 # would communicate (see the Postfix setup script for the corresponding
 # setting also commented out).
 #
-cat > /etc/dovecot/conf.d/99-local.conf << EOF;
+tools/write_conf.py /etc/dovecot/conf.d/99-local.conf << EOF;
 service lmtp {
   inet_listener lmtp {
     listen = 127.0.0.1
@@ -220,7 +235,7 @@ tools/editconf.py /etc/dovecot/conf.d/15-lda.conf \
 rm -f /etc/dovecot/conf.d/05-local-fts-plugins.conf /etc/dovecot/conf.d/99-local-fts.conf
 if [ "${FTS:-xapian}" != "off" ]; then
 	apt_install dovecot-fts-xapian
-	cat > /etc/dovecot/conf.d/95-mailinabox-fts.conf << EOF;
+	tools/write_conf.py /etc/dovecot/conf.d/95-mailinabox-fts.conf << EOF;
 # Managed by Mail-in-a-Box (setup/mail-dovecot.sh). FTS=off in
 # /etc/mailinabox.conf turns full-text search off.
 mail_plugins {
@@ -288,8 +303,13 @@ ufw_allow pop3s
 # Allow the Sieve port in the firewall.
 ufw_allow sieve
 
-# Restart services.
-restart_service dovecot
+# Dovecot is not (re)started here: setup/mail-users.sh writes the passdb and
+# userdb next and then loads the whole configuration once (load_dovecot in
+# setup/functions.sh). After a restart here, the first login started Dovecot's
+# config process, which parses the files at that moment; when that was while
+# mail-users.sh rewrote auth-sql.conf.ext (truncated, then written), Dovecot
+# had no passdb ("No passdbs specified"), and logins failed as wrong passwords
+# until the next restart two seconds later (B120).
 
 # Test versions of rc6 (never released) had a path unit run "doveadm log
 # reopen" after each rotation of mail.log (B85). Dovecot no longer writes a
