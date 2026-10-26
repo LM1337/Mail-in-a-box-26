@@ -283,13 +283,15 @@ report. The groups:
   alice's Nextcloud over DAV just before arrive, one of the cards with a
   name without `.vcf`, like Nextcloud's example contact `default` (B128);
   all are deleted again, and the test device is removed from Z-Push (with
-  `--ssh`); `zpush-ping`: a Ping with a heartbeat of 3600 s gets status 5
-  with the box's bound at once (no answer within 90 s fails it: no bound;
-  a Ping of 60 s of the device then ends the long one), and (with `--ssh`) nginx's
-  `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
-  at least a minute longer than that bound, so a long Ping does not end
-  with 504 (B129). Quick enough to run
-  right after a setup run: `--only activesync`.
+  `--ssh`); `zpush-ping`: a Ping on the inbox with a heartbeat of 3600 s
+  gets status 5 with the box's bound (60-3540 s) at once (no answer within
+  90 s fails it: no bound; a Ping of 60 s of the device then ends the long
+  one, so that no Ping is left), a Ping of 20 s completes with status 1 or
+  2, and (with `--ssh`) nginx's `fastcgi_read_timeout` of every
+  `/Microsoft-Server-ActiveSync` location (its own value, else the server's
+  or the http block's, in nginx's time units) is at least a minute longer
+  than that bound, so a phone's long Ping never ends with 504 (B129). Quick
+  enough to run right after a setup run: `--only activesync`.
 * **mail**: delivery over port 25 from the peer to a mailbox, an alias, a
   catch-all and a domain alias; no quota rejection for aliases; a 12 MB mail
   to the 10 MB mailbox rejected at RCPT; GETQUOTAROOT; the greylisting

@@ -2374,16 +2374,94 @@ def c_zpush_sync(ctx):
             http_req(ctx, "DELETE", path, auth=auth)
 
 
+_NGINX_TIME_UNITS = {"ms": 0.001, "": 1, "s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800,
+                     "M": 2592000, "y": 31536000}
+
+
+def nginx_seconds(v):
+    # nginx's time syntax: a number with an optional unit, several of them
+    # together ("1h30m"); a bare number is seconds.
+    parts = re.findall(r"(\d+)(ms|[smhdwMy]?)", v)
+    if not parts or "".join(n + u for n, u in parts) != v or (len(parts) > 1 and "" in [u for _, u in parts]):
+        raise Fail("nginx time %r: unknown unit" % v)
+    return sum(int(n) * _NGINX_TIME_UNITS[u] for n, u in parts)
+
+
+def nginx_location_timeouts(dump, prefix, directive, default=60):
+    # The value of `directive` in effect in each `location <prefix>` of an
+    # `nginx -T` dump: the location's own, else its server's, else the http
+    # level's, else nginx's default. nginx -T prints an included file on its
+    # own, not at the include, so a directive outside any server block (in
+    # nginx.conf's http block or at the top of a file in conf.d) counts as
+    # the http level. Nested blocks and directives after a nested block are
+    # handled; quoted strings and comments are skipped.
+    tokens = re.findall(r'#[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[{};]|[^\s{};"\']+', dump)
+    root = {"head": [], "dirs": [], "kids": []}
+    stack, words = [root], []
+    for t in tokens:
+        if t.startswith("#"):
+            continue
+        if t == ";":
+            if words:
+                stack[-1]["dirs"].append(words)
+            words = []
+        elif t == "{":
+            node = {"head": words, "dirs": [], "kids": []}
+            stack[-1]["kids"].append(node)
+            stack.append(node)
+            words = []
+        elif t == "}":
+            if len(stack) > 1:
+                stack.pop()
+            words = []
+        else:
+            words.append(t)
+
+    def own(node):
+        vals = [d[1] for d in node["dirs"] if d[0] == directive and len(d) > 1]
+        return min(nginx_seconds(v) for v in vals) if vals else None
+
+    http_vals = []
+
+    def walk_http(node):
+        # Everything outside server blocks (and outside mail/stream).
+        v = own(node)
+        if v is not None:
+            http_vals.append(v)
+        for k in node["kids"]:
+            if k["head"][:1] not in (["server"], ["mail"], ["stream"], ["events"]):
+                walk_http(k)
+
+    walk_http(root)
+    http_default = min(http_vals) if http_vals else default
+    found = []
+
+    def walk(node, inherited, in_server):
+        v = own(node)
+        if node["head"][:1] == ["server"]:
+            in_server = True
+        eff = v if v is not None and in_server else inherited
+        if in_server and node["head"][:1] == ["location"] and len(node["head"]) > 1 \
+                and node["head"][-1] == prefix:
+            found.append(eff)
+        for k in node["kids"]:
+            walk(k, eff, in_server)
+
+    walk(root, http_default, False)
+    return found
+
+
 def c_zpush_ping(ctx):
     # B129: a Ping (the push long poll) lasts as long as the heartbeat the
-    # phone asks for, and nginx ended every Ping longer than its
-    # fastcgi_read_timeout for /Microsoft-Server-ActiveSync (630 s) with 504.
-    # A Ping longer than the box allows gets status 5 with the bound at once,
-    # and (with --ssh) the timeout of every such location is at least a
-    # minute longer than that bound. The Ping waits 90 s at most: a box
-    # without a bound keeps it open (until nginx's 504), and a newer Ping of
-    # the device ends that wait in Z-Push; the check waits for that newer
-    # Ping (60 s), so that no Ping of the device is left when it is removed.
+    # phone asks for, and iOS asks for long ones; nginx ended every Ping
+    # longer than its fastcgi_read_timeout for /Microsoft-Server-ActiveSync
+    # (630 s) with 504. A Ping longer than the box allows gets status 5 with
+    # the bound at once, that bound fits in nginx's fastcgi_read_timeout of
+    # every such location (checked with --ssh), and a short Ping completes.
+    # The long Ping waits 90 s at most: a box without a bound keeps it open
+    # (until nginx's 504), and a newer Ping of the device ends that wait in
+    # Z-Push; the check waits for that newer Ping (60 s), so that no Ping of
+    # the device is left when it is removed.
     eas = _load_eas()
     wait = 90
     devid = "miabsmokeping" + ctx.tok
@@ -2392,13 +2470,14 @@ def c_zpush_ping(ctx):
     try:
         c.provision()
         c.folder_sync()
-        cons = c.folders_of(eas.TYPE_CONTACTS, eas.TYPE_USER_CONTACTS)
-        if not cons:
-            raise Fail("FolderSync: no contact folder")
-        c.sync([cons[0]["ServerId"]])
+        inbox = c.folders_of(eas.TYPE_INBOX)
+        if not inbox:
+            raise Fail("FolderSync: no inbox")
+        c.sync([inbox[0]["ServerId"]])
+        folders = [(inbox[0]["ServerId"], "Email")]
         t0 = time.time()
         try:
-            st, bound = c.ping_status([(cons[0]["ServerId"], "Contacts")], 3600, timeout=wait)
+            st, bound, _ = c.ping_answer(folders, 3600, timeout=wait)
         except (TimeoutError, socket.timeout):
             # Z-Push ends the old Ping (with more than 60 s to go) when it
             # sees a newer one of the device, at its next check (PING_INTERVAL,
@@ -2406,41 +2485,40 @@ def c_zpush_ping(ctx):
             # the device's state when it ends: wait for it, or it would write
             # the state again after the device's removal below.
             try:
-                c.ping_status([(cons[0]["ServerId"], "Contacts")], 60, timeout=150)
+                c.ping_answer(folders, 60, timeout=150)
             except (TimeoutError, socket.timeout, OSError, eas.EASError):
                 pass
             raise Fail("Ping with a heartbeat of 3600 s: no status 5 within %d s (no Ping bound: nginx ends it "
                        "with 504 after its fastcgi_read_timeout)" % wait)
         took = time.time() - t0
+        if st != "5" or not (bound or "").isdigit() or not 60 <= int(bound) <= 3540 or took > 60:
+            raise Fail("Ping with a heartbeat of 3600 s: status %s, HeartbeatInterval %s after %.0f s (expected "
+                       "status 5 with the box's bound, 60-3540 s, at once)" % (st, bound, took))
+        bound = int(bound)
+        t0 = time.time()
+        st2, _, _ = c.ping_answer(folders, 20)
+        if st2 not in ("1", "2"):
+            raise Fail("Ping with a heartbeat of 20 s: status %s" % st2)
+        took2 = time.time() - t0
     except eas.EASError as e:
         raise Fail("%s (%s)" % (e, e.kind))
     finally:
         if ctx.remote.available():
             ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/z-push/z-push-admin.php -a remove -u %s -d %s"
                            % (shlex.quote(ctx.alice), devid), timeout=120)
-    if st != "5" or not (bound or "").isdigit() or not 60 <= int(bound) <= 3540 or took > 60:
-        raise Fail("Ping with a heartbeat of 3600 s: status %s, HeartbeatInterval %s after %.0f s (expected status 5 "
-                   "with the box's bound, 60-3540 s, at once)" % (st, bound, took))
-    bound = int(bound)
-    msg = "heartbeat 3600 s: status 5 with the bound %d s after %.1f s" % (bound, took)
+    msg = "heartbeat 3600 s: status 5 with the bound %d s after %.1f s; heartbeat 20 s: status %s after %.0f s" % (
+        bound, took, st2, took2)
     if not ctx.remote.available():
         return msg + " (nginx's timeout not checked: needs --ssh)"
     rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
     if rc != 0:
         raise Fail("nginx -T: exit %d %s" % (rc, err.strip()[:200]))
-    timeouts, inside = [], False
-    for line in out.splitlines():
-        w = line.split()
-        if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
-            inside = True
-            timeouts.append(60)  # nginx's default, unless the location sets one
-        elif inside and w[:1] == ["fastcgi_read_timeout"]:
-            v = w[1].rstrip(";")
-            timeouts[-1] = int(v[:-1]) if v.endswith("s") else int(v)
-        elif inside and w[:1] == ["}"]:
-            inside = False
+    # Every server block has the location; the shortest timeout counts.
+    timeouts = nginx_location_timeouts(out, "/Microsoft-Server-ActiveSync", "fastcgi_read_timeout")
     if not timeouts:
         raise Fail("nginx has no location /Microsoft-Server-ActiveSync")
+    # Z-Push checks the mailbox every PING_INTERVAL (30 s) and needs a few
+    # seconds before and after the heartbeat: keep a minute of margin.
     if min(timeouts) < bound + 60:
         raise Fail("fastcgi_read_timeout %d s of /Microsoft-Server-ActiveSync is not a minute longer than the Ping "
                    "bound %d s: nginx ends a long Ping with 504" % (min(timeouts), bound))

@@ -11,9 +11,11 @@ its own:
 It does what a phone does on a new account: Provision (twice, the second
 acknowledges the policy), FolderSync, an initial Sync and a Sync with
 GetChanges of the default calendar and the contacts folder (with --inbox
-also of the inbox), and optionally a Ping (the long poll) on them. Z-Push serves calendars and contacts from
-Nextcloud over CalDAV/CardDAV (from 127.0.0.1), with the user's password, so
-this also exercises Nextcloud's login of the box's own services.
+also of the inbox), and optionally a Ping (the long poll) on them; status 5
+(the heartbeat is out of the server's range) counts as an answer there. Z-Push
+serves calendars and contacts from Nextcloud over CalDAV/CardDAV (from
+127.0.0.1), with the user's password, so this also exercises Nextcloud's login
+of the box's own services.
 
 The password is read from the environment and never printed. Exit code 0 if
 every step answered with status 1 (the Ping also with 2, or with 5 when its
@@ -331,22 +333,25 @@ class Client:
     def ping(self, folders, heartbeat):
         """folders: [(id, class)]. Returns the Ping status (1: no changes in
         the heartbeat, 2: changes)."""
-        st, _ = self.ping_status(folders, heartbeat)
+        st, _, _ = self.ping_answer(folders, heartbeat)
         if st not in ("1", "2"):
             raise EASError("status", "Ping status %s" % st, "Ping", status=st)
         return st
 
-    def ping_status(self, folders, heartbeat, timeout=None):
+    def ping_answer(self, folders, heartbeat, timeout=None):
         """One Ping, whatever its status: returns (status, the answer's
-        HeartbeatInterval or None). Status 5: the heartbeat is out of the
-        server's range, and HeartbeatInterval is the bound it allows
-        (MS-ASCMD 2.2.3.88.1). An HTTP error (such as 504) raises EASError;
+        HeartbeatInterval or None, [the ids of the changed folders]). With
+        status 5 the requested heartbeat is out of the server's range and the
+        answer's HeartbeatInterval is the bound it allows (MS-ASCMD 2.2.3.88.1).
+        An HTTP error (e.g. 504 from nginx) raises EASError as for any command;
         no answer within timeout (default: the heartbeat and two minutes)
         raises TimeoutError."""
         t = self.request("Ping", encode(13, ("Ping", [("HeartbeatInterval", str(heartbeat)), ("Folders", [
             ("Folder", [("Id", fid), ("Class", cls)]) for fid, cls in folders])])),
             timeout=heartbeat + 120 if timeout is None else timeout)
-        return first(t, "Status"), first(t, "HeartbeatInterval")
+        folders_el = next(find(t, "Folders"), None) if t else None
+        changed = [text(f) for f in find(folders_el, "Folder")] if folders_el else []
+        return first(t, "Status"), first(t, "HeartbeatInterval"), changed
 
 
 def flat_strings(el):
@@ -391,8 +396,10 @@ def main():
         log("sync", {fid: len(v) for fid, v in adds.items()})
         if args.ping:
             t0 = time.time()
-            st, hb = c.ping_status([(f["ServerId"], CLASS_OF_TYPE[f["Type"]]) for f in inbox + cals + cons], args.ping)
-            log("ping status %s after %.1f s%s" % (st, time.time() - t0, ", the server's bound %s s" % hb if st == "5" else ""))
+            st, hb, changed = c.ping_answer([(f["ServerId"], CLASS_OF_TYPE[f["Type"]]) for f in inbox + cals + cons],
+                                            args.ping)
+            log("ping status %s after %.1f s%s%s" % (st, time.time() - t0, ", changed %s" % changed if changed else "",
+                                                    ", the server's bound %s s" % hb if st == "5" else ""))
             # 1: no changes in the heartbeat, 2: changes, 5: the heartbeat is
             # out of the server's range (a phone pings again with the bound)
             if st not in ("1", "2", "5"):

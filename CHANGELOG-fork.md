@@ -178,7 +178,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Ping. nginx now waits up to 3660 s on `/Microsoft-Server-ActiveSync`, and
   Z-Push allows a heartbeat of at most 3540 s, the protocol's maximum: a
   Ping that asks for more gets status 5 with that bound, and the phone
-  pings with it (B129).
+  pings with it. Phones keep their long heartbeats and wake up less often.
+  A Ping without a heartbeat of its own now waits 3540 s instead of 600 s
+  (Z-Push's default is the bound), and setup warns if Z-Push's config.php
+  has no line for the bound (B129).
 * The proxy of `/caldav`, `/carddav` and `/webdav` to Nextcloud passes the
   path escaped, as the client sent it, and the query string. It passed
   nginx's decoded path: a name with a space got HTTP 400, an escaped `?`
@@ -277,9 +280,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   has no `.vcf` (B128).
 * Tests: the smoke test's new check `zpush-ping` (group `activesync`): a
   Ping with a heartbeat of 3600 s gets status 5 with the box's bound at
-  once, and nginx's timeout for `/Microsoft-Server-ActiveSync` is at least
-  a minute longer than that bound (B129). `tests/fork/eas.py --ping`
-  accepts status 5 and prints the bound.
+  once, a Ping of 20 s completes, and with `--ssh` nginx's
+  `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location
+  is at least a minute longer than that bound; it reads nginx's time units
+  and a value set for the server or http block (B129).
+  `tests/fork/eas.py` has `Client.ping_answer` (status, the server's
+  heartbeat and the changed folders, also for status 5, with a timeout),
+  and its `--ping` accepts status 5 and prints the bound.
 * Tests: the smoke test's new check `nextcloud-dav-proxy` (group `web`):
   a card whose name has a space and a `?` is read, found in `?export` and
   deleted through `/carddav`, and the address book stays; a file named
@@ -292,7 +299,6 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   504 after 635 s, and left Z-Push waiting for up to an hour): no answer
   within 90 s fails the check, and a Ping of 60 s of the same device ends
   the long one in Z-Push (about 2.5 minutes in all, and no Ping is left).
-  `tests/fork/eas.py`: `ping_status()` takes a timeout.
 * Setup marks Z-Push's directory with the version and the checksum of
   conf/zpush/z-push.patches (`/usr/local/lib/z-push/version`, such as
   `2.7.7+patches-<16 hex digits>`), and installs a fresh copy of Z-Push
@@ -372,6 +378,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * `/caldav`, `/carddav` and `/webdav` are now prefix locations of nginx: a
   proxy of your own for one of these paths (`www/custom.yaml`) would now
   clash with them (B130).
+* A reverse proxy or firewall of your own in front of the box must keep an
+  ActiveSync request open for an hour (3660 s) too, or it ends the long Pings
+  instead of nginx (B129).
+* If you raised the ActiveSync timeout by hand in your checkout's
+  `conf/nginx-alldomains.conf` (the template nginx's `local.conf` is built
+  from, so the change survives the nightly rebuild), put the file back before
+  the update (`git -C /root/mailinabox checkout -- conf/nginx-alldomains.conf`),
+  or bootstrap.sh refuses to check out the release (B129).
 
 ### Planned
 

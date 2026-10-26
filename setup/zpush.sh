@@ -164,6 +164,20 @@ fi
 	&& [ "$(grep -cxF "$ZPUSH_COMBINED_TEMPFAIL" "$ZPUSH_COMBINED")" = 1 ] && [ "$(grep -cF "MIAB-B126" "$ZPUSH_COMBINED")" = 1 ] \
 	|| { echo "Could not patch $ZPUSH_IMAP and $ZPUSH_COMBINED (Z-Push $VERSION); a temporary login failure would count as a failed login."; exit 1; }
 
+# Longest Ping (push long poll) a phone may ask for: 3540 s (59 min), Z-Push's
+# own maximum and the server heartbeat Apple advises. A longer request gets
+# status 5 with this bound at once, and the phone pings with it. Without a
+# bound Z-Push keeps any heartbeat open, beyond nginx's fastcgi_read_timeout
+# for /Microsoft-Server-ActiveSync (3660 s, conf/nginx-alldomains.conf), which
+# must stay longer than this (it was 630 s, and iPhones got 504 after 10.5
+# minutes for every Ping, B129).
+sed -i "s/define('PING_HIGHER_BOUND_LIFETIME', .*/define('PING_HIGHER_BOUND_LIFETIME', 3540);/" /usr/local/lib/z-push/config.php
+# The sed does nothing if a new Z-Push changes or drops that line. Setup goes
+# on (nginx's 3660 s still cover heartbeats up to about an hour), but says so.
+if ! grep -q "^[[:space:]]*define('PING_HIGHER_BOUND_LIFETIME', 3540);" /usr/local/lib/z-push/config.php; then
+	echo "WARNING: Z-Push's config.php has no PING_HIGHER_BOUND_LIFETIME line to set: phones may ask for Pings longer than nginx's limit for ActiveSync (B129)."
+fi
+
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php
 cp conf/zpush/backend_combined.php /usr/local/lib/z-push/backend/combined/config.php
@@ -186,19 +200,6 @@ rm -f /usr/local/lib/z-push/autodiscover/config.php
 cp conf/zpush/autodiscover_config.php /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s/PRIMARY_HOSTNAME/$PRIMARY_HOSTNAME/" /usr/local/lib/z-push/autodiscover/config.php
 sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezone --value)');^" /usr/local/lib/z-push/autodiscover/config.php
-
-# The longest Ping (the push long poll) a phone may ask for: 3540 s, the
-# protocol's maximum. A Ping with a longer heartbeat gets status 5 with this
-# bound at once, and the phone pings with it. Without a bound Z-Push kept any
-# heartbeat open, past nginx's fastcgi_read_timeout for
-# /Microsoft-Server-ActiveSync, which must stay longer than this (3660 s,
-# conf/nginx-alldomains.conf; it was 630 s, and iPhones got 504 after
-# 10.5 minutes for every Ping, B129).
-sed -i "s/define('PING_HIGHER_BOUND_LIFETIME', .*/define('PING_HIGHER_BOUND_LIFETIME', 3540);/" /usr/local/lib/z-push/config.php
-if ! grep -qF "define('PING_HIGHER_BOUND_LIFETIME', 3540);" /usr/local/lib/z-push/config.php; then
-	echo "Z-Push's config.php has no PING_HIGHER_BOUND_LIFETIME setting."
-	exit 1
-fi
 
 # The fork's changes to Z-Push's code (conf/zpush/z-push.patches): its CardDAV
 # client finds cards whose name has no ".vcf", such as Nextcloud's example
