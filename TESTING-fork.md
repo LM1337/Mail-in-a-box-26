@@ -270,7 +270,10 @@ report. The groups:
   to rc5, it must hold the new file); the attacks then run against the
   rotated log, so a jail that a rotation made blind fails (B85). After rc7
   also failed ActiveSync (OPTIONS with a wrong password) and Autodiscover
-  logins get the peer banned by `miab-zpush` (B126), on HTTP and HTTPS. Use a lab address of the peer
+  logins get the peer banned by `miab-zpush` (B126), on HTTP and HTTPS,
+  and 25 ActiveSync requests without credentials (a user in the URL, as a
+  phone's first request) must log no failed login and ban nothing
+  (`fail2ban-activesync-noauth`). Use a lab address of the peer
   (`--peer-ssh`), never the jump host.
 
 The number of checks grew from release to release (49 in the first runs, 73
