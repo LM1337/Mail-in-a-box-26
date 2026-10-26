@@ -257,8 +257,8 @@ report. The groups:
   name without `.vcf`, like Nextcloud's example contact `default` (B128);
   all are deleted again, and the test device is removed from Z-Push (with
   `--ssh`); `zpush-ping`: a Ping with a heartbeat of 3600 s gets status 5
-  with the box's bound at once (no answer within 90 s fails it: no bound,
-  and a short Ping of the device ends the long one), and (with `--ssh`) nginx's
+  with the box's bound at once (no answer within 90 s fails it: no bound;
+  a Ping of 60 s of the device then ends the long one), and (with `--ssh`) nginx's
   `fastcgi_read_timeout` of every `/Microsoft-Server-ActiveSync` location is
   at least a minute longer than that bound, so a long Ping does not end
   with 504 (B129). Quick enough to run

@@ -2144,7 +2144,8 @@ def c_zpush_ping(ctx):
     # and (with --ssh) the timeout of every such location is at least a
     # minute longer than that bound. The Ping waits 90 s at most: a box
     # without a bound keeps it open (until nginx's 504), and a newer Ping of
-    # the device ends that wait in Z-Push.
+    # the device ends that wait in Z-Push; the check waits for that newer
+    # Ping (60 s), so that no Ping of the device is left when it is removed.
     eas = _load_eas()
     wait = 90
     devid = "miabsmokeping" + ctx.tok
@@ -2163,9 +2164,11 @@ def c_zpush_ping(ctx):
         except (TimeoutError, socket.timeout):
             # Z-Push ends the old Ping (with more than 60 s to go) when it
             # sees a newer one of the device, at its next check (PING_INTERVAL,
-            # 30 s); the newer one, of 60 s, is not waited for: it ends itself.
+            # 30 s), without saving its state; the newer one, of 60 s, saves
+            # the device's state when it ends: wait for it, or it would write
+            # the state again after the device's removal below.
             try:
-                c.ping_status([(cons[0]["ServerId"], "Contacts")], 60, timeout=5)
+                c.ping_status([(cons[0]["ServerId"], "Contacts")], 60, timeout=150)
             except (TimeoutError, socket.timeout, OSError, eas.EASError):
                 pass
             raise Fail("Ping with a heartbeat of 3600 s: no status 5 within %d s (no Ping bound: nginx ends it "

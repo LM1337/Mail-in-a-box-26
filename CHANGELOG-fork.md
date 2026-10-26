@@ -97,8 +97,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the `/cloud/remote.php/...` URLs or `.well-known`, and not Z-Push. Files
   and cards whose names begin with `.ht`, `.git`, `.svn`, `.hg` or `.bzr`
   pass through these paths as before (nginx's dotfile block does not apply
-  to them), and a path with `/mail/config/` in it below them is now passed
-  too instead of 403 (B130).
+  to them; B130).
 
 ### Changed
 
@@ -151,8 +150,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Tests: the smoke test's `zpush-ping` waits 90 s at most for the answer
   to its Ping of 3600 s (on a box without the bound it waited for nginx's
   504 after 635 s, and left Z-Push waiting for up to an hour): no answer
-  within 90 s fails the check, and a short Ping of the same device ends the
-  long one in Z-Push. `tests/fork/eas.py`: `ping_status()` takes a timeout.
+  within 90 s fails the check, and a Ping of 60 s of the same device ends
+  the long one in Z-Push (about 2.5 minutes in all, and no Ping is left).
+  `tests/fork/eas.py`: `ping_status()` takes a timeout.
 * Setup marks Z-Push's directory with the version and the checksum of
   conf/zpush/z-push.patches (`/usr/local/lib/z-push/version`, such as
   `2.7.7+patches-<16 hex digits>`), and installs a fresh copy of Z-Push
