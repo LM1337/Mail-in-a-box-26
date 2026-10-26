@@ -1916,7 +1916,13 @@ def c_zpush_sync(ctx):
     try:
         for path, body, ctype in ((event, ics, "text/calendar; charset=utf-8"),
                                   (card, vcf, "text/vcard; charset=utf-8")):
-            r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": ctype})
+            for attempt in range(3):
+                # Nextcloud on SQLite answers 500 ("database is locked")
+                # while its cron job or a user's first login writes
+                r = http_req(ctx, "PUT", path, auth=auth, body=body, headers={"Content-Type": ctype})
+                if r.status not in (500, 503):
+                    break
+                time.sleep(10)
             if r.status not in (201, 204):
                 raise Fail("PUT %s HTTP %d" % (path, r.status))
             created.append(path)

@@ -257,6 +257,7 @@ class Client:
         if st != "1":
             raise EASError("status", "FolderSync status %s" % st)
         self.folders = []
+        self.sync_keys = {}  # a new folder hierarchy: every folder starts with SyncKey 0
         for f in find(t, "Add"):
             self.folders.append({c[0]: text(c) for c in f[1] if isinstance(c, tuple)})
         return self.folders

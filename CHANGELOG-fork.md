@@ -54,8 +54,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   IMAP (logins and IDLE), SMTP AUTH and Roundcube clients busy while setup
   runs and summarizes what failed; the update scenarios run it during setup
   (TESTING-fork.md, "Client load during updates"). The log audit no longer
-  accepts "No passdbs specified" during setup (B120), and accepts what
-  Dovecot logs when setup reloads it.
+  accepts "No passdbs specified" during setup (B120); it accepts what
+  Dovecot logs when setup reloads it, and what nginx and OpenDKIM log when
+  a client comes in during setup's restart of PHP-FPM or OpenDKIM.
 
 ### Planned
 
