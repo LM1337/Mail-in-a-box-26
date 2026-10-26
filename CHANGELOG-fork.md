@@ -22,6 +22,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 For the final release v78-r2604.0 (from rc7):
 
+* Nextcloud's brute-force protection throttles 127.0.0.1 after a setup run
+  (seen on a production box at the update from rc6 to rc7): setup restarts
+  Dovecot, Nextcloud's `user_external` cannot reach IMAP for about two
+  seconds, and the CalDAV/CardDAV logins that Z-Push makes from 127.0.0.1
+  fail (12 in two seconds). Nextcloud then answers Z-Push with
+  `TooManyRequests` for every user for about 30 minutes, and keeps a 25 s
+  delay after that, so ActiveSync calendars and contacts do not sync.
+  Planned: setup puts 127.0.0.1 and ::1 on the bypass list of
+  `bruteforcesettings` (Z-Push and the other local callers authenticate
+  against Dovecot first, where fail2ban watches), and the smoke test syncs
+  a calendar over ActiveSync right after a setup run.
 * T6 (on the Internet: Let's Encrypt, delivery to other providers, and
   `mailcheck` with a real external probe) before the final release
   v78-r2604.0.
