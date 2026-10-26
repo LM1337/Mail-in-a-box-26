@@ -42,6 +42,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   client, can pass for a failed login. Setup removes a log file with more
   than one link (a hard link that www-data could have made to a file of
   another account) before it gives the log files to www-data (B126).
+* Logins no longer fail for a moment at the end of each setup run: setup
+  rewrote the automatic aliases in `users.sqlite` every time (since rc4,
+  B60), and Dovecot, which reads that database for every login and waits
+  at most one second for a lock, answered "Temporary authentication
+  failure" (`database is locked` in `mail.log`) to the IMAP, POP3, SMTP
+  AUTH and ActiveSync logins of that moment when the commit took longer on
+  a busy disk. Setup and the control panel now write the table only when
+  it changes (B133).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP

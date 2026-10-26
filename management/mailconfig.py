@@ -647,11 +647,30 @@ def remove_mail_alias(address, env, do_kick=True):
 	return None
 
 def add_auto_aliases(aliases, env):
+	# Writes the table only when it changes (B133). Dovecot reads users.sqlite
+	# for every login and waits at most 1 s for a lock; a commit locks out
+	# all readers until its journal and the database are on disk, which on a
+	# busy disk (at the end of setup, which runs this each time) took longer:
+	# logins failed with a temporary error. BEGIN IMMEDIATE takes the write
+	# lock that readers do not block on, so the comparison and the write are
+	# one transaction; when nothing changes it is rolled back without a write.
 	conn, c = open_database(env, with_connection=True)
-	c.execute("DELETE FROM auto_aliases")
-	for source, destination in aliases.items():
-		c.execute("INSERT INTO auto_aliases (source, destination) VALUES (?, ?)", (source, destination))
-	conn.commit()
+	try:
+		c.execute("BEGIN IMMEDIATE")
+		c.execute("SELECT source, destination, permitted_senders FROM auto_aliases")
+		current = {}
+		for source, destination, permitted_senders in c.fetchall():
+			current[source] = (destination, permitted_senders)
+		if current == {source: (destination, None) for source, destination in aliases.items()}:
+			conn.rollback()
+			return
+		c.execute("DELETE FROM auto_aliases")
+		for source, destination in aliases.items():
+			c.execute("INSERT INTO auto_aliases (source, destination) VALUES (?, ?)", (source, destination))
+		conn.commit()
+	except BaseException:
+		conn.rollback()
+		raise
 
 def get_system_administrator(env):
 	return "administrator@" + env['PRIMARY_HOSTNAME']

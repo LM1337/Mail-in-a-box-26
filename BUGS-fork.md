@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116, B118 and B119 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84 and B113 in rc4, B70 in rc5.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116, B118 and B119 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84, B113 and B133 in rc4, B70 in rc5.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -39,8 +39,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-124 bugs: 2 critical, 18 high, 51 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B126 in the review of the fix of B121 (in Z-Push's setup since upstream), B127 in the journal of the production box after its update to rc7, B132 in the work on B125 (in the status checks since upstream). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
+125 bugs: 2 critical, 18 high, 52 medium, 53 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B126 in the review of the fix of B121 (in Z-Push's setup since upstream), B127 in the journal of the production box after its update to rc7, B132 in the work on B125 (in the status checks since upstream), B133 in the update test with client load of the merged fixes of B125 to B127 (in setup since rc4, the fix of B60). B92-B94 are not used; B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -48,9 +48,9 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 34 |
+| Fork | 35 |
 
-41 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B126, B127, B132). They are candidates for
+42 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B126, B127, B132, B133). They are candidates for
 upstream pull requests, independent of the 26.04 port.
 
 ## Overview
@@ -182,6 +182,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B126](#b126) | medium | fail2ban | ActiveSync and Autodiscover have no brute-force protection: Z-Push checks passwords from 127.0.0.1, which fail2ban ignores, and does not log failed logins | Upstream | yes | yes | after rc7 |
 | [B127](#b127) | medium | Management | Each login to the control panel writes the password hash into the journal, and the plain password is in doveadm's command line, which every local account can read | Upstream | yes | yes | after rc7 |
 | [B132](#b132) | medium | Management | The status checks stop with an error as a whole when the status of the backups cannot be read (the System Status page shows only "Something went wrong", the nightly check mails a traceback) | Upstream | yes | yes | after rc7 |
+| [B133](#b133) | medium | Setup | At the end of each setup run logins fail for a moment with a temporary error: setup rewrites the automatic aliases in users.sqlite, and Dovecot waits at most one second for the lock | Fork | partly | no | after rc7 |
 
 ## Details
 
@@ -1610,6 +1611,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes (the same check), PR #2603 yes, the fork up to rc7. Origin: Upstream.
 * **Evidence:** In the lab on the copy of a production box with the backup target's port 22 dropped on the box's own firewall: during a refresh of the backup page, the status checks answered in 4 s (before the fix: HTTP 500 with "Another duplicity instance is already running" in the journal) and used the saved status; with the target dropped and no refresh running, they answered after 229 s with HTTP 200, the backup check failed with duplicity's message, and the other checks were listed (50 entries with the headings). After the review of the fix: with no saved status (the file moved aside in the lab) and a refresh running, the backup check gave the one warning that a refresh is in progress and no status has been saved yet, and the other checks ran (50 entries).
 * **Found by:** rc7 development (the lab checks of B125); **commit:** see `git log --grep B132`; **fixed in:** the release after v78-r2604.0-rc7
+
+### B133
+
+**At the end of each setup run logins fail for a moment with a temporary error: setup rewrites the automatic aliases in users.sqlite, and Dovecot waits at most one second for the lock** (medium, Setup)
+
+* **Symptom:** In the update test under client load (a copy of a production box updated from rc6 to the merged fixes of B125 to B127), Dovecot logged `sql: Password query failed: database is locked` (and `User query failed`, `finalize failed`) in 44 lines between 17:06:01.99 and 17:06:03.07, right before setup ended, and 27 logins were aborted with "auth service reported temporary failure". The IMAP, POP3, SMTP AUTH and ActiveSync logins of that moment got `NO [UNAVAILABLE] Temporary authentication failure` or a closed connection; one ActiveSync request with a correct password got 401 and was counted as a failed login by `miab-zpush` (B126). New auth-worker processes, started because the others waited, failed the same way.
+* **Cause:** setup/start.sh runs `management/mailconfig.py update-auto-aliases` at its end (added in rc4 with the fix of B60), and the control panel runs the same after each change of users or aliases. `add_auto_aliases` deleted the table `auto_aliases` and inserted all rows again each time, also when nothing changed. Its commit takes the database's exclusive lock until the journal and the database are written and synced; Dovecot's SQLite driver waits 1 s for a lock (a constant in its source, `sqlite_busy_timeout`, not a setting) and then reports a temporary failure. On an idle box the commit blocks readers for about 50 ms; at the end of an update, with the disk busy, it took longer than 1 s.
+* **Fix:** `add_auto_aliases` compares the table with the aliases to write, inside one transaction started with `BEGIN IMMEDIATE` (a write lock that does not block readers), and rolls back without writing when they are the same (the usual case: every setup run, and most changes of users). Only a real change still writes, as before.
+* **Affects:** the fork from rc4 to rc7. Origin: Fork. v78 partly: its control panel rewrites the table after every change of users or aliases too (the same short lock, not measured there), but its setup does not.
+* **Evidence:** See below.
+* **Found by:** update test (the update of a copy of the production box under client load after the merge of the fixes of B125 to B127); **commit:** see `git log --grep B133`; **fixed in:** the release after v78-r2604.0-rc7
 
 ## Not counted above
 
