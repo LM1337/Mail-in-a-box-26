@@ -96,7 +96,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   " from IP 198.51.100.7." in them, an escaped line break, Z-Push's own
   order of the message), and the fail2ban group bans the peer through
   failed ActiveSync and Autodiscover logins (`fail2ban-activesync`,
-  `fail2ban-autodiscover`).
+  `fail2ban-autodiscover`; it asks only the jails that run, so that a slow
+  jail that is off logs no error). The log audit accepts what these
+  deliberate failures log (Z-Push's three IMAP tries, its exception and the
+  new warning; for Autodiscover, which names no user in brackets, only with
+  `--smoke`), and with `--internet` the same lines as password guessing.
 * Tests: the log audit's rule for Postfix's milter warnings while setup
   restarts OpenDKIM or OpenDMARC also accepts a reset later in the milter
   session (`SMFIC_MAIL` and the other commands), not only in the handshake.

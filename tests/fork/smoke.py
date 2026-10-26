@@ -2722,8 +2722,15 @@ def c_fail2ban(ctx, proto, jails, port, wait=30):
         f2b_unban(ctx, src)
         time.sleep(5)
         f2b_unban(ctx, src)
+    # Only the jails that run (a slow web jail is off by default): asking
+    # fail2ban for another one logs an error in fail2ban.log.
+    rc, out, _ = ctx.remote.run("fail2ban-client status", sudo=True)
+    m = re.search(r"Jail list:\s*(.*)", out) if rc == 0 else None
+    if m:
+        running = {x.strip() for x in m.group(1).split(",")}
+        jails = [j for j in jails if j in running]
     before = {j: f2b_banned(ctx, j) for j in jails}
-    if all(v is None for v in before.values()):
+    if not jails or all(v is None for v in before.values()):
         raise Fail("none of the jails %s exist" % jails)
     if ctx.args.peer_ssh:
         spec = {"host": ctx.args.host, "port": port, "proto": proto, "count": ctx.args.fail2ban_count,
