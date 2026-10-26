@@ -417,11 +417,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * A reverse proxy or firewall of your own in front of the box must keep an
   ActiveSync request open for an hour (3660 s) too, or it ends the long Pings
   instead of nginx (B129).
-* If you raised the ActiveSync timeout by hand in your checkout's
-  `conf/nginx-alldomains.conf` (the template nginx's `local.conf` is built
-  from, so the change survives the nightly rebuild), put the file back before
-  the update (`git -C /root/mailinabox checkout -- conf/nginx-alldomains.conf`),
-  or bootstrap.sh refuses to check out the release (B129).
+* Put back every file that you changed by hand in `/root/mailinabox`
+  before the update, or bootstrap.sh stops with "Update failed. Did you
+  modify something in /root/mailinabox?" (git refuses to check out over a
+  changed file). `git -C /root/mailinabox status --short` lists them, and
+  `git -C /root/mailinabox checkout -- FILE` puts one back. Hotfixes of
+  this release made by hand on a box on rc7 are such files: the ActiveSync
+  timeout in `conf/nginx-alldomains.conf` (the template nginx's
+  `local.conf` is built from, so the change survived the nightly rebuild;
+  B129) and the ssh options in `management/backup.py` (B125). The release
+  sets both itself. Hand changes to Z-Push's own `config.php` (such as
+  `PING_HIGHER_BOUND_LIFETIME`) need nothing: the update installs Z-Push
+  again, and setup sets the bound.
 
 ### Planned
 

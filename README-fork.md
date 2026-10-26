@@ -104,6 +104,14 @@ dialog boxes again (the host name, the public IP address when it differs
 from what the Internet sees; from rc7 on no longer the welcome text of a new
 installation); Enter keeps the current values.
 
+Files changed by hand in `/root/mailinabox` (a hotfix, for example) must be
+put back before the update, or bootstrap.sh stops with "Update failed. Did
+you modify something in /root/mailinabox?": `git -C /root/mailinabox status
+--short` lists them, `git -C /root/mailinabox checkout -- FILE` puts one
+back. Setup downloads some components from GitHub again when the release
+changes them (Z-Push on the first update after rc7, as the fork's changes to
+it are new), so the box must reach GitHub during the update.
+
 Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
 tool) were cloned from the fork's previous home. bootstrap.sh stops on them
 with "is a checkout of ..., not of https://github.com/LM1337/Mail-in-a-box-26".
@@ -218,11 +226,12 @@ Right after the update:
   `doveconf -h log_path` must say `syslog`. fail2ban's Dovecot jails then
   see failed IMAP, POP3 and ManageSieve logins also after the weekly
   rotation of `mail.log`.
-* **ActiveSync contacts (B99).** From rc7 on, new users get no example
-  contact in Nextcloud. Users created before keep it, and the contact sync
-  of their phones over ActiveSync fails until it is deleted: in Nextcloud's
-  Contacts, delete the contact marked "This is an example contact" (each
-  user for themselves, or the admin for them).
+* **ActiveSync contacts (B99, B128).** From rc7 on, new users get no
+  example contact in Nextcloud. Users created before keep it. On rc7 the
+  contact sync of their phones over ActiveSync fails until it is deleted (in
+  Nextcloud's Contacts, the contact marked "This is an example contact");
+  after rc7 Z-Push syncs it like any other contact (B128), and it can stay
+  or be deleted.
 
 ### Deutsch
 
@@ -235,6 +244,15 @@ an Ort und Stelle wird dafür nicht gebraucht. Das Setup zeigt einige seiner
 Dialogfenster noch einmal (den Hostnamen und die öffentliche IP-Adresse,
 wenn sie von der abweicht, die das Internet sieht; ab rc7 nicht mehr den
 Begrüßungstext einer neuen Installation); Enter behält die bisherigen Werte.
+
+Von Hand geänderte Dateien in `/root/mailinabox` (etwa ein Hotfix) müssen vor
+dem Update zurückgesetzt werden, sonst bricht bootstrap.sh mit „Update
+failed. Did you modify something in /root/mailinabox?“ ab: `git -C
+/root/mailinabox status --short` listet sie, `git -C /root/mailinabox
+checkout -- DATEI` setzt eine zurück. Setup lädt manche Bestandteile wieder
+von GitHub, wenn das Release sie ändert (Z-Push beim ersten Update nach rc7,
+weil die Änderungen des Forks daran neu sind); die Box muss GitHub während
+des Updates also erreichen.
 
 Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
 In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.
@@ -362,12 +380,12 @@ Gleich nach dem Update:
   `doveconf -h log_path` muss `syslog` sagen. Die Dovecot-Jails von
   fail2ban sehen dann fehlgeschlagene Anmeldungen bei IMAP, POP3 und
   ManageSieve auch nach der wöchentlichen Rotation von `mail.log`.
-* **Kontakte über ActiveSync (B99).** Ab rc7 bekommen neue Benutzer in
-  Nextcloud keinen Beispielkontakt mehr. Ältere Benutzer behalten ihn, und
-  der Kontaktabgleich ihrer Telefone über ActiveSync schlägt fehl, bis er
-  gelöscht ist: in den Kontakten von Nextcloud den Kontakt löschen, der als
-  „This is an example contact“ markiert ist (jeder Benutzer selbst oder der
-  Admin für ihn).
+* **Kontakte über ActiveSync (B99, B128).** Ab rc7 bekommen neue Benutzer
+  in Nextcloud keinen Beispielkontakt mehr. Ältere Benutzer behalten ihn.
+  Unter rc7 schlägt der Kontaktabgleich ihrer Telefone über ActiveSync fehl,
+  bis er gelöscht ist (in den Kontakten von Nextcloud der Kontakt, der als
+  „This is an example contact“ markiert ist); nach rc7 gleicht Z-Push ihn
+  wie jeden anderen Kontakt ab (B128), er kann bleiben oder gelöscht werden.
 
 
 Setup output / Ausgaben von setup
