@@ -82,7 +82,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   of the target's files) in the journal of the management daemon. New API
   calls `GET /system/backup/status/saved` and
   `POST /system/backup/status/refresh`; `GET /system/backup/status` still
-  queries the target and waits for it (B125).
+  queries the target and waits for it. `tools/update-check.sh backup` no
+  longer takes such a refresh for a running backup (B125).
 * nginx waits for the control panel as long as gunicorn lets a request
   run (630 s) instead of its default of 60 s, so that the status checks,
   the TLS provisioning and the backup page's live query are no longer cut

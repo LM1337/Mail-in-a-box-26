@@ -936,7 +936,9 @@ and check custom.yaml and secret_key.txt in it."
 	else
 		[ -n "$MIAB_DIR" ] || die "No Mail-in-a-Box checkout of root's own found (see the warning above); use --no-miab-backup."
 		[ -x "$MIAB_DIR/management/backup.py" ] || die "$MIAB_DIR/management/backup.py is missing (or use --no-miab-backup)."
-		if pgrep -f 'management/backup\.py' > /dev/null; then
+		# Not the refresh of the backup page's status (backup.py --refresh-status,
+		# B125): the backup below waits for it.
+		if pgrep -f 'management/backup\.py( --full)?$' > /dev/null; then
 			die "A Mail-in-a-Box backup is running already. Wait until it is finished and run this again."
 		fi
 		say "management/backup.py to $(masked_target "$target") (it stops Postfix, Dovecot, postgrey and PHP for its run)..."
