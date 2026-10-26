@@ -113,8 +113,8 @@ B113 in the migration tool's check (all fixed).
     for its run) and writes an archive of `/etc`, `/root/mailinabox`, the
     crontabs, `/var/lib/z-push`, `/var/lib/munin`, `/usr/local/lib/owncloud`
     and the Docker stack directories and volumes named with `--docker-dir`
-    and `--docker-volume` (one archive per volume), and a pg_dump of each
-    container named with `--postgres` (with its `POSTGRES_USER` and
+    and `--docker-volume` (one archive per volume, B104), and a pg_dump of
+    each container named with `--postgres` (with its `POSTGRES_USER` and
     `POSTGRES_DB`); the names and mount points are checked before the
     Mail-in-a-Box backup. Everything is encrypted with gpg (AES256, the
     passphrase of the Mail-in-a-Box backups) as it is written; only the
@@ -158,7 +158,8 @@ B113 in the migration tool's check (all fixed).
   from a private copy of the old sshd (and of sshd-session and sshd-auth
   where they exist), so the package cannot replace it underneath. It
   accepts only public keys, only of the administrators (members of the
-  groups sudo and admin, and root if `PermitRootLogin` allows keys;
+  groups sudo and admin, also on a box without a group admin, B100, and
+  root if `PermitRootLogin` allows keys;
   `UPGRADE_SSH_FALLBACK_USERS` names others), whose keys it copies (read as
   the user) into a root-owned directory, listens on the ListenAddress
   addresses of the running sshd, keeps its AllowUsers, AllowGroups,
@@ -392,6 +393,13 @@ B113 in the migration tool's check (all fixed).
 * Tests: `tests/fork/log-audit.sh --since` also takes the short forms `-90s`,
   `-30m`, `-24h`, `-2d` and `-1w`; `date -d` fails on them ("-24h" reads the
   "h" as a time zone).
+* Docs: README-fork.md, "Updating the fork", gives the commands of
+  `tools/update-check.sh` for a box on rc6 or earlier (through curl, with
+  the Docker options) and what the results and exit codes of `after` mean;
+  "In-place upgrade to 26.04" has the outage times of the rc7 tests, what
+  the fallback SSH server did in them, how to try it before the upgrade,
+  and `update-check.sh` around an in-place upgrade. TESTING-fork.md has the
+  results of the rc7 certification runs.
 
 ### Upgrade note
 
@@ -418,7 +426,8 @@ B113 in the migration tool's check (all fixed).
 * The fallback SSH server of the in-place tool listens on port 1022 during
   each release upgrade. If a firewall of the provider must let it through,
   open it there before the upgrade and try it with
-  `sudo /root/mailinabox/tools/upgrade-in-place-to-2604.sh --ssh-fallback-test`.
+  `curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh | sudo bash -s -- --ssh-fallback-test`
+  (README-fork.md, "In-place upgrade to 26.04").
   `UPGRADE_SSH_FALLBACK_PORT=off` turns it off.
 * Before and after the update, `tools/update-check.sh before`, `backup`,
   `after` and `mailcheck` (see "Updating the fork" in README-fork.md) record
@@ -435,10 +444,13 @@ Munin alert setting, the fallback SSH server and the live note, the order
 of the OpenDKIM tables, the `(sd-pam)` rule, the API test, the log audit
 baseline and Internet allowlist, the update tools (state, backup,
 comparison, mail check) as code, the welcome dialog, the nginx reload with
-its allowlist rules, the journal check. The full test matrix T1 to T5b ran on rc7 after the fixes B106-B114
-(TESTING-fork.md, "rc7"): T3 and T4 with the single-binary sshd of 22.04
-and 24.04 for the fallback, T5b with `tools/update-check.sh` around the
-update (Docker options, rsync upload, lab probe).
+its allowlist rules, the journal check. The full test matrix T1 to T5b ran
+on rc7 twice (TESTING-fork.md, "rc7"): on the release commit, where it
+found B106 to B113, and after the fixes, with 0 FAIL in the smoke tests and
+0 unknown classes in every log audit: T3 and T4 with the single-binary sshd
+of 22.04 and 24.04 for the fallback, T5b with `tools/update-check.sh`
+around the update (Docker options, rsync upload, lab probe). T6 is left for
+the final release.
 
 ## v78-r2604.0-rc6 (2026-10-25)
 

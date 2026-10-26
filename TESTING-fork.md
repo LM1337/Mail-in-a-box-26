@@ -38,8 +38,8 @@ your mail.
   downloaded it from the tag and started it in a tmux session of its own,
   and the runs on a release branch set `SOURCE`/`TAG`. rc5 T4 is the run
   that uses exactly the documented command against the published tag. All
-  rc6 runs used the documented commands with `SOURCE`/`TAG` set to the
-  release branch.
+  rc6 and rc7 runs used the documented commands with `SOURCE`/`TAG` set to
+  the release branch.
 * **The smoke test measures the box, not itself:** against the unchanged
   22.04 test VM (v74) it passes in full (baseline run with the smoke test of
   rc1/rc2; not repeated with the larger smoke test of rc4/rc5).
@@ -74,37 +74,50 @@ smoke test.
 
 ### What the scenarios of rc7 cover
 
-rc7 adds tools and behaviour that the scenarios must run, not only the
-smoke test:
+rc7 adds tools and behaviour that the scenarios ran, not only the smoke
+test (results in "rc7" below):
 
-* **T5b** (update from rc3 and from rc6): `tools/update-check.sh before`
-  and `backup` on the snapshot before the update, started through
-  `curl … | sudo bash -s -- STEP` as the upgrade note says (a box on rc6 has
-  no copy of the tool), `backup` with `--docker-dir`, `--docker-volume` and
-  `--postgres` for the Docker stand-in of the copied box and with the
-  rsync upload to a lab target; after the update `after` (RESULT OK: every
-  change EXPECTED by `tools/expected-changes/`, no new log message class
-  against the baseline) and `mailcheck` with a lab probe (`--probe`, an
-  address of the peer that answers the mail; outbound delivery and DKIM are
-  then only checked inside the lab). `PROBE_ADDRESS` in
-  `/etc/mailinabox.conf` is still there after the update (B103). An
-  interactive update shows no welcome dialog.
+* **T5b** (update from the published rc6, Part A, and from rc3, Part B):
+  `tools/update-check.sh before` (both parts) and `backup` (Part A) on the
+  box before the update, started through `curl … | sudo bash -s -- STEP` as the upgrade note says
+  (a box on rc6 has no copy of the tool; the lab pointed the tool's helper
+  URL to the release branch, see "rc7"). `backup` with `--docker-dir`, two
+  `--docker-volume` (one archive each) and `--postgres` for a stand-in
+  Postgres container, and the upload to an rsync target of the lab (an
+  account on the peer), verified by checksum; the archives were decrypted
+  and the dump restored. After the update `after` and `mailcheck` with a
+  lab probe: an address on the peer whose script answers the marked mail
+  over port 25. Outbound delivery and the DKIM signature were therefore
+  only checked inside the lab. `PROBE_ADDRESS` in `/etc/mailinabox.conf`
+  was still there after the update (B103), and an interactive update
+  showed no welcome dialog. RESULT OK of `after` was shown with the
+  recorded states and the version lines of a tag, because the lab
+  installed a branch.
 * **T3 and T4** (the release upgrades): the fallback SSH server on port
-  1022 on the old OpenSSH of 22.04 and 24.04 (one binary; so far only tried
-  with OpenSSH 10.2 of 26.04), on boxes without a group `admin` (B100): a
-  key login on port 1022 while port 22 is down, the run's notes when port 22
+  1022 on the one-binary OpenSSH of 22.04 (8.9p1, T4) and 24.04 (9.6p1, T3
+  and T4): a key login on port 1022 while port 22 was down, the refusal of
+  a user who is not an administrator there, the run's notes when port 22
   stops and starts answering, and afterwards no fallback process, no ufw
-  rule for its port and none of its files. `--ssh-fallback-test` before the
-  upgrade. A login there of a user who is not an administrator fails.
-* **T1 and T5b**: Munin's alert setting in the admin panel (smoke test
-  `api-munin-alerts`, and one real alert to the chosen address), the nginx
-  reload of setup (no cut ActiveSync long poll except by the PHP-FPM
-  restarts), the OpenDKIM tables unchanged by a second setup run (B95).
-* **All scenarios**: the log audit with `--smoke` (the deliberate failed
-  logins of the smoke test's `api-auth`) and the lab's own list; the
-  classes of setup runs carry `[setup]`.
-* **T6**: `mailcheck` with a real external probe address (delivery to
-  another provider and back, DKIM and SPF there), Let's Encrypt.
+  rule for its port and none of its files, also after a reboot.
+  `--ssh-fallback-test` before the upgrade in both. The case of a box
+  without a group `admin` (B100) ran in T4 only (the group was deleted
+  before; the 24.04 copy of T3 has an empty one). T3 also ran
+  `update-check.sh before`, `backup`, `after` and `mailcheck` around the
+  in-place upgrade of the upstream box (B106, B110), and `--cleanup-only`
+  with `--old-checkout`.
+* **T1 and T5b**: Munin's alert setting through the admin panel's API
+  (smoke test `api-munin-alerts`, and real alerts of forced warnings and
+  criticals to the chosen address with their recovery), the nginx reload
+  of setup (nginx's main process the same through the setup runs), the
+  OpenDKIM tables unchanged by second setup runs (B95), `settings.yaml`
+  mode 0600 after saves in the panel (also T2), and the ActiveSync contact
+  sync of new users (B99) with a small ActiveSync client of the lab.
+* **All scenarios**: the smoke group `api`, the log audit with `--smoke`
+  and the lab's own list; the classes of setup runs carry `[setup]`, from
+  the marks that root logged only.
+* **T6** (not run for rc7; before the final release): `mailcheck` with a
+  real external probe address (delivery to another provider and back, DKIM
+  and SPF there), Let's Encrypt, a box on the Internet.
 
 ### What the smoke test checks
 
@@ -213,11 +226,14 @@ first run of 71/73).
 ² The commits after `5d2d3aa` change only the log audit tool, its
 allowlist and the documentation.
 
-³ Repeated certification run after the fixes B106-B114 (see "rc7" below):
-the code of setup and of the tools was the same in all runs; between the
-commits of the runs only `tools/expected-changes/any.txt` (B114), the
-allowlists of the log audit and the documentation changed. Every log
-audit ended with 0 unknown classes.
+³ Repeated certification run after the fixes B106-B114 (see "rc7" below),
+on `d586ba0`, `f5bd16f` and `20a5162`: the code of setup, of the
+management daemon and of the tools' scripts is the same in these commits
+and in the final head; between them only `tools/expected-changes/any.txt`
+(B114), the allowlists of the log audit and the documentation changed.
+Every log audit, with the lists of the final head, ended with 0 unknown
+classes. The first run on the release commit `1d3ef06` had the same smoke
+counts and found B106-B113.
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -479,28 +495,76 @@ Not fixed in rc6:
 
 ### rc7 (2026-10-25)
 
-The first certification run on the release commit `1d3ef06` passed the
-smoke tests of all scenarios but found B106-B113 in `tools/update-check.sh`,
-its lists of expected changes, the fallback SSH server and the migration
-tool's check, and log classes that were not on the allowlists. After the
-fixes every scenario ran again on the same test VMs (rolled back to their
-snapshots, T5b Part A from the update of the box copy to the published
-rc6), all five at the same time on one hypervisor with an HDD pool, so the
-disk was busy. The runs installed the release branch from the lab's mirror
-(`SOURCE`/`TAG`), not a tag; that is why `update-check.sh after` lists the
-version lines as changed (a test with the version lines of a tag gave
-RESULT OK, see T5b). Commits: `d586ba0` has the fixes B106-B113; `f5bd16f`
-adds the rule of B114 to `tools/expected-changes/any.txt`; `20a5162` adds
-allowlist lines.
+All runs installed the release branch from the lab's mirror with the
+documented commands and `SOURCE`/`TAG` set to it, before the tag existed;
+the published tag itself was not used. `tools/update-check.sh` through
+`curl | bash` takes its helpers from the branch main, which still held rc6,
+so the lab pointed its URL to the release branch. All five scenarios ran at
+the same time on one hypervisor with an HDD pool (at most two release
+upgrades at once), so the disk was busy; the longer times below come from
+there. The peer for port 25, the fail2ban attacks, the probe address of
+`mailcheck` and the rsync target of `backup` was a second test box, at an
+rc7 development commit in the first run and at `1d3ef06` in the repeated
+one, and updated to `518eba7` at the end. Every mail the testers sent to a box themselves was
+a marked test mail.
 
-| Run | Commit | Result |
-|---|---|---|
-| T1 (fresh 26.04) | install `d586ba0`, setup runs A-C and everything after them `f5bd16f` | install exit 0 in 2460 s. Smoke 60/60 after the install, 68/68 with `--fail2ban` after each of two reboots (SSH back after 21 s). Munin's alert setting through the panel's API: 29/29 checks, among them one real alert of a forced warning, one recovery, none on the next run, critical only to a custom address, off. ActiveSync of a new user (B99): Provision, FolderSync, Sync and Ping with status 1, the contact added over CardDAV synced, no example contact. Three second setup runs (non-interactive, interactive bootstrap, interactive `sudo mailinabox`), exit 0 in 88, 109 and 95 s: no welcome dialog, the OpenDKIM tables byte for byte the same (B95), nginx reloaded with the same main process, `settings.yaml` 0600. Log audit: 0 unknown, twice |
-| T2 (22.04 → fresh 26.04) | `d586ba0` | `--check` proposed the full start command with the given addresses (B113). "All checks passed"; the old box stopped 21:48:17, setup 46 min, end of the checks 22:34:45 (46 min 28 s; the new box answered on 25 and 587 after 8 min, on 993 after 9 min). 4 users, 5 aliases, 4 mailboxes, 25 messages, 2 Sieve scripts; the vacation duplicate database came over; `--check-old`: nothing started again. Smoke 21/21 after the first reboot, 79/79 with `--fail2ban` twice. Log audit of the new box: 4 unknown classes with the lists of `d586ba0` (fwupd's timer once during setup, a late timer interrupt of the VM), 0 with those of `20a5162`; old box: 0 |
-| T3 (24.04 copy, in place) | tool `d586ba0`, setup `f5bd16f` | `update-check.sh before` and `backup` on the upstream box with the checkout in `/mailinabox` (B106): version v74 and 17 errors and 9 warnings of the status checks recorded; v74's `backup.py` ran (17 s), the archive took `/mailinabox`, the stack directory and the volume and was verified on the lab's rsync target. `--ssh-fallback-test`: admin key login and sudo on 1022, a non-admin refused there and accepted on 22, nothing left afterwards, also no `/root/upgrade-2604` (B111). "All checks passed"; mail offline 1 h 35 min, 1 reboot (release upgrade 1 h 10 min, setup 20 min). Port 22 stopped answering 22:29:09 and answered again 22:48:01 (the run's notes; 19 min); key logins on 1022 worked meanwhile, the non-admin was refused; `/usr/bin/sudo` was missing about 37 minutes. `after`: "RESULT: NOT JUDGED" (B110, exit code 3, no new log message class). `mailcheck`: RESULT OK over STARTTLS (B107). `PROBE_ADDRESS` kept. Smoke 79/79 with `--fail2ban` after each reboot. `--cleanup-only --old-checkout` deleted `/mailinabox-v74`. Log audit with the baseline of `before`: 0 unknown, 14 known, twice |
-| T4 (22.04 → 24.04 → 26.04, in place) | tool `d586ba0`, setup `f5bd16f` | `--ssh-fallback-test` with and without the group `admin` (B100): as in T3. Without the group: "All checks passed"; mail offline 2 h 04 min, 2 reboots (release upgrades 1 h 12 min and 32 min, setup 15 min). Port 22 down 42 min and 6 min (the run's notes); a new key login on 1022 worked in every check while port 22 was down, except once for about 20 s at 22:09:55 (both ports: the `libtirpc3` switch of 22.04 → 24.04); the non-admin was refused on 1022 both times; sudo missing about 13 minutes; afterwards no fallback process, listener, ufw rule or file. Vacation replies after the upgrade; port 25 from the peer delivered. Smoke 79/79 with `--fail2ban`. Log audit: 11 unknown classes with the lists of `d586ba0` (a new SSH login during the minutes between the unpack of the new systemd and the re-execution of PID 1 gets no user manager; Nextcloud's example event of a first login left out on a busy SQLite database), 0 with those of `20a5162` |
-| T5b Part A (published rc6 → rc7) | `d586ba0` | `before`, `backup` with `--docker-dir`, two `--docker-volume` (one archive each) and `--postgres`, uploaded and verified. Interactive update twice (101 and 118 s), no welcome dialog; the OpenDKIM tables unchanged, nginx's main process the same; `PROBE_ADDRESS` kept; `settings.yaml` 0600. `after`: 6 changes not on the lists: 4 from installing a branch (version lines), munin-node's process name (B114, fixed in `f5bd16f`) and a status check warning of a second backup cache (the lab had changed the backup target right before `before`); the same records with tag version lines and the lists of `f5bd16f`: only that warning. `mailcheck`: RESULT OK. Munin through the API: a custom address set, an invalid one refused, a forced warning gave 1 alert, the recovery 1, the next run none. ActiveSync of two new users (B99): status 1. Smoke 79/79 with `--fail2ban`; a second run right after a reboot that followed the fail2ban group got 9 FAIL, because fail2ban read the attacks again at its start and banned the peer for 4 minutes (fail2ban's normal behaviour after a restart); run again, 79/79. Log audit with the baseline: 0 unknown |
-| T5b Part B (rc3 → rc7) | `20a5162` | on a temporary copy of the rc3 snapshot. `before`, interactive update (no welcome dialog), `PROBE_ADDRESS` kept; `after`: only the 2 version lines of the branch install not on the lists (B109: `/etc/mailname`, the hosts line, Dovecot and `mailinabox.service` enabled again are EXPECTED); with tag version lines "RESULT: OK - 0 unexpected, 30 expected". `mailcheck`: RESULT OK. Smoke 71/71 (a first run had 2 FAIL for the two unmarked lab mails of the snapshot, which the lab script had not deleted). Log audit with the baseline: 0 unknown, 3 known |
+#### First certification run (release commit `1d3ef06`)
+
+| Run | Result |
+|---|---|
+| T1 (fresh 26.04) | install exit 0 in 2111 s; smoke 60/60, then 68/68 with `--fail2ban` after each of two reboots; Munin alert script 29/29; three second setup runs (91 to 111 s) without welcome dialog, OpenDKIM tables unchanged, nginx reloaded with the same main process. Log audit: 3 unknown classes (the `tmp.mount` unmount at a shutdown; a Nextcloud "database is locked" of the lab's CardDAV request during a cron minute), 103 allowed |
+| T2 (22.04 → fresh 26.04) | "All checks passed"; downtime 42 min 31 s; smoke 21/21, 79/79, 79/79. Log audit of the new box: 5 unknown classes (Postfix's sqlite lookup locked during the smoke test's API write round trip, four classes of one event; `tmp.mount`), 102 allowed; old box: 1 unknown (v74's Munin contact warning), 16 allowed. `--check` proposed the start command without the given addresses (B113) |
+| T3 (24.04 copy, in place) | "All checks passed"; mail offline 1 h 23 min; port 22 down 16 min, key logins on 1022 meanwhile; sudo missing about 31 min; smoke 79/79 twice. `update-check.sh before` recorded no version and no status checks and `backup` stopped on the box with its checkout in `/mailinabox` (B106); `after`: "CHANGED - 56 unexpected" for the changes of a release upgrade (B110); `mailcheck`: FAILED for a round trip that worked (B107); `--ssh-fallback-test` left an empty `/root/upgrade-2604` (B111). Log audit: 19 unknown classes over the whole run (17 of the v74 box before it stopped mail, `tmp.mount`), 0 since the second reboot |
+| T4 (22.04 → 24.04 → 26.04, in place) | without the group `admin` (B100); "All checks passed"; mail offline 1 h 49 min; port 22 down 31 and 6 min; new logins on 1022 failed twice for a few seconds (the `libtirpc3` switch; `/run/sshd` gone for up to 10 s, B112); smoke 79/79. Log audit: 5 unknown classes (v74's Munin contact warning before it stopped mail, the fallback's `/run/sshd` fatal, a user journal moved aside at the first boot of 24.04, two classes of the lab's own port probes), 586 allowed |
+| T5b (rc6 → rc7 and rc3 → rc7) | smoke 79/79 twice (from rc6) and 71/71 (from rc3); `before` and `backup` passed; `after` could not say OK, because setup gives the nightly job a new minute on every run (B108), and from rc3 it missed the changes of rc4 and rc5 (B109); `mailcheck`: FAILED (B107). Log audit: 24 unknown classes, none a defect of the box |
+| Peer (rc7 development commit → `1d3ef06`) | interactive update, exit 0 in 89 s, no welcome dialog; smoke `--only api` 5/5. Log audit: 2 unknown classes, both about a lab unit file with mode 0600 |
+
+No smoke run had a FAIL. The defects were B106 to B113 (B114 came
+from the repeated run); the harmless classes went into the allowlists with
+their reasons (`f8d2963`, `20a5162`), the lab artefacts into the lab's own
+list.
+
+#### Certification run after the fixes
+
+Every scenario ran again on the same test VMs, rolled back to their
+snapshots (T5b Part A from a snapshot of the box copy updated to the
+published rc6, Part B on a temporary copy of the rc3 snapshot). Commits:
+`d586ba0` has the fixes B106 to B113; `f5bd16f` adds the rule of B114 to
+`tools/expected-changes/any.txt`; `20a5162` adds allowlist lines; the
+commits after it change only the documentation. The code of `setup/`,
+`management/`, `conf/` and of the tools' scripts is the same in all these
+commits and in the final head; each log audit below was run (again, after
+the run) with the lists of the final head and the lab's own list.
+
+| Run | Commit | Smoke | Mail offline | New SSH logins | Log audit |
+|---|---|---|---|---|---|
+| T1 | install `d586ba0`, the later setup runs `f5bd16f` | 60/60, 68/68, 68/68 | – (fresh install; second setup runs not measured) | only the reboots (SSH back after 21 s) | 0 unknown, 102 allowed |
+| T2 | `d586ba0` | 21/21, 79/79, 79/79 | 46 min 28 s (stop of the old box to the end of the checks); port 25 and 587 after 8 min, 993 after 9 min | no outage | new box 0 unknown, 111 allowed; old box 0 unknown, 20 allowed |
+| T3 | tool `d586ba0`, setup `f5bd16f` | 79/79, 79/79 | 1 h 35 min | port 22 down 19 min, key logins on port 1022 worked meanwhile; sudo missing about 37 min | 0 unknown, 14 known from the baseline, 483 allowed |
+| T4 | tool `d586ba0`, setup `f5bd16f` | 79/79 | 2 h 04 min | port 22 down 42 and 6 min; port 1022 worked in every check but one (about 20 s, both ports); sudo missing about 13 min | 0 unknown, 607 allowed |
+| T5b Part A (rc6 → rc7) | `d586ba0` | 79/79 (one run 69/79, see below), 79/79 | update runs of 101 and 118 s, a probe every 2 s: ports 25 and 587 failed at most 2 probes in a row, 993 and LMTP 1, spampd 3; one probe mail of each run refused or cut at connect | no outage (a check every 10 s) | 0 unknown, 0 known, 81 allowed |
+| T5b Part B (rc3 → rc7) | `20a5162` | 69/71, then 71/71 | update run of 118 s: 1 failed probe on each port and on spampd, one probe mail refused at connect | no outage | 0 unknown, 3 known, 78 allowed |
+| Peer (`1d3ef06` → `518eba7`) | `518eba7` | admin and api 12/12 | update run of 86 s: ports 25, 587, 993 and LMTP never failed a probe, spampd 2 in a row; all probe mails delivered | – | 0 unknown, 23 allowed |
+
+The release upgrades took 1 h 10 min (T3) and 1 h 12 min and 32 min (T4),
+setup 20, 14 and 46 min (T3, T4, T2; T1's install 41 min). Reboots: SSH
+back after 20 to 21 s in every scenario, all units active.
+
+| Run | Details |
+|---|---|
+| T1 (fresh 26.04) | install exit 0 in 2460 s. Munin's alert setting through the panel's API: 29/29 checks, among them one real alert of a forced warning, one recovery, none on the next run, critical only to a custom address, off. ActiveSync of a new user (B99): Provision, FolderSync, Sync and Ping with status 1, the contact added over CardDAV synced, no example contact. Three second setup runs (non-interactive, interactive bootstrap, interactive `sudo mailinabox`), exit 0 in 88, 109 and 95 s: no welcome dialog, the OpenDKIM tables byte for byte the same (B95), nginx reloaded with the same main process, `settings.yaml` 0600 |
+| T2 (22.04 → fresh 26.04) | `--check` proposed the full start command with the given addresses (B113). "All checks passed"; the old box stopped 21:48:17, setup 2744 s, end of the checks 22:34:45. 4 users, 5 aliases, 4 mailboxes, 25 messages, 2 Sieve scripts; the vacation duplicate database came over; `--check-old`: nothing started again. Log audit of the new box with the lists of `d586ba0`: 4 unknown classes (fwupd's timer once during setup, a late timer interrupt of the VM), 0 with those of `20a5162` |
+| T3 (24.04 copy, in place) | `update-check.sh before` and `backup` on the upstream box with the checkout in `/mailinabox` (B106): version v74 and 17 errors and 9 warnings of the status checks recorded (all from the test network); v74's `backup.py` ran, the archive took `/mailinabox`, the stack directory and the volume and was verified on the lab's rsync target. `--ssh-fallback-test`: admin key login and sudo on 1022, a non-admin refused there and accepted on 22, nothing left afterwards, also no `/root/upgrade-2604` (B111). The box has an empty group `admin`. "All checks passed", 1 reboot. Port 22 stopped answering 22:29:09 and answered again 22:48:01 (the run's notes); the fallback ran OpenSSH 9.6p1 of 24.04, the non-admin was refused on it. `after`: "RESULT: NOT JUDGED" (B110, exit code 3, the log audit found no new class; a first `after` without the lab's list named 4 classes of the lab: ufw blocks of its probes and Docker of the stand-in). `mailcheck`: RESULT OK over STARTTLS (B107). `PROBE_ADDRESS` kept. `--cleanup-only` purged the old packages, `--old-checkout` deleted `/mailinabox-v74` |
+| T4 (22.04 → 24.04 → 26.04, in place) | `--ssh-fallback-test` with and without the group `admin` (B100), as in T3. The run without the group: "All checks passed", 2 reboots. The fallback ran OpenSSH 8.9p1 of 22.04 and 9.6p1 of 24.04 with the users of the group sudo and root; the one failed check at 22:09:55 was the `libtirpc3` switch of 22.04 → 24.04, when a new sshd cannot load its libraries on either port; the non-admin was refused on 1022 both times; afterwards no fallback process, listener, ufw rule or file. Vacation replies after the upgrade; port 25 from the peer delivered. Log audit with the lists of `d586ba0`: 11 unknown classes (a new SSH login during the minutes between the unpack of the new systemd and the re-execution of PID 1 gets no user manager; Nextcloud's example event of a first login left out on a busy SQLite database), 0 with those of `20a5162` |
+| T5b Part A (published rc6 → rc7) | `before`, `backup` (through `curl \| sudo bash -s --`) with `--docker-dir`, two `--docker-volume` (one archive each) and `--postgres` (a stand-in container), uploaded and verified by checksum; the archives decrypt, the dump restores. Interactive update twice, no welcome dialog; the OpenDKIM tables unchanged, nginx's main process the same; `PROBE_ADDRESS` kept; `settings.yaml` 0600. `after`: "CHANGED - 6 unexpected": 4 from installing a branch (version lines), munin-node's process name (B114, fixed in `f5bd16f`) and a status check warning of a second backup cache (the lab had changed the backup target right before `before`); the same records with the version lines of a tag and the lists of `f5bd16f`: only that warning. `mailcheck`: RESULT OK. Munin through the API: a custom address set, an invalid one refused, a forced warning gave 1 alert, the recovery 1, the next run none. ActiveSync of two new users (B99): status 1. The 69/79 run came right after a reboot that followed the fail2ban group: fail2ban read the attacks again at its start and banned the peer for 4 minutes (fail2ban's normal behaviour after a restart); run again, 79/79 |
+| T5b Part B (rc3 → rc7) | `before`, interactive update (no welcome dialog), `PROBE_ADDRESS` kept; `after`: "CHANGED - 2 unexpected, 28 expected", the 2 version lines of the branch install (B109: `/etc/mailname`, the hosts line, Dovecot and `mailinabox.service` enabled again are EXPECTED); with the version lines of a tag "RESULT: OK - 0 unexpected, 30 expected". `mailcheck`: RESULT OK. The first smoke run had 2 FAIL for the two unmarked lab mails of the snapshot, which the lab script had not deleted |
+
+What the update tools reported, in short: on the update path (T5b)
+`before`, `backup` and `mailcheck` passed, and `after` gives RESULT OK
+for an update from a tag (shown with the recorded states and the version
+lines of a tag, since the lab installed a branch); on an in-place upgrade
+(T3) `before` and `backup` work on the upstream box and `after` lists the
+changes as NOT JUDGED.
 
 #### Open findings of rc7
 
@@ -526,6 +590,13 @@ Seen in the runs, not fixed in rc7:
    disk: on the shared test host port 22 was down up to 42 minutes from
    22.04 to 24.04 (the tool says 20 to 40) and sudo was missing up to 37
    minutes from 24.04 to 26.04 (the tool says 12 to 31).
+7. In the `libtirpc3` switch of the release upgrade from 22.04, a new sshd
+   cannot load its libraries for some seconds (about 20 s in T4), on port
+   22 and on the fallback's port; open connections are not affected.
+
+Of the open findings of rc6, 1 (the `--check` plan names the fallback SSH
+server now), 2 (the fallback SSH server and the run's notes) and 3 (B113)
+are done; 4 to 7 remain.
 
 ### Production use
 
@@ -543,6 +614,11 @@ waits for a running backup, starts itself in tmux, has before/after hooks,
 and setup keeps `greylist_bypass_senders`). The bugs found there are B57-B60.
 The update test of a copy of this box later showed that rc3 had left
 Dovecot disabled (B67); setup of rc5 enables it again.
+
+The same box was later updated from rc3 to rc6 with the commands of
+"Updating the fork" in README-fork.md. rc7 builds on that update: the Munin
+alert setting, the API test and the update tools (see CHANGELOG-fork.md,
+rc7).
 
 ## Known differences
 
@@ -668,15 +744,28 @@ Outline, with a legacy box 192.0.2.10 and a new box 192.0.2.11:
   rc5 without an end-to-end run; rc6 ran T2 again. The migration was only
   run from a 22.04 source, not from a release-upgraded 24.04 box.
 * **Modes of the tools** that the scenarios do not use: `--rollback`,
-  `--rehearse`, `--from-backup`, `--push-zones-to-old`, `--cleanup-only`.
-  Of `tools/update-check.sh backup`: the targets other than rsync and
-  local (S3, B2), and Docker setups other than the copied box's stand-in.
+  `--rehearse`, `--from-backup`, `--push-zones-to-old` (`--cleanup-only`
+  ran in rc7 T3). Of `tools/update-check.sh backup`: the targets other than
+  rsync (local, S3, B2), and Docker
+  setups other than the stand-ins of the lab. `after` on a real update from
+  one tag to the next: the lab installed a branch, so RESULT OK was shown
+  with the recorded states and the version lines of a tag.
+* **The published tag and GitHub.** The rc7 runs installed the release
+  branch from the lab's mirror, not the tag `v78-r2604.0-rc7`, and
+  `tools/update-check.sh` through `curl | bash` took its helpers from the
+  release branch by a changed URL, not from the branch main on GitHub.
 * **The fallback SSH server's refusal** where sshd asks for more than a
   key (`AuthenticationMethods`) or has `Match` blocks: checked by hand on a
   test box (the Match case) and against the function, not in a release
-  upgrade. A box whose sshd listens only on some addresses was not tested.
-* **The Internet:** Let's Encrypt certificates, delivery to other providers,
-  blocklists, reverse DNS. These need public DNS and an open port 25.
+  upgrade. A box whose sshd listens only on some addresses, a firewall of
+  the provider in front of port 1022, and other values of
+  `UPGRADE_SSH_FALLBACK_PORT` and `UPGRADE_SSH_FALLBACK_USERS` were not
+  tested.
+* **The Internet (T6):** Let's Encrypt certificates, delivery to other
+  providers, blocklists, reverse DNS, and `mailcheck` with a real external
+  probe address (DKIM and SPF checked by another provider). These need
+  public DNS and an open port 25. T6 has not run for any release yet; it
+  runs before the final release v78-r2604.0.
 * **Other virtualization and hosting providers.** The tests ran on one
   hypervisor with its cloud-init. The cloud-init configuration of hosting
   providers' images (`manage_etc_hosts`, B68) was not tested.

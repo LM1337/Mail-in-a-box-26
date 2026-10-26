@@ -157,6 +157,31 @@ folder and storage in one round trip. Without a probe address it is skipped.
 	sudo /root/mailinabox/tools/update-check.sh after
 	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
 
+A box on rc6 or earlier has no copy of the tool yet. Run `before` and
+`backup` through curl (the tool fetches its helpers from the branch main),
+name your Docker stacks if there are any, then update, then run `after` and
+`mailcheck` from the new checkout:
+
+	curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/update-check.sh | sudo bash -s -- before
+	curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/update-check.sh \
+	  | sudo bash -s -- backup --docker-dir /opt/myapp --docker-volume myapp_data --postgres myapp-db
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+`backup` stops mail for the run of the Mail-in-a-Box backup (as the
+nightly one does; in the tests about 15 seconds for an incremental one).
+Leave the backup settings alone between `before` and `after`: a changed
+target shows up as a change of the status checks. What `after` says:
+"RESULT: OK" (exit code 0) when every change is EXPECTED and the log audit
+found no new message class; otherwise it names the unexpected changes
+(`after/changes.txt`) and the new classes (`after/log-audit.txt`), exit code
+1. "RESULT: INCOMPLETE" (exit code 2): nothing unexpected, but the log audit
+could not run. After a release upgrade or the first update from upstream:
+"RESULT: NOT JUDGED" (exit code 3, or 1 with a new message class). Look at each UNEXPECTED
+line; the mail check answers "RESULT: OK" or "RESULT: FAILED" with the
+step that failed.
+
 Everything lands in `/root/update-check/<stamp>/` (only root can read it).
 `--help` lists the options.
 
@@ -265,6 +290,33 @@ der Schritt übersprungen.
 	(das Update)
 	sudo /root/mailinabox/tools/update-check.sh after
 	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+Eine Box mit rc6 oder älter hat das Werkzeug noch nicht. Dann `before` und
+`backup` über curl aufrufen (das Werkzeug holt seine Hilfsdateien vom Zweig
+main), dabei die eigenen Docker-Stacks nennen, falls es welche gibt, dann
+aktualisieren, dann `after` und `mailcheck` aus dem neuen Checkout:
+
+	curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/update-check.sh | sudo bash -s -- before
+	curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/update-check.sh \
+	  | sudo bash -s -- backup --docker-dir /opt/myapp --docker-volume myapp_data --postgres myapp-db
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck --probe probe@example.net
+
+`backup` hält die Mail für den Lauf der Mail-in-a-Box-Sicherung an (wie die
+nächtliche; in den Tests etwa 15 Sekunden für eine inkrementelle). Die
+Einstellungen der Sicherung zwischen `before` und `after` nicht ändern: Ein
+geändertes Ziel erscheint als Änderung der Statusprüfungen. Was `after`
+meldet: „RESULT: OK“ (Exit-Code 0), wenn jede Änderung EXPECTED ist und das
+Log-Audit keine neue Meldungsklasse gefunden hat; sonst nennt es die
+unerwarteten Änderungen (`after/changes.txt`) und die neuen Klassen
+(`after/log-audit.txt`), Exit-Code 1. „RESULT: INCOMPLETE“ (Exit-Code 2):
+nichts Unerwartetes, aber das Log-Audit konnte nicht laufen. Nach einem
+Release-Upgrade oder dem ersten Update von Upstream: „RESULT: NOT JUDGED“
+(Exit-Code 3, oder 1 bei einer neuen Meldungsklasse). Jede
+UNEXPECTED-Zeile ansehen; die Mailprüfung
+antwortet mit „RESULT: OK“ oder „RESULT: FAILED“ und dem Schritt, der
+scheiterte.
 
 Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
 `--help` zeigt die Optionen.
@@ -1027,7 +1079,8 @@ again in finish. Write hooks so that they can run twice. For example:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
-Downtime on a test box was about 50 minutes; plan 1-3 hours. The fresh
+Downtime on the test boxes was 50 minutes to 2 hours (the longer times on
+a busy disk and with two release upgrades); plan 1-3 hours. The fresh
 backup is part of it: a few minutes when it is incremental, much longer when
 backup.py makes a full backup (when there is none yet, or on a Saturday or
 Sunday after many changes or about a month since the last full one);
@@ -1039,11 +1092,13 @@ during the release upgrade or after a reboot.
 `--cleanup-only` removes leftovers of the old releases afterwards.
 
 **Logging in during the release upgrades.** While do-release-upgrade
-replaces the SSH server, new SSH logins fail for a while (in the test runs
-19 to 36 minutes from 22.04 to 24.04 and 6 to 16 minutes from 24.04 to
-26.04, the longer times on a busy disk). Connections that are open stay
-open, and the upgrade goes on in tmux. From 24.04 to 26.04, `sudo` is also
-missing for 12 to 31 minutes, while sudo-rs replaces it:
+replaces the SSH server, new SSH logins on port 22 fail for a while (in
+the test runs 19 to 42 minutes from 22.04 to 24.04 and 6 to 19 minutes from
+24.04 to 26.04, the longer times on a busy disk; from rc7 on the fallback
+SSH server below takes key logins of the administrators meanwhile).
+Connections that are open stay open, and the upgrade goes on in tmux. From
+24.04 to 26.04, `sudo` is also missing for 12 to 37 minutes, while sudo-rs
+replaces it:
 `sudo tmux attach -t upgrade-2604` then fails with "command not found". In the same release upgrade tmux 3.6 replaces
 tmux 3.4 a few minutes after the start. From then until the reboot a new
 `tmux attach` cannot reach the run ("open terminal failed: not a
@@ -1079,6 +1134,27 @@ answering and when it answers again. The fallback is stopped when port 22
 works again, also when the tool stops with an error; while port 22 does not
 answer it stays until the next reboot, and the next run removes it and its
 firewall rule.
+
+In the rc7 test runs (OpenSSH 8.9 of 22.04 and 9.6 of 24.04 as the
+fallback, also on a box without a group `admin`) a new key login on port
+1022 worked through the whole outage of port 22, except for about 20
+seconds in the release upgrade from 22.04, when the library switch from
+`libtirpc3` to `libtirpc3t64` stops every new sshd on both ports; a user
+who is not an administrator was refused there. The fallback ends at the
+reboot of the release upgrade: if port 22 does not answer after it, use the
+provider's console. Before the upgrade:
+
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash -s -- --ssh-fallback-test
+    # from your workstation, while the test runs:
+    ssh -p 1022 you@box.example.net
+
+`tools/update-check.sh before` and `backup` (see "Updating the fork") also
+run on the old box before the upgrade, through `curl ... | sudo bash -s --
+STEP`; they find its checkout in `/mailinabox`. After the upgrade `after`
+lists the changes without judging them ("RESULT: NOT JUDGED", exit code 3),
+since a release upgrade changes almost everything, and still runs the log
+audit against the baseline (a new message class: exit code 1); `mailcheck` works as after an update.
 
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
@@ -1183,8 +1259,9 @@ noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
-Die Ausfallzeit lag auf einer Testbox bei etwa 50 Minuten; einplanen sollte
-man 1 bis 3 Stunden. Die frische Sicherung zählt dazu: einige Minuten, wenn
+Die Ausfallzeit lag auf den Testboxen zwischen 50 Minuten und 2 Stunden
+(die längeren Zeiten bei ausgelasteter Platte und mit zwei
+Release-Upgrades); einplanen sollte man 1 bis 3 Stunden. Die frische Sicherung zählt dazu: einige Minuten, wenn
 sie inkrementell ist, viel länger, wenn backup.py eine Vollsicherung macht
 (wenn es noch keine gibt, oder an einem Samstag oder Sonntag nach vielen
 Änderungen oder etwa einem Monat seit der letzten Vollsicherung); `--check`
@@ -1196,12 +1273,13 @@ des Release-Upgrades oder nach einem Neustart eine Weile weg sein kann.
 räumt danach die Reste der alten Releases weg.
 
 **Anmelden während der Release-Upgrades.** Solange do-release-upgrade den
-SSH-Server ersetzt, schlagen neue SSH-Anmeldungen eine Weile fehl (in den
-Testläufen 19 bis 36 Minuten von 22.04 auf 24.04 und 6 bis 16 Minuten von
-24.04 auf 26.04, die längeren Zeiten bei ausgelasteter Platte). Offene
-Verbindungen bleiben bestehen, und das Upgrade läuft in tmux weiter. Von
-24.04 auf 26.04 fehlt außerdem `sudo` für 12 bis 31 Minuten, weil sudo-rs es
-ersetzt: `sudo tmux attach -t upgrade-2604`
+SSH-Server ersetzt, schlagen neue SSH-Anmeldungen auf Port 22 eine Weile
+fehl (in den Testläufen 19 bis 42 Minuten von 22.04 auf 24.04 und 6 bis 19
+Minuten von 24.04 auf 26.04, die längeren Zeiten bei ausgelasteter Platte;
+ab rc7 nimmt der Ersatz-SSH-Server unten derweil die Schlüssel-Anmeldungen
+der Administratoren an). Offene Verbindungen bleiben bestehen, und das
+Upgrade läuft in tmux weiter. Von 24.04 auf 26.04 fehlt außerdem `sudo` für
+12 bis 37 Minuten, weil sudo-rs es ersetzt: `sudo tmux attach -t upgrade-2604`
 scheitert dann mit „command not found“. Im selben Release-Upgrade ersetzt
 tmux 3.6 einige Minuten nach dem Start tmux 3.4. Von da an bis zum Neustart
 erreicht ein neues `tmux attach` den Lauf nicht mehr („open terminal
@@ -1241,6 +1319,30 @@ antwortet und wann wieder. Der Ersatz-Server wird beendet, sobald Port 22
 wieder geht, auch wenn das Werkzeug mit einem Fehler abbricht; solange Port 22
 nicht antwortet, bleibt er bis zum nächsten Neustart, und der nächste Lauf
 entfernt ihn und seine Firewall-Regel.
+
+In den Testläufen von rc7 (OpenSSH 8.9 von 22.04 und 9.6 von 24.04 als
+Ersatz-Server, auch auf einer Box ohne Gruppe `admin`) ging eine neue
+Schlüssel-Anmeldung auf Port 1022 während des ganzen Ausfalls von Port 22,
+außer etwa 20 Sekunden lang im Release-Upgrade von 22.04, wenn der Wechsel
+der Bibliothek `libtirpc3` auf `libtirpc3t64` jeden neuen sshd auf beiden
+Ports scheitern lässt; ein Benutzer, der kein Administrator ist, wurde dort
+abgewiesen. Der Ersatz-Server endet mit dem Neustart des Release-Upgrades:
+Antwortet Port 22 danach nicht, hilft die Konsole des Anbieters. Vor dem
+Upgrade:
+
+    curl -s https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/tools/upgrade-in-place-to-2604.sh \
+      | sudo bash -s -- --ssh-fallback-test
+    # vom eigenen Rechner aus, während der Test läuft:
+    ssh -p 1022 name@box.example.net
+
+`tools/update-check.sh before` und `backup` (siehe „Fork aktualisieren“)
+laufen auch auf der alten Box vor dem Upgrade, über `curl ... | sudo bash
+-s -- SCHRITT`; sie finden ihren Checkout in `/mailinabox`. Nach dem Upgrade
+führt `after` die Änderungen auf, ohne sie zu bewerten („RESULT: NOT
+JUDGED“, Exit-Code 3), weil ein Release-Upgrade fast alles ändert, und
+lässt das Log-Audit trotzdem gegen die Vergleichsbasis laufen (eine neue
+Meldungsklasse: Exit-Code 1); `mailcheck`
+geht wie nach einem Update.
 
 Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
 in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand
