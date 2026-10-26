@@ -150,9 +150,12 @@ per client and user, the first failures and the seconds with failures;
 `--report` writes them as JSON.
 
 The update scenarios (T3, T4 and T5b; also T1's second setup runs) run two
-instances with 3 test users, from 2 minutes before setup starts until 10
+instances with 3 test users, from 5 minutes before setup starts until 10
 minutes after it ends (Nextcloud's throttle showed only after setup; on the
-production box it lasted 30 minutes):
+production box it lasted 30 minutes). The baseline must be long enough for
+every new ActiveSync device to finish its first Sync of all folders (on the
+2-vCPU copy of the production box under this load about 3 minutes), or an
+error of the box that only that Sync shows counts as new:
 
 * one on the box under test, as a normal user, with the clients on
   127.0.0.1 (like Z-Push's own calls);
@@ -168,7 +171,7 @@ address):
         --user alice@example.net --user bob@seed2.example.net \
         --user carol@example.net --env-file credentials.env --seed \
         --device-prefix box --marker-file /tmp/setup-started \
-        --duration 1800 --log load.jsonl --report load.json
+        --duration 2400 --log load.jsonl --report load.json
 
 The update driver creates the marker file when it starts setup (or sends
 SIGUSR1). For the in-place upgrades (T3, T4) the load runs around the setup

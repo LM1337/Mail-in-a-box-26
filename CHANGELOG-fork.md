@@ -134,6 +134,12 @@ open findings in TESTING-fork.md, "Open findings of rc7"):
   multiget of the cards of Nextcloud's system address book
   (`z-server-generated--system`, cards named `OCA%5cUserExternal%5cIMAP:...`)
   comes back empty. Not seen on a fresh box. To be looked at.
+* A Dovecot reload (B122) still has two client-visible moments: a login
+  that the old login process hands to the new auth process at that moment
+  fails as an internal failure (Nextcloud's `user_external` counts it as a
+  failed login of the client; harmless for 127.0.0.1 after B121), and a
+  FolderSync that Z-Push answers during the reload can come without the
+  mail folders (seen once, for a new device's first FolderSync).
 * Roundcube's CardDAV plugin can log "duplicate column name: account_id"
   when several sessions log in at the same moment for the first time after
   an upgrade of the plugin (a race in its schema migration).
