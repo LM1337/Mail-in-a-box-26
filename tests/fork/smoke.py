@@ -657,10 +657,13 @@ def one(proto, host, port):
                 pass
         elif proto in ("activesync", "autodiscover"):
             # Z-Push (B126): a wrong password, as a phone with an old one sends it.
+            # Z-Push tries the IMAP login three times, and Dovecot delays each
+            # failure, so an answer can take a minute.
             name = HOSTNAME or host
-            c = http.client.HTTPSConnection(host, port, timeout=20, context=_ctx())
+            c = http.client.HTTPSConnection(host, port, timeout=90, context=_ctx())
             try:
                 c.sock = _ctx().wrap_socket(socket.create_connection((host, port), 20), server_hostname=name)
+                c.sock.settimeout(90)
                 h = {"Host": name, "User-Agent": "miab-fork-smoke/1",
                      "Authorization": "Basic " + base64.b64encode(("%s:%s" % (USER, PW)).encode()).decode()}
                 if proto == "activesync":
@@ -2708,7 +2711,7 @@ def c_fail2ban_adaptive_toggle(ctx):
     return "increment %s, restored adaptive=%s" % (" -> ".join(seen), orig)
 
 
-def c_fail2ban(ctx, proto, jails, port):
+def c_fail2ban(ctx, proto, jails, port, wait=30):
     if not getattr(ctx, "f2b", None):
         raise Skip("fail2ban preparation skipped")
     # Attempts of the previous protocol that were still in flight can re-ban the
@@ -2733,7 +2736,7 @@ def c_fail2ban(ctx, proto, jails, port):
                                                   "parallel": ctx.args.fail2ban_parallel,
                                                   "hostname": ctx.hostname})
     new = set()
-    deadline = time.time() + 30
+    deadline = time.time() + wait
     while time.time() < deadline:
         for j in jails:
             now = f2b_banned(ctx, j)
@@ -3529,8 +3532,8 @@ def main():
             run_check("fail2ban-smtp465", c_fail2ban, ctx, "smtp465", ["miab-postfix465"] + smtp, 465)
             # ActiveSync and Autodiscover (B126): miab-zpush bans HTTP and HTTPS.
             zpush = ["miab-zpush", "miab-slow-zpush"]
-            run_check("fail2ban-activesync", c_fail2ban, ctx, "activesync", zpush, 443)
-            run_check("fail2ban-autodiscover", c_fail2ban, ctx, "autodiscover", zpush, 443)
+            run_check("fail2ban-activesync", c_fail2ban, ctx, "activesync", zpush, 443, 120)
+            run_check("fail2ban-autodiscover", c_fail2ban, ctx, "autodiscover", zpush, 443, 120)
 
     ctx.net.close()
     summary = {}
