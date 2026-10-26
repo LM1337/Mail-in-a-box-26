@@ -32,4 +32,10 @@ define('BACKEND_PROVIDER', 'BackendCombined');
 // autodiscover request ended in a fatal error. AUTO verifies certificates except
 // on loopback, which is where our CalDAV/CardDAV backends connect (127.0.0.1).
 if (!defined('DAV_SSL_VERIFY')) define('DAV_SSL_VERIFY', DAV_SSL_VERIFY_AUTO);
+
+// A login that Dovecot or Nextcloud cannot check at that moment is answered
+// with 503 and Retry-After (ServiceUnavailableException, setup/zpush.sh, B126),
+// which reads RETRY_AFTER_DELAY; like DAV_SSL_VERIFY only the main config.php
+// defines it, and without it such a login ended in a fatal error (HTTP 500).
+if (!defined('RETRY_AFTER_DELAY')) define('RETRY_AFTER_DELAY', 300);
 ?>

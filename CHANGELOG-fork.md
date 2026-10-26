@@ -32,7 +32,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   "Temporary authentication failure", a connection that it closes or
   refuses) no longer counts as a failed login: Z-Push answers it with HTTP
   503 and `Retry-After`, which a phone retries without asking for its
-  password, and logs no failed login. Before, such a login with the right
+  password, and logs no failed login (Autodiscover too: its configuration
+  now defines `RETRY_AFTER_DELAY`). Before, such a login with the right
   password was counted (seen once in the update test under client load,
   while users.sqlite was locked, B133), and behind one shared address a
   few such moments could ban all its users from the web ports. Z-Push now
