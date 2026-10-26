@@ -3340,27 +3340,51 @@ fallback_users() { # PERMITROOTLOGIN
 	done | sort -u
 }
 
+# Debian's and Ubuntu's sshd also accept a part that its group may write when
+# that group has exactly one member, the user (a user private group; the
+# user-group-modes patch, secure_permissions()): the users whose primary
+# group it is must all be the user, and its member list empty or only the
+# owner of the part.
+group_only_user() { # GID UID OWNER_UID
+	local gid=$1 uid=$2 owner members n=0 pu pg
+	owner=$(getent passwd "$3" | cut -d: -f1) || return 1
+	members=$(getent group "$gid" | cut -d: -f4) || return 1
+	while IFS=: read -r _ _ pu pg _; do
+		[ "$pg" = "$gid" ] || continue
+		n=$((n + 1))
+		[ "$pu" = "$uid" ] || return 1
+	done < <(getent passwd || true)
+	if [ -n "$members" ]; then
+		n=$((n + 1))
+		[ "$members" = "$owner" ] || return 1
+	fi
+	[ "$n" -gt 0 ]
+}
+
 # sshd's StrictModes check of a key file (auth_secure_path in OpenSSH): by
 # its real path, the file must be a regular file of root's or the user's, not
-# writable by group or others, and so must each directory above it, up to the
-# home directory (or /). Prints the real path. A path that passes can be
-# changed only by root and the user, so reading it afterwards is safe.
+# writable by others (nor by its group, see group_only_user), and so must each
+# directory above it, up to the home directory (or /). Prints the real path.
+# A path that passes can be changed only by root and the user, so reading it
+# afterwards is safe.
 key_file_secure() { # USER UID HOME FILE
-	local u=$1 uid=$2 home=$3 f=$4 real rhome d st
+	local u=$1 uid=$2 home=$3 f=$4 real rhome d st o g m t
 	real=$(realpath -e -- "$f" 2> /dev/null) || return 1
 	rhome=$(realpath -e -- "$home" 2> /dev/null || true)
 	d=$real
 	while :; do
 		# stat without -L: the real path has no symlinks; one now is a change.
-		st=$(stat -c '%u %a %F' -- "$d" 2> /dev/null) || return 1
+		st=$(stat -c '%u %g %a %F' -- "$d" 2> /dev/null) || return 1
+		read -r o g m t <<< "$st"
 		if [ "$d" = "$real" ]; then
-			[[ ${st#* * } == regular*file ]] || { warn "Not on the fallback: $f of $u is not a regular file."; return 1; }
+			[[ $t == regular*file ]] || { warn "Not on the fallback: $f of $u is not a regular file."; return 1; }
 		else
-			[ "${st#* * }" = directory ] || return 1
+			[ "$t" = directory ] || return 1
 		fi
-		if { [ "${st%% *}" != 0 ] && [ "${st%% *}" != "$uid" ]; } || [ $((8#$(cut -d' ' -f2 <<< "$st") & 8#022)) != 0 ]; then
+		if { [ "$o" != 0 ] && [ "$o" != "$uid" ]; } || [ $((8#$m & 8#002)) != 0 ] \
+			|| { [ $((8#$m & 8#020)) != 0 ] && ! group_only_user "$g" "$uid" "$o"; }; then
 			warn "Not on the fallback: the keys in $f of $u, which sshd ignores too (StrictModes: $d is not
-owned by $u or root, or group or others can write it)."
+owned by $u or root, or others or a group with other members can write it)."
 			return 1
 		fi
 		[ "$d" != "$rhome" ] && [ "$d" != / ] || break

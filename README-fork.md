@@ -1133,7 +1133,8 @@ of `sshd_config` (ListenAddress), keeps its AllowUsers, AllowGroups,
 DenyUsers, DenyGroups, PubkeyAuthOptions, ForceCommand and ChrootDirectory
 and allows no forwarding. With StrictModes (sshd's default) it takes only
 the key files that sshd accepts: one whose path up to the home directory
-another account can write is skipped with a warning, as sshd ignores it.
+another account can write (others, or a group with other members) is
+skipped with a warning, as sshd ignores it.
 Where sshd asks for more than a key
 (`AuthenticationMethods`, e.g. a key and a one-time password) or
 `sshd_config` or a file it includes has `Match` blocks, there is no fallback (it would let in with
@@ -1321,8 +1322,8 @@ dessen AllowUsers, AllowGroups, DenyUsers, DenyGroups, PubkeyAuthOptions,
 ForceCommand und ChrootDirectory und erlaubt keine Weiterleitungen. Mit
 StrictModes (Voreinstellung von sshd) nimmt er nur die Schlüsseldateien,
 die sshd annimmt: Eine, deren Pfad bis zum Heimatverzeichnis ein anderes
-Konto beschreiben kann, lässt er mit einer Warnung aus, wie sshd sie
-übergeht. Wo sshd
+Konto beschreiben kann (andere, oder eine Gruppe mit weiteren Mitgliedern),
+lässt er mit einer Warnung aus, wie sshd sie übergeht. Wo sshd
 mehr als einen Schlüssel verlangt (`AuthenticationMethods`, etwa Schlüssel
 und Einmalpasswort) oder `sshd_config` oder eine eingebundene Datei
 `Match`-Blöcke hat, gibt es keinen

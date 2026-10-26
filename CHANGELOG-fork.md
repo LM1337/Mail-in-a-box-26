@@ -367,8 +367,9 @@ how the tools use `$STORAGE_ROOT/backup` (all fixed).
 * Tools: the fallback SSH server of the in-place tool takes, with
   StrictModes (sshd's default), only the key files that sshd accepts on
   port 22: a file whose path up to the home directory another account can
-  write (or that belongs to another user) is skipped with a warning, as
-  sshd ignores it. It accepted such keys, so whoever could write an
+  write (others, or a group with another member than the user; Ubuntu's
+  sshd accepts a user private group), or that belongs to another user, is
+  skipped with a warning, as sshd ignores it. It accepted such keys, so whoever could write an
   administrator's home could log in on port 1022 as that administrator.
   Its copy of the keys is `root:<the user's group>`, mode 0640 (B115).
 * Tools: `tools/update-check.sh` no longer uses a checkout it rejected (it
