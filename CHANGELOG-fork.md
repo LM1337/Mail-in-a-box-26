@@ -324,6 +324,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   a change of any block, or a tree that no longer has every change (a file
   changed by hand, checked with `tools/patch_source.py --check` on every
   run), gets a fresh copy of Z-Push on the next setup run (B126, B128).
+  The copy is made next to `/usr/local/lib/z-push` (on the same file
+  system) and replaces the old tree with two renames. Before, setup removed
+  the old tree first and moved the new one from `/tmp`, a tmpfs on Ubuntu
+  26.04, so that mv copied it file by file: in the update test under client
+  load, two ActiveSync requests in that second found Z-Push's files without
+  permissions for www-data and ended with a PHP fatal error.
+* Tests: the log audit accepts, in a setup run, what the update from rc7
+  logs once: the new jail `miab-zpush` skipping the older lines of Z-Push's
+  error logs at its first start, and the login that setup's Dovecot reload
+  cuts (B122, open finding) as the Z-Push of rc7 answers it (401) before
+  setup installs the new one; and Nextcloud's IMAP check of a password that
+  such a reload cuts.
 * Tests: the smoke test's new check `zpush-patches` (group `activesync`,
   with `--ssh`): `/usr/local/lib/z-push/version` carries the checksum of
   the checkout's conf/zpush/z-push.patches, and the installed tree has

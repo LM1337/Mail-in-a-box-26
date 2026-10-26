@@ -47,8 +47,17 @@ fi
 if [ $needs_update == 1 ]; then
 	# Download, extract and patch in a directory of root's own (mktemp -d:
 	# root, 0700), not under a fixed name in /tmp that another local user
-	# could create first (B97), and nowhere another account can write.
-	ZPUSH_TMP=$(mktemp -d)
+	# could create first (B97), and nowhere another account can write. It is
+	# made next to /usr/local/lib/z-push, on the same file system, so that
+	# moving the tree into place is a rename: from /tmp (a tmpfs) mv copied
+	# it file by file, and Z-Push's requests in that second found its
+	# directories still without permissions for www-data (seen in the update
+	# test under client load: "Permission denied" for include/z_carddav.php).
+	if [ -z "$(find /usr/local/lib -maxdepth 0 -user root ! -perm /022)" ]; then
+		echo "/usr/local/lib is not a directory of root's own."
+		exit 1
+	fi
+	ZPUSH_TMP=$(mktemp -d /usr/local/lib/.z-push-new.XXXXXXXX)
 	wget_verify "https://github.com/Z-Hub/Z-Push/archive/refs/tags/$VERSION.zip" $TARGETHASH "$ZPUSH_TMP/z-push.zip"
 	unzip -q "$ZPUSH_TMP/z-push.zip" -d "$ZPUSH_TMP/z-push"
 	ZPUSH_SRC="$ZPUSH_TMP/z-push/Z-Push-$VERSION/src"
@@ -70,13 +79,16 @@ if [ $needs_update == 1 ]; then
 	echo "$ZPUSH_STAMP" > "$ZPUSH_SRC/version"
 
 	# Move the patched tree into place. The old one is renamed away first and
-	# removed after, so that Z-Push is missing only between two renames.
+	# removed after, so that Z-Push is missing only between two renames (in
+	# the same directory). A temporary directory that an earlier run left
+	# behind (setup stopped there) is removed as well.
 	rm -rf /usr/local/lib/z-push.old
 	if [ -e /usr/local/lib/z-push ]; then
 		mv /usr/local/lib/z-push /usr/local/lib/z-push.old
 	fi
 	mv "$ZPUSH_SRC" /usr/local/lib/z-push
 	rm -rf /usr/local/lib/z-push.old "$ZPUSH_TMP"
+	find /usr/local/lib -maxdepth 1 -name '.z-push-new.*' -type d -user root -exec rm -rf -- {} +
 
 	# Create admin and top scripts with PHP_VER  
 	rm -f /usr/sbin/z-push-{admin,top}
