@@ -399,8 +399,9 @@ def dav_req(ctx, user, pw, method, path, body=None, depth="1", ctype="applicatio
     if extra:
         h.update(extra)
     r = smoke.http_req(ctx, method, path, auth=(user, pw), body=body, headers=h, timeout=60)
-    check_http(r, "%s %s" % (method, re.sub(r"/[^/]*@[^/]*/", "/<user>/", path)), want)
-    return r
+    what = "%s %s" % (method, re.sub(r"/[^/]*@[^/]*/", "/<user>/", path))
+    check_http(r, what, want)
+    return "%s: HTTP %d" % (what, r.status)
 
 
 def dav_client(args, ctx, user, pw, stats):
@@ -611,7 +612,7 @@ def summarize(args, stats, clients, started, ended):
         (", no setup marker seen" if args.marker_file else "")))
     out.append("%-10s %-8s %7s %5s %9s %11s %10s %5s %8s" % ("CLIENT", "PHASE", "ok", "auth", "throttled",
                                                             "unavailable", "disconnect", "error", "ok ms p50"))
-    for c in clients:
+    for c in clients + (["seed"] if any(ck[0] == "seed" for ck in stats.counts) else []):
         for phase in ("baseline", "setup"):
             k = stats.counts.get((c, phase))
             if not k:
