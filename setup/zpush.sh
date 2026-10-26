@@ -60,6 +60,44 @@ sed -i "s^define('TIMEZONE', .*^define('TIMEZONE', '$(timedatectl show -p Timezo
 sed -i "s/define('BACKEND_PROVIDER', .*/define('BACKEND_PROVIDER', 'BackendCombined');/" /usr/local/lib/z-push/config.php
 sed -i "s/define('USE_FULLEMAIL_FOR_LOGIN', .*/define('USE_FULLEMAIL_FOR_LOGIN', true);/" /usr/local/lib/z-push/config.php
 sed -i "s/define('LOGLEVEL', .*/define('LOGLEVEL', LOGLEVEL_ERROR);/" /usr/local/lib/z-push/config.php
+# Log failed logins ("Failed to authenticate user '...' from IP ...", see
+# below) for the miab-zpush jail (B126). They are warnings: Z-Push writes warnings and errors
+# to z-push-error.log whatever LOGLEVEL is, so z-push.log stays as quiet as
+# before. autodiscover/config.php sets the same.
+sed -i "s/define('LOGAUTHFAIL', .*/define('LOGAUTHFAIL', true);/" /usr/local/lib/z-push/config.php
+grep -qF "define('LOGAUTHFAIL', true);" /usr/local/lib/z-push/config.php \
+	|| { echo "Z-Push's config.php has no LOGAUTHFAIL setting; the miab-zpush jail would see no failed login."; exit 1; }
+
+# Z-Push writes text that a client chooses (the user name of the Authorization
+# header, the e-mail address of an autodiscover request) unescaped into its
+# logs. With a line break in it, a client could add a whole line of its own,
+# with any address in it, to the log that the miab-zpush jail reads (B126).
+# Escape the control characters of each log line (a line break becomes "\n").
+# The file belongs to root, in a directory of root's own.
+ZPUSH_FILELOG=/usr/local/lib/z-push/lib/log/filelog.php
+if ! grep -qF "MIAB-B126" "$ZPUSH_FILELOG"; then
+	sed 's/^        return \$log;$/        return addcslashes($log, "\\0..\\37\\177"); \/\/ MIAB-B126: no line breaks from clients/' "$ZPUSH_FILELOG" \
+		| tools/write_conf.py "$ZPUSH_FILELOG"
+fi
+grep -qF 'return addcslashes($log, "\0..\37\177"); // MIAB-B126' "$ZPUSH_FILELOG" \
+	|| { echo "Could not patch $ZPUSH_FILELOG (Z-Push $VERSION); its log lines would not be escaped."; exit 1; }
+
+# Z-Push logs a failed ActiveSync login as "[<user>] IP: <address> failed to
+# authenticate user '<user>'": text that the client chooses on both sides of
+# the address, so no filter can tell which address Z-Push wrote. Put the
+# address last, as in the autodiscover message, where the jail's filter
+# anchors it at the end of the line (B126). Only the format string changes:
+# its arguments stay the same, in their positions (%1$s, %2$s).
+ZPUSH_INDEX=/usr/local/lib/z-push/index.php
+ZPUSH_AUTHFAIL_FORMAT="\"Failed to authenticate user '%2\\\$s' from IP %1\\\$s.\""
+if ! grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX"; then
+	sed -f <(cat <<'SED'
+s/sprintf("IP: %s failed to authenticate user '%s'",/sprintf("Failed to authenticate user '%2\\$s' from IP %1\\$s.",/
+SED
+) "$ZPUSH_INDEX" | tools/write_conf.py "$ZPUSH_INDEX"
+fi
+grep -qF "$ZPUSH_AUTHFAIL_FORMAT" "$ZPUSH_INDEX" \
+	|| { echo "Could not patch $ZPUSH_INDEX (Z-Push $VERSION); the miab-zpush jail would see no failed ActiveSync login."; exit 1; }
 
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php
@@ -95,16 +133,25 @@ chown www-data:www-data /var/lib/z-push
 
 # Add log rotation
 
-cat > /etc/logrotate.d/z-push <<EOF;
+# The directory belongs to www-data: logrotate works there as www-data (su),
+# not as root by path. "create" puts an empty file in place at once, so that
+# fail2ban (miab-zpush) finds its log files also before Z-Push's next request.
+tools/write_conf.py /etc/logrotate.d/z-push <<EOF;
 /var/log/z-push/*.log {
+	su www-data www-data
 	weekly
 	missingok
 	rotate 52
 	compress
 	delaycompress
 	notifempty
+	create 0640 www-data www-data
 }
 EOF
+
+# The miab-zpush jail reads the error logs, and fail2ban does not start a
+# jail whose log files do not exist. Created as www-data, in its directory.
+sudo -u www-data touch /var/log/z-push/z-push-error.log /var/log/z-push/autodiscover-error.log
 
 # Restart service.
 

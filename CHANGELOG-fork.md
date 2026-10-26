@@ -13,6 +13,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Fixed
 
+* ActiveSync and Autodiscover have brute-force protection now: the new
+  jail `miab-zpush` bans an address after 20 failed logins within 120 s on
+  HTTP and HTTPS. Before, nothing limited password guessing there: Z-Push
+  checks passwords against Dovecot from 127.0.0.1, which fail2ban ignores,
+  and did not log failed logins. Setup turns on Z-Push's `LOGAUTHFAIL` (the
+  lines go to `z-push-error.log` and `autodiscover-error.log`; `z-push.log`
+  gets no more lines), escapes control characters in Z-Push's log lines and
+  puts the client's address at the end of the ActiveSync message, so that a
+  user name chosen by a client can neither add a line nor name another
+  address for the jail. logrotate works in `/var/log/z-push` as www-data
+  (B126).
 * Nextcloud's brute-force protection no longer throttles the box's own
   services (seen on a production box at the update from rc6 to rc7):
   setup restarted Dovecot, Nextcloud's `user_external` could not reach IMAP
@@ -106,6 +117,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Upgrade note
 
+* Z-Push's message for a failed ActiveSync login reads "Failed to
+  authenticate user '...' from IP ...." now (Z-Push: "IP: ... failed to
+  authenticate user '...'"), and control characters in Z-Push's log lines
+  are escaped (a multi-line message is one line with `\n`). A fail2ban
+  filter or log tool of your own for Z-Push needs the new form.
 * Setup sets Nextcloud's `trusted_proxies` (adds 127.0.0.1, keeps the
   others) and `forwarded_for_headers` (`HTTP_X_FORWARDED_FOR` only, the
   Nextcloud default; another value there is replaced). A reverse proxy of
