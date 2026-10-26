@@ -67,6 +67,11 @@ sed -i "s/define('LOGLEVEL', .*/define('LOGLEVEL', LOGLEVEL_ERROR);/" /usr/local
 # /Microsoft-Server-ActiveSync (3660 s, conf/nginx-alldomains.conf), which must
 # stay longer than this (B131).
 sed -i "s/define('PING_HIGHER_BOUND_LIFETIME', .*/define('PING_HIGHER_BOUND_LIFETIME', 3540);/" /usr/local/lib/z-push/config.php
+# The sed does nothing if a new Z-Push changes or drops that line. Setup goes
+# on (nginx's 3660 s still cover heartbeats up to about an hour), but says so.
+if ! grep -q "^[[:space:]]*define('PING_HIGHER_BOUND_LIFETIME', 3540);" /usr/local/lib/z-push/config.php; then
+	echo "WARNING: Z-Push's config.php has no PING_HIGHER_BOUND_LIFETIME line to set: phones may ask for Pings longer than nginx's limit for ActiveSync (B131)."
+fi
 
 # Configure BACKEND
 rm -f /usr/local/lib/z-push/backend/combined/config.php

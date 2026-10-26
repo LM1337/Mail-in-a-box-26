@@ -75,7 +75,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   is now 3660 s, and Z-Push accepts heartbeats up to 3540 s (59 minutes,
   `PING_HIGHER_BOUND_LIFETIME`): a phone that asks for more gets that bound
   at once (status 5) and pings with it. Phones keep their long heartbeats
-  and wake up less often (B131).
+  and wake up less often. A Ping without a heartbeat of its own now waits
+  3540 s instead of 600 s (Z-Push's default is the bound), and setup warns if
+  Z-Push's config.php has no line for the bound (B131).
 
 ### Changed
 
@@ -93,7 +95,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * Tests: the smoke test's group `activesync` checks the heartbeat bound of
   a Ping (`zpush-ping`: 3600 s get status 5 with the box's bound at once, a
   Ping of 20 s completes, and with `--ssh` nginx's `fastcgi_read_timeout` of
-  the ActiveSync location is at least a minute longer than the bound, B131).
+  the ActiveSync location is at least a minute longer than the bound; it
+  reads nginx's time units and a value set for the server or http block,
+  B131).
   `tests/fork/eas.py` has `Client.ping_answer` (status, the server's
   heartbeat and the changed folders, also for status 5), and its `--ping`
   prints them.
@@ -135,6 +139,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * A reverse proxy or firewall of your own in front of the box must keep an
   ActiveSync request open for an hour (3660 s) too, or it ends the long Pings
   instead of nginx (B131).
+* If you raised the ActiveSync timeout by hand in your checkout's
+  `conf/nginx-alldomains.conf` (the template nginx's `local.conf` is built
+  from, so the change survives the nightly rebuild), put the file back before
+  the update (`git -C /root/mailinabox checkout -- conf/nginx-alldomains.conf`),
+  or bootstrap.sh refuses to check out the release (B131).
 
 ### Planned
 

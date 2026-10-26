@@ -2033,6 +2033,83 @@ def c_zpush_sync(ctx):
             http_req(ctx, "DELETE", path, auth=auth)
 
 
+_NGINX_TIME_UNITS = {"ms": 0.001, "": 1, "s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800,
+                     "M": 2592000, "y": 31536000}
+
+
+def nginx_seconds(v):
+    # nginx's time syntax: a number with an optional unit, several of them
+    # together ("1h30m"); a bare number is seconds.
+    parts = re.findall(r"(\d+)(ms|[smhdwMy]?)", v)
+    if not parts or "".join(n + u for n, u in parts) != v or (len(parts) > 1 and "" in [u for _, u in parts]):
+        raise Fail("nginx time %r: unknown unit" % v)
+    return sum(int(n) * _NGINX_TIME_UNITS[u] for n, u in parts)
+
+
+def nginx_location_timeouts(dump, prefix, directive, default=60):
+    # The value of `directive` in effect in each `location <prefix>` of an
+    # `nginx -T` dump: the location's own, else its server's, else the http
+    # level's, else nginx's default. nginx -T prints an included file on its
+    # own, not at the include, so a directive outside any server block (in
+    # nginx.conf's http block or at the top of a file in conf.d) counts as
+    # the http level. Nested blocks and directives after a nested block are
+    # handled; quoted strings and comments are skipped.
+    tokens = re.findall(r'#[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[{};]|[^\s{};"\']+', dump)
+    root = {"head": [], "dirs": [], "kids": []}
+    stack, words = [root], []
+    for t in tokens:
+        if t.startswith("#"):
+            continue
+        if t == ";":
+            if words:
+                stack[-1]["dirs"].append(words)
+            words = []
+        elif t == "{":
+            node = {"head": words, "dirs": [], "kids": []}
+            stack[-1]["kids"].append(node)
+            stack.append(node)
+            words = []
+        elif t == "}":
+            if len(stack) > 1:
+                stack.pop()
+            words = []
+        else:
+            words.append(t)
+
+    def own(node):
+        vals = [d[1] for d in node["dirs"] if d[0] == directive and len(d) > 1]
+        return min(nginx_seconds(v) for v in vals) if vals else None
+
+    http_vals = []
+
+    def walk_http(node):
+        # Everything outside server blocks (and outside mail/stream).
+        v = own(node)
+        if v is not None:
+            http_vals.append(v)
+        for k in node["kids"]:
+            if k["head"][:1] not in (["server"], ["mail"], ["stream"], ["events"]):
+                walk_http(k)
+
+    walk_http(root)
+    http_default = min(http_vals) if http_vals else default
+    found = []
+
+    def walk(node, inherited, in_server):
+        v = own(node)
+        if node["head"][:1] == ["server"]:
+            in_server = True
+        eff = v if v is not None and in_server else inherited
+        if in_server and node["head"][:1] == ["location"] and len(node["head"]) > 1 \
+                and node["head"][-1] == prefix:
+            found.append(eff)
+        for k in node["kids"]:
+            walk(k, eff, in_server)
+
+    walk(root, http_default, False)
+    return found
+
+
 def c_zpush_ping(ctx):
     # B131: a Ping (the push long poll) lasts as long as the heartbeat the
     # phone asks for, and iOS asks for long ones. One longer than the box
@@ -2075,19 +2152,8 @@ def c_zpush_ping(ctx):
     rc, out, err = ctx.remote.run("nginx -T", sudo=True, timeout=60)
     if rc != 0:
         raise Fail("nginx -T: %s" % err.strip()[:200])
-    # Every server block has the location; the shortest timeout counts, and
-    # one without fastcgi_read_timeout has nginx's default of 60 s.
-    timeouts, inside = [], False
-    for line in out.splitlines():
-        w = line.split()
-        if w[:2] == ["location", "/Microsoft-Server-ActiveSync"]:
-            inside = True
-            timeouts.append(60)
-        elif inside and w[:1] == ["fastcgi_read_timeout"]:
-            v = w[1].rstrip(";")
-            timeouts[-1] = int(v[:-1]) if v.endswith("s") else int(v)
-        elif inside and w[:1] == ["}"]:
-            inside = False
+    # Every server block has the location; the shortest timeout counts.
+    timeouts = nginx_location_timeouts(out, "/Microsoft-Server-ActiveSync", "fastcgi_read_timeout")
     if not timeouts:
         raise Fail("nginx has no location /Microsoft-Server-ActiveSync")
     # Z-Push checks the mailbox every PING_INTERVAL (30 s) and needs a few
