@@ -5,10 +5,10 @@ fork: what was tested, how, and with what result. It is meant to help you
 judge how mature a release is. Changes are in [CHANGELOG-fork.md](CHANGELOG-fork.md),
 fixed bugs in [BUGS-fork.md](BUGS-fork.md).
 
-The fork is a release candidate. The tests below are a small, fixed set of
-scenarios on test machines, not a test of every setup that exists. Make a
-backup and try a release on a copy before you run it on the box that holds
-your mail.
+The fork's first release is v78-r2604.0. The tests below are a small, fixed
+set of scenarios on test machines, not a test of every setup that exists.
+Make a backup and try a release on a copy before you run it on the box that
+holds your mail.
 
 ## Test environment
 
@@ -797,7 +797,7 @@ server, and from `6235572` on also says that new SSH logins and sudo fail
 for a while), 2 (the fallback SSH server and the run's notes) and 3 (B113)
 are done; 4 to 7 remain.
 
-### After rc7 (unreleased, 2026-10-26)
+### After rc7 (the branch before v78-r2604.0, 2026-10-26)
 
 The fixes after rc7 were tested on branches of their own and then merged;
 this run tested the merge of the two Z-Push branches (B128 to B130, the Ping

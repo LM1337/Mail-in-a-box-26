@@ -757,7 +757,7 @@ version_lt() { # A B
 # given: a branch or commit, a test of the next release), or when AFTER has
 # no list of its own.
 expected_rule_files() { # BEFORE_VERSION AFTER_VERSION [DEV]
-	local from=$1 to=$2 dev=${3:-} d f v seen=" " any= unreleased= own=
+	local from=$1 to=$2 dev=${3:-} d f v seen=" " any='' unreleased='' own=''
 	local dirs=()
 	if [ -n "$SELF_REPO" ]; then dirs+=("$SELF_REPO/tools/expected-changes"); fi
 	if [ -n "$MIAB_DIR" ] && [ "$MIAB_DIR" != "$SELF_REPO" ]; then dirs+=("$MIAB_DIR/tools/expected-changes"); fi

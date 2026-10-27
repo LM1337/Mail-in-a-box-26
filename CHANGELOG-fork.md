@@ -11,6 +11,82 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Planned
+
+Seen in the work on rc7 and v78-r2604.0, not done (the certification runs
+add their open findings in TESTING-fork.md):
+
+* Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
+  polls; a reload with a `process_control_timeout` would keep them.
+* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
+  test of B126): Z-Push tries the IMAP login three times, and Dovecot
+  delays failed logins, possibly more for an address with many failures,
+  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
+  `miab-zpush` threshold slows down the ActiveSync logins of other users
+  is not measured.
+* `miab-zpush` counts failures per address, like the other jails, and is
+  always on: behind the shared servers of a mail app that syncs through its
+  provider's cloud (Outlook for iOS and Android with an ActiveSync
+  account), one person with a wrong password, or anyone on purpose, can get
+  all users of that app banned, and repeated bans reach recidive's week on
+  all ports (B126). The README, the upgrade note and the allowlist help say
+  to put such networks on the allowlist; nothing finds them on its own.
+  Leaving `miab-zpush` out of recidive would let an attacker guess 20
+  passwords every few minutes for good, so it still counts there.
+* The failed-login report does not read `nextcloud.log` yet, which now
+  has the client's address for `/caldav`, `/carddav` and `/webdav` too
+  (B121).
+* Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
+  postgrey, named, systemd-resolved, munin-node and the management daemon
+  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
+  (`milter_default_action`). Candidates for a reload or a restart only on a
+  change.
+* A Dovecot reload (B122) still has two client-visible moments: a login
+  that the old login process hands to the new auth process at that moment
+  fails as an internal failure (Nextcloud's `user_external` counts it as a
+  failed login of the client; harmless for 127.0.0.1 after B121), and a
+  FolderSync that Z-Push answers during the reload can come without the
+  mail folders (seen once, for a new device's first FolderSync).
+* Roundcube's CardDAV plugin can log "duplicate column name: account_id"
+  when several sessions log in at the same moment for the first time after
+  an upgrade of the plugin (a race in its schema migration).
+* A Dovecot reload ends the open IMAP sessions (their clients log in
+  again); setup reloads Dovecot only when its configuration changed (B122).
+* Critical only (Munin's alerts) never mails the return to normal.
+* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
+  not installed (nginx 404).
+* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
+* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
+  `management/backup.py` and `management/dns_update.py` still write
+  `custom.yaml` as root with `open(..., "w")` (B87 covers only
+  `settings.yaml`), and the nightly backup reads its target and
+  `secret_key.txt` there by path. An account that can replace `backup/`
+  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
+  its own with a passphrase it knows. The fork's tools read them, and write
+  the paused `custom.yaml`, only through a checked `backup/` of root's own
+  (B117).
+
+## v78-r2604.0 (2026-10-27)
+
+The first release of the fork after seven release candidates, from the
+update of a production box from rc6 to rc7 and the analysis of its
+ActiveSync errors. Setup disturbs the clients less: it reloads Dovecot,
+Postfix and fail2ban instead of restarting them, Dovecot only on a change
+(B122), and no longer leaves Dovecot without a passdb (B120), Nextcloud
+without a readable config.php (B124) or the logins at the end of a run
+without users.sqlite (B133) for a moment; Nextcloud no longer throttles the
+box's own services (B121). ActiveSync and Autodiscover get brute-force
+protection (B126); Z-Push syncs contacts whose card name has no `.vcf`
+(B128) and holds Pings of up to 59 minutes (B129), and the fork's changes
+to it are one patch file, applied to a fresh copy (B126, B128); the
+`/caldav`, `/carddav` and `/webdav` proxy passes the path as the client
+sent it (B130). Security: `/etc/dovecot` belongs to root (B123), and the
+control panel no longer writes password hashes into the journal or puts
+passwords on a command line (B127). The backup page and the status checks
+no longer hang or fail as a whole when a backup target does not answer
+(B125, B132), and Roundcube's deny of its config directory is anchored
+(B134).
+
 ### Fixed
 
 * ActiveSync and Autodiscover have brute-force protection now: the new
@@ -388,9 +464,32 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   already runs Nextcloud 34.0.5 keeps its calendar app at the update. The
   other pinned components were checked against their upstream releases on
   2026-10-27 and are current.
+* `tools/update-check.sh` writes its empty local variables as `''`
+  (shellcheck SC1007); no change in what it does.
 
 ### Upgrade note
 
+* Boxes on rc7 are updated with the bootstrap command of "Updating the
+  fork" in README-fork.md,
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`.
+  Before it: put back the files changed by hand in `/root/mailinabox`
+  (`git -C /root/mailinabox status --short` lists them, `sudo git -C
+  /root/mailinabox checkout -- FILE` puts one back), such as the hotfixes of
+  rc7 in `management/backup.py` (B125) and `conf/nginx-alldomains.conf`
+  (B129), which this release sets itself; and check that the box reaches
+  GitHub for the one-time download of Z-Push: `curl -fsSIL
+  https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null
+  && echo OK` (both explained below). rc7 has `tools/update-check.sh`:
+  `before` and `backup` before the update, `after` and `mailcheck` after
+  it, all from `/root/mailinabox/tools/`; `after` judges the changes by
+  `tools/expected-changes/v78-r2604.0.txt` (and `any.txt`).
+* Boxes on rc1 to rc6 are updated the same way, with the steps of rc7's
+  upgrade note first: `sudo git -C /root/mailinabox remote set-url origin
+  https://github.com/LM1337/Mail-in-a-box-26` for rc1 to rc3, and
+  `tools/update-check.sh before` and `backup` through `curl ... | sudo bash
+  -s -- STEP`, as these releases have no copy of the tool. Read the upgrade
+  notes of every release in between; `after` uses the lists of rc7 and of
+  v78-r2604.0.
 * Z-Push's message for a failed ActiveSync login reads "Failed to
   authenticate user '...' from IP ...." now (Z-Push: "IP: ... failed to
   authenticate user '...'"), and control characters in Z-Push's log lines
@@ -487,69 +586,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `PING_HIGHER_BOUND_LIFETIME`) need nothing: the update installs Z-Push
   again, and setup sets the bound.
 
-### Planned
+### Done from the plan
 
-For the final release v78-r2604.0 (from rc7):
-
-* T6 (on the Internet: Let's Encrypt, delivery to other providers, and
-  `mailcheck` with a real external probe) before the final release
-  v78-r2604.0.
-* `tools/expected-changes/` needs a list for each release, also an empty
-  one for the final release: at the release, `unreleased.txt` is renamed to
-  the release's `<version>.txt`, and a new, empty `unreleased.txt` starts.
-
-Seen in the rc7 work, not done (the certification runs of rc7 add their
-open findings in TESTING-fork.md, "Open findings of rc7"):
-
-* Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
-  polls; a reload with a `process_control_timeout` would keep them.
-* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
-  test of B126): Z-Push tries the IMAP login three times, and Dovecot
-  delays failed logins, possibly more for an address with many failures,
-  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
-  `miab-zpush` threshold slows down the ActiveSync logins of other users
-  is not measured.
-* `miab-zpush` counts failures per address, like the other jails, and is
-  always on: behind the shared servers of a mail app that syncs through its
-  provider's cloud (Outlook for iOS and Android with an ActiveSync
-  account), one person with a wrong password, or anyone on purpose, can get
-  all users of that app banned, and repeated bans reach recidive's week on
-  all ports (B126). The README, the upgrade note and the allowlist help say
-  to put such networks on the allowlist; nothing finds them on its own.
-  Leaving `miab-zpush` out of recidive would let an attacker guess 20
-  passwords every few minutes for good, so it still counts there.
-* The failed-login report does not read `nextcloud.log` yet, which now
-  has the client's address for `/caldav`, `/carddav` and `/webdav` too
-  (B121).
-* Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
-  postgrey, named, systemd-resolved, munin-node and the management daemon
-  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
-  (`milter_default_action`). Candidates for a reload or a restart only on a
-  change.
-* A Dovecot reload (B122) still has two client-visible moments: a login
-  that the old login process hands to the new auth process at that moment
-  fails as an internal failure (Nextcloud's `user_external` counts it as a
-  failed login of the client; harmless for 127.0.0.1 after B121), and a
-  FolderSync that Z-Push answers during the reload can come without the
-  mail folders (seen once, for a new device's first FolderSync).
-* Roundcube's CardDAV plugin can log "duplicate column name: account_id"
-  when several sessions log in at the same moment for the first time after
-  an upgrade of the plugin (a race in its schema migration).
-* A Dovecot reload ends the open IMAP sessions (their clients log in
-  again); setup reloads Dovecot only when its configuration changed (B122).
-* Critical only (Munin's alerts) never mails the return to normal.
-* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
-  not installed (nginx 404).
-* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
-* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
-  `management/backup.py` and `management/dns_update.py` still write
-  `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the nightly backup reads its target and
-  `secret_key.txt` there by path. An account that can replace `backup/`
-  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
-  its own with a passphrase it knows. The fork's tools read them, and write
-  the paused `custom.yaml`, only through a checked `backup/` of root's own
-  (B117).
+From the plan for the final release: the list of expected changes of this
+release (`tools/expected-changes/v78-r2604.0.txt`, renamed from
+`unreleased.txt`, with a new, empty `unreleased.txt` for the next release).
+The test matrix T1 to T5b and T6 (on the Internet: Let's Encrypt, delivery
+to other providers, `mailcheck` with a real external probe) run on the
+release commit; their results are in TESTING-fork.md.
 
 ## v78-r2604.0-rc7 (2026-10-25)
 
