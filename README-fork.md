@@ -144,6 +144,26 @@ the tag it installs, with `--force`). To clean up, delete the old tags:
 `git fetch --tags` for this: the checkout is shallow, and it would download
 the history behind every upstream tag of the repository.
 
+One case does affect an update: a checkout whose current commit carries a
+local tag with the name of the release being installed, but another commit
+than on GitHub (an old pre-release or a mirror's tag of that name).
+bootstrap.sh compares the release name with `git describe` and, when they
+match, fetches nothing: setup then runs on the old code and still ends with
+exit code 0. After an update, check that the checkout is the release and
+its commit is GitHub's (here for v78-r2604.1; use the name of the release
+you install):
+
+	sudo git -C /root/mailinabox describe --always
+	sudo git -C /root/mailinabox rev-parse HEAD
+	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.1^{}'
+
+`describe` must print the release name, and the two commit ids must be
+the same. If they are not, delete the local tag and run the bootstrap
+command again:
+
+	sudo git -C /root/mailinabox tag -d v78-r2604.1
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+
 **Checks around the update** (rc7 and later, `tools/update-check.sh`, as
 root; through `curl ... | sudo bash -s -- STEP` without a checkout). Before
 the update, `before` records the state of the box (version, services,
@@ -331,6 +351,27 @@ Zum Aufräumen die alten Tags löschen:
 („not found“ für einen Tag, den es nicht gibt, ist in Ordnung). Nicht
 `git fetch --tags` dafür nehmen: Der Checkout ist flach (shallow) und würde
 die Historie hinter jedem Upstream-Tag des Repositorys herunterladen.
+
+Ein Fall wirkt sich doch auf ein Update aus: ein Checkout, dessen aktueller
+Commit einen lokalen Tag mit dem Namen des zu installierenden Release trägt,
+aber auf einen anderen Commit als auf GitHub (ein altes Vorab-Release oder
+der Tag eines Spiegels mit diesem Namen). bootstrap.sh vergleicht den
+Release-Namen mit `git describe` und holt bei Gleichheit nichts: Setup läuft
+dann mit dem alten Code und endet trotzdem mit Exit-Code 0. Nach einem
+Update prüfen, dass der Checkout das Release ist und sein Commit der von
+GitHub (hier für v78-r2604.1; den Namen des installierten Release
+einsetzen):
+
+	sudo git -C /root/mailinabox describe --always
+	sudo git -C /root/mailinabox rev-parse HEAD
+	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.1^{}'
+
+`describe` muss den Release-Namen ausgeben, und die beiden Commit-IDs
+müssen gleich sein. Sonst den lokalen Tag löschen und den
+Bootstrap-Befehl noch einmal ausführen:
+
+	sudo git -C /root/mailinabox tag -d v78-r2604.1
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 **Prüfungen rund um das Update** (ab rc7, `tools/update-check.sh`, als
 root; ohne Checkout über `curl ... | sudo bash -s -- SCHRITT`). Vor dem

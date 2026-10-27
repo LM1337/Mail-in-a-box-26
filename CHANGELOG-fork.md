@@ -55,12 +55,26 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   virtual machine took long on a busy host. A production box's
   `update-check.sh after` named them in the update to v78-r2604.0 (the
   backup step and the nightly backup stop PHP-FPM the same way).
+* Docs: README-fork.md, "Updating the fork": a checkout whose current
+  commit has a local tag with the name of the release being installed,
+  but another commit than on GitHub (an old pre-release or a mirror's
+  tag), is not updated: bootstrap.sh compares the name with `git
+  describe`, fetches nothing, and setup runs on the old code and ends with
+  exit code 0. How to check after the update (`git describe`, `git
+  rev-parse HEAD` against `git ls-remote`) and the fix (`git tag -d`, then
+  the bootstrap command again), in English and German.
 
 ### Planned
 
 Seen in the work on rc7 and v78-r2604.0, not done (the certification runs
 add their open findings in TESTING-fork.md):
 
+* bootstrap.sh decides whether to fetch by the name that `git describe`
+  prints for the checkout, so a local tag of the release's name on another
+  commit keeps the old code (see "Updating the fork" in README-fork.md).
+  Comparing the commit of the tag at the source (`git ls-remote`) with
+  `HEAD` would find it; not changed in this bug-fix release, as every
+  update goes through that code and it had no test run.
 * Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
 * A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
