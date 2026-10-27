@@ -533,6 +533,10 @@ no longer hang or fail as a whole when a backup target does not answer
   (B137).
 * Tests: the log audit accepts systemd's note of the left-over processes
   of a cron job when setup starts cron again at its end (B138).
+* Tests: the log audit accepts systemd's note of the left-over processes
+  of any cron job when setup starts cron again (not only of Nextcloud's
+  `cron.php`), and with `--internet` the reverse DNS warning of Postfix
+  also for clients of the submission ports (scanners).
 * Tests: the log audit accepts the auth-worker processes' note of their
   end at setup's Dovecot reload (`Killed with signal 15` from the master,
   B122), seen in the repeated update test.
