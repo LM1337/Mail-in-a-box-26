@@ -300,6 +300,13 @@ no longer hang or fail as a whole when a backup target does not answer
   is still no list it fails the request with a server error (FolderSync
   status 6, which the phone retries later). Another change in
   conf/zpush/z-push.patches, so the update installs Z-Push again (B137).
+* Setup keeps cron off for its whole run: needrestart, which apt runs,
+  started cron again in the middle of setup when setup's `apt-get upgrade`
+  replaced a library that a cron job still running from before setup used
+  (stopping cron leaves its running jobs alone). Setup now also masks cron
+  in `/run` while it runs; a run that is killed leaves the mask until the
+  next boot or the next setup run, which removes it (B138, a gap in the fix
+  of B82 in rc6).
 
 ### Changed
 
@@ -497,6 +504,8 @@ no longer hang or fail as a whole when a backup target does not answer
   retries, like HTTP 503; within `--max-outage`), and the log audit accepts
   Z-Push's warning that it connects again for a folder list in a setup run
   (B137).
+* Tests: the log audit accepts systemd's note of the left-over processes
+  of a cron job when setup starts cron again at its end (B138).
 
 ### Upgrade note
 

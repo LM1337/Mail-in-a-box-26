@@ -19,14 +19,41 @@ source setup/preflight.sh
 # The start and the end of the run are marked in the journal (identifier
 # mailinabox-setup): tests/fork/log-audit.sh accepts what the restarts of the
 # services make clients and services log (cut connections) only in between.
+#
+# Stopping cron was not enough: when setup's apt-get upgrade replaced a
+# library that a job still running from before setup used (cron's KillMode
+# is "process", a stop leaves its jobs running), needrestart started
+# cron.service again in the middle of setup (B138). Setup also masks cron in
+# /run (gone at the next boot) while it runs; the marker file in /run tells
+# a later run that a run that was killed before it could unmask cron left the
+# mask behind.
+SETUP_CRON_MASK_MARKER=/run/mailinabox-setup-masked-cron
 logger -t mailinabox-setup "Mail-in-a-Box setup started" 2> /dev/null || true
 SETUP_STOPPED_CRON=
+SETUP_MASKED_CRON=
+if [ -e "$SETUP_CRON_MASK_MARKER" ]; then
+	systemctl unmask --runtime --quiet cron.service 2> /dev/null || true
+	rm -f "$SETUP_CRON_MASK_MARKER"
+	SETUP_STOPPED_CRON=1
+fi
 if systemctl is-active --quiet cron.service 2> /dev/null; then
 	systemctl stop cron.service
 	SETUP_STOPPED_CRON=1
 fi
+if [ -n "$SETUP_STOPPED_CRON" ] && [ "$(systemctl is-enabled cron.service 2> /dev/null)" != masked-runtime ]; then
+	: > "$SETUP_CRON_MASK_MARKER"
+	if systemctl mask --runtime --quiet cron.service 2> /dev/null; then
+		SETUP_MASKED_CRON=1
+	else
+		rm -f "$SETUP_CRON_MASK_MARKER"
+	fi
+fi
 function setup_ended {
 	local rc=$?
+	if [ -n "$SETUP_MASKED_CRON" ]; then
+		systemctl unmask --runtime --quiet cron.service 2> /dev/null || true
+		rm -f "$SETUP_CRON_MASK_MARKER"
+	fi
 	if [ -n "$SETUP_STOPPED_CRON" ]; then
 		systemctl start cron.service 2> /dev/null || true
 	fi
