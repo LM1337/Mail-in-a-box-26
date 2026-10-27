@@ -274,6 +274,12 @@ no longer hang or fail as a whole when a backup target does not answer
   Nextcloud files and folders below a folder `mail/config` (through
   `/cloud/remote.php` and the `/webdav` proxy) and the pages of static
   sites under such a path. It is anchored now (`^/mail/config/`; B134).
+* The release tag is an annotated tag, as CONTRIBUTING.md asks. The tag
+  first made for this release on the fork's internal server was a
+  lightweight one, which `git describe` without `--tags` does not see:
+  the test boxes installed from it showed their commit id as their version
+  (status checks, control panel, setup) and bootstrap.sh fetched again on
+  every run (B135; never published).
 
 ### Changed
 
