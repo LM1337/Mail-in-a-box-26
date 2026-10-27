@@ -172,9 +172,10 @@ function do_login() {
            : switch_back_to_panel);
 
       // The panels may still hold the data of another user, whose session
-      // ended without a logout: go there with a fresh page instead (B141).
+      // ended without a logout: start again with a fresh page, on the
+      // welcome page rather than the panel of that user (B141).
       if (panels_user && panels_user != api_credentials.username) {
-        history.replaceState(null, "", "#" + panelid);
+        history.replaceState(null, "", window.location.pathname + window.location.search);
         window.location.reload();
         return;
       }
