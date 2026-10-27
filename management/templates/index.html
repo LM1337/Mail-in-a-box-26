@@ -79,6 +79,10 @@
 
             .if-logged-in { display: none; }
             .if-logged-in-admin { display: none; }
+            /* Bootstrap's ".nav > li" and ".nav > li > a" win over the two rules
+               above, so the menus are hidden until show_hide_menus() has set
+               them (B141). */
+            .navbar-nav { visibility: hidden; }
 
       /* The below only gets used if it is supported */
       @media (prefers-color-scheme: dark) {

@@ -29,8 +29,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   reload with an ended session is no longer logged as failed logins (each
   API call with the old key was one). Log out starts again with a fresh
   page, and a login of another user in the same tab after a session ended
-  reloads the page, so that no panel shows data loaded for the user before
-  (B141).
+  reloads the page and opens the welcome page, so that no panel shows data
+  loaded for the user before. While the page loads, before its script has
+  run, the menus no longer show for a moment either (on every load, also
+  logged out): Bootstrap's style overrode the rule that hides them (B141).
 
 ### Planned
 
