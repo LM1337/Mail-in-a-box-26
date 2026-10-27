@@ -36,6 +36,18 @@ add their open findings in TESTING-fork.md):
 * The failed-login report does not read `nextcloud.log` yet, which now
   has the client's address for `/caldav`, `/carddav` and `/webdav` too
   (B121).
+* Nextcloud takes the client's address from `X-Forwarded-For` on every
+  connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
+  of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the
+  header itself. A local account or a compromised service can make
+  Nextcloud log a failed login under another address, which
+  `miab-owncloud` bans; before, such a login was logged as 127.0.0.1,
+  which fail2ban ignores. Local accounts could already write such lines
+  into the logs that fail2ban reads (logger(1); www-data owns Nextcloud's
+  log), so this is a second way to an existing one; clients on the
+  Internet cannot do it (the proxy replaces the header). A fix: the proxy
+  proves itself to the `/cloud` location with a secret header from a
+  root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
 * Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
   postgrey, named, systemd-resolved, munin-node and the management daemon
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
@@ -47,10 +59,12 @@ add their open findings in TESTING-fork.md):
   failed login of the client; harmless for 127.0.0.1 after B121), and a
   FolderSync or Ping that Z-Push answers during the reload gets a server
   error if Z-Push cannot connect again (B137).
-* Roundcube's CardDAV plugin can log "duplicate column name: account_id"
-  or "no such column: active" when several sessions of one user log in at
-  the same moment for the first time after an upgrade of the plugin (a race
-  in its schema migration; one of the logins fails once).
+* Roundcube's CardDAV plugin can log "duplicate column name: account_id",
+  "no such column: active" or "UNIQUE constraint failed:
+  carddav_migrations.filename" when two sessions log in at the same moment
+  for the first time after an upgrade of the plugin (a race in its schema
+  migration; one of the logins fails once). After an update from rc7 or
+  earlier, `update-check.sh after` accepts the last form.
 * nginx sets no HSTS header on `/admin/`: the headers of that location
   replace the server's (upstream). Browsers that visited another page of
   the box have the header already.
@@ -193,11 +207,11 @@ no longer hang or fail as a whole when a backup target does not answer
   (B122).
 * The backup page of the control panel and the backups no longer hang for
   a minute or more when the rsync target does not answer a connection
-  request at once (seen on a production box with a Hetzner Storage Box: ssh
-  waited 11 s for an answer over IPv6, and twice the page showed only
-  "Something went wrong" after 60 s). ssh to the target now gives an
-  address 10 s for the connection and the SSH banner, then tries the next
-  one, and makes two attempts, instead of waiting for the kernel's TCP
+  request at once (seen on a production box with a remote rsync backup
+  server: ssh waited 11 s for an answer over IPv6, and twice the page
+  showed only "Something went wrong" after 60 s). ssh to the target now
+  gives an address 10 s for the connection and the SSH banner, then tries
+  the next one, and makes two attempts, instead of waiting for the kernel's TCP
   retries; the list of the target's files (status page, and the nightly
   backup's choice between a full and an incremental backup) is tried three
   times (B125).
@@ -562,6 +576,12 @@ no longer hang or fail as a whole when a backup target does not answer
   not support (HTTP 400), the TLS error "unexpected message" of old
   clients and scanners (`--internet`), and Dovecot 2.3's note when the
   migration stops the old box during a delivery (old-box list).
+* Tests: `tests/fork/log-audit-allow-from-rc7.txt`, which `update-check.sh
+  after` adds by itself after an update from rc7 or earlier, accepts
+  Roundcube's CardDAV migration race ("UNIQUE constraint failed:
+  carddav_migrations.filename") of two first logins in the same second on
+  a box whose Roundcube was not used since an earlier setup run upgraded
+  the plugin; `after` named it in the update test from rc7.
 
 ### Upgrade note
 

@@ -207,8 +207,10 @@ Everything lands in `/root/update-check/<stamp>/` (only root can read it).
 
 **From rc7 to v78-r2604.0, step by step.** The steps of the release's
 upgrade note, in the order in which they were tested (TESTING-fork.md,
-"v78-r2604.0", T5b Part A). If you use Docker stacks next to the box, name
-them in `backup` as shown above.
+"v78-r2604.0", T5b Part A, on a copy with only the hotfix of
+`management/backup.py`; putting back `conf/nginx-alldomains.conf` as well
+was tested in the update test after rc7, at `958f2b9`). If you use Docker
+stacks next to the box, name them in `backup` as shown above.
 
 	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
 	sudo /root/mailinabox/tools/update-check.sh before
@@ -227,7 +229,14 @@ nothing. Setup asks for the host name and the public IP addresses: Enter
 keeps them. `after` should end with "RESULT: OK": it judges the changes by
 `tools/expected-changes/v78-r2604.0.txt` (and `any.txt`) and adds
 `tests/fork/log-audit-allow-from-rc7.txt` to the log audit by itself
-(the old Z-Push had no mark of the fork's changes). `mailcheck` needs a
+(the old Z-Push had no mark of the fork's changes). In the test, the
+changes part said "RESULT: OK - 0 unexpected, 8 expected changes", and the
+log audit named two message classes, which the lists of the release accept:
+the auth-worker note at setup's Dovecot reload, and Roundcube's CardDAV
+migration race ("UNIQUE constraint failed: carddav_migrations.filename") of
+two first logins in the same second on a box whose Roundcube was not used
+since rc7's setup. Look at any other class it names (`after/log-audit.txt`).
+`mailcheck` needs a
 probe address (`--probe ADDRESS` or `PROBE_ADDRESS=` in
 `/etc/mailinabox.conf`); without one it is skipped.
 
@@ -392,8 +401,10 @@ Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
 
 **Von rc7 auf v78-r2604.0, Schritt für Schritt.** Die Schritte des
 Upgrade-Hinweises des Releases, in der getesteten Reihenfolge
-(TESTING-fork.md, „v78-r2604.0“, T5b Teil A). Docker-Stacks neben der Box
-bei `backup` wie oben angeben.
+(TESTING-fork.md, „v78-r2604.0“, T5b Teil A, auf einer Kopie nur mit dem
+Hotfix von `management/backup.py`; das Zurücksetzen von
+`conf/nginx-alldomains.conf` dazu lief im Update-Test nach rc7, auf
+`958f2b9`). Docker-Stacks neben der Box bei `backup` wie oben angeben.
 
 	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
 	sudo /root/mailinabox/tools/update-check.sh before
@@ -413,7 +424,14 @@ IP-Adressen: Enter behält sie. `after` sollte mit „RESULT: OK“ enden: Es
 bewertet die Änderungen nach `tools/expected-changes/v78-r2604.0.txt` (und
 `any.txt`) und nimmt `tests/fork/log-audit-allow-from-rc7.txt` von selbst
 zur Log-Prüfung dazu (das alte Z-Push hatte keine Marke der Änderungen des
-Forks). `mailcheck` braucht eine Prüfadresse (`--probe ADRESSE` oder
+Forks). Im Test meldete der Teil der Änderungen „RESULT: OK - 0 unexpected,
+8 expected changes“, und das Log-Audit nannte zwei Meldungsklassen, die die
+Listen des Releases zulassen: die Meldung der auth-worker beim Dovecot-Reload
+von Setup und den Wettlauf in der CardDAV-Migration von Roundcube („UNIQUE
+constraint failed: carddav_migrations.filename“) bei zwei ersten Anmeldungen
+in derselben Sekunde auf einer Box, deren Roundcube seit dem Setup von rc7
+nicht benutzt wurde. Jede andere Klasse, die es nennt, ansehen
+(`after/log-audit.txt`). `mailcheck` braucht eine Prüfadresse (`--probe ADRESSE` oder
 `PROBE_ADDRESS=` in `/etc/mailinabox.conf`); ohne sie wird er übersprungen.
 
 Gleich nach dem Update:

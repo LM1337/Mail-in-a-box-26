@@ -380,8 +380,9 @@ runs, changed outside the tests and the documentation. T6, on the
 Internet: fresh install of `d06dc67` with setup's network checks, 80/80
 twice, then updated to `e6920f2`, 80/80. Every log audit, with the lists
 of the final head and the lab's own lists, ended with 0 unknown classes.
-The first run on the release commit `72c1661` had the same smoke counts
-and found B135 to B139.
+The first run on the release commit `72c1661` had the same smoke counts,
+except T6's first smoke run (73/80, the lab's NAT; see there), and found
+B135 to B139.
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -877,7 +878,7 @@ box themselves was a marked test mail.
 | T4 (22.04 → 24.04 → 26.04, in place) | "All checks passed"; mail offline 2 h 18 min; port 22 down 39 and 8.5 min, 1022 worked in every check but one (about 20 s); smoke 91/91. Log audit: 0 unknown (with one lab line for the lab's own favicon check) |
 | T5b Part A (published rc6 → published rc7 → release, the production box's path) | smoke 92/92; the client load's verdict FAIL on both instances: one FolderSync each during setup's Dovecot reload answered without the mail folders (B137). `after`: 1 unexpected change, the lab's origin (the lab set its mirror as origin). Log audit: 8 unknown classes, all harmless or of the lab |
 | T5b Part B (rc6 → release) | smoke 91/91; `after`: the same origin line. Log audit: 4 unknown classes, cron started again in the middle of setup by needrestart (B138) |
-| T6 (fresh install on the Internet) | the first install stopped after 2 s: setup took Spamhaus' refusal of the public resolver for a DBL listing (B136); the second, with `SKIP_NETWORK_CHECKS=1`, passed. The first certificate run left out the box's own name (B140, its cause found in the repeated run); the MTA-STS record came only with a later DNS update (B139). Then smoke 80/80 twice, mail to and from an external mailbox, 10/10 at mail-tester.com; log audit 10 unknown classes, all harmless or of the lab |
+| T6 (fresh install on the Internet) | the first install stopped after 2 s: setup took Spamhaus' refusal of the public resolver for a DBL listing (B136); the second, with `SKIP_NETWORK_CHECKS=1`, passed. The first certificate run left out the box's own name (B140, its cause found in the repeated run); the MTA-STS record came only with a later DNS update (B139). Smoke three times: 73/80 first (the 7 fail2ban checks found the host's NAT address banned instead of the peer's, a lab artefact; the repeated run routed the peer directly), then 80/80 twice; mail to and from an external mailbox, 10/10 at mail-tester.com; log audit 10 unknown classes, all harmless or of the lab |
 
 The defects were B135 to B140 (B140 from the repeated T6); the harmless
 classes went into the allowlists with their reasons (`d06dc67`), the lab
@@ -889,7 +890,9 @@ Commits: `d06dc67` has the fixes B135 to B139 (the tag re-created as an
 annotated tag); `e6920f2` adds B140 (the grouping of the certificate
 request in `management/ssl_certificates.py`, which only a box with Let's
 Encrypt runs) and an allowlist line; `332bac5`, `a373c89` and `ca6780f` widen and add
-allowlist lines; the commits after them change the documentation only. bootstrap.sh compares only the tag's name with `git describe`, so a
+allowlist lines; the commits after them change the documentation and
+add one line to `tests/fork/log-audit-allow-from-rc7.txt` (Roundcube's
+CardDAV migration race, see T5b Part A). bootstrap.sh compares only the tag's name with `git describe`, so a
 box installed before the tag moved stayed at `d06dc67` on a later run of
 it, unless the lab removed the local tag first (only possible because the
 lab moved its unpublished tag). Every log audit below was run with the
@@ -905,7 +908,7 @@ allowlists of the final head and the lab's own lists.
 | T5b Part B (rc6 → release) | `e6920f2` | 91/91 | update run of 123 s: 25, 587, 993 and LMTP never failed, spampd 4 probes in two windows; 8 of 8 probe mails delivered | 0 of 14 checks failed | 0 unknown, 95 allowed |
 | T6 (fresh install on the Internet, then an update) | install `d06dc67`, update to `e6920f2` | 80/80, 80/80, 80/80 (`--fail2ban`) | reboots: port 25 back after 20 to 22 s | reboots: back after 17 to 20 s | 0 unknown, 393 allowed (install to the end, `--internet`) |
 
-The reboots: SSH back after 17 to 23 s in every scenario, no failed unit.
+The reboots: SSH back after 17 to 24 s in every scenario, no failed unit.
 The peer was updated from `72c1661` to `e6920f2` at the end, as an operator
 would (bootstrap in a pty, 133 s): ports 25, 587, 993 and LMTP never failed
 a probe, spampd 1; 10 of 10 probe mails delivered; smoke `--only api` 6/6;
@@ -917,7 +920,7 @@ log audit 0 unknown.
 | T2 (22.04 → fresh 26.04) | `--check`: no blockers. "All checks passed", setup 2023 s; old box vs new box: 4 users, 5 aliases, 4 mailboxes, 25 messages, 2 Sieve scripts, the DKIM, DNSSEC, TLS and backup keys, the Let's Encrypt account, Bayes 2/0, Nextcloud 2 accounts, 1 card, 1 event, all the same; DS records unchanged in 3 of 3 zones. Dovecot 2.4.2, Postfix 3.10.6, PHP 8.5.4, Nextcloud 34.0.5, Roundcube 1.7.5; no failed unit. Vacation: a new sender got a reply, a repeated one "discarded duplicate" (the duplicate database came over); port 25 from the peer delivered. `--check-old` right after the run and at the end: nothing started again. `git describe --always` on the box: `v78-r2604.0` (B135). `api-routes.py`: 66 routes, 63 documented operations, 0 problems. The migration's tmux client checks of the first run (detach, a client killed with SIGKILL, reattach) were not repeated: the tools did not change |
 | T3 (24.04 copy, in place) | `update-check.sh before` and `backup` through `curl \| bash` from the tag (the stand-in Docker stack and volume): the first `backup` failed because the lab had emptied its directory on the rsync target, which v74's `backup.py` does not create (as in the first run; the in-place tool's preflight then refused to start: no backup younger than 24 h); after the lab recreated it, `backup` exit 0 in 42 s and `--check --keep-local` found no blockers. `--ssh-fallback-test`: admin key login and sudo on 1022, the non-admin refused there and accepted on 22, nothing left afterwards. The in-place run (`--keep-local --yes`, detached after 150 s): "All checks passed", 1 reboot; the before, local-ext and after hooks ran. Ubuntu 26.04.1, Dovecot 2.4.2, Postfix 3.10.6, PHP 8.5.4, Nextcloud 34.0.5; FTS with the old indexes (alice 6, carol 2 hits); `.dovecot.lda-dupes` a file again. The non-admin was refused on 1022 during the outage. `after`: changes not judged (24.04 → 26.04, as documented); its log audit named 8 classes, all now in the lists or of the lab (git's warning on the annotated tag, ntpd and Docker's link-local addresses, spamd's daily restart and cron's bounced mail to root@ on the v74 box, the first attempt's preflight error). `mailcheck` OK; `PROBE_ADDRESS` kept. `--cleanup-only` (the four calls of rc7) reported the packages without a source (not removed, by design), `--old-checkout` deleted `/mailinabox-v74` |
 | T4 (22.04 → 24.04 → 26.04, in place) | `--ssh-fallback-test` with the group `admin` (admin on 1022 with sudo, the non-admin refused there and accepted on 22, the admin with a home of mode 0775 refused on both with the tool's warning, B115), the nested `Match` refused (B118), and again without the group (B100). The first start of the in-place run (`curl \| sudo bash -s -- --yes --no-backup-check`, detached after 150 s) stopped in its first release upgrade: do-release-upgrade found no new release (its download of the release list from Ubuntu failed for a moment; the tool's own check a minute before had found 24.04, and it found it again later). The tool stopped with mail offline and printed the command to continue; that command, run as an operator would, went through: "All checks passed", 2 reboots. The tmux clients: one killed with SIGKILL after 30 s did not stop the run, one stayed attached through the first release upgrade until its reboot, one through the second, and one attached after the second reboot ended 60 s after the end of the run, with no tmux server left (B72). The non-admin was refused on 1022 in both outages; afterwards no fallback process, listener, ufw rule or file. Vacation: a new sender got a reply, a repeated one "discarded duplicate"; port 25 from the peer delivered. Favicons: Roundcube and Nextcloud serve the fork's icon. `--check` before the run named only the 102 h old backup (the run used `--no-backup-check`) |
-| T5b Part A (published rc6 → published rc7 → release) | the copy of the production box at rc6 with 4 users whose first Nextcloud login was on rc6 (each with the example contact); the published rc7 from GitHub (a new ActiveSync device of such a user got HTTP 500, B128), then only the hand change of B125 in `management/backup.py`. The operator's steps of README-fork.md: the GitHub check (OK), rc7's `update-check.sh before` and `backup` with the Docker stand-ins (exit 0; the copy on the peer verified by checksum), `git checkout -- management/backup.py` (status clean), the lab's origin, bootstrap `TAG=v78-r2604.0` in a pty under the client load of both instances (exit 0). The peer's load: RESULT OK; the box's own load: RESULT FAIL for one result, an ActiveSync request that rc7's Z-Push answered with HTTP 401 in the second of setup's Dovecot reload, before setup installed the new Z-Push (rc7's code; the new Z-Push answers such a moment with 503, B126; see the upgrade note); no failed-login line and no fail2ban `Found` of the load's addresses; no FolderSync without mail folders. The lab put the GitHub origin back before `after` (a box keeps it): "RESULT: OK - 0 unexpected, 8 expected changes" (`any.txt`, `v78-r2604.0.txt`, `log-audit-allow-from-rc7.txt` added by itself); its log audit named 2 classes (the auth-worker note at the Dovecot reload, allowed from `75265dd`; Roundcube's CardDAV migration race of the load's simultaneous first logins, the lab's list). `mailcheck` OK. The example-contact user synced 7 contacts on a new device; Pings: heartbeat 3600 got status 5 with the bound 3540, a 20 s Ping status 1; 12 ActiveSync locations with 3660 s; Z-Push's mark `2.7.7+patches-0c49176f078e6dae` = `--digest`, `--check` passed. A second setup run (126 s) left the Z-Push tree alone (inodes, mtimes, mark) and nginx's main process; `after` again 0 unexpected changes |
+| T5b Part A (published rc6 → published rc7 → release) | the copy of the production box at rc6 with 4 users whose first Nextcloud login was on rc6 (each with the example contact); the published rc7 from GitHub (a new ActiveSync device of such a user got HTTP 500, B128), then only the hand change of B125 in `management/backup.py`. The operator's steps of README-fork.md: the GitHub check (OK), rc7's `update-check.sh before` and `backup` with the Docker stand-ins (exit 0; the copy on the peer verified by checksum), `git checkout -- management/backup.py` (status clean), the lab's origin, bootstrap `TAG=v78-r2604.0` in a pty under the client load of both instances (exit 0). The peer's load: RESULT OK; the box's own load: RESULT FAIL for one result, an ActiveSync request that rc7's Z-Push answered with HTTP 401 in the second of setup's Dovecot reload, before setup installed the new Z-Push (rc7's code; the new Z-Push answers such a moment with 503, B126; see the upgrade note); no failed-login line and no fail2ban `Found` of the load's addresses; no FolderSync without mail folders. The lab put the GitHub origin back before `after` (a box keeps it): "RESULT: OK - 0 unexpected, 8 expected changes" (`any.txt`, `v78-r2604.0.txt`, `log-audit-allow-from-rc7.txt` added by itself); its log audit named 2 classes, so its last line was "RESULT: look at the unexpected changes ... and the new log message classes" (exit code 1): the auth-worker note at the Dovecot reload (allowed from `75265dd`) and Roundcube's CardDAV migration race of the load's simultaneous first logins ("UNIQUE constraint failed: carddav_migrations.filename", then in the lab's list; in `log-audit-allow-from-rc7.txt`, which `after` adds by itself here, from the final head). Both classes, as the run recorded them, are accepted by the lists of the final head (checked with the log audit's matching rules). `mailcheck` OK. The example-contact user synced 7 contacts on a new device; Pings: heartbeat 3600 got status 5 with the bound 3540, a 20 s Ping status 1; 12 ActiveSync locations with 3660 s; Z-Push's mark `2.7.7+patches-0c49176f078e6dae` = `--digest`, `--check` passed. A second setup run (126 s) left the Z-Push tree alone (inodes, mtimes, mark) and nginx's main process; `after` again 0 unexpected changes, its log audit the auth-worker note again (exit code 1; allowed from `75265dd`) |
 | T5b Part B (rc6 → release) | GitHub check OK, `before` and `backup` through `curl \| bash` from the tag (exit 0), bootstrap `TAG=v78-r2604.0` (exit 0); `after` with the GitHub origin: "RESULT: OK - 0 unexpected, 11 expected changes" (`any.txt`, `v78-r2604.0-rc7.txt`, `v78-r2604.0.txt`), its log audit 0 unknown, exit 0; `mailcheck` OK; 12 locations with 3660 s, the bound 3540, the mark = digest, the peer not banned |
 | T6 (on the Internet) | below |
 
@@ -948,7 +951,8 @@ machine was a public one.
 * **Public DNS** through several public resolvers: A, NS with glue, MX,
   SPF, DKIM, DMARC, `_mta-sts`, TLSA for 25 and 443, SSHFP, the SRV records
   of CalDAV and CardDAV, and the A records of the service names, as the box
-  serves them.
+  serves them, except the DKIM key at one resolver (9.9.9.9), which still
+  held the key of the first install (see "External mail").
 * **TLS:** 443, 25 and 587 with STARTTLS, 465, 993, 995 and 4190 verified
   with TLS 1.3; TLS 1.0 and 1.1 refused on 443, 993 and 465. DANE: the
   `3 1 1` record matched the key on 25 and 443.
@@ -987,8 +991,9 @@ first boot with the network down (T6, first run).
 * The update from rc7 or earlier: in the second of setup's Dovecot reload
   the old Z-Push can answer an ActiveSync request with 401 (seen once in
   the repeated T5b; upgrade note).
-* `/admin/` without HSTS header; Roundcube's CardDAV migration race; a
-  CardDAV write during Nextcloud's cron run on SQLite (500); the start line
+* `/admin/` without HSTS header; Roundcube's CardDAV migration race;
+  Nextcloud's trust of `X-Forwarded-For` on every local connection (found
+  in the review, B121); a CardDAV write during Nextcloud's cron run on SQLite (500); the start line
   of `upgrade-in-place-to-2604.sh --check` with another `SOURCE`
   (CHANGELOG-fork.md, "Planned").
 * do-release-upgrade found no new release once in the repeated T4 (its
@@ -1088,7 +1093,9 @@ Everything is in `tests/fork/`:
   earlier), add `--allow-extra tests/fork/log-audit-allow-from-rc7.txt`
   (`tools/update-check.sh after` does that by itself when its state before
   the update has no such mark): the Z-Push of rc7 answers a login cut by
-  setup's Dovecot reload with 401 until setup installs the fork's Z-Push.
+  setup's Dovecot reload with 401 until setup installs the fork's Z-Push,
+  and Roundcube's CardDAV plugin can race in a schema migration left from
+  an earlier setup run at two first logins.
   `--since`
   also takes the short forms `-30m`, `-24h`, `-2d`. With `--baseline
   BEFORE.json` (the `--json` report of an earlier run, e.g. before an
@@ -1142,6 +1149,18 @@ Outline, with a legacy box 192.0.2.10 and a new box 192.0.2.11:
    The fail2ban group refuses to run when the attacks would come from the
    address of the `--ssh` session; use `--peer-ssh`.
 
+Release checks (B135), in the repository before the tag is published and
+on a box installed or updated from it:
+
+        git cat-file -t v78-r2604.0                  # must print: tag
+        sudo git -C /root/mailinabox describe --always   # on the box: v78-r2604.0
+
+The status checks and the control panel's version (`/system/version`) name
+the tag, and a second run of bootstrap.sh does not fetch again. The tag on
+GitHub must be the same tag object (`git ls-remote` shows it and its
+`^{}` line), and the release must be created from that tag, so that GitHub
+does not make a new one.
+
 ## Not tested
 
 * **Interactive first install** with `sudo bash -c "$(curl …)"` on 26.04. The
@@ -1156,8 +1175,10 @@ Outline, with a legacy box 192.0.2.10 and a new box 192.0.2.11:
   rsync (local, S3, B2), and Docker
   setups other than the stand-ins of the lab. In v78-r2604.0 `after` ran
   on updates from one tag to the next (rc7 and rc6 to the release, from the
-  lab's mirror) and said RESULT OK once the lab had put the GitHub origin
-  back; with the lab's own origin it named that line.
+  lab's mirror). Once the lab had put the GitHub origin back (with the
+  lab's own origin it named that line), its changes were RESULT OK in both;
+  from rc6 it ended with RESULT: OK, from rc7 its log audit named two
+  classes that the lists of the release accept (T5b Part A).
 * **The published tag and GitHub.** The runs of v78-r2604.0 installed the
   tag from the lab's mirror, before it was on GitHub (the boxes downloaded
   Z-Push and the other components from GitHub as usual), and

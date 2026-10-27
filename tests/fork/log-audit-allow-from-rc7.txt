@@ -7,6 +7,10 @@
 # runs: the Z-Push of the fork answers a login that Dovecot or Nextcloud
 # cannot check at that moment with 503, and a 401 for it in a setup run of
 # the fork's Z-Push is a regression of B126 that the log audit must show.
+# The Roundcube line is for the first logins after such an update on a box
+# whose Roundcube was not used since an earlier setup run upgraded its CardDAV
+# plugin.
 # Same format as log-audit-allow.txt.
 
 ^\[setup\] \[N\] \[FATAL\] \[<user>\] (Exception: \(AuthenticationRequiredException\) - Access denied\. Username or password incorrect|WBXML NK debug data: <blob>)$ # setup's Dovecot reload (B122, open finding) cuts a login that the old imap-login hands over; the Z-Push of rc7 or earlier, which runs until setup installs the fork's Z-Push later in the same run, answers it with 401 (the fork's Z-Push with 503, B126); only in a setup run (load-no-failed-login and fail2ban check the failed logins)
+^(<<hex>>|<N>) DB Error: \[N\] UNIQUE constraint failed: carddav_migrations\.filename \(SQL Query: INSERT INTO carddav_migrations\("filename"\) VALUES \('N-[a-z]+N?'\)\) in /usr/local/lib/roundcubemail/program/lib/Roundcube/rcube_db\.php on line N \(POST /mail/\?_task=login&_action=login\)$ # Roundcube's CardDAV plugin runs a pending schema migration at the next login; on a box whose Roundcube was not used since the plugin's upgrade by an earlier setup run (rc7 or earlier), two first logins in the same second both run it, and the second finds it recorded and fails once (the schema is complete; CHANGELOG-fork.md, Planned). Seen at the update of the copy of a production box from rc7 (T5b of v78-r2604.0)
