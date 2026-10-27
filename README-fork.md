@@ -1260,9 +1260,37 @@ again in finish. Write hooks so that they can run twice. For example:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
-Downtime on the test boxes was 50 minutes to 2 hours (the longer times on
-a busy disk and with two release upgrades); plan 1-3 hours. The fresh
-backup is part of it: a few minutes when it is incremental, much longer when
+**How long an in-place upgrade takes.** Times of the in-place test runs
+(test VMs with 2 vCPUs and 4-6 GB RAM on one host with HDD storage):
+
+| Run | 22.04 → 24.04 | 24.04 → 26.04 | Setup | Mail offline | Reboots |
+|---|---|---|---|---|---|
+| From 22.04, no other test run on the host | 33-34 min | 29-31 min | 15-16 min | 1 h 21 min - 1 h 25 min | 2 |
+| From 22.04, other test runs on the same disks at the same time | 45-73 min | 31-41 min | 15-17 min | 1 h 36 min - 2 h 18 min | 2 |
+| From 24.04 (copy of a production box), no other test run on the host | – | 33-41 min | 15-16 min | 50 min - 1 h 01 min | 1 |
+| From 24.04 (copy of a production box), other test runs at the same time | – | 46-72 min | 18-23 min | 1 h 08 min - 1 h 41 min | 1 |
+
+A production box (from 24.04, on its own server) was without mail
+for 1 h 10 min.
+
+* **What makes it slower:** slow disks, and other load on the same storage
+  (other virtual machines, a backup or a large copy at the same time). The
+  release upgrades replace most of the system's packages; on disks
+  shared with up to five other test runs they took about twice as long. A
+  full backup in phase snapshot adds its own time (see below).
+* **When mail is offline:** from phase snapshot, before the fresh backup,
+  until the end of phase setup (with `--skip-miab-backup`, from phase
+  quiesce); the column "Mail offline" is that window.
+  Users cannot read or send mail in it. Other mail servers cannot deliver
+  and try again later (usually for several days), so incoming mail arrives
+  after the upgrade. New SSH logins on port 22 fail for a while during each
+  release upgrade, and `sudo` is missing for a while from 24.04 to 26.04
+  (see "Logging in during the release upgrades" below).
+* **Plan 1-3 hours** of mail outage and announce it. Keep a root shell
+  open, and do not reboot while a release upgrade runs, even when it seems
+  to hang.
+
+The fresh backup is part of the downtime: a few minutes when it is incremental, much longer when
 backup.py makes a full backup (when there is none yet, or on a Saturday or
 Sunday after many changes or about a month since the last full one);
 `--check` shows the estimate. The release upgrades cannot be undone:
@@ -1444,9 +1472,40 @@ noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
-Die Ausfallzeit lag auf den Testboxen zwischen 50 Minuten und 2 Stunden
-(die längeren Zeiten bei ausgelasteter Platte und mit zwei
-Release-Upgrades); einplanen sollte man 1 bis 3 Stunden. Die frische Sicherung zählt dazu: einige Minuten, wenn
+**Wie lange ein Upgrade an Ort und Stelle dauert.** Zeiten der
+In-place-Testläufe (Test-VMs mit 2 vCPUs und 4-6 GB RAM auf einem Host mit
+HDD-Speicher):
+
+| Lauf | 22.04 → 24.04 | 24.04 → 26.04 | Setup | Mail aus | Neustarts |
+|---|---|---|---|---|---|
+| Ab 22.04, kein anderer Testlauf auf dem Host | 33-34 min | 29-31 min | 15-16 min | 1 h 21 min - 1 h 25 min | 2 |
+| Ab 22.04, gleichzeitig andere Testläufe auf denselben Platten | 45-73 min | 31-41 min | 15-17 min | 1 h 36 min - 2 h 18 min | 2 |
+| Ab 24.04 (Kopie einer Produktivbox), kein anderer Testlauf auf dem Host | – | 33-41 min | 15-16 min | 50 min - 1 h 01 min | 1 |
+| Ab 24.04 (Kopie einer Produktivbox), gleichzeitig andere Testläufe | – | 46-72 min | 18-23 min | 1 h 08 min - 1 h 41 min | 1 |
+
+Eine Produktivbox (ab 24.04, auf eigenem Server) war 1 h 10 min ohne
+Mail.
+
+* **Was es verlangsamt:** langsame Platten und andere Last auf demselben
+  Speicher (andere virtuelle Maschinen, eine Sicherung oder eine große Kopie
+  zur selben Zeit). Die Release-Upgrades ersetzen die meisten Pakete
+  des Systems; auf Platten, die sich bis zu fünf andere Testläufe
+  teilten, dauerten sie etwa doppelt so lange. Eine Vollsicherung in der
+  Phase snapshot braucht zusätzlich Zeit (siehe unten).
+* **Wann die Mail aus ist:** ab der Phase snapshot, vor der frischen
+  Sicherung, bis zum Ende der Phase setup (mit `--skip-miab-backup` ab der Phase
+  quiesce); die Spalte „Mail aus“ ist dieses
+  Fenster. Die Benutzer können darin keine Mail lesen oder senden. Andere
+  Mailserver können nicht zustellen und versuchen es später erneut (meist
+  über mehrere Tage); eingehende Mail kommt also nach dem Upgrade an. Neue
+  SSH-Anmeldungen auf Port 22 schlagen während jedes Release-Upgrades eine
+  Zeit lang fehl, und von 24.04 auf 26.04 fehlt `sudo` eine Zeit lang
+  (siehe „Anmelden während der Release-Upgrades“ unten).
+* **1 bis 3 Stunden** Mailausfall einplanen und ankündigen. Eine root-Shell
+  offen lassen und während eines Release-Upgrades nicht neu starten, auch
+  wenn es zu hängen scheint.
+
+Die frische Sicherung zählt zur Ausfallzeit: einige Minuten, wenn
 sie inkrementell ist, viel länger, wenn backup.py eine Vollsicherung macht
 (wenn es noch keine gibt, oder an einem Samstag oder Sonntag nach vielen
 Änderungen oder etwa einem Monat seit der letzten Vollsicherung); `--check`

@@ -356,6 +356,11 @@ no longer hang or fail as a whole when a backup target does not answer
 
 ### Changed
 
+* Docs: README-fork.md, "In-place upgrade to 26.04", has a table of the
+  times of the in-place test runs (each release upgrade, setup, mail
+  offline, from 22.04 and from 24.04, with and without other load on the
+  same storage), what makes an upgrade slower and when mail is offline
+  (English and German).
 * Control panel (System > Intrusion Protection): `miab-zpush` is a web
   jail (its bans keep their fixed length with adaptive banning), the slow
   web jails get `miab-slow-zpush` (ActiveSync and Autodiscover), and the
