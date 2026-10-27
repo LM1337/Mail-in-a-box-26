@@ -70,7 +70,7 @@ builds on that port. Its goals:
 | Ubuntu | 22.04 LTS (standard support until May 2027) | 26.04 LTS (standard support until May 2031) |
 | PHP | 8.0 from `ppa:ondrej/php` (no security support since 26 Nov 2023) | 8.5 from the Ubuntu archive (security support until 31 Dec 2029) |
 | Nextcloud ¹ | 27.1.11 (end of life June 2024) | 34.0.5 (supported until June 2027) ³ |
-| Nextcloud apps contacts / calendar / user_external ¹ | 5.5.4 / 4.7.20 / 3.4.0 | 8.9.2 / 6.6.3 / 4.0.0 |
+| Nextcloud apps contacts / calendar / user_external ¹ | 5.5.4 / 4.7.20 / 3.4.0 | 8.9.2 / 6.6.4 / 4.0.0 |
 | Roundcube ¹ | 1.6.20 (LTS, security fixes only), CardDAV plugin 4.4.3 | 1.7.5 (current stable), CardDAV plugin 5.1.4 |
 | Z-Push ¹ | 2.7.7 | 2.7.7 (unchanged) |
 | Dovecot | 2.3.16 | 2.4.2 |

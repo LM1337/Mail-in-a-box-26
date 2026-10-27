@@ -378,6 +378,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   2.7.7+patches-<16 hex digits>`). Every update may also change the version
   named by the status checks, and an update to a branch or commit records
   its commit id as the version (`any.txt`).
+* Nextcloud's calendar app 6.6.3 → 6.6.4 (bug fixes; for the fresh install
+  and the steps of the upgrade chain to 32, 33 and 34), SHA256
+  `0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c`
+  (computed from the download, the same as GitHub's digest of the release
+  asset). Its `appinfo/info.xml` accepts Nextcloud 32 to 35 and PHP 8.1 to
+  8.5, as 6.6.3's did. Setup installs the pinned apps only together with a
+  new Nextcloud version (as upstream; the app store is off), so a box that
+  already runs Nextcloud 34.0.5 keeps its calendar app at the update. The
+  other pinned components were checked against their upstream releases on
+  2026-10-27 and are current.
 
 ### Upgrade note
 

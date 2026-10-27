@@ -43,8 +43,8 @@ contacts_ver=8.9.2
 contacts_hash=92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/calendar
-calendar_ver=6.6.3
-calendar_hash=bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080
+calendar_ver=6.6.4
+calendar_hash=0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/user_external
 # user_external 4.0.0 declares nextcloud min-version=31 max-version=34 and there is no release
@@ -325,12 +325,12 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		fi
 		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^31 ]]; then
 			# runs with PHP 8.2 (NC 32: PHP 8.1-8.4)
-			InstallNextcloud 32.0.15 33e7adbe81c1ad0be61123a0fadc63ae2e392759f0c2557e008863eb69c6453d 8.3.21 45d12ff526515ce5efc52d8e0d42bd3446a66b9a423ee4eb92ebd44a6b5974c3 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+			InstallNextcloud 32.0.15 33e7adbe81c1ad0be61123a0fadc63ae2e392759f0c2557e008863eb69c6453d 8.3.21 45d12ff526515ce5efc52d8e0d42bd3446a66b9a423ee4eb92ebd44a6b5974c3 6.6.4 0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 			CURRENT_NEXTCLOUD_VER="32.0.15"
 		fi
 		if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^32 ]]; then
 			# runs with PHP 8.5 (NC 33: PHP 8.2-8.5)
-			InstallNextcloud 33.0.10 ff602a1f1ba202f2137f10eecd201d3e80c5d94fd17ab984c688fb1bcb290645 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+			InstallNextcloud 33.0.10 ff602a1f1ba202f2137f10eecd201d3e80c5d94fd17ab984c688fb1bcb290645 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.4 0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 			CURRENT_NEXTCLOUD_VER="33.0.10"
 		fi
 		##
@@ -341,7 +341,7 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		# and move nextcloud_ver and the app pins at the top of this file to 35.
 		# if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
 		#	# runs with PHP 8.5
-		#	InstallNextcloud 34.0.5 d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.3 bda8f38c609b2182533887f67eacb543edf437066d0356912ac6324c94743080 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+		#	InstallNextcloud 34.0.5 d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.4 0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 		#	CURRENT_NEXTCLOUD_VER="34.0.5"
 		# fi
 		##
