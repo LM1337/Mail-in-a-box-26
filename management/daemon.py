@@ -172,7 +172,7 @@ def login():
 # accepted, never a password, so a session that has ended (expired, logged out,
 # the daemon restarted) is no failed login.
 @app.route('/me')
-def me():
+def session_me(): # not "me": that name holds this file's path (above)
 	try:
 		email, privs = auth_service.authenticate(request, env, session_only=True)
 	except ValueError as e:

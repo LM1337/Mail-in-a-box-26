@@ -160,11 +160,17 @@ TESTING-fork.md, "v78-r2604.1").
   for a backup (the socket is missing, or the request in progress is
   cut), in every phase, as backup.py logs no marks that would limit it to
   its run (with any host and the referrer that nginx adds for a browser's
-  request, which also covers such lines at setup's PHP-FPM restart); and
+  request, which also covers such lines at setup's PHP-FPM restart; also
+  a line that the audit cuts at 400 characters, a long request with a
+  referrer, as setup's rule for the same lines now does too); and
   the kernel's note that the free page reporting of a
   virtual machine took long on a busy host. A production box's
   `update-check.sh after` named them in the update to v78-r2604.0 (the
   backup step and the nightly backup stop PHP-FPM the same way).
+* Management daemon: the function behind `GET /admin/me` is named
+  `session_me`, so it no longer reuses the module's name `me`, which holds
+  the daemon's own path (no change in behavior; a later use of that path
+  would have failed).
 * Docs: README-fork.md, "Updating the fork": a checkout whose current
   commit has a local tag with the name of the release being installed,
   but another commit than on GitHub (an old pre-release or a mirror's

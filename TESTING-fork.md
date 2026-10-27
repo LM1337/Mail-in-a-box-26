@@ -1026,7 +1026,9 @@ Internet), an update from the tag `v78-r2604.0` to the tag `v78-r2604.1`
 with `tools/update-check.sh` (so neither the fix of B143 nor the new log
 audit rules ran on a box; both were checked against sample lines only), and
 the release commit itself, which after `5001366` changes only the version
-strings, `tools/expected-changes/`, the log audit's allowlist and the
+strings, `tools/expected-changes/`, the log audit's allowlist, the name of
+the Python function behind `/me` in `management/daemon.py` (a rename of
+the review, no change in behavior; checked with `py_compile` only) and the
 documentation.
 
 ### Production use
