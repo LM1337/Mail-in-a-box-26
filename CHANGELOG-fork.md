@@ -42,6 +42,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Before, every login was saved in the browser's localStorage and was still
   there after the browser was closed and opened again, also when "Remember
   me" was not ticked (B142).
+* `tools/update-check.sh after` no longer lists the new version line as
+  UNEXPECTED after an update to a release after v78-r2604.0: the rule of
+  `tools/expected-changes/any.txt` for the version of `/root/mailinabox`
+  named only v78-r2604.0 and its release candidates (B143).
 
 ### Changed
 

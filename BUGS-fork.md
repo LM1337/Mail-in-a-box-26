@@ -15,7 +15,7 @@ reproduced on a box, the evidence line says so.
   * *Upstream*: the bug is already in v78 and shows on 22.04 boxes.
   * *PR #2603*: the port introduced it.
   * *26.04 change*: a package or OS change in 26.04 that the port did not handle.
-  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116, B118, B119 and B135 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84, B113 and B133 in rc4, B70 in rc5, B138 in rc6.
+  * *Fork*: introduced and fixed within this fork. B07, B100, B101, B103-B112, B114-B116, B118, B119 and B135 never shipped in a tag (found in the development of the release that fixes them); B11, B54, B76, B77, B90 and B117 shipped in rc1, B57, B67, B73 and B102 in rc3, B68, B71, B72, B84, B113 and B133 in rc4, B70 in rc5, B138 in rc6, B143 in rc7.
   * *latent*: the code is wrong, but nothing triggers it yet.
 * **v78 / PR**: whether a v78 box on 22.04 or a box installed from the PR head is affected.
 * **Severity**
@@ -41,8 +41,8 @@ reproduced on a box, the evidence line says so.
 
 ## Summary
 
-137 bugs: 2 critical, 20 high, 57 medium, 58 low. B51-B56 were found by the in-place upgrade test for rc3,
-B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B126 in the review of the fix of B121 (in Z-Push's setup since upstream), B127 in the journal of the production box after its update to rc7, B132 in the work on B125 (in the status checks since upstream), B133 in the update test with client load of the merged fixes of B125 to B127 (in setup since rc4, the fix of B60), B128 in the update test with client load (found there, its cause in the ActiveSync analysis on a copy of the production box), B129 in nginx's log of the production box after the update (its cause in that analysis), B130 and B134 in that analysis, B135 to B140 in the certification of v78-r2604.0 (B135 in its release step, B136, B139 and B140 in T6, the fresh install on the Internet, all since upstream, B137 and B138 in T5b, the update test, B137 in Z-Push since upstream, B138 in setup since rc6, the fix of B82), B141 by a user report from a production box (the control panel after its session had ended, since upstream), B142 in the review of the fix of B141 (in the login form since upstream). B92-B94 and B131 are not used (B131 was the provisional ID of the second Ping branch, merged into B129); B96 is the same bug as B89, found twice and counted once.
+138 bugs: 2 critical, 20 high, 57 medium, 59 low. B51-B56 were found by the in-place upgrade test for rc3,
+B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding the adaptive fail2ban, B62 in the review of rc4, B63-B65 in the test runs of rc4, B66-B69 in the update test of rc4, B70-B72 in the in-place test T4 of rc5, B73 in the in-place test T3 of rc6, B74 and B75 in the update test T5b of rc6, B76-B78 in the migration test T2 of rc6, B79 in the repeated update test after T1 of rc6, B80-B84 by the log audit of the certification runs of rc6, B85 by the smoke test of the certification run of T5b, B86-B89, B91 and B99 in the development of rc7 (B91 by its new API smoke test, B99 in its setup tests), B90 and B96-B98 in the review of rc7 against the rule that root does no file operations by path in directories that another account may write, B95 from the update test T5b of rc6 (fixed in rc7), B100-B105 in the review of the merged rc7 (B102 in the in-place tool since rc3, the others in code new in rc7), B106-B114 in the certification runs T2 to T5b of rc7 (B113 in the migration tool since rc4, the others in code new in rc7), B115-B118 in the review of the fixes of those runs (B117 in the migration tool since rc1 and the in-place tool since rc3, the others in code new in rc7), B119 in the test runs after that review, B120-B122 at the update of a production box from rc6 to rc7, B123 in the review of their fixes (in setup since upstream), B124 in the update test with client load after that review, B125 by a user report from a production box (its backup page), B126 in the review of the fix of B121 (in Z-Push's setup since upstream), B127 in the journal of the production box after its update to rc7, B132 in the work on B125 (in the status checks since upstream), B133 in the update test with client load of the merged fixes of B125 to B127 (in setup since rc4, the fix of B60), B128 in the update test with client load (found there, its cause in the ActiveSync analysis on a copy of the production box), B129 in nginx's log of the production box after the update (its cause in that analysis), B130 and B134 in that analysis, B135 to B140 in the certification of v78-r2604.0 (B135 in its release step, B136, B139 and B140 in T6, the fresh install on the Internet, all since upstream, B137 and B138 in T5b, the update test, B137 in Z-Push since upstream, B138 in setup since rc6, the fix of B82), B141 by a user report from a production box (the control panel after its session had ended, since upstream), B142 in the review of the fix of B141 (in the login form since upstream), B143 in the release step of v78-r2604.1 (in the list of expected changes since rc7). B92-B94 and B131 are not used (B131 was the provisional ID of the second Ping branch, merged into B129); B96 is the same bug as B89, found twice and counted once.
 
 | Origin | Count |
 |---|---|
@@ -50,7 +50,7 @@ B57-B60 by the in-place upgrade of a production box with rc3, B61 while adding t
 | PR #2603 | 29 |
 | PR #2603 (latent) | 1 |
 | 26.04 change | 20 |
-| Fork | 37 |
+| Fork | 38 |
 
 52 of these bugs also affect v78 on Ubuntu 22.04, fully or partly (B13, B17, B19, B28, B30, B31, B32, B33, B34, B35, B37, B45, B49, B56, B58, B60, B61, B62, B63, B78, B79, B80, B82, B83, B85, B86, B87, B88, B89, B95, B97, B98, B120, B121, B122, B123, B124, B125, B126, B127, B128, B129, B130, B132, B133, B134, B136, B137, B139, B140, B141, B142). They are candidates for
 upstream pull requests, independent of the 26.04 port.
@@ -197,6 +197,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B140](#b140) | low | Management | The first Let's Encrypt provisioning of a fresh box leaves out the box's own name (and its mta-sts. name) when the box's name is below a mail domain of the box | Upstream | yes | yes | v78-r2604.0 |
 | [B141](#b141) | low | Control panel | After the session has ended (two days unused, a logout elsewhere, a restart of the management daemon), a reload of the control panel shows the admin menus and the last panel from the credentials saved in the browser | Upstream | yes | yes | unreleased |
 | [B142](#b142) | medium | Control panel | "Remember me" on the control panel's login has no effect: every login is saved in the browser's localStorage and outlives the browser, also when it is not ticked | Upstream | yes | yes | unreleased |
+| [B143](#b143) | low | Tools | update-check.sh after lists the new version line as UNEXPECTED after an update to a release of the fork after v78-r2604.0 | Fork | no | no | unreleased |
 
 ## Details
 
@@ -1768,6 +1769,17 @@ upstream pull requests, independent of the 26.04 port.
 * **Affects:** v78 yes (the same line; upstream's main branch has it as well), PR #2603 yes, the fork up to v78-r2604.0. Origin: Upstream. Every login without "Remember me".
 * **Evidence:** On a test box in headless Chromium, before the fix: a login without "Remember me" saved in localStorage. With the fix: without it in sessionStorage only, with it in localStorage only; a reload in the same tab logs in without a password in both cases, and after a restart of the daemon both storages are empty.
 * **Found by:** the review of the fix of B141 (in the login form since upstream); **commit:** see `git log --grep B142`; **fixed in:** unreleased
+
+### B143
+
+**update-check.sh after lists the new version line as UNEXPECTED after an update to a release of the fork after v78-r2604.0** (low, Tools)
+
+* **Symptom:** After an update from v78-r2604.0 to v78-r2604.1 (or any later release), `tools/update-check.sh after` would list `version.txt + miab v78-r2604.1` as UNEXPECTED and end with "RESULT: CHANGED" instead of "RESULT: OK", although the new version is the update itself.
+* **Cause:** The rule of `tools/expected-changes/any.txt` for the version of `/root/mailinabox` (`version.txt ~ ^miab v78-r2604\.0`) names the version number of the first release: it accepts the release candidates and v78-r2604.0 itself, the only versions there were when it was written, but no later release. The line of the version before the update (`- miab v78-r2604.0`) still matched, so only the new line was unexpected.
+* **Fix:** The rule accepts every release of the fork, `^miab v78-r2604\.[0-9]+`.
+* **Affects:** `tools/update-check.sh` of rc7 and v78-r2604.0 (the copy in the checkout after the update judges it, so the fix takes effect with the update to the release that has it). Origin: Fork.
+* **Evidence:** From the code: `compare_states()` in `tools/update-check.sh` searches each rule's regex in the changed line, and `^miab v78-r2604\.0` does not match `miab v78-r2604.1`; with the fix, both `miab v78-r2604.0` and `miab v78-r2604.1` match (checked with Python's `re`). Not run on a box.
+* **Found by:** the release step of v78-r2604.1 (deriving its list of expected changes); **commit:** see `git log --grep B143`; **fixed in:** unreleased
 
 ## Not counted above
 
