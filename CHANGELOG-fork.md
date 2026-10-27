@@ -280,6 +280,15 @@ no longer hang or fail as a whole when a backup target does not answer
   the test boxes installed from it showed their commit id as their version
   (status checks, control panel, setup) and bootstrap.sh fetched again on
   every run (B135; never published).
+* A fresh install no longer stops at once on a machine whose DNS resolver
+  is a public one (1.1.1.1, and the default resolvers of many hosting
+  providers), saying that the hostname is listed in the Spamhaus Domain
+  Block List. Spamhaus refuses queries through such resolvers and answers
+  127.255.255.254, which setup took for a listing (upstream). Setup now
+  stops only on a listing (DBL 127.0.1.2 to 127.0.1.99, ZEN 127.0.0.2 to
+  127.0.0.11), shows any other answer as a check it could not make, and
+  goes on; the status checks look again later through the box's own
+  resolver (B136).
 
 ### Changed
 
