@@ -42,7 +42,8 @@ Each request ends as one of
                failed): a client shows a password prompt or stops syncing
   throttled    the server throttled (HTTP 429, TooManyRequests)
   unavailable  no connection, HTTP 502/503/504, a temporary failure (IMAP
-               [UNAVAILABLE], SMTP 4xx): a service was restarting
+               [UNAVAILABLE], SMTP 4xx, FolderSync status 6): a service was
+               restarting
   disconnect   the connection broke during a request (a Ping or IDLE cut by
                a restart), or the server asked the client to resync (above)
   error        anything else (an unexpected status or answer, HTTP 500)
@@ -244,7 +245,9 @@ def classify(e):
         if e.kind == "provision":
             return "disconnect"
         if e.kind == "status":
-            return "disconnect" if (e.cmd, e.status) in RESYNC else "error"
+            if (e.cmd, e.status) in RESYNC:
+                return "disconnect"
+            return "unavailable" if (e.cmd, e.status) in RETRY_LATER else "error"
         return e.kind
     if isinstance(e, smtplib.SMTPServerDisconnected):
         return "disconnect"
@@ -254,6 +257,10 @@ def classify(e):
 
 # What a phone does after these answers: it resyncs, it does not fail.
 RESYNC = {("FolderSync", "9"), ("Sync", "3"), ("Sync", "12"), ("Ping", "7")}
+# A server error that the client retries later: Z-Push answers a FolderSync
+# with status 6 when the IMAP server gives no folder list, also after it
+# connected again (B137; a service was restarting, like HTTP 503).
+RETRY_LATER = {("FolderSync", "6")}
 
 
 # ---------------------------------------------------------------------------

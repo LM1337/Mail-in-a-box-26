@@ -45,8 +45,8 @@ add their open findings in TESTING-fork.md):
   that the old login process hands to the new auth process at that moment
   fails as an internal failure (Nextcloud's `user_external` counts it as a
   failed login of the client; harmless for 127.0.0.1 after B121), and a
-  FolderSync that Z-Push answers during the reload can come without the
-  mail folders (seen once, for a new device's first FolderSync).
+  FolderSync or Ping that Z-Push answers during the reload gets a server
+  error if Z-Push cannot connect again (B137).
 * Roundcube's CardDAV plugin can log "duplicate column name: account_id"
   when several sessions log in at the same moment for the first time after
   an upgrade of the plugin (a race in its schema migration).
@@ -289,6 +289,17 @@ no longer hang or fail as a whole when a backup target does not answer
   127.0.0.11), shows any other answer as a check it could not make, and
   goes on; the status checks look again later through the box's own
   resolver (B136).
+* A FolderSync of a phone during an IMAP failure, such as setup's Dovecot
+  reload, which ends every IMAP session, no longer answers without the
+  mail folders. Z-Push's IMAP backend took a failed folder list for an
+  empty one (upstream Z-Push): a new phone got only its calendars and
+  address books, and for a phone already set up the answer meant deleting
+  its mail folders (it got them back at its next FolderSync and downloaded
+  their mail again); a Ping in that moment sent the phone into such a
+  FolderSync. Z-Push now connects again and asks once more, and if there
+  is still no list it fails the request with a server error (FolderSync
+  status 6, which the phone retries later). Another change in
+  conf/zpush/z-push.patches, so the update installs Z-Push again (B137).
 
 ### Changed
 
@@ -481,6 +492,11 @@ no longer hang or fail as a whole when a backup target does not answer
   2026-10-27 and are current.
 * `tools/update-check.sh` writes its empty local variables as `''`
   (shellcheck SC1007); no change in what it does.
+* Tests: the client load (`tests/fork/client-load.py`) counts a
+  FolderSync status 6 as "unavailable" (a server error that the phone
+  retries, like HTTP 503; within `--max-outage`), and the log audit accepts
+  Z-Push's warning that it connects again for a folder list in a setup run
+  (B137).
 
 ### Upgrade note
 

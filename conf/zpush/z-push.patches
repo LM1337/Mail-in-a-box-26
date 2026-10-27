@@ -317,3 +317,40 @@ EOFXMLGETXMLVCARD;
         }
         $message["mod"] = $this->contactsetag[$id];
 >>>
+
+# B137: Z-Push's IMAP backend returned an empty folder list when the IMAP
+# server gave none (imap_getmailboxes() failed: the connection was cut, as
+# setup's Dovecot reload does with every IMAP session). The combined backend
+# merged it without an error, so a FolderSync answered with the calendars and
+# address books only: a new device got no mail folders, and for an existing
+# one the difference to its last state meant deleting every mail folder. A
+# Ping took the empty list for a changed hierarchy and sent the device into
+# such a FolderSync. Connect again once and ask again (the cut connection is
+# the usual cause, and Dovecot is back within a second); if there is still no
+# list, fail the request with a server error (FolderSync status 6, which a
+# client retries later, a Ping just ends) instead of answering with a wrong
+# hierarchy.
+
+@@ backend/imap/imap.php
+<<<
+    private function get_folder_list() {
+        $folders = array();
+        $list = @imap_getmailboxes($this->mbox, $this->server, "*");
+        if (is_array($list)) {
+===
+    private function get_folder_list() {
+        $folders = array();
+        $list = @imap_getmailboxes($this->mbox, $this->server, "*");
+        if (!is_array($list)) {
+            // MIAB-B137: no folder list is no empty folder list
+            ZLog::Write(LOGLEVEL_WARN, sprintf("BackendIMAP->get_folder_list(): the IMAP server gave no folder list (%s), connecting again", imap_last_error()));
+            if ($this->mbox) @imap_close($this->mbox);
+            $this->mbox = @imap_open($this->server, $this->username, $this->password, OP_HALFOPEN, 0, $this->imapParams);
+            $this->mboxFolder = "";
+            $list = $this->mbox ? @imap_getmailboxes($this->mbox, $this->server, "*") : false;
+            if (!is_array($list)) {
+                throw new StatusException(sprintf("BackendIMAP->get_folder_list(): the IMAP server gave no folder list: %s", imap_last_error()), SYNC_FSSTATUS_SERVERERROR, null, LOGLEVEL_WARN);
+            }
+        }
+        if (is_array($list)) {
+>>>
