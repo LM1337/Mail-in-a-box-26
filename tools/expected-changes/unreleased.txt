@@ -1,4 +1,4 @@
-# Expected changes of an update to the release after v78-r2604.0, for
+# Expected changes of an update to the release after v78-r2604.1, for
 # tools/update-check.sh after: what this release changes in the recorded
 # state. "after" uses this list (with any.txt) when the checkout after the
 # update is not at a release tag (bootstrap.sh with TAG=<branch or commit>),

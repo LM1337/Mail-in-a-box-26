@@ -5,8 +5,10 @@ fork: what was tested, how, and with what result. It is meant to help you
 judge how mature a release is. Changes are in [CHANGELOG-fork.md](CHANGELOG-fork.md),
 fixed bugs in [BUGS-fork.md](BUGS-fork.md).
 
-The fork's first release is v78-r2604.0. The tests below are a small, fixed
-set of scenarios on test machines, not a test of every setup that exists.
+The fork's first release is v78-r2604.0; v78-r2604.1 is a bug-fix release
+of the control panel's login, tested without the full set of scenarios
+(see "v78-r2604.1"). The tests below are a small, fixed set of scenarios
+on test machines, not a test of every setup that exists.
 Make a backup and try a release on a copy before you run it on the box that
 holds your mail.
 
@@ -354,6 +356,7 @@ the in-place tool reports it.
 | rc6 | 2026-10-25 | 62/62 ¹ | 73/73 ¹ | 73/73 ¹ | 73/73 ¹ | 75/75 (T5b, from rc3, at `5d2d3aa`, the code of the release ²) |
 | rc7 | 2026-10-25 | 68/68 ³ | 79/79 ³ | 79/79 ³ | 79/79 ³ | 79/79 (T5b from rc6), 71/71 (from rc3) ³ |
 | v78-r2604.0 | 2026-10-27 | 80/80 ⁴ | 91/91 ⁴ | 91/91 ⁴ | 91/91 ⁴ | 92/92 (T5b from rc6 through rc7), 91/91 (from rc6) ⁴ |
+| v78-r2604.1 | 2026-10-27 | not run ⁵ | not run | not run | not run | not run ⁵ |
 
 ¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
 not repeated on the code of the release (see "rc6 certification" below).
@@ -383,6 +386,10 @@ of the final head and the lab's own lists, ended with 0 unknown classes.
 The first run on the release commit `72c1661` had the same smoke counts,
 except T6's first smoke run (73/80, the lab's NAT; see there), and found
 B135 to B139.
+
+⁵ No test matrix for this bug-fix release: a browser test of the control
+panel (62/62) and the smoke test's API group (6/6) on a test box at the
+branch (see "v78-r2604.1" below).
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there) and the first runs of rc6 T3 and T5b,
@@ -999,6 +1006,28 @@ first boot with the network down (T6, first run).
 * do-release-upgrade found no new release once in the repeated T4 (its
   download of the release list failed for a moment); the tool stopped with
   mail offline and the command to continue, which then ran through.
+
+### v78-r2604.1 (2026-10-27)
+
+A bug-fix release (B141 to B143), released without the test matrix T1 to
+T6 by the decision of the maintainer. One test box: a fresh install of the
+branch at `4ab5db4` from the lab's mirror, then updated with bootstrap.sh
+(non-interactive) to `0f9efb8`, `6af973e` and `5001366` (each setup run
+exit 0, 74 to 112 s).
+
+| Test | Result |
+|---|---|
+| Browser test of the control panel (headless Chromium), at `5001366` | 62 PASS, 0 FAIL in 13 groups: every load path of B141 (a valid session in session and local storage, a session ended by age, by a restart of the daemon and by a logout, no connection, nginx's 502, the daemon stopped and busy, a 403 to `/me`, a non-admin whose saved copy claims `admin`, another user after an ended session, the back button after a 403, a link, the back button and the brand link while `/me` was pending), no API call and no menu before `/me` answered, no failed login logged by a reload, the menu bar hidden with scripts off, and "Remember me" with and without the tick (B142) |
+| Smoke test, group `api`, at `5001366` | 6/6: `/me` answers `ok` with the privileges for a session key and `invalid` for a password, a wrong password and a key after the logout |
+
+Not tested in this release: the scenarios T1 to T6 (install, migration,
+in-place upgrades, the update test with client load, the box on the
+Internet), an update from the tag `v78-r2604.0` to the tag `v78-r2604.1`
+with `tools/update-check.sh` (so neither the fix of B143 nor the new log
+audit rules ran on a box; both were checked against sample lines only), and
+the release commit itself, which after `5001366` changes only the version
+strings, `tools/expected-changes/`, the log audit's allowlist and the
+documentation.
 
 ### Production use
 

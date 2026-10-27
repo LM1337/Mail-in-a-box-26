@@ -1,0 +1,11 @@
+# Expected changes of an update to v78-r2604.1, for tools/update-check.sh
+# after: what this release changes in the recorded state, compared with
+# v78-r2604.0 ("after" uses the lists of all releases after the version
+# before the update, up to the version after it, and any.txt). The format is
+# in any.txt.
+#
+# None of its own: the release changes the control panel's page, the
+# management daemon (GET /admin/me), the log audit's lists, the docs and the
+# tools' default tag, none of which the state record holds. The new version line
+# (version.txt) and the version that the status checks name are in any.txt
+# (B143).

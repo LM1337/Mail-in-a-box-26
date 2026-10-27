@@ -11,74 +11,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-### Fixed
-
-* The control panel no longer shows its menus and the last panel for saved
-  credentials whose session has ended. A session ends after two days
-  without use, at a logout, when the password or MFA changes, and whenever
-  the management daemon restarts (at every update). Before, a reload showed
-  the admin menus and the last panel from the copy in the browser until an
-  API call failed; the welcome and guide pages, which call no API, never
-  noticed. On load the page now asks the box first (the new
-  `GET /admin/me`, which takes a session key only, never a password) and
-  shows no menu and no panel until the answer: for an ended session the
-  login, and after it the requested panel; the menus follow the privileges
-  in the box's answer, not the saved copy. When the box does not answer
-  (its service stopped or restarting, or busy for more than 20 seconds
-  with a long request of another tab), the login panel says so and the
-  saved login is kept, so that a reload afterwards needs no password. A
-  link or the back button while the box is being asked opens the panel of
-  the new address with the answer, without the login form in between. A
-  reload with an ended session is no longer logged as failed logins (each
-  API call with the old key was one). Log out starts again with a fresh
-  page (after at most five seconds, also when the box is busy; the login
-  form is disabled until then), and a login of another user in the same tab after a session ended
-  reloads the page and opens the welcome page, so that no panel shows data
-  loaded for the user before. While the page loads, before its script has
-  run, the menus no longer show for a moment either (on every load, also
-  logged out): Bootstrap's style overrode the rule that hides them (B141).
-* "Remember me" on the control panel's login works: without it, the login
-  is kept for the browser tab only (sessionStorage) and ends with it.
-  Before, every login was saved in the browser's localStorage and was still
-  there after the browser was closed and opened again, also when "Remember
-  me" was not ticked (B142).
-* `tools/update-check.sh after` no longer lists the new version line as
-  UNEXPECTED after an update to a release after v78-r2604.0: the rule of
-  `tools/expected-changes/any.txt` for the version of `/root/mailinabox`
-  named only v78-r2604.0 and its release candidates (B143).
-
-### Changed
-
-* Tests: the log audit accepts nginx's 502 for a request to Roundcube,
-  Nextcloud or Z-Push while `management/backup.py` has PHP-FPM stopped
-  for a backup (the socket is missing, or the request in progress is
-  cut), in every phase, as backup.py logs no marks that would limit it to
-  its run (with any host and the referrer that nginx adds for a browser's
-  request, which also covers such lines at setup's PHP-FPM restart); and
-  the kernel's note that the free page reporting of a
-  virtual machine took long on a busy host. A production box's
-  `update-check.sh after` named them in the update to v78-r2604.0 (the
-  backup step and the nightly backup stop PHP-FPM the same way).
-* Docs: README-fork.md, "Updating the fork": a checkout whose current
-  commit has a local tag with the name of the release being installed,
-  but another commit than on GitHub (an old pre-release or a mirror's
-  tag), is not updated: bootstrap.sh compares the name with `git
-  describe`, fetches nothing, and setup runs on the old code and ends with
-  exit code 0. How to check after the update (`git describe`, `git
-  rev-parse HEAD` against `git ls-remote`) and the fix (`git tag -d`, then
-  the bootstrap command again), in English and German.
-
 ### Planned
 
-Seen in the work on rc7 and v78-r2604.0, not done (the certification runs
-add their open findings in TESTING-fork.md):
+Seen in the work on rc7, v78-r2604.0 and v78-r2604.1, not done (the
+certification runs add their open findings in TESTING-fork.md):
 
 * bootstrap.sh decides whether to fetch by the name that `git describe`
   prints for the checkout, so a local tag of the release's name on another
   commit keeps the old code (see "Updating the fork" in README-fork.md).
   Comparing the commit of the tag at the source (`git ls-remote`) with
-  `HEAD` would find it; not changed in this bug-fix release, as every
-  update goes through that code and it had no test run.
+  `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
+  as every update goes through that code and that release had no test
+  run of it.
 * Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
 * A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
@@ -156,6 +100,106 @@ add their open findings in TESTING-fork.md):
   its own with a passphrase it knows. The fork's tools read them, and write
   the paused `custom.yaml`, only through a checked `backup/` of root's own
   (B117).
+
+## v78-r2604.1 (2026-10-27)
+
+A bug-fix release for the control panel's login. After a session had
+ended (two days unused, a logout elsewhere, a changed password, or a
+restart of the management daemon, which every update does), a reload still
+showed the admin menus and the last panel from the credentials saved in the
+browser (B141); the page now asks the box (the new `GET /admin/me`) before
+it shows any menu or panel. "Remember me" had no effect, so every login
+was kept in the browser beyond its tab (B142). `update-check.sh after`
+accepts the new version line of an update to this or a later release
+(B143), and the log audit accepts what a backup's stop of PHP-FPM logs.
+This release had no full test matrix: the control panel changes were
+tested in a browser test and the API smoke test on a test box (see
+TESTING-fork.md, "v78-r2604.1").
+
+### Fixed
+
+* The control panel no longer shows its menus and the last panel for saved
+  credentials whose session has ended. A session ends after two days
+  without use, at a logout, when the password or MFA changes, and whenever
+  the management daemon restarts (at every update). Before, a reload showed
+  the admin menus and the last panel from the copy in the browser until an
+  API call failed; the welcome and guide pages, which call no API, never
+  noticed. On load the page now asks the box first (the new
+  `GET /admin/me`, which takes a session key only, never a password) and
+  shows no menu and no panel until the answer: for an ended session the
+  login, and after it the requested panel; the menus follow the privileges
+  in the box's answer, not the saved copy. When the box does not answer
+  (its service stopped or restarting, or busy for more than 20 seconds
+  with a long request of another tab), the login panel says so and the
+  saved login is kept, so that a reload afterwards needs no password. A
+  link or the back button while the box is being asked opens the panel of
+  the new address with the answer, without the login form in between. A
+  reload with an ended session is no longer logged as failed logins (each
+  API call with the old key was one). Log out starts again with a fresh
+  page (after at most five seconds, also when the box is busy; the login
+  form is disabled until then), and a login of another user in the same
+  tab after a session ended reloads the page and opens the welcome page,
+  so that no panel shows data loaded for the user before. While the page
+  loads, before its script has run, the menus no longer show for a moment
+  either (on every load, also logged out): Bootstrap's style overrode the
+  rule that hides them (B141).
+* "Remember me" on the control panel's login works: without it, the login
+  is kept for the browser tab only (sessionStorage) and ends with it.
+  Before, every login was saved in the browser's localStorage and was still
+  there after the browser was closed and opened again, also when "Remember
+  me" was not ticked (B142).
+* `tools/update-check.sh after` no longer lists the new version line as
+  UNEXPECTED after an update to a release after v78-r2604.0: the rule of
+  `tools/expected-changes/any.txt` for the version of `/root/mailinabox`
+  named only v78-r2604.0 and its release candidates (B143).
+
+### Changed
+
+* Tests: the log audit accepts nginx's 502 for a request to Roundcube,
+  Nextcloud or Z-Push while `management/backup.py` has PHP-FPM stopped
+  for a backup (the socket is missing, or the request in progress is
+  cut), in every phase, as backup.py logs no marks that would limit it to
+  its run (with any host and the referrer that nginx adds for a browser's
+  request, which also covers such lines at setup's PHP-FPM restart); and
+  the kernel's note that the free page reporting of a
+  virtual machine took long on a busy host. A production box's
+  `update-check.sh after` named them in the update to v78-r2604.0 (the
+  backup step and the nightly backup stop PHP-FPM the same way).
+* Docs: README-fork.md, "Updating the fork": a checkout whose current
+  commit has a local tag with the name of the release being installed,
+  but another commit than on GitHub (an old pre-release or a mirror's
+  tag), is not updated: bootstrap.sh compares the name with `git
+  describe`, fetches nothing, and setup runs on the old code and ends with
+  exit code 0. How to check after the update (`git describe`, `git
+  rev-parse HEAD` against `git ls-remote`) and the fix (`git tag -d`, then
+  the bootstrap command again), in English and German.
+
+### Upgrade note
+
+* Boxes on v78-r2604.0 are updated with the bootstrap command of "Updating
+  the fork" in README-fork.md,
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`,
+  with `tools/update-check.sh before` and `backup` before it and `after`
+  and `mailcheck` after it, all from `/root/mailinabox/tools/`. There is no
+  file to put back unless you changed one by hand: `git -C
+  /root/mailinabox status --short` must print nothing (`sudo git -C
+  /root/mailinabox checkout -- FILE` puts a file back). `after` judges the
+  changes by `tools/expected-changes/any.txt` and `v78-r2604.1.txt`; this
+  release changes nothing in the recorded state but the version (B143).
+  `sudo git -C /root/mailinabox describe --always` should print
+  `v78-r2604.1` afterwards (see README-fork.md for a local tag of that name
+  on another commit).
+* The update restarts the management daemon, which ends every control panel
+  session: log in again. A page that is still open shows the login on its
+  next reload ("Your session has ended") or at its next call to the box,
+  not the admin menus. A login without "Remember me" is now kept for the
+  browser tab only; tick it to stay logged in after the browser is closed
+  (for at most two days without use, as before). API clients are not affected; the new
+  `GET /admin/me` takes session keys only.
+* Boxes on rc7 or earlier are updated the same way, with the steps of the
+  upgrade note of v78-r2604.0 first (for rc1 to rc6 also those of rc7).
+  Read the upgrade notes of every release in between; `after` uses the
+  lists of all of them.
 
 ## v78-r2604.0 (2026-10-27)
 
