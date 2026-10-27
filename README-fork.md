@@ -205,6 +205,32 @@ step that failed.
 Everything lands in `/root/update-check/<stamp>/` (only root can read it).
 `--help` lists the options.
 
+**From rc7 to v78-r2604.0, step by step.** The steps of the release's
+upgrade note, in the order in which they were tested (TESTING-fork.md,
+"v78-r2604.0", T5b Part A). If you use Docker stacks next to the box, name
+them in `backup` as shown above.
+
+	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	sudo git -C /root/mailinabox status --short
+	sudo git -C /root/mailinabox checkout -- management/backup.py conf/nginx-alldomains.conf
+	sudo git -C /root/mailinabox status --short
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck
+
+The first command must print `OK`. Put back every file that the first
+`status --short` lists (the two named above are the hotfixes of rc7; leave
+out a file that is not listed); the second `status --short` must print
+nothing. Setup asks for the host name and the public IP addresses: Enter
+keeps them. `after` should end with "RESULT: OK": it judges the changes by
+`tools/expected-changes/v78-r2604.0.txt` (and `any.txt`) and adds
+`tests/fork/log-audit-allow-from-rc7.txt` to the log audit by itself
+(the old Z-Push had no mark of the fork's changes). `mailcheck` needs a
+probe address (`--probe ADDRESS` or `PROBE_ADDRESS=` in
+`/etc/mailinabox.conf`); without one it is skipped.
+
 Right after the update:
 
 * **Allowlist your own networks.** From rc4 on, adaptive banning and the
@@ -363,6 +389,32 @@ scheiterte.
 
 Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
 `--help` zeigt die Optionen.
+
+**Von rc7 auf v78-r2604.0, Schritt für Schritt.** Die Schritte des
+Upgrade-Hinweises des Releases, in der getesteten Reihenfolge
+(TESTING-fork.md, „v78-r2604.0“, T5b Teil A). Docker-Stacks neben der Box
+bei `backup` wie oben angeben.
+
+	curl -fsSIL https://github.com/Z-Hub/Z-Push/archive/refs/tags/2.7.7.zip > /dev/null && echo OK
+	sudo /root/mailinabox/tools/update-check.sh before
+	sudo /root/mailinabox/tools/update-check.sh backup
+	sudo git -C /root/mailinabox status --short
+	sudo git -C /root/mailinabox checkout -- management/backup.py conf/nginx-alldomains.conf
+	sudo git -C /root/mailinabox status --short
+	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
+	sudo /root/mailinabox/tools/update-check.sh after
+	sudo /root/mailinabox/tools/update-check.sh mailcheck
+
+Der erste Befehl muss `OK` ausgeben. Jede Datei zurücksetzen, die das erste
+`status --short` listet (die beiden oben genannten sind die Hotfixes von
+rc7; eine nicht gelistete weglassen); das zweite `status --short` muss
+nichts ausgeben. Setup fragt nach dem Hostnamen und den öffentlichen
+IP-Adressen: Enter behält sie. `after` sollte mit „RESULT: OK“ enden: Es
+bewertet die Änderungen nach `tools/expected-changes/v78-r2604.0.txt` (und
+`any.txt`) und nimmt `tests/fork/log-audit-allow-from-rc7.txt` von selbst
+zur Log-Prüfung dazu (das alte Z-Push hatte keine Marke der Änderungen des
+Forks). `mailcheck` braucht eine Prüfadresse (`--probe ADRESSE` oder
+`PROBE_ADDRESS=` in `/etc/mailinabox.conf`); ohne sie wird er übersprungen.
 
 Gleich nach dem Update:
 

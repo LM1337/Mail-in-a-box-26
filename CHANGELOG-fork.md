@@ -48,8 +48,17 @@ add their open findings in TESTING-fork.md):
   FolderSync or Ping that Z-Push answers during the reload gets a server
   error if Z-Push cannot connect again (B137).
 * Roundcube's CardDAV plugin can log "duplicate column name: account_id"
-  when several sessions log in at the same moment for the first time after
-  an upgrade of the plugin (a race in its schema migration).
+  or "no such column: active" when several sessions of one user log in at
+  the same moment for the first time after an upgrade of the plugin (a race
+  in its schema migration; one of the logins fails once).
+* nginx sets no HSTS header on `/admin/`: the headers of that location
+  replace the server's (upstream). Browsers that visited another page of
+  the box have the header already.
+* Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
+  locked") while its `cron.php` holds the database (seen once in T1); the
+  client writes again later.
+* `upgrade-in-place-to-2604.sh --check` prints the start command with the
+  GitHub URL also when `SOURCE` and `TAG` name another source.
 * A Dovecot reload ends the open IMAP sessions (their clients log in
   again); setup reloads Dovecot only when its configuration changed (B122).
 * Critical only (Munin's alerts) never mails the return to normal.
@@ -74,10 +83,14 @@ ActiveSync errors. Setup disturbs the clients less: it reloads Dovecot,
 Postfix and fail2ban instead of restarting them, Dovecot only on a change
 (B122), and no longer leaves Dovecot without a passdb (B120), Nextcloud
 without a readable config.php (B124) or the logins at the end of a run
-without users.sqlite (B133) for a moment; Nextcloud no longer throttles the
-box's own services (B121). ActiveSync and Autodiscover get brute-force
-protection (B126); Z-Push syncs contacts whose card name has no `.vcf`
-(B128) and holds Pings of up to 59 minutes (B129), and the fork's changes
+without users.sqlite (B133) for a moment, and keeps cron off for its whole
+run (B138); Nextcloud no longer throttles the box's own services (B121). A
+fresh install no longer stops on Spamhaus' refusal of public resolvers
+(B136), and the MTA-STS record comes with the first certificate (B139).
+ActiveSync and Autodiscover get brute-force protection (B126); Z-Push syncs contacts whose card name has no `.vcf`
+(B128), holds Pings of up to 59 minutes (B129) and no longer answers a
+FolderSync without the mail folders when an IMAP session is cut (B137), and
+the fork's changes
 to it are one patch file, applied to a fresh copy (B126, B128); the
 `/caldav`, `/carddav` and `/webdav` proxy passes the path as the client
 sent it (B130). Security: `/etc/dovecot` belongs to root (B123), and the
@@ -513,6 +526,9 @@ no longer hang or fail as a whole when a backup target does not answer
   (B137).
 * Tests: the log audit accepts systemd's note of the left-over processes
   of a cron job when setup starts cron again at its end (B138).
+* Tests: the log audit accepts the auth-worker processes' note of their
+  end at setup's Dovecot reload (`Killed with signal 15` from the master,
+  B122), seen in the repeated update test.
 * Tests: the log audit's lists, from the final runs of this release: the
   first start of the jails that read mail.log in the setup run that adds
   them (a migration), Postfix's cleanup and systemd at setup's OpenDKIM
@@ -586,7 +602,13 @@ no longer hang or fail as a whole when a backup target does not answer
   mail processes; give a file that other processes must read other
   permissions in another place.
 * The first update with this release reloads Dovecot once (its open IMAP
-  sessions log in again), as the checksum of its configuration is new.
+  sessions log in again), as the checksum of its configuration is new. In
+  that second, the Z-Push of rc7 or earlier, which runs until setup
+  installs the new one later in the same run, can answer an ActiveSync
+  request with HTTP 401 when its CalDAV or CardDAV login through Nextcloud
+  is cut (seen once for one request in the update test under client load):
+  a phone may show a password prompt once (the password is unchanged).
+  The new Z-Push answers such a moment with 503 (B126).
 * The password hashes that the control panel's logins wrote before (B127)
   stay in the journal and in `/var/log/syslog` until these are rotated
   away. To remove them at once: `journalctl --rotate` and
