@@ -47,6 +47,8 @@ sudo management/cli.py user make-admin me@{{hostname}}</pre>
 
 <p class="subtitle">Log in here for your Mail-in-a-Box control panel.</p>
 
+<p id="loginMessage" class="text-center text-danger" style="display: none"></p>
+
 <div class="login">
   <form id="loginForm" class="form-horizontal" role="form" onsubmit="do_login(); return false;" method="get">
     <div class="form-group">
@@ -162,6 +164,22 @@ function do_login() {
         }
       }
 
+      // The next panel the user wants to go to.
+      var panelid = window.location.hash
+        ? window.location.hash.substring(1)
+        : (!switch_back_to_panel || switch_back_to_panel == "login"
+           ? 'welcome'
+           : switch_back_to_panel);
+
+      // The panels may still hold the data of another user, whose session
+      // ended without a logout: go there with a fresh page instead (B141).
+      if (panels_user && panels_user != api_credentials.username) {
+        history.replaceState(null, "", "#" + panelid);
+        window.location.reload();
+        return;
+      }
+      panels_user = api_credentials.username;
+
       // Toggle menus.
       show_hide_menus();
 
@@ -169,15 +187,7 @@ function do_login() {
       // is over so that we don't start a new XHR request while this one is finishing,
       // which confuses the loading indicator.
       setTimeout(function() {
-        if (window.location.hash) {
-          var panelid = window.location.hash.substring(1);
-          show_panel(panelid);
-        } else {
-          show_panel(
-            !switch_back_to_panel || switch_back_to_panel == "login"
-            ? 'welcome'
-            : switch_back_to_panel)
-        }
+        show_panel(panelid);
       }, 300);
 
     }
@@ -188,7 +198,13 @@ function do_login() {
   });
 }
 
+function show_login_message(message) {
+  // A note above the login form (text only), e.g. why the saved login was not used.
+  $('#loginMessage').text(message).toggle(!!message);
+}
+
 function show_login() {
+  show_login_message(null);
   $('#loginForm').removeClass('is-twofactor');
   $('#loginOtpInput').val('');
   $('#loginEmail,#loginPassword').each(function() {
@@ -201,17 +217,19 @@ function show_login() {
 }
 
 function show_hide_menus() {
-  var is_logged_in = (api_credentials != null);
-  var privs = api_credentials ? api_credentials.privileges : [];
-  $('.if-logged-in').toggle(is_logged_in);
+  // The privileges are the box's answer at the login or to /me (B141), never
+  // a saved copy.
+  var logged_in = is_logged_in();
+  var privs = logged_in ? api_credentials.privileges : [];
+  $('.if-logged-in').toggle(logged_in);
   $('.if-logged-in-admin, .if-logged-in-not-admin').toggle(false);
-  if (is_logged_in) {
+  if (logged_in) {
     $('.if-logged-in-not-admin').toggle(true);
     privs.forEach(function(priv) {
       $('.if-logged-in-' + priv).toggle(true);
       $('.if-logged-in-not-' + priv).toggle(false);
     });
   }
-  $('.if-not-logged-in').toggle(!is_logged_in);
+  $('.if-not-logged-in').toggle(!logged_in);
 }
 </script>

@@ -116,6 +116,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LogoutResponse'
+  /me:
+    get:
+      tags:
+        - User
+      summary: Check a session API key.
+      description: |
+        Returns the user and the privileges of a session API key, or the status
+        `invalid` when the session has ended (it expired, it was logged out, the
+        password or MFA changed, or the management daemon restarted).
+
+        Only a session API key from `/login` is accepted, never a password or the
+        system API key, so an ended session is not logged as a failed login. The
+        control panel asks this before it shows any menu for saved credentials.
+      operationId: me
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/me" \
+              -u "<email>:<session_key>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+              examples:
+                invalid:
+                  value:
+                    reason: The session has ended. Log in again.
+                    status: invalid
+                ok:
+                  value:
+                    email: user@example.com
+                    privileges:
+                      - admin
+                    status: ok
   /system/status:
     post:
       tags:

@@ -11,6 +11,27 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Fixed
+
+* The control panel no longer shows its menus and the last panel for saved
+  credentials whose session has ended. A session ends after two days
+  without use, at a logout, when the password or MFA changes, and whenever
+  the management daemon restarts (at every update). Before, a reload showed
+  the admin menus and the last panel from the copy in the browser until an
+  API call failed; the welcome and guide pages, which call no API, never
+  noticed. On load the page now asks the box first (the new
+  `GET /admin/me`, which takes a session key only, never a password) and
+  shows no menu and no panel until the answer: for an ended session the
+  login, and after it the requested panel; the menus follow the privileges
+  in the box's answer, not the saved copy. When the box does not answer
+  (its service stopped or restarting), the login panel says so and the
+  saved login is kept, so that a reload afterwards needs no password. A
+  reload with an ended session is no longer logged as failed logins (each
+  API call with the old key was one). Log out starts again with a fresh
+  page, and a login of another user in the same tab after a session ended
+  reloads the page, so that no panel shows data loaded for the user before
+  (B141).
+
 ### Planned
 
 Seen in the work on rc7 and v78-r2604.0, not done (the certification runs

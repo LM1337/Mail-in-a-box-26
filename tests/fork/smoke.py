@@ -3356,6 +3356,7 @@ def send_test_mail(ctx):
 #
 # Read-only: (method, documented path, content type of the 200 answer).
 API_READ_ONLY = [
+    ("GET", "/me", "application/json"),
     ("GET", "/system/version", "text/html"),
     ("POST", "/system/latest-upstream-version", "text/html"),
     ("POST", "/system/status", "application/json"),
@@ -3482,12 +3483,25 @@ def c_api_auth(ctx):
     if key2 == ctx.admin_auth[1]:
         raise Fail("second login gave the same key")
     api_expect(http_req(ctx, "GET", "/admin/system/version", auth=(ctx.admin_user, key2)), 200, "text/html", "second key")
+    r = http_req(ctx, "GET", "/admin/me", auth=(ctx.admin_user, key2))
+    api_expect(r, 200, "application/json", "me, second key")
+    if r.json().get("status") != "ok" or "admin" not in (r.json().get("privileges") or []):
+        raise Fail("me, second key: status %s" % r.json().get("status"))
+    # /me takes session keys only (B141): not a password, and no failed login.
+    for what, pw in (("password", ctx.admin_pw), ("wrong password", wrong)):
+        r = http_req(ctx, "GET", "/admin/me", auth=(ctx.admin_user, pw))
+        api_expect(r, 200, "application/json", "me, " + what)
+        if r.json().get("status") != "invalid":
+            raise Fail("me, %s: status %s" % (what, r.json().get("status")))
     r = http_req(ctx, "POST", "/admin/logout", auth=(ctx.admin_user, key2))
     api_expect(r, 200, "application/json", "logout")
     if r.json().get("status") != "ok":
         raise Fail("logout: %s" % r.text()[:100])
     api_expect(http_req(ctx, "GET", "/admin/system/version", auth=(ctx.admin_user, key2)), 401, "text/plain", "key after logout")
-    notes.append("login/key/logout ok, key after logout 401")
+    r = http_req(ctx, "GET", "/admin/me", auth=(ctx.admin_user, key2))
+    if r.status != 200 or r.json().get("status") != "invalid":
+        raise Fail("me, key after logout: HTTP %d" % r.status)
+    notes.append("login/key/logout ok, key after logout 401, me ok/invalid")
     api_expect(admin_api(ctx, "GET", "system/version"), 200, "text/html", "first key after the other logout")
     return "; ".join(notes) + " (2 failed logins)"
 
@@ -3507,6 +3521,10 @@ def api_shape(ctx, path, r):
     if api_ctype(r) == "application/json":
         j = r.json()
     t = r.text()
+    if path == "/me":
+        _need(j.get("status") == "ok" and j.get("email") == ctx.admin_user and "admin" in (j.get("privileges") or [])
+              and "api_key" not in j, "me: status %s" % j.get("status"))
+        return "ok"
     if path == "/system/version":
         _need(t.strip() and "\n" not in t.strip(), "version: %r" % t[:60])
         return t.strip()

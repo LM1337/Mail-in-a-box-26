@@ -153,7 +153,7 @@
             <li><a href="#web" class="if-logged-in-admin">Web</a></li>
           </ul>
           <ul class="nav navbar-nav navbar-right">
-            <li class="if-logged-in"><a href="#" onclick="do_logout(); return false;" style="color: white">Log out</a></li>
+            <li class="if-logged-in"><a href="#" onclick="do_logout(true); return false;" style="color: white">Log out</a></li>
           </ul>
         </div><!--/.navbar-collapse -->
       </div>
@@ -450,6 +450,12 @@ function api(url, method, data, callback, callback_error, headers, options) {
 var current_panel = null;
 var switch_back_to_panel = null;
 
+function is_logged_in() {
+  // Logged in once the box has confirmed the credentials and named the
+  // user's privileges: at the login, or for saved credentials by /me (B141).
+  return api_credentials != null && Array.isArray(api_credentials.privileges);
+}
+
 function clear_credentials() {
   // Forget the token.
   api_credentials = null;
@@ -459,9 +465,13 @@ function clear_credentials() {
     sessionStorage.removeItem("miab-cp-credentials");
 }
 
-function do_logout() {
-  // Clear the session from the backend.
-  api("/logout", "POST");
+function do_logout(reload) {
+  // Clear the session from the backend. With reload (the menu's Log out),
+  // start again with a fresh page, which holds no data of the panels (B141).
+  function done() {
+    if (reload) window.location.reload();
+  }
+  api("/logout", "POST", {}, done, done);
 
   // Remove locally stored credentials
   clear_credentials();
@@ -479,6 +489,14 @@ function show_panel(panelid) {
     panelid = panelid.getAttribute('href').substring(1);
   }
 
+  // Not logged in (or not yet confirmed): only the login panel, and the
+  // requested one after the login (B141).
+  if (panelid != 'login' && !is_logged_in()) {
+    show_panel('login');
+    switch_back_to_panel = panelid;
+    return;
+  }
+
   $('.admin_panel').hide();
   $('#panel_' + panelid).show();
   if (window["show_" + panelid])
@@ -493,28 +511,68 @@ window.onhashchange = function() {
   show_panel(panelid);
 };
 
+// The user whose data the panels may hold: the page is reloaded when another
+// user logs in after a session that ended without a logout (B141).
+var panels_user = null;
+
+function resume_session(saved, panelid) {
+  // Saved credentials are not trusted before the box has confirmed them: the
+  // session ends after two days without use, at a logout elsewhere, when the
+  // password changes and whenever the management daemon restarts. Until the
+  // answer, no menu and no panel; the privileges come from the answer (B141).
+  api_credentials = { username: saved.username, session_key: saved.session_key };
+  api(
+    "/me",
+    "GET",
+    {},
+    function(response) {
+      if (response.status != "ok") {
+        // The session has ended: log in again, then on to the panel.
+        clear_credentials();
+        show_panel('login');
+        show_login_message("Your session has ended. Log in again.");
+        switch_back_to_panel = panelid;
+        return;
+      }
+      api_credentials.username = response.email;
+      api_credentials.privileges = response.privileges;
+      panels_user = response.email;
+      show_hide_menus();
+      show_panel(panelid || 'welcome');
+    },
+    function(message, xhr) {
+      if (xhr.status == 403) return; // handled by api()
+      // The box did not answer (the daemon is stopped or restarting, no
+      // connection): no menus, but the saved credentials stay, so that a
+      // reload after the outage needs no new login.
+      api_credentials = null;
+      show_panel('login');
+      show_login_message((xhr.miab_error_message || ("Your login could not be checked (HTTP " + xhr.status + ")."))
+        + " Your saved login is kept: reload the page when the box answers again.");
+      switch_back_to_panel = panelid;
+    });
+}
+
 $(function() {
   // Recall saved user credentials.
+  var saved = null;
   try {
     if (typeof sessionStorage != 'undefined' && sessionStorage.getItem("miab-cp-credentials"))
-      api_credentials = JSON.parse(sessionStorage.getItem("miab-cp-credentials"));
+      saved = JSON.parse(sessionStorage.getItem("miab-cp-credentials"));
     else if (typeof localStorage != 'undefined' && localStorage.getItem("miab-cp-credentials"))
-      api_credentials = JSON.parse(localStorage.getItem("miab-cp-credentials"));
+      saved = JSON.parse(localStorage.getItem("miab-cp-credentials"));
   } catch (_) {
   }
 
-  // Toggle menu state.
+  // Toggle menu state (none before the session is confirmed).
   show_hide_menus();
 
   // Recall what the user was last looking at.
-  if (api_credentials != null && window.location.hash) {
-    var panelid = window.location.hash.substring(1);
-    show_panel(panelid);
-  } else if (api_credentials != null) {
-    show_panel('welcome');
-  } else {
-    show_panel('login');
-  }
+  var panelid = window.location.hash ? window.location.hash.substring(1) : null;
+  if (saved && saved.username && saved.session_key)
+    resume_session(saved, panelid);
+  else
+    show_panel(panelid || 'login');
 })
 
         </script>

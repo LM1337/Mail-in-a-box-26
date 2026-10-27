@@ -167,6 +167,25 @@ def login():
 	# Return.
 	return json_response(resp)
 
+# Check a session key of a login: the control panel asks this before it shows
+# any menu or panel for saved credentials (B141). Only session keys are
+# accepted, never a password, so a session that has ended (expired, logged out,
+# the daemon restarted) is no failed login.
+@app.route('/me')
+def me():
+	try:
+		email, privs = auth_service.authenticate(request, env, session_only=True)
+	except ValueError as e:
+		return json_response({
+			"status": "invalid",
+			"reason": str(e),
+		})
+	return json_response({
+		"status": "ok",
+		"email": email,
+		"privileges": privs,
+	})
+
 @app.route('/logout', methods=["POST"])
 def logout():
 	try:

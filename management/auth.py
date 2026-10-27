@@ -25,9 +25,10 @@ class AuthService:
 		with open(self.key_path, encoding='utf-8') as file:
 			self.key = file.read()
 
-	def authenticate(self, request, env, login_only=False, logout=False):
+	def authenticate(self, request, env, login_only=False, logout=False, session_only=False):
 		"""Test if the HTTP Authorization header's username matches the system key, a session key,
 		or if the username/password passed in the header matches a local user.
+		With session_only, only a session key of a login is accepted (no password check).
 		Returns a tuple of the user's email address and list of user privileges (e.g.
 		('my@email', []) or ('my@email', ['admin']); raises a ValueError on login failure.
 		If the user used the system API key, the user's email is returned as None since
@@ -58,7 +59,7 @@ class AuthService:
 
 		# If user passed the system API key, grant administrative privs. This key
 		# is not associated with a user.
-		if username == self.key and not login_only:
+		if username == self.key and not login_only and not session_only:
 			return (None, ["admin"])
 
 		# If the password corresponds with a session token for the user, grant access for that user.
@@ -71,6 +72,11 @@ class AuthService:
 			else:
 				# Re-up the session so that it does not expire.
 				self.sessions[sessionid] = session
+
+		# Only a session key was asked for, and it is not (or no longer) a valid one.
+		elif session_only:
+			msg = "The session has ended. Log in again."
+			raise ValueError(msg)
 
 		# If no password was given, but a username was given, we're missing some information.
 		elif password.strip() == "":
