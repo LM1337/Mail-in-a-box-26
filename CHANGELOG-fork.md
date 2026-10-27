@@ -57,6 +57,11 @@ add their open findings in TESTING-fork.md):
 * Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
   locked") while its `cron.php` holds the database (seen once in T1); the
   client writes again later.
+* Through some public resolvers (8.8.8.8 in the test of B136) Spamhaus
+  gives no answer at all, also for its own test entries, so setup's checks
+  can neither see a listing nor say that they could not check; the comment
+  in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
+  127.255.255.254.
 * `upgrade-in-place-to-2604.sh --check` prints the start command with the
   GitHub URL also when `SOURCE` and `TAG` name another source.
 * A Dovecot reload ends the open IMAP sessions (their clients log in
