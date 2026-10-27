@@ -43,6 +43,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   there after the browser was closed and opened again, also when "Remember
   me" was not ticked (B142).
 
+### Changed
+
+* Tests: the log audit accepts nginx's 502 for a request to Roundcube,
+  Nextcloud or Z-Push while `management/backup.py` has PHP-FPM stopped
+  for a backup (the socket is missing, or the request in progress is
+  cut), in every phase, as backup.py logs no marks that would limit it to
+  its run (with any host and the referrer that nginx adds for a browser's
+  request, which also covers such lines at setup's PHP-FPM restart); and
+  the kernel's note that the free page reporting of a
+  virtual machine took long on a busy host. A production box's
+  `update-check.sh after` named them in the update to v78-r2604.0 (the
+  backup step and the nightly backup stop PHP-FPM the same way).
+
 ### Planned
 
 Seen in the work on rc7 and v78-r2604.0, not done (the certification runs
