@@ -258,17 +258,23 @@ def provision_certificates(env, limit_domains):
 	# put parents ahead of children.
 	# Since Let's Encrypt requests are limited to 100 domains at a time,
 	# we'll create a list of lists of domains where the inner lists have
-	# at most 100 items. By sorting we also get the DNS zone domain as the first
-	# entry in each list (unless we overflow beyond 100) which ends up as the
-	# primary domain listed in each certificate.
+	# at most 100 items. By sorting we also get PRIMARY_HOSTNAME, or else the
+	# DNS zone domain, as the first entry in each list (unless we overflow
+	# beyond 100), which ends up as the primary domain listed in each
+	# certificate.
 	from dns_update import get_dns_zones
 	certs = { }
 	for zone, _zonefile in get_dns_zones(env):
 		certs[zone] = [[]]
 	for domain in sort_domains(domains, env):
-		# Does the domain end with any domain we've seen so far.
+		# Is the domain one we've seen so far (a zone), or does it end with one?
+		# sort_domains() puts PRIMARY_HOSTNAME first in its zone, before the
+		# zone's own name: the zone's name must join the zone's list, not
+		# start a new one in its place, which dropped PRIMARY_HOSTNAME and its
+		# mta-sts. name from the request when the zone needed a certificate
+		# too (the first provisioning of a fresh box, B140).
 		for parent in certs:
-			if domain.endswith("." + parent):
+			if domain == parent or domain.endswith("." + parent):
 				# Add this to the parent's list of domains.
 				# Start a new group if the list already has
 				# 100 items.

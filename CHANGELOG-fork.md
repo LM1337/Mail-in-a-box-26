@@ -86,7 +86,8 @@ without a readable config.php (B124) or the logins at the end of a run
 without users.sqlite (B133) for a moment, and keeps cron off for its whole
 run (B138); Nextcloud no longer throttles the box's own services (B121). A
 fresh install no longer stops on Spamhaus' refusal of public resolvers
-(B136), and the MTA-STS record comes with the first certificate (B139).
+(B136), and the first certificates cover the box's own name (B140) and
+publish the MTA-STS record (B139).
 ActiveSync and Autodiscover get brute-force protection (B126); Z-Push syncs contacts whose card name has no `.vcf`
 (B128), holds Pings of up to 59 minutes (B129) and no longer answers a
 FolderSync without the mail folders when an IMAP session is cut (B137), and
@@ -327,6 +328,12 @@ no longer hang or fail as a whole when a backup target does not answer
   it was missing until the next DNS update (the daily one at the latest):
   the status checks reported the MTA-STS policy as missing, and other mail
   servers did not use it yet (upstream; B139).
+* The first Let's Encrypt provisioning of a fresh box certifies the box's
+  own name too. When the box's name is below one of its mail domains (the
+  usual layout), the request grouped by DNS zone lost the box's name and
+  its `mta-sts.` name, and mail and the control panel kept the self-signed
+  certificate until a second run (by hand or the nightly one; upstream;
+  B140).
 
 ### Changed
 
