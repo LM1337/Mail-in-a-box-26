@@ -307,6 +307,13 @@ no longer hang or fail as a whole when a backup target does not answer
   in `/run` while it runs; a run that is killed leaves the mask until the
   next boot or the next setup run, which removes it (B138, a gap in the fix
   of B82 in rc6).
+* DNS is updated as soon as a certificate is installed (Let's Encrypt from
+  the control panel or the nightly run, or a certificate of your own). The
+  `_mta-sts` TXT record of a mail domain is published only when its policy
+  host has a valid certificate, and after the first certificates of a box
+  it was missing until the next DNS update (the daily one at the latest):
+  the status checks reported the MTA-STS policy as missing, and other mail
+  servers did not use it yet (upstream; B139).
 
 ### Changed
 

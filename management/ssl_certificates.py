@@ -365,8 +365,8 @@ def provision_certificates(env, limit_domains):
 			ret[-1]["log"].append(str(e))
 			ret[-1]["result"] = "error"
 
-	# Run post-install steps.
-	ret.extend(post_install_func(env))
+	# Run post-install steps (DNS only when a certificate was installed, B139).
+	ret.extend(post_install_func(env, update_dns=any(isinstance(r, dict) and r.get("result") == "installed" for r in ret)))
 
 	# Return what happened with each certificate request.
 	return ret
@@ -461,7 +461,7 @@ def install_cert_copy_file(fn, env):
 	shutil.move(fn, ssl_certificate)
 
 
-def post_install_func(env):
+def post_install_func(env, update_dns=True):
 	ret = []
 
 	# Get the certificate to use for PRIMARY_HOSTNAME.
@@ -495,6 +495,16 @@ def post_install_func(env):
 	# Update the web configuration so nginx picks up the new certificate file.
 	from web_update import do_web_update
 	ret.append( do_web_update(env) )
+
+	# dns_update.py publishes the "_mta-sts" TXT record of a mail domain only
+	# when its policy host (mta-sts.<domain>) has a valid certificate. After the
+	# first certificate of a box the record was missing until the next DNS
+	# update (the daily one at the latest), and the status checks reported the
+	# MTA-STS policy as missing (B139). Update DNS now, after nginx serves the
+	# policy with the new certificate.
+	if update_dns:
+		from dns_update import do_dns_update
+		ret.append(do_dns_update(env))
 
 	return ret
 
