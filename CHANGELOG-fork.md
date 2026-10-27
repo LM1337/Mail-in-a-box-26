@@ -541,7 +541,9 @@ no longer hang or fail as a whole when a backup target does not answer
   warning that a release tag is a tag object when the in-place and
   migration tools clone it (`git clone -b <tag> --depth 1`; every release
   tag is annotated, B135), ntpd's skipped link-local addresses of Docker's
-  interfaces during an in-place upgrade, and on the old box (upstream v74)
+  interfaces during an in-place upgrade, logind's note on a login over the
+  in-place tool's fallback SSH server started from a login session, and on
+  the old box (upstream v74)
   Dovecot 2.3's notes at stop-old and cron's mail to root@, which has no
   alias there.
 * Tests: the log audit accepts the auth-worker processes' note of their
