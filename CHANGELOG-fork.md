@@ -537,6 +537,13 @@ no longer hang or fail as a whole when a backup target does not answer
   of any cron job when setup starts cron again (not only of Nextcloud's
   `cron.php`), and with `--internet` the reverse DNS warning of Postfix
   also for clients of the submission ports (scanners).
+* Tests: more classes of the repeated runs in the log audit's lists: git's
+  warning that a release tag is a tag object when the in-place and
+  migration tools clone it (`git clone -b <tag> --depth 1`; every release
+  tag is annotated, B135), ntpd's skipped link-local addresses of Docker's
+  interfaces during an in-place upgrade, and on the old box (upstream v74)
+  Dovecot 2.3's notes at stop-old and cron's mail to root@, which has no
+  alias there.
 * Tests: the log audit accepts the auth-worker processes' note of their
   end at setup's Dovecot reload (`Killed with signal 15` from the master,
   B122), seen in the repeated update test.
@@ -679,9 +686,12 @@ no longer hang or fail as a whole when a backup target does not answer
 From the plan for the final release: the list of expected changes of this
 release (`tools/expected-changes/v78-r2604.0.txt`, renamed from
 `unreleased.txt`, with a new, empty `unreleased.txt` for the next release).
-The test matrix T1 to T5b and T6 (on the Internet: Let's Encrypt, delivery
-to other providers, `mailcheck` with a real external probe) run on the
-release commit; their results are in TESTING-fork.md.
+The test matrix T1 to T5b and T6 (on the Internet: Let's Encrypt, public
+DNS, TLS and DANE, mail to and from an external mailbox); their first run
+found B135 to B139 and the repeated one B140. Which commit each scenario
+ran, and the results, are in TESTING-fork.md ("v78-r2604.0"); `mailcheck`
+ran with the lab's probe address, the round trip with the external mailbox
+by the test's own script.
 
 ## v78-r2604.0-rc7 (2026-10-25)
 
