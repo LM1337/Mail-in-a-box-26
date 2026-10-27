@@ -103,7 +103,9 @@ function do_login() {
     return false;
   }
 
-  // Exchange the email address & password for an API key.
+  // Exchange the email address & password for an API key. A check of saved
+  // credentials still pending no longer counts (B141).
+  session_check = null;
   api_credentials = { username: $('#loginEmail').val(), session_key: $('#loginPassword').val() }
 
   api(
@@ -155,7 +157,8 @@ function do_login() {
 
       // Remember the credentials.
       if (typeof localStorage != 'undefined' && typeof sessionStorage != 'undefined') {
-        if ($('#loginRemember').val()) {
+        // Only when "Remember me" is ticked (.val() of the checkbox is always "on", B142).
+        if ($('#loginRemember').prop('checked')) {
           localStorage.setItem("miab-cp-credentials", JSON.stringify(api_credentials));
           sessionStorage.removeItem("miab-cp-credentials");
         } else {
@@ -206,6 +209,7 @@ function show_login_message(message) {
 
 function show_login() {
   show_login_message(null);
+  $('#loginForm :input').prop('disabled', false);
   $('#loginForm').removeClass('is-twofactor');
   $('#loginOtpInput').val('');
   $('#loginEmail,#loginPassword').each(function() {

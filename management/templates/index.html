@@ -440,8 +440,9 @@ function api(url, method, data, callback, callback_error, headers, options) {
     error: callback_error || default_error,
     statusCode: {
       403: function(xhr) {
-        // Credentials are no longer valid. Try to login again.
-        var p = current_panel;
+        // Credentials are no longer valid. Try to login again (on the panel
+        // asked for, also when no panel was open yet).
+        var p = current_panel || switch_back_to_panel;
         clear_credentials();
         show_panel('login');
         show_hide_menus();
@@ -463,6 +464,7 @@ function is_logged_in() {
 function clear_credentials() {
   // Forget the token.
   api_credentials = null;
+  session_check = null;
   if (typeof localStorage != 'undefined')
     localStorage.removeItem("miab-cp-credentials");
   if (typeof sessionStorage != 'undefined')
@@ -472,16 +474,22 @@ function clear_credentials() {
 function do_logout(reload) {
   // Clear the session from the backend. With reload (the menu's Log out),
   // start again with a fresh page, which holds no data of the panels (B141).
+  // A short timeout, so that the reload comes soon also when the daemon is
+  // busy with a long request of another tab.
   function done() {
     if (reload) window.location.reload();
   }
-  api("/logout", "POST", {}, done, done);
+  api("/logout", "POST", {}, done, done, undefined, { timeout: 5000 });
 
   // Remove locally stored credentials
   clear_credentials();
 
   // Return to the start.
   show_panel('login');
+
+  // No typing into the login form that the reload would wipe.
+  if (reload)
+    $('#loginForm :input').prop('disabled', true);
 
   // Reset menus.
   show_hide_menus();
@@ -491,6 +499,13 @@ function show_panel(panelid) {
   if (panelid.getAttribute) {
     // we might be passed an HTMLElement <a>.
     panelid = panelid.getAttribute('href').substring(1);
+  }
+
+  // While the saved credentials are being checked: nothing yet, the panel
+  // asked for comes with the answer (B141).
+  if (session_check) {
+    switch_back_to_panel = panelid;
+    return;
   }
 
   // Not logged in (or not yet confirmed): only the login panel, and the
@@ -519,42 +534,76 @@ window.onhashchange = function() {
 // user logs in after a session that ended without a logout (B141).
 var panels_user = null;
 
+// The saved credentials while /me checks them, else null (B141).
+var session_check = null;
+
 function resume_session(saved, panelid) {
   // Saved credentials are not trusted before the box has confirmed them: the
   // session ends after two days without use, at a logout elsewhere, when the
   // password changes and whenever the management daemon restarts. Until the
   // answer, no menu and no panel; the privileges come from the answer (B141).
-  api_credentials = { username: saved.username, session_key: saved.session_key };
+  var pending = { username: saved.username, session_key: saved.session_key };
+  api_credentials = pending;
+  session_check = pending;
+  switch_back_to_panel = panelid;
+
+  // Whether the answer still counts: not after a login or a logout meanwhile.
+  function settle() {
+    if (session_check === pending)
+      session_check = null;
+    return api_credentials === pending;
+  }
+
+  // The panel asked for: the current address (the back button or a link may
+  // have changed it meanwhile), else the one asked for at load.
+  function next_panel() {
+    return window.location.hash ? window.location.hash.substring(1) : switch_back_to_panel;
+  }
+
   api(
     "/me",
     "GET",
     {},
     function(response) {
+      if (!settle()) return;
+      var next = next_panel();
       if (response.status != "ok") {
         // The session has ended: log in again, then on to the panel.
         clear_credentials();
         show_panel('login');
         show_login_message("Your session has ended. Log in again.");
-        switch_back_to_panel = panelid;
+        switch_back_to_panel = next;
         return;
       }
-      api_credentials.username = response.email;
-      api_credentials.privileges = response.privileges;
+      pending.username = response.email;
+      pending.privileges = response.privileges;
       panels_user = response.email;
       show_hide_menus();
-      show_panel(panelid || 'welcome');
+      show_panel(next || 'welcome');
     },
     function(message, xhr) {
-      if (xhr.status == 403) return; // handled by api()
-      // The box did not answer (the daemon is stopped or restarting, no
-      // connection): no menus, but the saved credentials stay, so that a
-      // reload after the outage needs no new login.
+      if (!settle()) return;
+      var next = next_panel();
+      switch_back_to_panel = next;
+      if (xhr.status == 403) {
+        // api()'s 403 handler runs next: it forgets the credentials, shows the
+        // login and keeps the panel asked for; the note comes after it.
+        setTimeout(function() { show_login_message("Your session has ended. Log in again."); }, 0);
+        return;
+      }
+      // The box did not answer in time or at all (the daemon is busy, stopped
+      // or restarting, no connection): no menus, but the saved credentials
+      // stay, so that a reload after the outage needs no new login.
       api_credentials = null;
       show_panel('login');
       show_login_message((xhr.miab_error_message || ("Your login could not be checked (HTTP " + xhr.status + ")."))
         + " Your saved login is kept: reload the page when the box answers again.");
-      switch_back_to_panel = panelid;
-    });
+      switch_back_to_panel = next;
+    },
+    undefined,
+    // The daemon answers one request at a time: do not wait minutes behind a
+    // long request of another tab.
+    { timeout: 20000 });
 }
 
 $(function() {

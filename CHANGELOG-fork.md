@@ -24,15 +24,24 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   shows no menu and no panel until the answer: for an ended session the
   login, and after it the requested panel; the menus follow the privileges
   in the box's answer, not the saved copy. When the box does not answer
-  (its service stopped or restarting), the login panel says so and the
+  (its service stopped or restarting, or busy for more than 20 seconds
+  with a long request of another tab), the login panel says so and the
   saved login is kept, so that a reload afterwards needs no password. A
+  link or the back button while the box is being asked opens the panel of
+  the new address with the answer, without the login form in between. A
   reload with an ended session is no longer logged as failed logins (each
   API call with the old key was one). Log out starts again with a fresh
-  page, and a login of another user in the same tab after a session ended
+  page (after at most five seconds, also when the box is busy; the login
+  form is disabled until then), and a login of another user in the same tab after a session ended
   reloads the page and opens the welcome page, so that no panel shows data
   loaded for the user before. While the page loads, before its script has
   run, the menus no longer show for a moment either (on every load, also
   logged out): Bootstrap's style overrode the rule that hides them (B141).
+* "Remember me" on the control panel's login works: without it, the login
+  is kept for the browser tab only (sessionStorage) and ends with it.
+  Before, every login was saved in the browser's localStorage and was still
+  there after the browser was closed and opened again, also when "Remember
+  me" was not ticked (B142).
 
 ### Planned
 
