@@ -513,6 +513,14 @@ no longer hang or fail as a whole when a backup target does not answer
   (B137).
 * Tests: the log audit accepts systemd's note of the left-over processes
   of a cron job when setup starts cron again at its end (B138).
+* Tests: the log audit's lists, from the final runs of this release: the
+  first start of the jails that read mail.log in the setup run that adds
+  them (a migration), Postfix's cleanup and systemd at setup's OpenDKIM
+  restart, the smoke test's rejected mails from a client with reverse DNS
+  (a box on the Internet), Outlook's Autodiscover schema that Z-Push does
+  not support (HTTP 400), the TLS error "unexpected message" of old
+  clients and scanners (`--internet`), and Dovecot 2.3's note when the
+  migration stops the old box during a delivery (old-box list).
 
 ### Upgrade note
 
