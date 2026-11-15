@@ -1347,6 +1347,25 @@ checkout_ref() { # DIR REF [--force]
 	fi
 }
 
+# After a failed fetch or clone of the release tag: is the tag not published
+# in SOURCE (yes: the branch main may be used instead), or is it there (no:
+# the fetch failed for another reason)? Stops when SOURCE cannot be asked
+# (network, GitHub, a wrong SOURCE): before, any failure counted as "not
+# published", and setup ran from main (B169). git ls-remote --exit-code
+# exits 2 when the repository answered without the tag.
+tag_unpublished() { # SOURCE TAG
+	local rc=0 out
+	out=$(GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --tags "$1" "refs/tags/$2" < /dev/null 2>&1 > /dev/null) || rc=$?
+	case "$rc" in
+		2) return 0 ;;
+		0) return 1 ;;
+	esac
+	die "Could not fetch the release tag $2 from $1, and could not ask whether it is published
+(git ls-remote, exit code $rc)${out:+:
+$(sed 's/^/  /' <<< "$out")}
+Not using the branch main instead. Check the network (and SOURCE), then run the command again."
+}
+
 # Through curl | bash there is no file to continue from after a reboot:
 # clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
 # in tools/migrate-to-2604.sh, with the script name and the directory as
@@ -1372,10 +1391,12 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 		git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 	fi
 	if [ ! -f "$d/tools/$script" ] && [ -z "${TAG:-}" ]; then
-		# The release tag may not contain this tool yet.
+		# The release tag may not contain this tool yet, or not be published
+		# yet; not when it could not be fetched (B169).
 		if [ -d "$d/.git" ]; then
 			git -C "$d" fetch -q --depth 1 --force origin main < /dev/null && git -C "$d" checkout -q --force FETCH_HEAD || true
-		else
+		elif tag_unpublished "$source" "$tag"; then
+			warn "The release tag $tag is not published yet. Using the branch main instead."
 			git clone -q -b main --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 		fi
 	fi
@@ -4004,7 +4025,7 @@ update_fork_dir() { # DIR TAG SOURCE
 	check_origin "$d" "$source"
 	say "Updating $d from ${cur:-an unknown version} to $tag..."
 	if checkout_ref "$d" "$tag"; then return 0; fi
-	if [ -z "${TAG:-}" ] && checkout_ref "$d" main; then
+	if [ -z "${TAG:-}" ] && tag_unpublished "$source" "$tag" && checkout_ref "$d" main; then
 		warn "The release tag $tag is not published yet. Using the branch main instead."
 		return 0
 	fi
@@ -4054,7 +4075,7 @@ resolve_fork_dir() {
 		command -v git > /dev/null || install_packages git
 		say "Downloading Mail-in-a-Box $tag from $source to $d..."
 		if ! git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null; then
-			if [ -n "${TAG:-}" ]; then die "Could not download $tag from $source."; fi
+			if [ -n "${TAG:-}" ] || ! tag_unpublished "$source" "$tag"; then die "Could not download $tag from $source."; fi
 			warn "The release tag $tag is not published yet. Using the branch main instead."
 			git clone -q -b main --depth 1 "$source" "$d" < /dev/null || die "Could not download $source."
 		fi
