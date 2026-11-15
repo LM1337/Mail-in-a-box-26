@@ -2990,6 +2990,11 @@ not come back after the reboot. Not rebooting. Fix it ('systemctl enable ssh.soc
 the command again."
 		fi
 	fi
+	# sshd -t fails without /run/sshd like sshd -T (B119), which socket
+	# activation leaves missing until ssh.service has run since the boot: the
+	# run after a reboot that needs another one, or an interrupted release
+	# upgrade, stopped here with "Not rebooting" (B156).
+	ensure_run_sshd
 	out=$(sshd -t 2>&1) || rc=$?
 	[ "$rc" = 0 ] || die "sshd -t fails (exit code $rc); SSH would not come back after the reboot:
 $(sed 's/^/  /' <<< "$out")
