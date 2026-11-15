@@ -807,13 +807,12 @@ old_value_ok() { # KEY VALUE
 		CONF_STORAGE_USER) [[ $v =~ ^([a-z_][a-z0-9_-]{0,31})?$ ]] ;;
 		CONF_PRIMARY_HOSTNAME) [ -z "$v" ] || [[ $v =~ $HOSTNAME_FORM ]] ;;
 		CONF_MTA_STS_MODE) [[ $v =~ ^(enforce|testing|none)?$ ]] ;;
-		# FINGERPRINT_SCRIPT: counts and the beginnings of sha256 sums, "-" for none.
-		USERS | ALIASES | MAILBOXES | MESSAGES | SIEVE_SCRIPTS | LE_ACCOUNTS | BAYES_SPAM | BAYES_HAM | NC_ACCOUNTS \
-			| NC_CARDS | NC_EVENTS)
-			[[ $v =~ ^(-|0|[1-9][0-9]{0,17})?$ ]] ;;
-		DKIM_KEY | DNSSEC_KEYS | TLS_KEY | BACKUP_KEY) [[ $v =~ ^(-|[0-9a-f]{16})?$ ]] ;;
+		# FINGERPRINT_SCRIPT's counts and key fingerprints as well: compare_fingerprints
+		# only does arithmetic on them after checking that they are numbers.
 		OS_ID | OS_VERSION | NTP_SYNC | RSYNC_VERSION | PHP_VERSIONS | MIAB_DIR | MIAB_VERSION | NC_EXTRA_APPS \
-			| BACKUP_TARGET | CONF_PUBLIC_IP | CONF_PUBLIC_IPV6)
+			| BACKUP_TARGET | CONF_PUBLIC_IP | CONF_PUBLIC_IPV6 | USERS | ALIASES | MAILBOXES | MESSAGES | SIEVE_SCRIPTS \
+			| DKIM_KEY | DNSSEC_KEYS | TLS_KEY | BACKUP_KEY | LE_ACCOUNTS | BAYES_SPAM | BAYES_HAM | NC_ACCOUNTS | NC_CARDS \
+			| NC_EVENTS)
 			return 4 ;;
 		*) return 3 ;;
 	esac
@@ -848,14 +847,6 @@ Check the old box (a setting: correct it there) and run the command again."
 				;;
 		esac
 	done
-}
-
-# The counts and fingerprints of the old box saved in FILE (FINGERPRINT_SCRIPT).
-check_old_fingerprint() { # FILE
-	# shellcheck disable=SC2034 # read by check_old_values through its name
-	local -A fp=()
-	load_kv fp < "$1"
-	check_old_values fp
 }
 
 # The PIDs of a running Mail-in-a-Box backup: a python running
@@ -2469,8 +2460,6 @@ phase_sync_final() {
 		say "Recording counts and key fingerprints of the old box for the final check..."
 		remote_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/old-fingerprint.txt" \
 			|| die "Could not read the fingerprints of the old box."
-		# Checked now (B154), so that a wrong form stops before setup, not at the final check.
-		check_old_fingerprint "$STATE_DIR/old-fingerprint.txt"
 		run_rsync final
 		# Anything that ran on the old box during the copy may have changed data after rsync read it.
 		old_status
