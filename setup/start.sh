@@ -9,6 +9,44 @@ source setup/functions.sh # load our functions
 # If not, this shows an error and exits.
 source setup/preflight.sh
 
+# Setup gives owner and mode to these paths in STORAGE_ROOT (and reads or
+# writes mailinabox.version) only through descriptors, and refuses a path
+# that is a symbolic link or anything but a directory or regular file, or a
+# database with a second hard link: another account (www-data, the storage
+# user) could have put it there (B147). Checked here first, with the same
+# rules (tools/write_conf.py --check-own), so that such a box stops before
+# setup has changed anything, not in the middle of the run; the checks at
+# those places stay. STORAGE_ROOT as questions.sh takes it below (the
+# environment, /etc/mailinabox.conf, /home/user-data).
+pf_conf() { { sed -n "s/^$1=//p" /etc/mailinabox.conf 2> /dev/null || true; } | tail -n 1; }
+pf_root=${STORAGE_ROOT:-$(pf_conf STORAGE_ROOT)}
+pf_user=${STORAGE_USER:-$(pf_conf STORAGE_USER)}
+pf_root=${pf_root:-/home/${pf_user:-user-data}}
+pf_problems=$(tools/write_conf.py --check-own "$pf_root/mail" "$pf_root/mail/users.sqlite" \
+	"$pf_root/mail/roundcube/roundcube.sqlite" "$pf_root/mail/postgrey" "$pf_root/mail/postgrey/db" \
+	"$pf_root/mail/dkim" "$pf_root/mail/spamassassin" 2>&1 || true)
+if [ -L "$pf_root/mailinabox.version" ] || { [ -e "$pf_root/mailinabox.version" ] && [ ! -f "$pf_root/mailinabox.version" ]; }; then
+	pf_problems+="${pf_problems:+$'\n'}$pf_root/mailinabox.version is not a regular file"
+fi
+if [ -n "$pf_problems" ]; then
+	echo
+	echo "Setup stopped before it changed anything. It no longer follows a symbolic"
+	echo "link, or changes a database with a second hard link, in these places, as"
+	echo "another account could have put them there (B147):"
+	echo
+	echo "  ${pf_problems//$'\n'/$'\n'  }"
+	echo
+	echo "* A symbolic link, e.g. $pf_root/mail moved to another disk: put the directory"
+	echo "  back, or mount the other disk there with a bind mount instead of the link."
+	echo "* A second hard link of users.sqlite or roundcube.sqlite: find its other name with"
+	echo "  \"find / -xdev -samefile FILE\" and remove that name, unless you made it on"
+	echo "  purpose (the account www-data can make such a link)."
+	echo "* mailinabox.version must be a regular file with the number of the last migration."
+	echo
+	echo "Then run setup again."
+	exit 1
+fi
+
 # No cron jobs while setup runs: they would run against half-configured
 # services (Nextcloud's cron.php during its upgrade steps, Munin during its
 # installation), and their mail to root bounces until setup has written the
