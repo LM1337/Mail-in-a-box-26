@@ -104,18 +104,18 @@ if [ $needs_update == 1 ]; then
 		exit 1
 	fi
 	# The skin's own favicon as released, to tell it from one replaced by hand.
-	sha256sum 2> /dev/null < ${RCM_BUILD}/skins/elastic/images/favicon.ico | cut -d" " -f1 > ${RCM_BUILD}/elastic-favicon.sha256 || true
+	sha256sum 2> /dev/null < "${RCM_BUILD}/skins/elastic/images/favicon.ico" | cut -d" " -f1 > "${RCM_BUILD}/elastic-favicon.sha256" || true
 
 	# install roundcube persistent_login plugin
-	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' ${RCM_BUILD}/plugins/persistent_login
+	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' "${RCM_BUILD}/plugins/persistent_login"
 
 	# install roundcube html5_notifier plugin
 	# (github.com/kitist/html5_notifier is a 301 redirect to stremlau/html5_notifier)
-	git_clone https://github.com/stremlau/html5_notifier.git $HTML5_NOTIFIER_VERSION '' ${RCM_BUILD}/plugins/html5_notifier
+	git_clone https://github.com/stremlau/html5_notifier.git $HTML5_NOTIFIER_VERSION '' "${RCM_BUILD}/plugins/html5_notifier"
 	# Roundcube 1.7 is served from public_html/, plugin assets are only reachable via static.php/.
 	# Use rcmail.assets_path() for the notification icon (same as unmerged upstream PR #59).
 	sed -i "s#'./plugins/html5_notifier/images/new_mail.png'#rcmail.assets_path('plugins/html5_notifier/images/new_mail.png')#" \
-		${RCM_BUILD}/plugins/html5_notifier/html5_notifier.js
+		"${RCM_BUILD}/plugins/html5_notifier/html5_notifier.js"
 
 	# download and verify the full release of the carddav plugin
 	wget_verify \
@@ -124,11 +124,11 @@ if [ $needs_update == 1 ]; then
 		"$RCM_TMP/carddav.tar.gz"
 
 	# unzip and cleanup
-	tar -C ${RCM_BUILD}/plugins -zxf "$RCM_TMP/carddav.tar.gz"
+	tar -C "${RCM_BUILD}/plugins" -zxf "$RCM_TMP/carddav.tar.gz"
 	rm -f "$RCM_TMP/carddav.tar.gz"
 
 	# record the version we've installed
-	echo $UPDATE_KEY > ${RCM_BUILD}/version
+	echo $UPDATE_KEY > "${RCM_BUILD}/version"
 fi
 RCM_PLUGIN_DIR=${RCM_BUILD}/plugins
 RCM_CONFIG=${RCM_BUILD}/config/config.inc.php
@@ -157,11 +157,11 @@ fi
 # (its SHA256 is not the one of the release): Roundcube then shows that one.
 # Other skins keep their own favicons.
 RCM_FAVICON_CONFIG=
-rm -f ${RCM_BUILD}/mailinabox-favicon.ico
+rm -f "${RCM_BUILD}/mailinabox-favicon.ico"
 if [ "${FAVICON:-on}" != off ]; then
-	rcm_favicon=$(sha256sum 2> /dev/null < ${RCM_BUILD}/skins/elastic/images/favicon.ico | cut -d" " -f1 || true)
-	if [ "$rcm_favicon" = "$(cat ${RCM_BUILD}/elastic-favicon.sha256 2> /dev/null || echo $ELASTIC_FAVICON_HASH)" ]; then
-		install -m 644 branding/favicon.ico ${RCM_BUILD}/mailinabox-favicon.ico
+	rcm_favicon=$(sha256sum 2> /dev/null < "${RCM_BUILD}/skins/elastic/images/favicon.ico" | cut -d" " -f1 || true)
+	if [ "$rcm_favicon" = "$(cat "${RCM_BUILD}/elastic-favicon.sha256" 2> /dev/null || echo $ELASTIC_FAVICON_HASH)" ]; then
+		install -m 644 branding/favicon.ico "${RCM_BUILD}/mailinabox-favicon.ico"
 		RCM_FAVICON_CONFIG="\$config['skin_logo'] = array('elastic:[favicon]' => 'mailinabox-favicon.ico');"
 	else
 		echo "Roundcube: the favicon of the Elastic skin was replaced by hand, so it is kept."
@@ -173,7 +173,7 @@ fi
 # For security, temp and log files are not stored in the default locations
 # which are inside the roundcube sources directory. We put them instead
 # in normal places.
-cat > $RCM_CONFIG <<EOF;
+cat > "$RCM_CONFIG" <<EOF;
 <?php
 /*
  * Do not edit. Written by Mail-in-a-Box. Regenerated on updates.
@@ -221,7 +221,7 @@ EOF
 # by URI (the server would fetch any address a contact names); its admin
 # setting download_photos turns that on again. It is not set here, so that
 # secure default stays.
-cat > ${RCM_PLUGIN_DIR}/carddav/config.inc.php <<EOF;
+cat > "${RCM_PLUGIN_DIR}/carddav/config.inc.php" <<EOF;
 <?php
 /* Do not edit. Written by Mail-in-a-Box. Regenerated on updates. */
 \$prefs['_GLOBAL']['hide_preferences'] = true;
@@ -254,10 +254,10 @@ sudo -u www-data touch /var/log/roundcubemail/errors.log
 # Password changing plugin settings
 # The config comes empty by default, so we need the settings
 # we're not planning to change in config.inc.dist...
-cp ${RCM_PLUGIN_DIR}/password/config.inc.php.dist \
-	${RCM_PLUGIN_DIR}/password/config.inc.php
+cp "${RCM_PLUGIN_DIR}/password/config.inc.php.dist" \
+	"${RCM_PLUGIN_DIR}/password/config.inc.php"
 
-tools/editconf.py ${RCM_PLUGIN_DIR}/password/config.inc.php \
+tools/editconf.py "${RCM_PLUGIN_DIR}/password/config.inc.php" \
 	"\$config['password_minimum_length']=8;" \
 	"\$config['password_db_dsn']='sqlite:///$STORAGE_ROOT/mail/users.sqlite';" \
 	"\$config['password_query']='UPDATE users SET password=%P WHERE email=%u';" \
@@ -278,14 +278,14 @@ tools/write_conf.py --own "$STORAGE_ROOT/mail" root www-data 775
 tools/write_conf.py --own "$STORAGE_ROOT/mail/users.sqlite" root www-data 664
 
 # Fix Carddav permissions:
-chown -f -R root:www-data ${RCM_PLUGIN_DIR}/carddav
+chown -f -R root:www-data "${RCM_PLUGIN_DIR}/carddav"
 # root:www-data need all permissions, others only read
-chmod -R 774 ${RCM_PLUGIN_DIR}/carddav
+chmod -R 774 "${RCM_PLUGIN_DIR}/carddav"
 
 # Patch the Roundcube code to eliminate an issue that causes postfix to reject our sqlite
 # user database (see https://github.com/mail-in-a-box/mailinabox/issues/2185)
 sed -i.miabold 's/^[^#]\+.\+PRAGMA journal_mode = WAL.\+$/#&/' \
-	${RCM_BUILD}/program/lib/Roundcube/db/sqlite.php
+	"${RCM_BUILD}/program/lib/Roundcube/db/sqlite.php"
 
 # A new tree goes into place now (see above). The installed one is renamed
 # away first and removed after, so that Roundcube is missing only between
