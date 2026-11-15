@@ -193,6 +193,7 @@ BACKUP_DIR=
 BACKUP_DIR_FD=
 BACKUP_DIR_WHY=
 SSH_CHECK_HOSTS=()
+SSH_PORTS=()
 
 # ---------------------------------------------------------------------------
 # Output. Keep in sync with tools/migrate-to-2604.sh (blocker differs: it
@@ -3158,7 +3159,7 @@ release_upgrade() { # PHASE FROM TO
 		do-release-upgrade -f DistUpgradeViewNonInteractive < /dev/null || rc=$?
 	FAILED_CMD=
 	ssh_watch_stop
-	if ssh_banner 22; then say "SSH on port 22 answers."; fi
+	if ssh_answers; then say "SSH on $(ssh_ports_text) answers."; fi
 	ssh_fallback_stop if-ssh-works
 	cur=$(os_version)
 	if [ "$cur" = "$from" ] && sources_name "$(codename_of "$from")" && ! sources_name "$(codename_of "$to")"; then
@@ -3219,12 +3220,13 @@ or restore from the backups."
 # the port through (rate limited) only while the fallback runs. Its
 # privilege separation directory /run/sshd goes away when ssh.service stops
 # (RuntimeDirectory); the watcher puts it back within 2 s (in /run, root's own).
-# It is stopped when port 22 answers again after the release upgrade, and on
-# every way out of this script; if port 22 does not answer then, it is left
+# It is stopped when sshd answers again after the release upgrade, and on
+# every way out of this script; if sshd does not answer then, it is left
 # running (a reboot ends it) and the next run of this script removes it and
 # its ufw rule. Open sessions over it are not ended.
-# The watcher also reports in the run when port 22 stops answering and when it
-# answers again (the SSH banner).
+# The watcher also reports in the run when sshd stops answering and when it
+# answers again (the SSH banner). Both look at the ports sshd listens on
+# (sshd -T), port 22 unless sshd_config sets others (B162).
 
 ssh_fallback_port() {
 	local p=${UPGRADE_SSH_FALLBACK_PORT:-}
@@ -3257,15 +3259,20 @@ port_listening() { # PORT
 }
 
 # The local addresses on which sshd listens (its ListenAddress lines, from
-# sshd -T; 0.0.0.0 and [::] as 127.0.0.1 and ::1), to check its banner. Read
-# once, before the release upgrade replaces sshd; without them 127.0.0.1 and ::1.
+# sshd -T; 0.0.0.0 and [::] as 127.0.0.1 and ::1), to check its banner, and
+# its ports (SSH_PORTS). Read once, before the release upgrade replaces sshd;
+# without them 127.0.0.1 and ::1, and port 22.
 ssh_check_hosts() {
 	[ ${#SSH_CHECK_HOSTS[@]} = 0 ] || return 0
-	local key val host
+	local key val host port
 	ensure_run_sshd
 	while read -r key val; do
 		[ "$key" = listenaddress ] || continue
 		host=${val%% *}
+		# sshd -T names each address with its port: Port, or the port given
+		# in ListenAddress. Not always 22 (B162).
+		port=${host##*:}
+		if [[ $port =~ ^[0-9]+$ ]] && [[ " ${SSH_PORTS[*]} " != *" $port "* ]]; then SSH_PORTS+=("$port"); fi
 		host=${host%:*}
 		case "$host" in
 			0.0.0.0) host=127.0.0.1 ;;
@@ -3276,6 +3283,32 @@ ssh_check_hosts() {
 		[[ " ${SSH_CHECK_HOSTS[*]} " == *" $host "* ]] || SSH_CHECK_HOSTS+=("$host")
 	done < <(sshd -T 2> /dev/null < /dev/null || true)
 	[ ${#SSH_CHECK_HOSTS[@]} -gt 0 ] || SSH_CHECK_HOSTS=(127.0.0.1 ::1)
+	[ ${#SSH_PORTS[@]} -gt 0 ] || SSH_PORTS=(22)
+}
+
+# "port 22", or "ports 22 2222", for the messages.
+ssh_ports_text() {
+	if [ ${#SSH_PORTS[@]} -gt 1 ]; then echo "ports ${SSH_PORTS[*]}"; else echo "port ${SSH_PORTS[0]:-22}"; fi
+}
+
+# Is something listening on one of sshd's ports? Builtins only (the watcher).
+ssh_listening() {
+	local p
+	ssh_check_hosts
+	for p in "${SSH_PORTS[@]}"; do
+		if port_listening "$p"; then return 0; fi
+	done
+	return 1
+}
+
+# Does sshd answer (its banner) on one of its ports?
+ssh_answers() {
+	local p
+	ssh_check_hosts
+	for p in "${SSH_PORTS[@]}"; do
+		if ssh_banner "$p"; then return 0; fi
+	done
+	return 1
 }
 
 # /run/sshd (privilege separation), without which sshd -T and the fallback
@@ -3605,19 +3638,19 @@ $(sed 's/^/  /' <<< "$out")"
 		fi
 	fi
 	say "Fallback SSH server on port $port $until: key login for"
-	say "the administrators (${users[*]}), no passwords. If a new login on port 22 fails meanwhile:"
+	say "the administrators (${users[*]}), no passwords. If a new login on $(ssh_ports_text) fails meanwhile:"
 	say "  ssh -p $port ${SUDO_USER:-${users[0]}}@${PRIMARY_HOSTNAME:-$(hostname -f)}"
 	say "(a firewall of the provider must let port $port through). Logins there log as usual."
 }
 
 # Stop the fallback, close its ufw rule and remove its files. "if-ssh-works"
-# leaves it running while port 22 does not answer (that would lock out).
+# leaves it running while sshd does not answer (that would lock out).
 ssh_fallback_stop() { # [quiet|if-ssh-works]
 	local pid alive='' port msgs=() m
 	pid=$(cat "$FALLBACK_DIR/sshd.pid" 2> /dev/null || true)
 	if [[ $pid =~ ^[0-9]+$ ]] && [ "$(readlink "/proc/$pid/exe" 2> /dev/null || true)" = "$FALLBACK_DIR/sshd" ]; then alive=1; fi
-	if [ "${1:-}" = if-ssh-works ] && [ -n "$alive" ] && ! ssh_banner 22; then
-		warn "SSH on port 22 does not answer. The fallback SSH server on port $(ssh_fallback_port) keeps running
+	if [ "${1:-}" = if-ssh-works ] && [ -n "$alive" ] && ! ssh_answers; then
+		warn "SSH on $(ssh_ports_text) does not answer. The fallback SSH server on port $(ssh_fallback_port) keeps running
 until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall rule." || true
 		return 0
 	fi
@@ -3645,8 +3678,8 @@ until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall 
 	return 0
 }
 
-# Watch port 22 while the release upgrade runs (in the background), and keep
-# the fallback's /run/sshd.
+# Watch sshd's ports while the release upgrade runs (in the background), and
+# keep the fallback's /run/sshd.
 ssh_watch_start() {
 	local port
 	port=$(ssh_fallback_port)
@@ -3654,13 +3687,13 @@ ssh_watch_start() {
 	(
 		trap - ERR EXIT
 		set +e
-		p22_down='' since=0 tick=0
+		ssh_down='' since=0 tick=0 ports=$(ssh_ports_text)
 		# Builtins only where it loops: the release upgrade replaces date and
 		# sleep (coreutils). read -t on a pipe that never delivers is the pause.
 		exec {pause_fd}<> <(:)
 		while :; do
 			# Every 2 s: until /run/sshd is back, new logins on the fallback
-			# fail (B112). Port 22 every 10 s.
+			# fail (B112). sshd's ports every 10 s.
 			if [ -f "$FALLBACK_DIR/sshd.pid" ] && [ ! -d /run/sshd ] && [ ! -L /run/sshd ]; then
 				mkdir -m 0755 /run/sshd 2> /dev/null
 			fi
@@ -3669,17 +3702,17 @@ ssh_watch_start() {
 				read -r -t 2 -u "$pause_fd" _
 				continue
 			fi
-			if [ -z "$p22_down" ] && ! port_listening 22; then
-				p22_down=1 since=$SECONDS
-				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on port 22: new logins fail until\n' -1
+			if [ -z "$ssh_down" ] && ! ssh_listening; then
+				ssh_down=1 since=$SECONDS
+				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on %s: new logins fail until\n' -1 "$ports"
 				if [ -f "$FALLBACK_DIR/sshd.pid" ]; then
 					echo "  it is back (usually 5-45 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
 				else
 					echo "  it is back (usually 5-45 minutes). Open connections stay. Do not reboot."
 				fi
-			elif [ -n "$p22_down" ] && port_listening 22 && ssh_banner 22; then
-				p22_down=
-				printf '\n%(%H:%M:%S)T SSH on port 22 answers again (after %d min): new logins work.\n' -1 $(((SECONDS - since + 59) / 60))
+			elif [ -n "$ssh_down" ] && ssh_listening && ssh_answers; then
+				ssh_down=
+				printf '\n%(%H:%M:%S)T SSH on %s answers again (after %d min): new logins work.\n' -1 "$ports" $(((SECONDS - since + 59) / 60))
 			fi
 			read -r -t 2 -u "$pause_fd" _
 		done
