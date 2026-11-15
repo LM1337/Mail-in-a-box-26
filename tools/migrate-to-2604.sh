@@ -56,7 +56,11 @@ MARKER=.migrate-to-2604
 # Files that a copy replaces or deletes on this machine after it already ran
 # as the mail server are kept below $STORAGE_ROOT/$OVERWRITTEN (same file system).
 OVERWRITTEN=.migrate-overwritten
-PARTIAL_DIR=.rsync-partial
+# rsync keeps interrupted files in a directory of this name next to them, and
+# leaves out (and keeps) every directory of this name at any depth: a name of
+# this tool's own, so that no mail folder (Maildir++ ".rsync-partial") or
+# Nextcloud folder is skipped (B164).
+PARTIAL_DIR=.migrate-to-2604-partial
 # File owners that this machine does not know yet are parked at old ID + ID_OFFSET
 # until setup has created the system users (see phase_prepare / phase_ownership).
 ID_OFFSET=2000000000
@@ -74,7 +78,10 @@ OLD_NSD_SAVE=/root/migrate-to-2604-nsd-orig
 TMUX_SESSION=migrate-2604
 # The environment variables this script and setup read (passed into that
 # session); SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
-MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
+# PROBE_ADDRESS: setup keeps it in /etc/mailinabox.conf; DISABLE_FIREWALL:
+# setup leaves ufw alone (B153, as in tools/upgrade-in-place-to-2604.sh).
+MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK FTS NEXTCLOUD_SHARE_SCOPE FAVICON
+	PROBE_ADDRESS DISABLE_FIREWALL)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
@@ -93,6 +100,7 @@ LOCAL_UNITS=(cron.service mailinabox.service nginx.service "php$PHP_VER-fpm.serv
 declare -A OLD=() OLDFP=() NEWFP=() STATE_MEM=()
 SSH_ARGS=()
 SSH_TARGET=
+RSYNC_TARGET=
 NET_BLOCKERS=()
 CHECK_BLOCKERS=()
 VERIFY_PROBLEMS=()
@@ -134,6 +142,10 @@ section() {
 	echo "$*"
 	echo "-----------------------------------------------"
 }
+# Text from the old box, or from processes of other accounts here, for the
+# terminal and the reports: control characters other than tab become "?", so
+# that it cannot send escape sequences to the terminal (B154).
+printable() { sed 's/[^[:print:][:blank:]]/?/g'; }
 human() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "${1:-0} bytes"; }
 fmt_dur() { # seconds -> "7 min" / "2 h 05 min"
 	local m=$(((${1:-0} + 59) / 60))
@@ -662,8 +674,13 @@ ssh_init() {
 		OLD_USER=${FROM%%@*}
 		OLD_HOST=${FROM#*@}
 	fi
+	# An IPv6 address: ssh takes it without brackets (it does not remove
+	# them), rsync's HOST:PATH only in brackets (B167).
+	if [[ $OLD_HOST == \[*\] ]]; then OLD_HOST=${OLD_HOST:1:-1}; fi
 	[ -n "$OLD_HOST" ] || die "--from needs a host name."
 	SSH_TARGET="$OLD_USER@$OLD_HOST"
+	RSYNC_TARGET=$SSH_TARGET
+	if [[ $OLD_HOST == *:* ]]; then RSYNC_TARGET="$OLD_USER@[$OLD_HOST]"; fi
 
 	local ctl=$STATE_DIR
 	if [ -n "$CHECK_ONLY" ]; then ctl=$CHECK_TMP; fi
@@ -759,6 +776,83 @@ load_kv() {
 	while IFS='=' read -r k v; do
 		# shellcheck disable=SC2004 # associative array: the key must be expanded
 		if [[ $k =~ ^[A-Z][A-Z0-9_]*$ ]]; then _arr[$k]=$v; fi
+	done
+}
+
+# The forms of a host name, of addresses and of a systemd unit name.
+HOSTNAME_FORM='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+IPV4_FORM='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+IPV6_FORM='^[0-9A-Fa-f.:]*:[0-9A-Fa-f.:]*$'
+UNIT_FORM='[-A-Za-z0-9:_.@\\]+'
+
+# An absolute path of letters, digits and . _ - / without . or .. in it, not /.
+storage_root_ok() {
+	[[ $1 =~ ^/[A-Za-z0-9._/-]+$ && $1 =~ [^/] && ! $1 =~ (^|/)\.\.?(/|$) ]]
+}
+
+# The values that the scripts below report about the old box, and the form each
+# must have (B154). The old box may be the very reason for the move (broken
+# into), and its values are used here as root: in arithmetic (where bash runs a
+# $(...) found in a value), in /etc/mailinabox.conf (which setup sources), in
+# paths and in commands. Returns 0 for the right form, 3 for a key that no
+# script reports, 4 for a value that is only shown or compared (any form; its
+# control characters are replaced), anything else for a wrong form.
+old_value_ok() { # KEY VALUE
+	local v=$2 units="^($UNIT_FORM( $UNIT_FORM)*)?\$"
+	case "$1" in
+		EPOCH | NC_DB_BYTES | POSTQUEUE | QUEUE_TOTAL | QUEUE_LOCAL | QUEUE_REMOTE | SIZE_TOTAL | SIZE_OWNCLOUD_BACKUP \
+			| SIZE_BACKUP_CACHE | SIZE_BACKUP_ENCRYPTED | FILES_TOTAL | FILES_OWNCLOUD)
+			[[ $v =~ ^(0|[1-9][0-9]{0,17})?$ ]] ;;
+		HAS_CONF | NC_MAINTENANCE | NC_APPSTORE | BACKUP_RUNNING | APT_BUSY | HAS_BACKUP_SSH_KEY | HAS_ZPUSH | HAS_MUNIN)
+			[[ $v =~ ^[01]?$ ]] ;;
+		MACHINE_ID) [[ $v =~ ^[A-Za-z0-9]*$ ]] ;;
+		NC_VERSION) [[ $v =~ ^[0-9.]*$ ]] ;;
+		# A path below /usr/share/zoneinfo, given to timedatectl.
+		TIMEZONE) [[ $v =~ ^([A-Za-z0-9_][A-Za-z0-9_+.-]*(/[A-Za-z0-9_][A-Za-z0-9_+.-]*)*)?$ ]] ;;
+		ACTIVE_UNITS) [[ $v =~ $units ]] ;;
+		CONF_STORAGE_ROOT) [ -z "$v" ] || storage_root_ok "$v" ;;
+		CONF_STORAGE_USER) [[ $v =~ ^([a-z_][a-z0-9_-]{0,31})?$ ]] ;;
+		CONF_PRIMARY_HOSTNAME) [ -z "$v" ] || [[ $v =~ $HOSTNAME_FORM ]] ;;
+		CONF_MTA_STS_MODE) [[ $v =~ ^(enforce|testing|none)?$ ]] ;;
+		# FINGERPRINT_SCRIPT's counts and key fingerprints as well: compare_fingerprints
+		# only does arithmetic on them after checking that they are numbers.
+		OS_ID | OS_VERSION | NTP_SYNC | RSYNC_VERSION | PHP_VERSIONS | MIAB_DIR | MIAB_VERSION | NC_EXTRA_APPS \
+			| BACKUP_TARGET | CONF_PUBLIC_IP | CONF_PUBLIC_IPV6 | USERS | ALIASES | MAILBOXES | MESSAGES | SIEVE_SCRIPTS \
+			| DKIM_KEY | DNSSEC_KEYS | TLS_KEY | BACKUP_KEY | LE_ACCOUNTS | BAYES_SPAM | BAYES_HAM | NC_ACCOUNTS | NC_CARDS \
+			| NC_EVENTS)
+			return 4 ;;
+		*) return 3 ;;
+	esac
+}
+
+# Check the values of the old box in the associative array named by $1 right
+# after load_kv, and stop at a value of the wrong form. Keys that no script
+# reports (e.g. other settings of the old /etc/mailinabox.conf) are dropped,
+# so that nothing uses them unchecked. In values that are only shown, control
+# characters (terminal escapes) become "?".
+check_old_values() { # ARRAY
+	local -n _vals=$1
+	local k v rc what
+	for k in "${!_vals[@]}"; do
+		v=${_vals[$k]}
+		rc=0
+		old_value_ok "$k" "$v" || rc=$?
+		case "$rc" in
+			0) ;;
+			3) unset "_vals[$k]" ;;
+			4)
+				# shellcheck disable=SC2004 # associative array: the key must be expanded
+				_vals[$k]=${v//[[:cntrl:]]/?}
+				;;
+			*)
+				what=$k
+				if [[ $k == CONF_* ]]; then what="${k#CONF_} in its /etc/mailinabox.conf"; fi
+				die "The old box reported a value of an unexpected form for $what: $(printf '%q' "$v")
+Values from the old box are used here as root (in calculations, in /etc/mailinabox.conf,
+in paths and commands), so only the form that Mail-in-a-Box itself gives is taken.
+Check the old box (a setting: correct it there) and run the command again."
+				;;
+		esac
 	done
 }
 
@@ -875,8 +969,11 @@ EOF
 )"
 
 # Size and number of files of $STORAGE_ROOT and of the parts that may be left
-# out. Slow on big boxes.
+# out. Slow on big boxes. A $STORAGE_ROOT that is a symbolic link (to another
+# volume) is measured where it points: du does not follow a link it is given
+# (B163).
 SIZE_SCRIPT=$(cat <<'EOF'
+r=$(readlink -f -- "$SR") && [ -n "$r" ] && SR=$r
 sz() { if [ -e "$1" ]; then du -s -B1 "$1" 2> /dev/null | cut -f1; else echo 0; fi; }
 nf() { if [ -e "$1" ]; then du -s --inodes "$1" 2> /dev/null | cut -f1; else echo 0; fi; }
 echo "SIZE_TOTAL=$(sz "$SR")"
@@ -924,7 +1021,10 @@ EOF
 # Processes that still use $SR: a file open there, the working directory there
 # (interactive shells excepted), or a known job (backup, Nextcloud cron, ...).
 # cron.service has KillMode=process, so stopping cron does not end its jobs.
+# /proc/PID/fd and cwd show resolved paths: a $SR that is a symbolic link is
+# resolved first (B163).
 QUIET_SCRIPT=$(cat <<'EOF'
+r=$(readlink -f -- "$SR") && [ -n "$r" ] && SR=$r
 pat='cron\.php|daily_tasks|management/backup\.py|/usr/bin/duplicity|sa-learn|owncloud/occ'
 {
 	find /proc/[0-9]*/fd -maxdepth 1 \( -lname "$SR" -o -lname "$SR/*" \) 2> /dev/null | cut -d/ -f3 | sed 's/$/ 1fd/'
@@ -1113,9 +1213,18 @@ def visit(path):
 	if (u, g) != (st.st_uid, st.st_gid):
 		try:
 			os.chown(path, u, g, follow_symlinks=False)
-			# chown clears setuid/setgid bits, put them back.
-			if not stat.S_ISLNK(st.st_mode) and st.st_mode & (stat.S_ISUID | stat.S_ISGID):
-				os.chmod(path, stat.S_IMODE(st.st_mode))
+			# chown clears setuid/setgid bits, put them back: through a descriptor
+			# of the file that lstat saw (device and inode), as a link put into
+			# the path meanwhile would be followed by a chmod by path (B166).
+			if (stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode)) and st.st_mode & (stat.S_ISUID | stat.S_ISGID):
+				fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
+				try:
+					fst = os.fstat(fd)
+					if (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+						raise OSError("it changed while it was looked at, mode not restored")
+					os.fchmod(fd, stat.S_IMODE(st.st_mode))
+				finally:
+					os.close(fd)
 			changed += 1
 		except OSError as e:
 			errors += 1
@@ -1220,6 +1329,51 @@ if buf.strip():
 	full(buf.decode("utf-8", "replace"))
 if tty and shown:
 	tty.write("\n")
+EOF
+)
+
+# Copies a regular file of the old /etc unpacked in $STATE_DIR/old-etc (from
+# what the old box sent) to a new file here (B166):
+#   python3 -c "$TAKE_OLD_FILE_PY" BASE RELATIVE_PATH NEW_FILE
+# Nothing on the way is followed (a link there could point to any file of this
+# machine), anything but a regular file with one name is refused, and the mode
+# is at most the old file's and at most 0644. NEW_FILE must not exist.
+TAKE_OLD_FILE_PY=$(cat <<'EOF'
+import os, stat, sys
+
+base, rel, new = sys.argv[1:4]
+
+def refuse(why):
+	print("WARNING: %s of the old box is not taken over: %s." % (new, why), file=sys.stderr)
+	sys.exit(1)
+
+parts = rel.split("/")
+fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+try:
+	for p in parts[:-1]:
+		nfd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+		os.close(fd)
+		fd = nfd
+	st = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+	if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+		refuse("not a regular file with one name")
+	src = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=fd)
+except OSError as e:
+	refuse("not reached without following a link (%s)" % e.strerror)
+finally:
+	os.close(fd)
+fst = os.fstat(src)
+if (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+	refuse("changed while it was read")
+mode = stat.S_IMODE(fst.st_mode) & 0o644
+out = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+os.fchmod(out, mode)
+with os.fdopen(src, "rb") as i, os.fdopen(out, "wb") as o:
+	while True:
+		b = i.read(65536)
+		if not b:
+			break
+		o.write(b)
 EOF
 )
 
@@ -1467,10 +1621,12 @@ Move it away (or use an empty disk) and run the command again."
 }
 
 # The ownership placeholders need 32-bit user IDs (not in some containers).
+# chown -h: another account that can write in the directory could have put a
+# link in place of the test file (B166).
 check_big_ids() {
 	local t
 	t=$(mktemp "$1/.migrate-idtest.XXXXXX")
-	if ! chown "$((ID_OFFSET + 1)):$((ID_OFFSET + 1))" "$t" 2> /dev/null; then
+	if ! chown -h "$((ID_OFFSET + 1)):$((ID_OFFSET + 1))" "$t" 2> /dev/null; then
 		rm -f "$t"
 		blocker "The file system of $1 does not accept large user IDs (a container?).
 Use a virtual machine or a real server as the new box."
@@ -1479,20 +1635,31 @@ Use a virtual machine or a real server as the new box."
 	rm -f "$t"
 }
 
+# Write the marker into SR (B166). SR belongs to the storage user (after a
+# copy, to whatever account has the old box's user ID here), who could put a
+# link to another file in place of the marker for root to write through.
+# tools/write_conf.py follows no link in a directory that another account may
+# write and replaces the file by a rename.
+write_marker() { # SR OWNER
+	printf '%s\n' "$2" | python3 -I "$MIAB_DIR/tools/write_conf.py" "$1/$MARKER" 600 \
+		|| die "Could not write the marker $1/$MARKER (see above)."
+}
+
 claim_target() {
 	local sr=$1 owner=$2
 	check_target "$sr" "$owner"
 	mkdir -p "$sr"
-	echo "$owner" > "$sr/$MARKER"
-	chmod 600 "$sr/$MARKER"
+	write_marker "$sr" "$owner"
 	state_set TARGET_OWNER "$owner"
 	check_big_ids "$sr"
 }
 
 detect_ip() { # 4|6
-	local ip
+	local ip form=$IPV4_FORM
+	if [ "$1" = 6 ]; then form=$IPV6_FORM; fi
 	ip=$(curl -"$1" --fail --silent --max-time 15 icanhazip.com 2> /dev/null || true)
-	if [ -z "$ip" ]; then
+	# The web service's answer only counts as an address (B154).
+	if ! [[ $ip =~ $form ]]; then
 		if [ "$1" = 4 ]; then
 			ip=$(ip -4 route get 1.1.1.1 2> /dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
 		else
@@ -1524,6 +1691,19 @@ choose_new_settings() {
 	NEW_PRIVATE_IP=${OPT_PRIVATE_IP:-$(state_get NEW_PRIVATE_IP)}
 	NEW_PRIVATE_IPV6=${OPT_PRIVATE_IPV6:-$(state_get NEW_PRIVATE_IPV6)}
 
+	# These go into /etc/mailinabox.conf, which setup sources as root; the
+	# hostname may come from the old box or from a restored TLS certificate,
+	# the public addresses from a web service (B154).
+	[[ $NEW_PRIMARY_HOSTNAME =~ $HOSTNAME_FORM ]] \
+		|| die "The hostname $(printf '%q' "$NEW_PRIMARY_HOSTNAME") is not a plain host name (letters, digits, dots and hyphens). Give it with --hostname."
+	[[ $NEW_PUBLIC_IP =~ $IPV4_FORM ]] || die "$(printf '%q' "$NEW_PUBLIC_IP") is not an IPv4 address. Give it with --public-ip."
+	[ -z "$NEW_PRIVATE_IP" ] || [[ $NEW_PRIVATE_IP =~ $IPV4_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PRIVATE_IP") is not an IPv4 address (--private-ip)."
+	[ -z "$NEW_PUBLIC_IPV6" ] || [[ $NEW_PUBLIC_IPV6 =~ $IPV6_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PUBLIC_IPV6") is not an IPv6 address (--public-ipv6)."
+	[ -z "$NEW_PRIVATE_IPV6" ] || [[ $NEW_PRIVATE_IPV6 =~ $IPV6_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PRIVATE_IPV6") is not an IPv6 address (--private-ipv6)."
+
 	state_set NEW_PRIMARY_HOSTNAME "$NEW_PRIMARY_HOSTNAME"
 	state_set NEW_PUBLIC_IP "$NEW_PUBLIC_IP"
 	state_set NEW_PUBLIC_IPV6 "$NEW_PUBLIC_IPV6"
@@ -1531,6 +1711,11 @@ choose_new_settings() {
 	state_set NEW_PRIVATE_IP "$NEW_PRIVATE_IP"
 	state_set NEW_PRIVATE_IPV6 "$NEW_PRIVATE_IPV6"
 }
+
+# The first address of NAME in DNS, or nothing. NAME ends with a dot, which
+# keeps the resolver's search domains out: with a wildcard record there, "not
+# listed" would come back as an address (B76).
+dns_a() { getent -s dns hosts "$1" 2> /dev/null | awk '{print $1; exit}' || true; }
 
 # What setup/network-checks.sh checks (setup runs with SKIP_NETWORK_CHECKS=1
 # here), plus the reverse DNS. Fills NET_BLOCKERS.
@@ -1544,26 +1729,51 @@ network_checks() {
 (e.g. Hetzner Cloud, AWS, Google Cloud, DigitalOcean); ask them to unblock it.")
 	fi
 
-	local a rev ptr
+	# Spamhaus' test entries are asked first (127.0.0.2 and dbltest.com are
+	# always listed): no answer for a name means "not listed" only when the
+	# test entry has one. Without it the lookup failed (no resolver, a timeout,
+	# SERVFAIL), which gives no answer just the same (B165). Spamhaus answers
+	# a query through a public resolver, also for the test entries, with
+	# 127.255.255.254, one over the limit with 127.255.255.255.
+	local a t rev ptr refused
 	if [[ $NEW_PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 		rev=$(echo "$NEW_PUBLIC_IP" | awk -F. '{print $4"."$3"."$2"."$1}')
-		# The trailing dot keeps the resolver's search domains out: with a
-		# wildcard record there, "not listed" would come back as an address.
-		a=$(getent -s dns hosts "$rev.zen.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
-		case "$a" in
-			"") say "Spamhaus ZEN:      $NEW_PUBLIC_IP is not listed" ;;
-			127.255.255.*) say "Spamhaus ZEN:      no answer (Spamhaus refuses public resolvers); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
+		refused="no answer (Spamhaus refuses public resolvers); check $NEW_PUBLIC_IP on https://check.spamhaus.org/"
+		t=$(dns_a 2.0.0.127.zen.spamhaus.org.)
+		case "$t" in
 			127.0.0.*)
-				say "Spamhaus ZEN:      $NEW_PUBLIC_IP is LISTED ($a)"
-				NET_BLOCKERS+=("The IP address $NEW_PUBLIC_IP is listed in the Spamhaus Block List (https://check.spamhaus.org/).
+				a=$(dns_a "$rev.zen.spamhaus.org.")
+				case "$a" in
+					"") say "Spamhaus ZEN:      $NEW_PUBLIC_IP is not listed" ;;
+					127.255.255.*) say "Spamhaus ZEN:      $refused" ;;
+					127.0.0.*)
+						say "Spamhaus ZEN:      $NEW_PUBLIC_IP is LISTED ($a)"
+						NET_BLOCKERS+=("The IP address $NEW_PUBLIC_IP is listed in the Spamhaus Block List (https://check.spamhaus.org/).
 Mail from this machine would be rejected. Get another IP address or have it delisted.")
+						;;
+					*) say "Spamhaus ZEN:      unexpected answer $a" ;;
+				esac
 				;;
-			*) say "Spamhaus ZEN:      unexpected answer $a" ;;
+			127.255.255.*) say "Spamhaus ZEN:      $refused" ;;
+			"") say "Spamhaus ZEN:      could not check (no answer, not even for Spamhaus' test entry 127.0.0.2: no resolver, a timeout or an error); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
+			*) say "Spamhaus ZEN:      could not check (answer $t for Spamhaus' test entry 127.0.0.2); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
 		esac
 	fi
-	a=$(getent -s dns hosts "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
-	case "$a" in
-		127.0.1.*) warn "The hostname $NEW_PRIMARY_HOSTNAME is listed in the Spamhaus Domain Block List ($a), see https://check.spamhaus.org/." ;;
+	refused="no answer (Spamhaus refuses public resolvers); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/"
+	t=$(dns_a dbltest.com.dbl.spamhaus.org.)
+	case "$t" in
+		127.0.1.*)
+			a=$(dns_a "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org.")
+			case "$a" in
+				"") say "Spamhaus DBL:      $NEW_PRIMARY_HOSTNAME is not listed" ;;
+				127.255.255.*) say "Spamhaus DBL:      $refused" ;;
+				127.0.1.*) warn "The hostname $NEW_PRIMARY_HOSTNAME is listed in the Spamhaus Domain Block List ($a), see https://check.spamhaus.org/." ;;
+				*) say "Spamhaus DBL:      unexpected answer $a" ;;
+			esac
+			;;
+		127.255.255.*) say "Spamhaus DBL:      $refused" ;;
+		"") say "Spamhaus DBL:      could not check (no answer, not even for Spamhaus' test entry dbltest.com: no resolver, a timeout or an error); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/" ;;
+		*) say "Spamhaus DBL:      could not check (answer $t for Spamhaus' test entry dbltest.com); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/" ;;
 	esac
 	ptr=
 	if [[ $NEW_PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -1590,6 +1800,7 @@ read_old_facts() {
 	facts=$(remote_bash "$FACTS_SCRIPT") || die "Could not read the facts of the old box."
 	OLD=()
 	load_kv OLD <<< "$facts"
+	check_old_values OLD
 }
 
 read_old_queue() {
@@ -1598,6 +1809,7 @@ read_old_queue() {
 	OLD[QUEUE_LOCAL]=
 	out=$(remote_bash "$QUEUE_SCRIPT" "SR=${OLD[CONF_STORAGE_ROOT]:-}" 2> /dev/null) || return 0
 	load_kv OLD <<< "$out"
+	check_old_values OLD
 }
 
 preflight_old() {
@@ -1704,6 +1916,21 @@ Their data stays in the database. Reinstall them afterwards if they support Next
 	fi
 }
 
+# --check: list $STORAGE_ROOT on the old box with rsync, with the same target,
+# SSH connection and remote command as the copy, which --check does not run
+# otherwise (B167: an IPv6 address passed --check, then rsync failed on it).
+check_rsync_old() {
+	local rc=0
+	command -v rsync > /dev/null || return 0     # installed by the migration
+	[ -n "${OLD[RSYNC_VERSION]:-}" ] || return 0 # a blocker already
+	rsync --list-only -e "$RSYNC_RSH" "--rsync-path=$RSYNC_PATH" "$RSYNC_TARGET:$STORAGE_ROOT/" > /dev/null || rc=$?
+	if [ "$rc" = 0 ]; then
+		say "rsync:             works ($RSYNC_TARGET:$STORAGE_ROOT/)"
+	else
+		blocker "rsync could not list $STORAGE_ROOT on the old box (exit code $rc, see above); the copy uses the same command."
+	fi
+}
+
 check_space() {
 	local sr=$1
 	if [ -z "$(state_get SIZE_TOTAL)" ]; then
@@ -1712,6 +1939,7 @@ check_space() {
 		out=$(remote_bash "$SIZE_SCRIPT" "SR=$sr") || die "Could not measure $sr on the old box."
 		local -A S=()
 		load_kv S <<< "$out"
+		check_old_values S
 		state_set SIZE_TOTAL "${S[SIZE_TOTAL]:-0}"
 		state_set SIZE_OWNCLOUD_BACKUP "${S[SIZE_OWNCLOUD_BACKUP]:-0}"
 		state_set SIZE_BACKUP_CACHE "${S[SIZE_BACKUP_CACHE]:-0}"
@@ -1834,7 +2062,7 @@ show_plan_ssh() {
 	say "Old box:   $SSH_TARGET  ${OLD[CONF_PUBLIC_IP]:-} ${OLD[CONF_PUBLIC_IPV6]:-}"
 	say "New box:   this machine  $NEW_PUBLIC_IP ${NEW_PUBLIC_IPV6:-}"
 	say "Hostname:  $NEW_PRIMARY_HOSTNAME"
-	say "Data:      $SSH_TARGET:$STORAGE_ROOT -> $STORAGE_ROOT"
+	say "Data:      $RSYNC_TARGET:$STORAGE_ROOT -> $STORAGE_ROOT"
 	if [ "$NEW_PRIMARY_HOSTNAME" != "${OLD[CONF_PRIMARY_HOSTNAME]:-}" ]; then
 		warn "The hostname changes from ${OLD[CONF_PRIMARY_HOSTNAME]:-} to $NEW_PRIMARY_HOSTNAME.
 Then MX/NS records, the TLS certificate and all clients must be changed as well."
@@ -1868,7 +2096,7 @@ wait_quiet() {
 		else
 			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT") || die "Could not check the processes on this machine."
 		fi
-		out=$(grep '^BUSY ' <<< "$out" | sed 's/^BUSY /  /' || true)
+		out=$(grep '^BUSY ' <<< "$out" | sed 's/^BUSY /  /' | printable || true)
 		if [ -z "$out" ]; then
 			if [ "$shown" = 1 ]; then say "Nothing $label uses $STORAGE_ROOT any more."; fi
 			return 0
@@ -1891,7 +2119,7 @@ wait_quiet() {
 				if [ -n "$pids" ]; then kill -KILL $pids 2> /dev/null || true; fi
 				sleep 2
 			fi
-			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' || true)
+			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' | printable || true)
 			if [ -n "$out" ]; then
 				warn "These processes on this machine still use $STORAGE_ROOT (PID, why, command):
 $out
@@ -1914,7 +2142,8 @@ then run the command again."
 	done
 }
 
-backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT"; }
+# Only numbers count as PIDs of the old box (B154).
+backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT" | { grep -E '^[0-9]+$' || true; }; }
 
 # A Mail-in-a-Box backup that is running (the nightly one starts at 01:04,
 # /etc/cron.d/mailinabox-nightly): wait until it has finished, at most
@@ -2027,11 +2256,24 @@ local_needs_quiesce() { [ "$(state_get CONF_WRITTEN)" = 1 ] || [ -f /etc/mailina
 # The state of the units stopped on the old box: OLD_ACTIVE_NOW (running
 # again) and OLD_STAMPS_NOW (unit=last start time).
 old_status() {
-	local out kind u v
+	local out kind u v units
 	OLD_ACTIVE_NOW='' OLD_STAMPS_NOW=''
-	out=$(remote_bash "$OLD_STATUS_SCRIPT" "UNITS=$(state_get OLD_SERVICES)") \
+	units=$(state_get OLD_SERVICES)
+	out=$(remote_bash "$OLD_STATUS_SCRIPT" "UNITS=$units") \
 		|| die "Could not read the state of the services on the old box."
 	while read -r kind u v; do
+		# Only the units asked about, and a number for the start time (B154).
+		case "$kind" in
+			ACTIVE | STAMP)
+				case " $units " in
+					*" $u "*) ;;
+					*) die "The old box reported the state of a unit it was not asked about: $(printf '%q' "$u")" ;;
+				esac
+				if [ "$kind" = STAMP ] && ! [[ $v =~ ^[0-9]*$ ]]; then
+					die "The old box reported a start time of an unexpected form for $u: $(printf '%q' "$v")"
+				fi
+				;;
+		esac
 		case "$kind" in
 			ACTIVE) OLD_ACTIVE_NOW="$OLD_ACTIVE_NOW $u" ;;
 			STAMP) OLD_STAMPS_NOW="$OLD_STAMPS_NOW $u=$v" ;;
@@ -2065,7 +2307,7 @@ stop_old_units() {
 		die "Could not stop all of these on the old box: $unit_list"
 	fi
 	if grep -q '^NOMASK ' <<< "$out"; then
-		warn "Could not mask on the old box (unit file in /etc/systemd/system?): $(sed -n 's/^NOMASK //p' <<< "$out" | tr '\n' ' ')
+		warn "Could not mask on the old box (unit file in /etc/systemd/system?): $(sed -n 's/^NOMASK //p' <<< "$out" | printable | tr '\n' ' ')
 They are stopped, but something could start them again; the final copy checks for that."
 	fi
 	old_status
@@ -2119,7 +2361,7 @@ run_rsync() { # live|final
 			extra=(--backup "--backup-dir=$bdir")
 		fi
 		set +e
-		rsync "${args[@]}" "${extra[@]}" "$SSH_TARGET:$STORAGE_ROOT/" "$STORAGE_ROOT/" 2>&1 \
+		rsync "${args[@]}" "${extra[@]}" "$RSYNC_TARGET:$STORAGE_ROOT/" "$STORAGE_ROOT/" 2>&1 \
 			| python3 -I -c "$PROGRESS_PY" "$STATE_DIR/rsync-$mode.txt" "$LOG_FILE"
 		st=("${PIPESTATUS[@]}")
 		set -e
@@ -2165,7 +2407,10 @@ run_rsync() { # live|final
 	# The data here is a copy of the old box again.
 	state_set NEW_RAN_LIVE ""
 	if [ -n "$clean_partial" ]; then
-		find "$STORAGE_ROOT" -xdev -type d -name "$PARTIAL_DIR" -prune -exec rm -rf {} + 2> /dev/null || true
+		# Only rsync's own (root's) directories, removed from within the directory
+		# that holds them: other accounts can write in $STORAGE_ROOT and could put
+		# a link in the path between find and rm (B164).
+		find "$STORAGE_ROOT" -xdev -type d -name "$PARTIAL_DIR" -user root -prune -execdir rm -rf -- {} + 2> /dev/null || true
 	fi
 }
 
@@ -2194,7 +2439,7 @@ handle_old_queue() {
 		[ "${OLD[QUEUE_LOCAL]:-1}" != 0 ] || break
 	done
 	[ "${OLD[QUEUE_TOTAL]:-0}" -gt 0 ] 2> /dev/null || return 0
-	remote "postqueue -p" > "$STATE_DIR/old-postqueue.txt" 2> /dev/null || true
+	remote "postqueue -p" 2> /dev/null | printable > "$STATE_DIR/old-postqueue.txt" || true
 	state_set OLD_QUEUE_SAVED "${OLD[QUEUE_TOTAL]}"
 	say "Still in the queue: ${OLD[QUEUE_TOTAL]} messages, ${OLD[QUEUE_LOCAL]:-?} of them for mailboxes of the box."
 	say "The listing is in $STATE_DIR/old-postqueue.txt. The queue is not migrated; it stays on the old box."
@@ -2301,7 +2546,15 @@ write_mailinabox_conf() {
 	# file with the IPs given in the environment (see run_setup). The other
 	# settings of a file from an earlier run (FTS=off or NEXTCLOUD_SHARE_SCOPE=all,
 	# set after a rehearsal) are kept: setup reads them as its defaults.
-	local keep=""
+	# setup/start.sh sources the file as root, and management/utils.py takes
+	# each value as it stands (no quotes to remove): only values that need no
+	# quoting are written (B154).
+	local keep="" v
+	for v in "$STORAGE_USER" "$STORAGE_ROOT" "$NEW_PRIMARY_HOSTNAME" "$NEW_PUBLIC_IP" "$NEW_PUBLIC_IPV6" \
+		"$NEW_PRIVATE_IP" "$NEW_PRIVATE_IPV6" "$MTA_STS_MODE"; do
+		[[ $v =~ ^[A-Za-z0-9._:/-]*$ ]] \
+			|| die "Not writing $(printf '%q' "$v") into /etc/mailinabox.conf: setup sources that file, so its values may only have letters, digits and . _ : / -"
+	done
 	if [ -f /etc/mailinabox.conf ]; then
 		keep=$(grep -E '^[A-Z_][A-Z0-9_]*=' /etc/mailinabox.conf \
 			| grep -vE '^(STORAGE_USER|STORAGE_ROOT|PRIMARY_HOSTNAME|PUBLIC_IP|PUBLIC_IPV6|PRIVATE_IP|PRIVATE_IPV6|MTA_STS_MODE)=' || true)
@@ -2459,10 +2712,12 @@ prepare_machine() {
 
 	# The greylisting exceptions are a fork feature that lives in /etc
 	# (setup/mail-postfix.sh reads the file). Not in a backup: only over SSH.
+	# Only a regular file, reached without following a link (B166).
 	local gb=/etc/postfix/greylist_bypass_senders
-	if [ -f "$STATE_DIR/old-etc$gb" ] && [ ! -e "$gb" ]; then
+	if { [ -e "$STATE_DIR/old-etc$gb" ] || [ -L "$STATE_DIR/old-etc$gb" ]; } && [ ! -e "$gb" ] && [ ! -L "$gb" ]; then
 		say "Taking over the greylisting exceptions $gb from the old box."
-		install -D -m 644 "$STATE_DIR/old-etc$gb" "$gb"
+		mkdir -p "$(dirname "$gb")"
+		python3 -I -c "$TAKE_OLD_FILE_PY" "$STATE_DIR/old-etc" "${gb#/}" "$gb" || true
 	fi
 
 	if [ "$(state_get SOURCE_MODE)" = ssh ]; then
@@ -2547,15 +2802,22 @@ map_owners() {
 # --from-backup: there is no list of the old users. Fix what belongs to the
 # storage user and report every owner that setup does not use.
 fix_restored_owners() {
-	local su sg f
+	local su sg f e
 	su=$(id -u "$STORAGE_USER")
 	sg=$(id -g "$STORAGE_USER")
 	chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT"
-	if [ -f "$STORAGE_ROOT/mailinabox.version" ]; then chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"; fi
-	if [ -d "$STORAGE_ROOT/www" ]; then chown -R "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/www"; fi
+	# $STORAGE_ROOT belongs to the storage user, who could put links there: below
+	# it no link is followed (chown -h), and in a tree each entry is changed from
+	# within the directory that holds it (find -execdir), so that a link put
+	# into the path meanwhile is not followed either (B166).
+	if [ -f "$STORAGE_ROOT/mailinabox.version" ]; then chown -h "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"; fi
+	if [ -d "$STORAGE_ROOT/www" ]; then find "$STORAGE_ROOT/www" -execdir chown -h "$STORAGE_USER:$STORAGE_USER" -- {} +; fi
 	# The storage user's dotfiles (its home directory is $STORAGE_ROOT).
-	find "$STORAGE_ROOT" -mindepth 1 -maxdepth 1 -name '.*' ! -name "$MARKER" ! -name "$OVERWRITTEN" \
-		-exec chown -R "$STORAGE_USER:$STORAGE_USER" {} + 2> /dev/null || true
+	for e in "$STORAGE_ROOT"/.[!.]* "$STORAGE_ROOT"/..?*; do
+		[ -e "$e" ] || [ -L "$e" ] || continue
+		case "${e##*/}" in "$MARKER" | "$OVERWRITTEN") continue ;; esac
+		find "$e" -execdir chown -h "$STORAGE_USER:$STORAGE_USER" -- {} + 2> /dev/null || true
+	done
 
 	f=$STATE_DIR/foreign-owners.txt
 	find "$STORAGE_ROOT" -xdev \( -nouser -o -nogroup \
@@ -2592,14 +2854,14 @@ phase_extras() {
 	if [ "${OLD[HAS_ZPUSH]:-0}" = 1 ]; then
 		# Same Z-Push 2.7 state format; without it every phone does a full resync.
 		mkdir -p /var/lib/z-push
-		rsync "${args[@]}" "$SSH_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
+		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
 		chown -R www-data:www-data /var/lib/z-push
 		chmod 750 /var/lib/z-push
 		say "Z-Push state copied."
 	fi
 	if [ "${OLD[HAS_MUNIN]:-0}" = 1 ] && id munin > /dev/null 2>&1; then
 		mkdir -p /var/lib/munin
-		rsync "${args[@]}" "$SSH_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
+		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
 		chown -R munin:munin /var/lib/munin
 		say "munin graphs copied."
 	fi
@@ -2687,12 +2949,22 @@ phase_restore() {
 their credentials in the environment; see README-fork.md for the manual way."
 
 	# Backups leave out $STORAGE_ROOT/backup. Put the key back so that this box
-	# can read the old backups and continue them.
-	install -d -m 700 "$STORAGE_ROOT/backup"
-	if [ ! -f "$STORAGE_ROOT/backup/secret_key.txt" ]; then
-		install -m 600 "$BACKUP_KEY" "$STORAGE_ROOT/backup/secret_key.txt"
+	# can read the old backups and continue them. $STORAGE_ROOT belongs to the
+	# storage user: the key goes only into a checked directory of root's own,
+	# through its descriptor (B166, as B117).
+	if [ ! -e "$STORAGE_ROOT/backup" ] && [ ! -L "$STORAGE_ROOT/backup" ]; then
+		mkdir -m 700 "$STORAGE_ROOT/backup" 2> /dev/null || true
 	fi
-	state_get TARGET_OWNER > "$STORAGE_ROOT/$MARKER"
+	if backup_dir_open; then
+		if [ ! -f "$BACKUP_DIR/secret_key.txt" ]; then
+			install -m 600 "$BACKUP_KEY" "$BACKUP_DIR/secret_key.txt"
+		fi
+		backup_dir_close
+	else
+		warn "$BACKUP_DIR_WHY: the backup key was not put back. Check it, then copy $BACKUP_KEY
+to $STORAGE_ROOT/backup/secret_key.txt (mode 0600, in a directory of root's own) yourself."
+	fi
+	write_marker "$STORAGE_ROOT" "$(state_get TARGET_OWNER)"
 	phase_mark_done restore
 }
 
@@ -2712,7 +2984,9 @@ preflight_backup() {
 	STORAGE_USER=$(state_get STORAGE_USER)
 	STORAGE_USER=${STORAGE_USER:-user-data}
 	MTA_STS_MODE=enforce
-	[[ $STORAGE_ROOT == /* && $STORAGE_ROOT != *" "* ]] || die "--storage-root must be an absolute path without spaces."
+	# It goes into /etc/mailinabox.conf, which setup sources (B154).
+	storage_root_ok "$STORAGE_ROOT" \
+		|| die "--storage-root must be an absolute path of letters, digits and . _ - / (without . or .. in it)."
 	state_set STORAGE_ROOT "$STORAGE_ROOT"
 	state_set STORAGE_USER "$STORAGE_USER"
 	if [ -n "$CHECK_ONLY" ]; then
@@ -2800,7 +3074,8 @@ restriction_items() {
 etc_report() {
 	local out=$STATE_DIR/etc-report.txt old=$STATE_DIR/old-etc gone line
 	[ -d "$old/etc" ] || return 0
-	gone=$(postfix_restrictions_gone "$STATE_DIR/old-postconf.txt")
+	# From the old box: postconf -n, file names, crontab (B154: printable).
+	gone=$(postfix_restrictions_gone "$STATE_DIR/old-postconf.txt" | printable)
 	{
 		echo "Customizations of the old box that are NOT migrated (they live in /etc,"
 		echo "not in $STORAGE_ROOT). The old /etc (as of $(state_get ETC_SAVED_AT)) is in"
@@ -2842,7 +3117,7 @@ etc_report() {
 		echo
 		echo "== Crontab of root on the old box"
 		grep -vE '^[[:space:]]*(#|$)' "$STATE_DIR/old-root-crontab.txt" 2> /dev/null | sed 's/^/  /' || true
-	} > "$out"
+	} | printable > "$out"
 	say "Customizations of the old /etc that were not migrated: $out"
 	sed -n '1,80p' "$out"
 	# Restrictions decide which mail is accepted: a lost one is a failed check
@@ -2930,7 +3205,7 @@ next_steps() {
 		say "   * Zones with external DNS: change the A/AAAA records of $host (and the ones"
 		say "     listed in the admin panel under System > External DNS) to the new IPs. That"
 		say "     takes effect within their TTL."
-		sec=$(secondary_nameservers || true)
+		sec=$({ secondary_nameservers || true; } | printable)
 		if [ -n "$sec" ]; then
 			say "   * Custom secondary nameservers are set: $sec"
 			say "     Change the primary (master) IP at that DNS provider to $NEW_PUBLIC_IP ${NEW_PUBLIC_IPV6:-}."
@@ -3003,6 +3278,7 @@ phase_verify() {
 	if [ -f "$STATE_DIR/old-fingerprint.txt" ]; then
 		OLDFP=()
 		load_kv OLDFP < "$STATE_DIR/old-fingerprint.txt"
+		check_old_values OLDFP
 		compare_fingerprints
 	else
 		local k
@@ -3252,12 +3528,12 @@ keeps whatever its copy replaces here in $STORAGE_ROOT/$OVERWRITTEN/."
 	ip=$(state_get NEW_PUBLIC_IP)
 	ip6=$(state_get NEW_PUBLIC_IPV6)
 	if { [ -n "$ip" ] && [[ $vt == *"[$ip]"* ]]; } || { [ -n "$ip6" ] && [[ $vt == *"[$ip6]"* ]]; }; then
-		warn "The saved virtual_transport of the old box ($vt) points to this machine; using lmtp:[127.0.0.1]:10025."
+		warn "The saved virtual_transport of the old box ($(printable <<< "$vt")) points to this machine; using lmtp:[127.0.0.1]:10025."
 		vt="lmtp:[127.0.0.1]:10025"
 	fi
 	out=$(remote_bash "$OLD_POSTFIX_RESET_SCRIPT" "VT=$vt") || warn "Could not check Postfix on the old box."
 	if grep -q '^VTFIXED ' <<< "$out"; then
-		warn "virtual_transport on the old box was '$(sed -n 's/^VTFIXED //p' <<< "$out")', set back to '$vt'."
+		warn "virtual_transport on the old box was '$(sed -n 's/^VTFIXED //p' <<< "$out" | printable)', set back to '$(printable <<< "$vt")'."
 	fi
 	if grep -q '^PFSTOPPED' <<< "$out"; then
 		warn "Postfix ran on the old box outside systemd (postfix start); stopped it, systemd starts it now."
@@ -3265,7 +3541,7 @@ keeps whatever its copy replaces here in $STORAGE_ROOT/$OVERWRITTEN/."
 	remote_bash "$OLD_START_SCRIPT" "UNITS=$list" "START=${rev[*]}" \
 		|| die "Could not start the services on the old box. On the old box, run:
   postfix status && postfix stop  # if it was started by hand
-  postconf virtual_transport      # set it back if it points to this machine${vt:+ (old value: $vt)}
+  postconf virtual_transport      # set it back if it points to this machine${vt:+ (old value: $(printable <<< "$vt"))}
   systemctl unmask --runtime $list
   systemctl start ${rev[*]}"
 	# Mail that waited for this machine is delivered on the old box now.
@@ -3544,6 +3820,7 @@ unattended right after the copy."
 	state_set STORAGE_ROOT "$STORAGE_ROOT"
 	state_set STORAGE_USER "$STORAGE_USER"
 	state_set NC_VERSION "${OLD[NC_VERSION]:-}"
+	if [ -n "$CHECK_ONLY" ]; then check_rsync_old; fi
 
 	section "Checking this machine"
 	local key
