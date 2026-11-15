@@ -2847,7 +2847,7 @@ Mail stays offline. When it is offered, run the command again; or go back with -
 # Install a unit that continues the upgrade after the reboot, in a tmux
 # session the operator can attach to (or directly, without tmux).
 install_resume() {
-	local flags cmd
+	local flags cmd v
 	flags=$(state_get RESUME_FLAGS)
 	cmd="$(printf '%q' "$STATE_DIR/$SCRIPT_NAME")${flags:+ $flags} --yes --resumed"
 	{
@@ -2857,8 +2857,16 @@ install_resume() {
 		printf 'SESSION=%q\n' "$TMUX_SESSION"
 		printf 'CMD=%q\n' "$cmd"
 		printf 'export UPGRADE_STATE_DIR=%q\n' "$STATE_DIR"
-		if [ -n "${TAG:-}" ]; then printf 'export TAG=%q\n' "$TAG"; fi
-		if [ -n "${SOURCE:-}" ]; then printf 'export SOURCE=%q\n' "$SOURCE"; fi
+		# All the options given in the environment, not only TAG and SOURCE
+		# (B153): without them the run after the reboot ran setup with its
+		# defaults (FTS, NEXTCLOUD_SHARE_SCOPE, FAVICON, written to
+		# /etc/mailinabox.conf) and built the fallback SSH server of the next
+		# release upgrade for other users. Not UPGRADE_REEXEC: it only marks
+		# the run that reexec_from_clone started.
+		for v in "${MUX_ENV[@]}"; do
+			case "$v" in UPGRADE_STATE_DIR | UPGRADE_REEXEC) continue ;; esac
+			if [ -n "${!v+x}" ]; then printf 'export %s=%q\n' "$v" "${!v}"; fi
+		done
 		cat <<'EOF'
 export HOME=/root TERM=xterm-256color LANG=C.UTF-8 NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
 # In a scope of its own, outside this unit's cgroup: restarting the unit
