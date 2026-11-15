@@ -309,17 +309,18 @@ wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
 (default 7200) how many seconds to wait for a Mail-in-a-Box backup that is
 running (e.g. the nightly one) before anything is stopped.
 
-During each release upgrade the SSH server on port 22 is down for a while
-(5-45 minutes). Meanwhile a fallback SSH server listens on port 1022
-(UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
-administrators (members of the groups sudo and admin, and root if
-PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
-others), on the ListenAddress addresses of sshd and with its
-AllowUsers/AllowGroups/DenyUsers/DenyGroups, PubkeyAuthOptions, ForceCommand
-and ChrootDirectory. With StrictModes (the default) it takes only the key
-files that sshd accepts. It does not start where sshd asks for more than a
-key (AuthenticationMethods) or sshd_config or a file it includes has Match
-blocks. ufw lets its port through only while it runs. The run says when port 22 answers again.
+During each release upgrade the SSH server (port 22, or the ports set in
+sshd_config) is down for a while (5-45 minutes). Meanwhile a fallback SSH
+server listens on port 1022 (UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key
+login only, for the administrators (members of the groups sudo and admin,
+and root if PermitRootLogin allows keys;
+UPGRADE_SSH_FALLBACK_USERS="user ..." names others), on the ListenAddress
+addresses of sshd and with its AllowUsers/AllowGroups/DenyUsers/DenyGroups,
+PubkeyAuthOptions, ForceCommand and ChrootDirectory. With StrictModes (the
+default) it takes only the key files that sshd accepts. It does not start
+where sshd asks for more than a key (AuthenticationMethods) or sshd_config
+or a file it includes has Match blocks. ufw lets its port through only while
+it runs. The run says when the SSH port answers again.
 UPGRADE_SSH_FALLBACK_TEST_SECONDS (default 600) is how long
 --ssh-fallback-test keeps it running.
 EOF
@@ -2133,7 +2134,9 @@ show_plan() {
 	if [ "$v" != 26.04 ]; then
 		n=$((n + 1))
 		say "$n. do-release-upgrade to Ubuntu 26.04, reboot (continues on its own)."
-		say "   During each release upgrade new SSH logins on port 22 fail for a while (in the tests"
+		# Not the port number: reading it (sshd -T) needs /run/sshd, which
+		# --check must not create (B162).
+		say "   During each release upgrade new SSH logins on the SSH port fail for a while (in the tests"
 		say "   19 to 42 minutes from 22.04, 6 to 19 minutes from 24.04), and in the one to 26.04 sudo"
 		say "   is missing for 12 to 37 minutes; open connections stay."
 		if [ "$(ssh_fallback_port)" != off ]; then
@@ -3497,8 +3500,8 @@ owned by $u or root, or others or a group with other members can write it)."
 
 # The authorized keys of USER after AuthorizedKeysFile (relative to the home
 # directory; %h, %u, %U and %% expanded), read as that user. With StrictModes
-# (sshd's default) only from the files that sshd accepts on port 22, so that
-# the fallback lets in no key that sshd refuses there (B115).
+# (sshd's default) only from the files that sshd accepts, so that the
+# fallback lets in no key that sshd refuses (B115).
 user_keys() { # STRICTMODES USER FILES...
 	local strict=$1 u=$2 home uid f
 	shift 2
