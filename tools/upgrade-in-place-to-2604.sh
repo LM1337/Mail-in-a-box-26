@@ -2282,7 +2282,10 @@ offsite_rsync() { # URL FILE... (the first FILE names the stamp)
 	# One command, no shell syntax: restricted shells (e.g. SFTP/rsync-only storage accounts) run it as well.
 	"${ssh[@]}" -- "$userhost" "mkdir -p $dest" < /dev/null || die "Could not create $dest on $userhost."
 	rsync -t --partial -e "$rsh" "$@" "$userhost:$dest/" < /dev/null || die "Could not copy the archive to $userhost:$dest/."
-	out=$(rsync -anc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \
+	# Compared as copied: content (checksums) and times, not the permissions,
+	# owner or group of -a, which the copy does not keep (an account with
+	# umask 077 there gave "differs" for a perfect copy, B168).
+	out=$(rsync -ntc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \
 		|| die "Could not compare the copy on $userhost:$dest/."
 	[ -z "$out" ] || die "The copy on $userhost:$dest/ differs from the archive here:
 $out"
