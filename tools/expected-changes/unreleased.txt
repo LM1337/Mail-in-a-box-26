@@ -5,3 +5,10 @@
 # or when the version after the update has no list of its own. When the
 # release is tagged, rename this file to <version>.txt and start a new,
 # empty unreleased.txt. The format is in any.txt.
+
+nextcloud.txt - ^version: 34\.0\.5\.[0-9]+$ # v78-r2604.2: Nextcloud 34.0.5 to 34.0.6 (setup/nextcloud.sh); the version before, as "occ status" names it
+nextcloud.txt + ^version: 34\.0\.6\.[0-9]+$ # v78-r2604.2: Nextcloud 34.0.6, see the line above
+nextcloud.txt - ^versionstring: 34\.0\.5$ # v78-r2604.2: Nextcloud 34.0.5 to 34.0.6, see above
+nextcloud.txt + ^versionstring: 34\.0\.6$ # v78-r2604.2: Nextcloud 34.0.6, see above
+# Not in the state record: Roundcube 1.7.6, its CardDAV plugin 5.1.5 and
+# Nextcloud's contacts 8.10.0 and calendar 6.6.5.

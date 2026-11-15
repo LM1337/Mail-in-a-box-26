@@ -37,13 +37,13 @@ apt_install \
 # The package hashes are SHA256 (wget_verify still accepts legacy 40-char SHA1). Roundcube
 # publishes SHA256 on https://roundcube.net/download/ and as the GitHub release asset digest,
 # rcmcarddav as the GitHub asset digest. Check them against the hash in this script's error message.
-VERSION=1.7.5
-HASH=93a66c94e3efff7db93187c1c9d7f35546647a3e1e7b9327cc87911564edf9d1
+VERSION=1.7.6
+HASH=0168085bf0bfeeb5d4eca3b9730effbe610dbdb380a68567d292fec51f09db36
 PERSISTENT_LOGIN_VERSION=bde7b6840c7d91de627ea14e81cf4133cbb3c07a # version 5.3
 HTML5_NOTIFIER_VERSION=5d85947e16ea9cac4544c59666fe0ff13ba2a44a # master 2023-06-28 (0.6.4+, newest commit; last tag v0.6.4 is older)
-CARDDAV_VERSION=5.1.4
-CARDDAV_HASH=0ffa55ec6da5671d6c413a27d2511e903cd4e63de03c3e9480038844fa4625eb
-# SHA256 of skins/elastic/images/favicon.ico in Roundcube 1.7.5, for installs
+CARDDAV_VERSION=5.1.5
+CARDDAV_HASH=aea05586822848d9b2f2cdac6b59bdd500d3f93b1b0eeba0295a4aaeb335ad18
+# SHA256 of skins/elastic/images/favicon.ico in Roundcube 1.7.5 and 1.7.6, for installs
 # from before setup recorded it in elastic-favicon.sha256 (see below; a new
 # VERSION is installed again and gets the record).
 ELASTIC_FAVICON_HASH=7b30e499996ec4631848d3509d803d9311f5d71999212f2f4c1ca7af8f24eb69
@@ -184,6 +184,10 @@ $RCM_FAVICON_CONFIG
 EOF
 
 # Configure CardDav
+# Since 5.1.5 the plugin does not download photos that a vCard only references
+# by URI (the server would fetch any address a contact names); its admin
+# setting download_photos turns that on again. It is not set here, so that
+# secure default stays.
 cat > ${RCM_PLUGIN_DIR}/carddav/config.inc.php <<EOF;
 <?php
 /* Do not edit. Written by Mail-in-a-Box. Regenerated on updates. */

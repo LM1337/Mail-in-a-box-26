@@ -22,8 +22,8 @@ echo "Installing Nextcloud (contacts/calendar)..."
 # * The hash is the SHA256 hash of the ZIP package. Nextcloud publishes it next to the download
 #   (https://download.nextcloud.com/server/releases/nextcloud-<ver>.zip.sha256; there is no .sha1).
 #   Check it against the hash this script prints when it doesn't match what is below.
-nextcloud_ver=34.0.5
-nextcloud_hash=d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a
+nextcloud_ver=34.0.6
+nextcloud_hash=ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e
 
 # Nextcloud apps
 # --------------
@@ -39,12 +39,12 @@ nextcloud_hash=d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a
 # (wget_verify still accepts 40-char SHA1 hashes, but don't add new ones.)
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/contacts
-contacts_ver=8.9.2
-contacts_hash=92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5
+contacts_ver=8.10.0
+contacts_hash=035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/calendar
-calendar_ver=6.6.4
-calendar_hash=0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c
+calendar_ver=6.6.5
+calendar_hash=e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/user_external
 # user_external 4.0.0 declares nextcloud min-version=31 max-version=34 and there is no release
@@ -341,8 +341,8 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		# and move nextcloud_ver and the app pins at the top of this file to 35.
 		# if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
 		#	# runs with PHP 8.5
-		#	InstallNextcloud 34.0.5 d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.4 0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
-		#	CURRENT_NEXTCLOUD_VER="34.0.5"
+		#	InstallNextcloud 34.0.6 ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e 8.10.0 035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549 6.6.5 e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+		#	CURRENT_NEXTCLOUD_VER="34.0.6"
 		# fi
 		##
 	fi
