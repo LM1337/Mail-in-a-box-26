@@ -1,4 +1,6 @@
 #!/bin/bash
 # The API key goes to curl as a config line on its standard input (printf is a
 # shell builtin), not on its command line, which every local process can read (B127).
-printf 'user = "%s:"\n' "$(</var/lib/mailinabox/api.key)" | curl -s -K - -d POSTDATA http://127.0.0.1:10222/web/update
+# An HTTP error of the daemon (500: the update failed, 401: the key) is an error
+# of this script, with the daemon's answer shown (--fail-with-body, B159).
+printf 'user = "%s:"\n' "$(</var/lib/mailinabox/api.key)" | curl -sS --fail-with-body -K - -d POSTDATA http://127.0.0.1:10222/web/update

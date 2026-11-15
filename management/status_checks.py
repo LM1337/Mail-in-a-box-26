@@ -337,7 +337,9 @@ def run_network_checks(env, output):
 
 	from ipaddress import IPv6Address
 
-	rev_ip6 = ".".join(reversed(IPv6Address(env['PUBLIC_IPV6']).exploded.split(':')))
+	# A DNSBL wants the 32 nibbles of the address in reverse order, as in
+	# ip6.arpa, not the reversed 16-bit groups (upstream #2617, B144).
+	rev_ip6 = ".".join(reversed(IPv6Address(env['PUBLIC_IPV6']).exploded.replace(':', '')))
 	zen = query_dns(rev_ip6+'.zen.spamhaus.org', 'A', nxdomain=None)
 	evaluate_spamhaus_lookup(env['PUBLIC_IPV6'], 'IPv6', rev_ip6, output, zen)
 
@@ -350,7 +352,10 @@ def evaluate_spamhaus_lookup(lookupaddress, lookuptype, lookupdomain, output, ze
 	elif zen == "[timeout]":
 		output.print_warning(f"""Connection to zen.spamhaus.org timed out. Could not determine whether this box's
 		 	{lookuptype} address is blacklisted. Please try again later.""")
-	elif zen == "[Not Set]":
+	elif zen == "[error]":
+		# The lookup failed (SERVFAIL, REFUSED, no server reached), which is no
+		# answer. This branch tested "[Not Set]", which never comes with
+		# nxdomain=None, so such a failure said "not blacklisted" (B150).
 		output.print_warning(f"""Could not connect to zen.spamhaus.org. Could not determine whether this box's
 			{lookuptype} address is blacklisted. Please try again later.""")
 	elif zen == "127.255.255.252":
@@ -469,7 +474,9 @@ def check_primary_hostname_dns(domain, env, output, dns_domains, dns_zonefiles):
 	# If a DS record is set on the zone containing this domain, check DNSSEC now.
 	has_dnssec = False
 	for zone in dns_domains:
-		if (zone == domain or domain.endswith("." + zone)) and query_dns(zone, "DS", nxdomain=None) is not None:
+		# A failed DS lookup ("[error]") counts as no DS record, as it did
+		# before query_dns told it apart (B150).
+		if (zone == domain or domain.endswith("." + zone)) and query_dns(zone, "DS", nxdomain=None) not in {None, "[error]"}:
 			has_dnssec = True
 			check_dnssec(zone, env, output, dns_zonefiles, is_checking_primary=True)
 
@@ -530,6 +537,10 @@ def check_primary_hostname_dns(domain, env, output, dns_domains, dns_zonefiles):
 			# Omit a warning about it not being set if DNSSEC isn't enabled,
 			# since TLSA shouldn't be used without DNSSEC.
 			output.print_warning("""The DANE TLSA record for incoming mail is not set. This is optional.""")
+	elif tlsa25 in {"[timeout]", "[error]"}:
+		# A lookup that timed out or failed is no record to compare (B150).
+		output.print_warning(f"""Could not check the DANE TLSA record for incoming mail ({tlsa_qname}): the DNS lookup {"timed out" if tlsa25 == "[timeout]" else "failed"}.
+			Please try again later.""")
 	else:
 		output.print_error(f"""The DANE TLSA record for incoming mail ({tlsa_qname}) is not correct. It is '{tlsa25}' but it should be '{tlsa25_expected}'.
 			It may take several hours for public DNS to update after a change.""")
@@ -549,8 +560,9 @@ def check_alias_exists(alias_name, alias, env, output):
 
 def check_dns_zone(domain, env, output, dns_zonefiles):
 	# If a DS record is set at the registrar, check DNSSEC first because it will affect the NS query.
-	# If it is not set, we suggest it last.
-	if query_dns(domain, "DS", nxdomain=None) is not None:
+	# If it is not set, we suggest it last. A failed lookup ("[error]")
+	# counts as not set, as it did before query_dns told it apart (B150).
+	if query_dns(domain, "DS", nxdomain=None) not in {None, "[error]"}:
 		check_dnssec(domain, env, output, dns_zonefiles)
 
 	# We provide a DNS zone for the domain. It should have NS records set up
@@ -591,14 +603,15 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 		for ns in custom_secondary_ns:
 			# We must first resolve the nameserver to an IP address so we can query it.
 			ns_ips = query_dns(ns, "A")
-			if not ns_ips or ns_ips in {'[Not Set]', '[timeout]'}:
+			if not ns_ips or ns_ips in {'[Not Set]', '[timeout]', '[error]'}:
 				output.print_error(f"Secondary nameserver {ns} is not valid (it doesn't resolve to an IP address).")
 				continue
 			# Choose the first IP if nameserver returns multiple
 			ns_ip = ns_ips.split('; ')[0]
 			
-			# No need to check if we could not obtain the SOA record
-			if SOARecord == '[timeout]':
+			# No need to check if we could not obtain the SOA record (B150: nor
+			# when the lookup failed, two failures are no matching records)
+			if SOARecord in {'[timeout]', '[error]'}:
 				checkSOA = False
 			else:			
 				checkSOA = True
@@ -607,7 +620,9 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 			ip = query_dns(domain, "A", at=ns_ip, nxdomain=None)
 			if ip == correct_ip:
 				output.print_ok(f"Secondary nameserver {ns} resolved the domain correctly.")
-			elif ip is None:
+			elif ip is None or ip == '[error]':
+				# '[error]': the nameserver answered REFUSED or SERVFAIL for the
+				# domain, which is "not configured", as before B150.
 				output.print_error(f"Secondary nameserver {ns} is not configured to resolve this domain.")
 				# No need to check SOA record if not configured as nameserver
 				checkSOA = False
@@ -623,7 +638,7 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 
 				if SOARecord == SOASecondary:
 					output.print_ok(f"Secondary nameserver {ns} has consistent SOA record.")
-				elif SOASecondary == '[Not Set]':
+				elif SOASecondary in {'[Not Set]', '[error]'}:
 					output.print_error(f"Secondary nameserver {ns} has no SOA record configured.")
 				elif SOASecondary == '[timeout]':
 					output.print_warning(f"Secondary nameserver {ns} timed out on checking SOA record.")
@@ -640,8 +655,9 @@ def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_
 		output.print_warning(f"""A redirect from 'www.{domain}' has been disabled for this domain because you have set a custom DNS record on the www subdomain.""")
 
 	# Since DNSSEC is optional, if a DS record is NOT set at the registrar suggest it.
-	# (If it was set, we did the check earlier.)
-	if query_dns(domain, "DS", nxdomain=None) is None:
+	# (If it was set, we did the check earlier.) A failed lookup counts as
+	# not set, as in check_dns_zone (B150).
+	if query_dns(domain, "DS", nxdomain=None) in {None, "[error]"}:
 		check_dnssec(domain, env, output, dns_zonefiles)
 
 
@@ -755,14 +771,20 @@ def check_mail_domain(domain, env, output):
 	recommended_mx = "10 " + env['PRIMARY_HOSTNAME']
 	mx = query_dns(domain, "MX", nxdomain=None)
 
-	if mx is None or mx == "[timeout]":
+	if mx is None or mx in {"[timeout]", "[error]"}:
 		mxhost = None
 	else:
 		# query_dns returns a semicolon-delimited list
 		# of priority-host pairs.
 		mxhost = mx.split('; ')[0].split(' ')[1]
 
-	if mxhost is None:
+	if mx in {"[timeout]", "[error]"}:
+		# A lookup that timed out or failed is no answer; it does not mean
+		# that the domain has no MX record (B150).
+		output.print_warning(f"""Could not check this domain's MX record: the DNS lookup {"timed out" if mx == "[timeout]" else "failed"}.
+			Please try again later. If this persists, see the other issues listed here for this domain.""")
+
+	elif mxhost is None:
 		# A missing MX record is okay on the primary hostname because
 		# the primary hostname's A record (the MX fallback) is... itself,
 		# which is what we want the MX to be.
@@ -775,7 +797,11 @@ def check_mail_domain(domain, env, output):
 		else:
 			domain_a = query_dns(domain, "A", nxdomain=None)
 			primary_a = query_dns(env['PRIMARY_HOSTNAME'], "A", nxdomain=None)
-			if domain_a is not None and domain_a == primary_a:
+			if domain_a in {"[timeout]", "[error]"} or (domain_a is not None and primary_a in {"[timeout]", "[error]"}):
+				# Two lookups that timed out or failed are no matching A records (B150).
+				output.print_warning(f"""This domain has no MX record. Could not check whether its A record is the one of {env['PRIMARY_HOSTNAME']},
+					which would be OK: the DNS lookup timed out or failed. Please try again later.""")
+			elif domain_a is not None and domain_a == primary_a:
 				output.print_ok(f"Domain's email is directed to this domain. [{domain} has no MX record but its A record is OK]")
 			else:
 				output.print_error(f"""This domain's DNS MX record is not set. It should be '{recommended_mx}'. Mail will not
@@ -821,7 +847,8 @@ def check_mail_domain(domain, env, output):
 		output.print_ok("Domain is not blacklisted by dbl.spamhaus.org.")
 	elif dbl == "[timeout]":
 		output.print_warning(f"Connection to dbl.spamhaus.org timed out. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
-	elif dbl == "[Not Set]":
+	elif dbl == "[error]":
+		# The lookup failed, which is no answer (B150).
 		output.print_warning(f"Could not connect to dbl.spamhaus.org. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
 	elif dbl == "127.255.255.252":
 		output.print_warning("Incorrect spamhaus query: {}. Could not determine whether the domain {} is blacklisted.".format(domain+'.dbl.spamhaus.org', domain))
@@ -888,10 +915,15 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 	# Do the query.
 	try:
 		response = resolver.resolve(qname, rtype)
-	except (dns.resolver.NoNameservers, dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+	except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
 		# Host did not have an answer for this query; not sure what the
 		# difference is between the two exceptions.
 		return nxdomain
+	except dns.resolver.NoNameservers:
+		# No server gave an answer: each one answered SERVFAIL, REFUSED or
+		# another error, or could not be reached. That is not "no such
+		# record", so it has a value of its own, like a timeout (B150).
+		return "[error]"
 	except dns.exception.Timeout:
 		return "[timeout]"
 
@@ -914,8 +946,9 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 def check_ssl_cert(domain, rounded_time, ssl_certificates, env, output):
 	# Check that TLS certificate is signed.
 
-	# Skip the check if the A record is not pointed here.
-	if query_dns(domain, "A", None) not in {env['PUBLIC_IP'], None}: return
+	# Skip the check if the A record is not pointed here. A failed lookup
+	# ("[error]") does not skip it, as before B150.
+	if query_dns(domain, "A", None) not in {env['PUBLIC_IP'], None, "[error]"}: return
 
 	# Where is the certificate file stored?
 	tls_cert = get_domain_ssl_files(domain, ssl_certificates, env, allow_missing_cert=True)
@@ -1004,11 +1037,16 @@ def parse_bootstrap_tag(script):
 def get_latest_miab_version():
 	# This fetches the fork's setup/bootstrap.sh and extracts the tag named in
 	# the script to determine the current product version.
-    from urllib.request import urlopen, HTTPError, URLError
+    from urllib.request import urlopen
+    from http.client import HTTPException
 
+    # A failure while reading the response, too, is "could not be determined",
+    # not an exception that ends the whole status check run: a reset or a
+    # timeout during read() (OSError, which also covers urllib's URLError and
+    # HTTPError) or a cut response (http.client's IncompleteRead) (B170).
     try:
         return parse_bootstrap_tag(urlopen(FORK_BOOTSTRAP_URL, timeout=5).read())
-    except (TimeoutError, HTTPError, URLError):
+    except (OSError, HTTPException):
         return None
 
 def check_miab_version(env, output):

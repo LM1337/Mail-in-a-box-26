@@ -314,6 +314,9 @@ fork_file() { # REL
 # their differences are shown, not judged.
 
 INFO_FILES="queue.txt munin-limits.txt packages.txt"
+# The line that record_status_checks adds to status.txt when status_checks.py
+# did not finish (B152).
+STATUS_UNFINISHED="✖ status checks did not finish"
 
 # Units whose state is recorded (those that exist).
 UNITS="postfix dovecot nginx spampd opendkim opendmarc postgrey fail2ban nsd named munin-node cron
@@ -354,21 +357,38 @@ record_doveconf() {
 }
 
 record_status_checks() { # DIR
-	local d=$1
+	local d=$1 rc=0
 	if [ -z "$MIAB_DIR" ]; then
 		echo "(no Mail-in-a-Box checkout of root's own found)" > "$d/status.txt"
 	elif [ -x "$MIAB_DIR/management/status_checks.py" ]; then
-		(cd "$MIAB_DIR" && umask 022 && timeout 900 management/status_checks.py) > "$d/status-full.txt" 2>&1 < /dev/null || true
+		(cd "$MIAB_DIR" && umask 022 && timeout 900 management/status_checks.py) > "$d/status-full.txt" 2>&1 < /dev/null || rc=$?
 		# The error (✖) and warning (?) lines; numbers vary (days to expiry...).
 		grep -E '^[[:space:]]*(✖|\?)' "$d/status-full.txt" | sed -E 's/^[[:space:]]+//; s/[0-9]+/N/g' | sort > "$d/status.txt" || true
+		# A crash (traceback) or the timeout (exit code 124) cuts off the checks
+		# after it. Say so in a line that no rule names, so that the comparison
+		# shows it as UNEXPECTED; compare_states then judges none of the
+		# lines of status.txt (B152).
+		if [ "$rc" != 0 ]; then
+			echo "$STATUS_UNFINISHED (exit code $rc$( [ "$rc" != 124 ] || echo ", the time limit of 900 s" ))" >> "$d/status.txt"
+		fi
 	else
 		echo "(no $MIAB_DIR/management/status_checks.py)" > "$d/status.txt"
 	fi
 }
 
 record_nextcloud() {
+	# occ runs with the PHP version that the box's Mail-in-a-Box configures:
+	# PHP_VER of its checkout's setup/functions.sh (read, not run; 8.5 on this
+	# fork, 8.0 on upstream v78 before an upgrade), not plain php, which is
+	# whatever version the alternatives link points to (B173, as B49). Plain
+	# php only if the checkout names none.
+	local php=php v=
+	if [ -n "$MIAB_DIR" ]; then
+		v=$(sed -nE 's/^PHP_VER=([0-9]+\.[0-9]+)([[:space:]].*)?$/\1/p' "$MIAB_DIR/setup/functions.sh" 2> /dev/null | head -n 1 || true)
+	fi
+	if [ -n "$v" ]; then php=php$v; fi
 	if [ -f /usr/local/lib/owncloud/occ ]; then
-		(umask 022 && timeout 120 runuser -u www-data -- php /usr/local/lib/owncloud/occ status --no-ansi < /dev/null 2>&1) \
+		(umask 022 && timeout 120 runuser -u www-data -- "$php" /usr/local/lib/owncloud/occ status --no-ansi < /dev/null 2>&1) \
 			| sed -E 's/^[[:space:]]*-[[:space:]]*//' | grep -v '^$' || true
 	else
 		echo "(Nextcloud not installed)"
@@ -585,6 +605,9 @@ summary_of() { # DIR
 		say "Status checks:  not run $(head -n 1 "$d/status.txt")"
 	else
 		say "Status checks:  $(grep -c '^✖' "$d/status.txt" || true) errors, $(grep -c '^?' "$d/status.txt" || true) warnings"
+		if grep -qF "$STATUS_UNFINISHED" "$d/status.txt"; then
+			say "                $(grep -F "$STATUS_UNFINISHED" "$d/status.txt" | sed 's/^✖ //'), see $d/status-full.txt"
+		fi
 	fi
 	say "Mail queue:     $(sed -n 's/^messages in the queue: //p' "$d/queue.txt")"
 }
@@ -663,6 +686,7 @@ import collections, os, re, sys
 
 before, after, rule_files = sys.argv[1], sys.argv[2], sys.argv[3:]
 INFO = set(os.environ["UC_INFO_FILES"].split())
+UNFINISHED = os.environb[b"UC_STATUS_UNFINISHED"].decode("utf-8") # the files are read as UTF-8, whatever the locale
 SKIP = {"time.txt", "status-full.txt", "log-audit.json", "log-audit.txt", "changes.txt"}
 
 rules = []
@@ -702,6 +726,14 @@ for name in names:
         continue
     gone, new = collections.Counter(b) - collections.Counter(a), collections.Counter(a) - collections.Counter(b)
     changes = [("-", l) for l in sorted(gone.elements())] + [("+", l) for l in sorted(new.elements())]
+    if name == "status.txt" and any(l.startswith(UNFINISHED) for l in a):
+        # The status checks after the update did not finish (B152): the
+        # checks after the crash or timeout are missing, not gone, so no rule
+        # judges this file, and the line that says so is always unexpected,
+        # also when the run before did not finish either.
+        unexpected.extend((name, sign, l, "") for sign, l in changes if not l.startswith(UNFINISHED))
+        unexpected.extend((name, "+", l, "") for l in a if l.startswith(UNFINISHED))
+        continue
     for sign, l in changes:
         if name in INFO:
             info.append((name, sign, l, ""))
@@ -822,7 +854,7 @@ do_after() {
 	else
 		say "Expected changes from: $(printf '%s ' "${rules[@]}")"
 	fi
-	UC_INFO_FILES=$INFO_FILES UC_NOT_JUDGED=$not_judged compare_states "$RUN_DIR/before" "$RUN_DIR/after" "${rules[@]+"${rules[@]}"}" \
+	UC_INFO_FILES=$INFO_FILES UC_STATUS_UNFINISHED=$STATUS_UNFINISHED UC_NOT_JUDGED=$not_judged compare_states "$RUN_DIR/before" "$RUN_DIR/after" "${rules[@]+"${rules[@]}"}" \
 		| tee "$RUN_DIR/after/changes.txt" || rc=$?
 	[ "$rc" -le 1 ] || die "Could not compare the states (exit code $rc, see above)."
 	section "Log audit of the update"

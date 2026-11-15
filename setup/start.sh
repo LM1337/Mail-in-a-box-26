@@ -210,9 +210,19 @@ do
 done
 
 # ...and then have it write the DNS and nginx configuration files and start those
-# services.
-tools/dns_update
-tools/web_update
+# services. Both tools fail on an HTTP error of the daemon (B159): setup then
+# stops here with a clear message, after trying both. No service is stopped at
+# this point (PHP-FPM was started again above), so mail keeps running.
+setup_update_failed=
+tools/dns_update || setup_update_failed+="the DNS zones (tools/dns_update), "
+tools/web_update || setup_update_failed+="the web configuration (tools/web_update), "
+if [ -n "$setup_update_failed" ]; then
+	echo
+	echo "Setup stopped: the management daemon could not update ${setup_update_failed%, }."
+	echo "Its answer is above. Mail and the web server keep running. Fix the cause and run"
+	echo "setup again (sudo mailinabox)."
+	exit 1
+fi
 
 # Write the adaptive fail2ban configuration (repeat offenders get longer bans,
 # slow jails, allowlist) from the "fail2ban" settings in settings.yaml. It is
