@@ -1513,7 +1513,7 @@ checkout_dir() { # the checkout this script runs from, if any
 	echo "$d"
 }
 
-# Keep these three in sync with tools/upgrade-in-place-to-2604.sh.
+# Keep these four in sync with tools/upgrade-in-place-to-2604.sh.
 # GitHub treats the owner and repository names case-insensitively, and a
 # trailing .git or / names the same repository.
 same_repo() { # URL URL
@@ -1548,6 +1548,25 @@ checkout_ref() { # DIR REF [--force]
 	fi
 }
 
+# After a failed fetch or clone of the release tag: is the tag not published
+# in SOURCE (yes: the branch main may be used instead), or is it there (no:
+# the fetch failed for another reason)? Stops when SOURCE cannot be asked
+# (network, GitHub, a wrong SOURCE): before, any failure counted as "not
+# published", and setup ran from main (B169). git ls-remote --exit-code
+# exits 2 when the repository answered without the tag.
+tag_unpublished() { # SOURCE TAG
+	local rc=0 out
+	out=$(GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --tags "$1" "refs/tags/$2" < /dev/null 2>&1 > /dev/null) || rc=$?
+	case "$rc" in
+		2) return 0 ;;
+		0) return 1 ;;
+	esac
+	die "Could not fetch the release tag $2 from $1, and could not ask whether it is published
+(git ls-remote, exit code $rc)${out:+:
+$(sed 's/^/  /' <<< "$out")}
+Not using the branch main instead. Check the network (and SOURCE), then run the command again."
+}
+
 resolve_miab_dir() {
 	local d
 	if d=$(checkout_dir); then
@@ -1564,7 +1583,8 @@ resolve_miab_dir() {
 		command -v git > /dev/null || install_packages git
 		say "Downloading Mail-in-a-Box $tag from $source..."
 		if ! git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null; then
-			if [ -n "${TAG:-}" ]; then
+			# The branch main only when the tag is not published (B169).
+			if [ -n "${TAG:-}" ] || ! tag_unpublished "$source" "$tag"; then
 				die "Could not download $tag from $source. Set TAG and SOURCE like this:
   $how"
 			fi
@@ -1580,7 +1600,7 @@ resolve_miab_dir() {
 		check_origin "$d" "$source"
 		say "Updating $d to $tag..."
 		if ! checkout_ref "$d" "$tag"; then
-			if [ -z "${TAG:-}" ] && checkout_ref "$d" main; then
+			if [ -z "${TAG:-}" ] && tag_unpublished "$source" "$tag" && checkout_ref "$d" main; then
 				warn "The release tag $tag is not published yet. Using the branch main instead."
 			else
 				die "Could not update $d to $tag from $source. Did you modify something in $d?"
