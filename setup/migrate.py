@@ -5,7 +5,7 @@
 # We have to be careful here that any dependencies are already installed in the previous
 # version since this script runs before all other aspects of the setup script.
 
-import sys, os, os.path, glob, re, shutil
+import sys, os, os.path, glob, re, shutil, stat, importlib.util
 
 sys.path.insert(0, 'management')
 from utils import load_environment, save_environment, shell
@@ -207,6 +207,25 @@ def get_current_migration():
 			return ver
 		ver = next_ver
 
+# $STORAGE_ROOT is the home of the storage user, who may put a symbolic link,
+# a FIFO or a huge file at mailinabox.version. It is read only as a regular
+# file and only its first bytes, and written with tools/write_conf.py (a new
+# file renamed over the old one, keeping its owner and mode, refusing a link)
+# instead of open("w") by path as root (B147).
+def read_migration_id(path):
+	fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+	with os.fdopen(fd, "rb") as f:
+		if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+			raise OSError(f"{path} is not a regular file")
+		return f.read(64).decode("utf-8", "replace").strip()
+
+def write_migration_id(path, ver):
+	spec = importlib.util.spec_from_file_location("write_conf",
+		os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "write_conf.py"))
+	write_conf = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(write_conf)
+	write_conf.write_if_changed(path, (str(ver) + "\n").encode())
+
 def run_migrations():
 	if not os.access("/etc/mailinabox.conf", os.W_OK, effective_ids=True):
 		print("This script must be run as root.", file=sys.stderr)
@@ -216,9 +235,12 @@ def run_migrations():
 
 	migration_id_file = os.path.join(env['STORAGE_ROOT'], 'mailinabox.version')
 	migration_id = None
-	if os.path.exists(migration_id_file):
-		with open(migration_id_file, encoding='utf-8') as f:
-			migration_id = f.read().strip()
+	if os.path.lexists(migration_id_file):
+		try:
+			migration_id = read_migration_id(migration_id_file)
+		except OSError as e:
+			print(f"Cannot read {migration_id_file}: {e}", file=sys.stderr)
+			sys.exit(1)
 
 	if migration_id is None:
 		# Load the legacy location of the migration ID. We'll drop support
@@ -258,8 +280,11 @@ def run_migrations():
 
 		# Write out our current version now. Do this sooner rather than later
 		# in case of any problems.
-		with open(migration_id_file, "w", encoding='utf-8') as f:
-			f.write(str(ourver) + "\n")
+		try:
+			write_migration_id(migration_id_file, ourver)
+		except OSError as e:
+			print(f"Cannot write {migration_id_file}: {e}", file=sys.stderr)
+			sys.exit(1)
 
 		# Delete the legacy location of this field.
 		if "MIGRATIONID" in env:
