@@ -762,6 +762,92 @@ load_kv() {
 	done
 }
 
+# The forms of a host name, of addresses and of a systemd unit name.
+HOSTNAME_FORM='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+IPV4_FORM='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+IPV6_FORM='^[0-9A-Fa-f.:]*:[0-9A-Fa-f.:]*$'
+UNIT_FORM='[-A-Za-z0-9:_.@\\]+'
+
+# An absolute path of letters, digits and . _ - / without . or .. in it, not /.
+storage_root_ok() {
+	[[ $1 =~ ^/[A-Za-z0-9._/-]+$ && $1 =~ [^/] && ! $1 =~ (^|/)\.\.?(/|$) ]]
+}
+
+# The values that the scripts below report about the old box, and the form each
+# must have (B154). The old box may be the very reason for the move (broken
+# into), and its values are used here as root: in arithmetic (where bash runs a
+# $(...) found in a value), in /etc/mailinabox.conf (which setup sources), in
+# paths and in commands. Returns 0 for the right form, 3 for a key that no
+# script reports, 4 for a value that is only shown or compared (any form; its
+# control characters are replaced), anything else for a wrong form.
+old_value_ok() { # KEY VALUE
+	local v=$2 units="^($UNIT_FORM( $UNIT_FORM)*)?\$"
+	case "$1" in
+		EPOCH | NC_DB_BYTES | POSTQUEUE | QUEUE_TOTAL | QUEUE_LOCAL | QUEUE_REMOTE | SIZE_TOTAL | SIZE_OWNCLOUD_BACKUP \
+			| SIZE_BACKUP_CACHE | SIZE_BACKUP_ENCRYPTED | FILES_TOTAL | FILES_OWNCLOUD)
+			[[ $v =~ ^(0|[1-9][0-9]{0,17})?$ ]] ;;
+		HAS_CONF | NC_MAINTENANCE | NC_APPSTORE | BACKUP_RUNNING | APT_BUSY | HAS_BACKUP_SSH_KEY | HAS_ZPUSH | HAS_MUNIN)
+			[[ $v =~ ^[01]?$ ]] ;;
+		MACHINE_ID) [[ $v =~ ^[A-Za-z0-9]*$ ]] ;;
+		NC_VERSION) [[ $v =~ ^[0-9.]*$ ]] ;;
+		# A path below /usr/share/zoneinfo, given to timedatectl.
+		TIMEZONE) [[ $v =~ ^([A-Za-z0-9_][A-Za-z0-9_+.-]*(/[A-Za-z0-9_][A-Za-z0-9_+.-]*)*)?$ ]] ;;
+		ACTIVE_UNITS) [[ $v =~ $units ]] ;;
+		CONF_STORAGE_ROOT) [ -z "$v" ] || storage_root_ok "$v" ;;
+		CONF_STORAGE_USER) [[ $v =~ ^([a-z_][a-z0-9_-]{0,31})?$ ]] ;;
+		CONF_PRIMARY_HOSTNAME) [ -z "$v" ] || [[ $v =~ $HOSTNAME_FORM ]] ;;
+		CONF_MTA_STS_MODE) [[ $v =~ ^(enforce|testing|none)?$ ]] ;;
+		# FINGERPRINT_SCRIPT: counts and the beginnings of sha256 sums, "-" for none.
+		USERS | ALIASES | MAILBOXES | MESSAGES | SIEVE_SCRIPTS | LE_ACCOUNTS | BAYES_SPAM | BAYES_HAM | NC_ACCOUNTS \
+			| NC_CARDS | NC_EVENTS)
+			[[ $v =~ ^(-|0|[1-9][0-9]{0,17})?$ ]] ;;
+		DKIM_KEY | DNSSEC_KEYS | TLS_KEY | BACKUP_KEY) [[ $v =~ ^(-|[0-9a-f]{16})?$ ]] ;;
+		OS_ID | OS_VERSION | NTP_SYNC | RSYNC_VERSION | PHP_VERSIONS | MIAB_DIR | MIAB_VERSION | NC_EXTRA_APPS \
+			| BACKUP_TARGET | CONF_PUBLIC_IP | CONF_PUBLIC_IPV6)
+			return 4 ;;
+		*) return 3 ;;
+	esac
+}
+
+# Check the values of the old box in the associative array named by $1 right
+# after load_kv, and stop at a value of the wrong form. Keys that no script
+# reports (e.g. other settings of the old /etc/mailinabox.conf) are dropped,
+# so that nothing uses them unchecked. In values that are only shown, control
+# characters (terminal escapes) become "?".
+check_old_values() { # ARRAY
+	local -n _vals=$1
+	local k v rc what
+	for k in "${!_vals[@]}"; do
+		v=${_vals[$k]}
+		rc=0
+		old_value_ok "$k" "$v" || rc=$?
+		case "$rc" in
+			0) ;;
+			3) unset "_vals[$k]" ;;
+			4)
+				# shellcheck disable=SC2004 # associative array: the key must be expanded
+				_vals[$k]=${v//[[:cntrl:]]/?}
+				;;
+			*)
+				what=$k
+				if [[ $k == CONF_* ]]; then what="${k#CONF_} in its /etc/mailinabox.conf"; fi
+				die "The old box reported a value of an unexpected form for $what: $(printf '%q' "$v")
+Values from the old box are used here as root (in calculations, in /etc/mailinabox.conf,
+in paths and commands), so only the form that Mail-in-a-Box itself gives is taken.
+Check the old box (a setting: correct it there) and run the command again."
+				;;
+		esac
+	done
+}
+
+# The counts and fingerprints of the old box saved in FILE (FINGERPRINT_SCRIPT).
+check_old_fingerprint() { # FILE
+	# shellcheck disable=SC2034 # read by check_old_values through its name
+	local -A fp=()
+	load_kv fp < "$1"
+	check_old_values fp
+}
+
 # The PIDs of a running Mail-in-a-Box backup: a python running
 # management/backup.py, or duplicity. From /proc and not with pgrep -f, which
 # also matches any command line that only names them (the checking shell, a
@@ -1490,9 +1576,11 @@ claim_target() {
 }
 
 detect_ip() { # 4|6
-	local ip
+	local ip form=$IPV4_FORM
+	if [ "$1" = 6 ]; then form=$IPV6_FORM; fi
 	ip=$(curl -"$1" --fail --silent --max-time 15 icanhazip.com 2> /dev/null || true)
-	if [ -z "$ip" ]; then
+	# The web service's answer only counts as an address (B154).
+	if ! [[ $ip =~ $form ]]; then
 		if [ "$1" = 4 ]; then
 			ip=$(ip -4 route get 1.1.1.1 2> /dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
 		else
@@ -1523,6 +1611,19 @@ choose_new_settings() {
 	fi
 	NEW_PRIVATE_IP=${OPT_PRIVATE_IP:-$(state_get NEW_PRIVATE_IP)}
 	NEW_PRIVATE_IPV6=${OPT_PRIVATE_IPV6:-$(state_get NEW_PRIVATE_IPV6)}
+
+	# These go into /etc/mailinabox.conf, which setup sources as root; the
+	# hostname may come from the old box or from a restored TLS certificate,
+	# the public addresses from a web service (B154).
+	[[ $NEW_PRIMARY_HOSTNAME =~ $HOSTNAME_FORM ]] \
+		|| die "The hostname $(printf '%q' "$NEW_PRIMARY_HOSTNAME") is not a plain host name (letters, digits, dots and hyphens). Give it with --hostname."
+	[[ $NEW_PUBLIC_IP =~ $IPV4_FORM ]] || die "$(printf '%q' "$NEW_PUBLIC_IP") is not an IPv4 address. Give it with --public-ip."
+	[ -z "$NEW_PRIVATE_IP" ] || [[ $NEW_PRIVATE_IP =~ $IPV4_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PRIVATE_IP") is not an IPv4 address (--private-ip)."
+	[ -z "$NEW_PUBLIC_IPV6" ] || [[ $NEW_PUBLIC_IPV6 =~ $IPV6_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PUBLIC_IPV6") is not an IPv6 address (--public-ipv6)."
+	[ -z "$NEW_PRIVATE_IPV6" ] || [[ $NEW_PRIVATE_IPV6 =~ $IPV6_FORM ]] \
+		|| die "$(printf '%q' "$NEW_PRIVATE_IPV6") is not an IPv6 address (--private-ipv6)."
 
 	state_set NEW_PRIMARY_HOSTNAME "$NEW_PRIMARY_HOSTNAME"
 	state_set NEW_PUBLIC_IP "$NEW_PUBLIC_IP"
@@ -1590,6 +1691,7 @@ read_old_facts() {
 	facts=$(remote_bash "$FACTS_SCRIPT") || die "Could not read the facts of the old box."
 	OLD=()
 	load_kv OLD <<< "$facts"
+	check_old_values OLD
 }
 
 read_old_queue() {
@@ -1598,6 +1700,7 @@ read_old_queue() {
 	OLD[QUEUE_LOCAL]=
 	out=$(remote_bash "$QUEUE_SCRIPT" "SR=${OLD[CONF_STORAGE_ROOT]:-}" 2> /dev/null) || return 0
 	load_kv OLD <<< "$out"
+	check_old_values OLD
 }
 
 preflight_old() {
@@ -1712,6 +1815,7 @@ check_space() {
 		out=$(remote_bash "$SIZE_SCRIPT" "SR=$sr") || die "Could not measure $sr on the old box."
 		local -A S=()
 		load_kv S <<< "$out"
+		check_old_values S
 		state_set SIZE_TOTAL "${S[SIZE_TOTAL]:-0}"
 		state_set SIZE_OWNCLOUD_BACKUP "${S[SIZE_OWNCLOUD_BACKUP]:-0}"
 		state_set SIZE_BACKUP_CACHE "${S[SIZE_BACKUP_CACHE]:-0}"
@@ -2027,11 +2131,24 @@ local_needs_quiesce() { [ "$(state_get CONF_WRITTEN)" = 1 ] || [ -f /etc/mailina
 # The state of the units stopped on the old box: OLD_ACTIVE_NOW (running
 # again) and OLD_STAMPS_NOW (unit=last start time).
 old_status() {
-	local out kind u v
+	local out kind u v units
 	OLD_ACTIVE_NOW='' OLD_STAMPS_NOW=''
-	out=$(remote_bash "$OLD_STATUS_SCRIPT" "UNITS=$(state_get OLD_SERVICES)") \
+	units=$(state_get OLD_SERVICES)
+	out=$(remote_bash "$OLD_STATUS_SCRIPT" "UNITS=$units") \
 		|| die "Could not read the state of the services on the old box."
 	while read -r kind u v; do
+		# Only the units asked about, and a number for the start time (B154).
+		case "$kind" in
+			ACTIVE | STAMP)
+				case " $units " in
+					*" $u "*) ;;
+					*) die "The old box reported the state of a unit it was not asked about: $(printf '%q' "$u")" ;;
+				esac
+				if [ "$kind" = STAMP ] && ! [[ $v =~ ^[0-9]*$ ]]; then
+					die "The old box reported a start time of an unexpected form for $u: $(printf '%q' "$v")"
+				fi
+				;;
+		esac
 		case "$kind" in
 			ACTIVE) OLD_ACTIVE_NOW="$OLD_ACTIVE_NOW $u" ;;
 			STAMP) OLD_STAMPS_NOW="$OLD_STAMPS_NOW $u=$v" ;;
@@ -2277,6 +2394,8 @@ phase_sync_final() {
 		say "Recording counts and key fingerprints of the old box for the final check..."
 		remote_bash "$FINGERPRINT_SCRIPT" "SR=$STORAGE_ROOT" > "$STATE_DIR/old-fingerprint.txt" \
 			|| die "Could not read the fingerprints of the old box."
+		# Checked now (B154), so that a wrong form stops before setup, not at the final check.
+		check_old_fingerprint "$STATE_DIR/old-fingerprint.txt"
 		run_rsync final
 		# Anything that ran on the old box during the copy may have changed data after rsync read it.
 		old_status
@@ -2301,7 +2420,15 @@ write_mailinabox_conf() {
 	# file with the IPs given in the environment (see run_setup). The other
 	# settings of a file from an earlier run (FTS=off or NEXTCLOUD_SHARE_SCOPE=all,
 	# set after a rehearsal) are kept: setup reads them as its defaults.
-	local keep=""
+	# setup/start.sh sources the file as root, and management/utils.py takes
+	# each value as it stands (no quotes to remove): only values that need no
+	# quoting are written (B154).
+	local keep="" v
+	for v in "$STORAGE_USER" "$STORAGE_ROOT" "$NEW_PRIMARY_HOSTNAME" "$NEW_PUBLIC_IP" "$NEW_PUBLIC_IPV6" \
+		"$NEW_PRIVATE_IP" "$NEW_PRIVATE_IPV6" "$MTA_STS_MODE"; do
+		[[ $v =~ ^[A-Za-z0-9._:/-]*$ ]] \
+			|| die "Not writing $(printf '%q' "$v") into /etc/mailinabox.conf: setup sources that file, so its values may only have letters, digits and . _ : / -"
+	done
 	if [ -f /etc/mailinabox.conf ]; then
 		keep=$(grep -E '^[A-Z_][A-Z0-9_]*=' /etc/mailinabox.conf \
 			| grep -vE '^(STORAGE_USER|STORAGE_ROOT|PRIMARY_HOSTNAME|PUBLIC_IP|PUBLIC_IPV6|PRIVATE_IP|PRIVATE_IPV6|MTA_STS_MODE)=' || true)
@@ -2712,7 +2839,9 @@ preflight_backup() {
 	STORAGE_USER=$(state_get STORAGE_USER)
 	STORAGE_USER=${STORAGE_USER:-user-data}
 	MTA_STS_MODE=enforce
-	[[ $STORAGE_ROOT == /* && $STORAGE_ROOT != *" "* ]] || die "--storage-root must be an absolute path without spaces."
+	# It goes into /etc/mailinabox.conf, which setup sources (B154).
+	storage_root_ok "$STORAGE_ROOT" \
+		|| die "--storage-root must be an absolute path of letters, digits and . _ - / (without . or .. in it)."
 	state_set STORAGE_ROOT "$STORAGE_ROOT"
 	state_set STORAGE_USER "$STORAGE_USER"
 	if [ -n "$CHECK_ONLY" ]; then
@@ -3003,6 +3132,7 @@ phase_verify() {
 	if [ -f "$STATE_DIR/old-fingerprint.txt" ]; then
 		OLDFP=()
 		load_kv OLDFP < "$STATE_DIR/old-fingerprint.txt"
+		check_old_values OLDFP
 		compare_fingerprints
 	else
 		local k
