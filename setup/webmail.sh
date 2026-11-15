@@ -277,10 +277,16 @@ usermod -a -G dovecot www-data
 tools/write_conf.py --own "$STORAGE_ROOT/mail" root www-data 775
 tools/write_conf.py --own "$STORAGE_ROOT/mail/users.sqlite" root www-data 664
 
-# Fix Carddav permissions:
-chown -f -R root:www-data "${RCM_PLUGIN_DIR}/carddav"
-# root:www-data need all permissions, others only read
-chmod -R 774 "${RCM_PLUGIN_DIR}/carddav"
+# Fix Carddav permissions: root's, read-only for everyone else (directories 755,
+# files 644). Upstream (#1029, 2017) gave the plugin to root:www-data with mode
+# 774 ("root:www-data need all permissions") without saying why. Neither
+# Roundcube nor the plugin writes into its directory (the plugin logs into
+# Roundcube's log_dir and keeps its data in Roundcube's database), and PHP
+# code that www-data may change is code that a hole in a web app could change
+# for good (B147). The owner first: from then on www-data cannot change the
+# tree that find walks.
+chown -f -R root:root "${RCM_PLUGIN_DIR}/carddav"
+find "${RCM_PLUGIN_DIR}/carddav" \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
 
 # Patch the Roundcube code to eliminate an issue that causes postfix to reject our sqlite
 # user database (see https://github.com/mail-in-a-box/mailinabox/issues/2185)
