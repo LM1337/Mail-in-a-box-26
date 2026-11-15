@@ -961,8 +961,11 @@ EOF
 )"
 
 # Size and number of files of $STORAGE_ROOT and of the parts that may be left
-# out. Slow on big boxes.
+# out. Slow on big boxes. A $STORAGE_ROOT that is a symbolic link (to another
+# volume) is measured where it points: du does not follow a link it is given
+# (B163).
 SIZE_SCRIPT=$(cat <<'EOF'
+r=$(readlink -f -- "$SR") && [ -n "$r" ] && SR=$r
 sz() { if [ -e "$1" ]; then du -s -B1 "$1" 2> /dev/null | cut -f1; else echo 0; fi; }
 nf() { if [ -e "$1" ]; then du -s --inodes "$1" 2> /dev/null | cut -f1; else echo 0; fi; }
 echo "SIZE_TOTAL=$(sz "$SR")"
@@ -1010,7 +1013,10 @@ EOF
 # Processes that still use $SR: a file open there, the working directory there
 # (interactive shells excepted), or a known job (backup, Nextcloud cron, ...).
 # cron.service has KillMode=process, so stopping cron does not end its jobs.
+# /proc/PID/fd and cwd show resolved paths: a $SR that is a symbolic link is
+# resolved first (B163).
 QUIET_SCRIPT=$(cat <<'EOF'
+r=$(readlink -f -- "$SR") && [ -n "$r" ] && SR=$r
 pat='cron\.php|daily_tasks|management/backup\.py|/usr/bin/duplicity|sa-learn|owncloud/occ'
 {
 	find /proc/[0-9]*/fd -maxdepth 1 \( -lname "$SR" -o -lname "$SR/*" \) 2> /dev/null | cut -d/ -f3 | sed 's/$/ 1fd/'
