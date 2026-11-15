@@ -114,10 +114,12 @@ source setup/questions.sh
 # Run some network checks to make sure setup on this machine makes sense.
 # Skip on existing installs since we don't want this to block the ability to
 # upgrade, and these checks are also in the control panel status checks.
-if [ -z "${DEFAULT_PRIMARY_HOSTNAME:-}" ]; then
-if [ -z "${SKIP_NETWORK_CHECKS:-}" ]; then
+# A first install is one without /etc/mailinabox.conf (see above). The test
+# was for an empty DEFAULT_PRIMARY_HOSTNAME, which questions.sh sets on a
+# first interactive install (the suggested hostname), so only installs with
+# PRIMARY_HOSTNAME in the environment ran the checks (B146).
+if [ -n "${FIRST_TIME_SETUP:-}" ] && [ -z "${SKIP_NETWORK_CHECKS:-}" ]; then
 	source setup/network-checks.sh
-fi
 fi
 
 # Create the STORAGE_USER and STORAGE_ROOT directory if they don't already exist.
