@@ -122,9 +122,11 @@ FALLBACK_DIR=$STATE_DIR/ssh-fallback
 FALLBACK_KEYS_DIR=/etc/ssh/upgrade-2604-fallback-keys
 FALLBACK_UFW_MARK=$STATE_DIR/ssh-fallback-ufw
 TMUX_SESSION=upgrade-2604
-# The environment variables this script and setup read (passed into that session).
+# The environment variables this script and setup read (passed into that
+# session, and into the run after a reboot, see install_resume). PROBE_ADDRESS:
+# setup keeps it in /etc/mailinabox.conf (B153).
 MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC
-	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
+	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON PROBE_ADDRESS)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
