@@ -188,19 +188,32 @@ echo "Installing ppa prereqs..."
 apt_get_quiet update --allow-releaseinfo-change
 apt_install lsb-release ca-certificates curl gnupg
 SURY_KEY_FPR=15058500A0235D97F5D10063B188E2B695BD4743 # DEB.SURY.ORG Automatic Signing Key
+SURY_KEYRING=usr/share/keyrings/debsuryorg-archive-keyring.gpg # in the package, and below /
 SURY_TMP=$(mktemp -d)
 hide_output curl -fsSLo "$SURY_TMP/keyring.deb" https://packages.sury.org/debsuryorg-archive-keyring.deb
 dpkg-deb -x "$SURY_TMP/keyring.deb" "$SURY_TMP/x"
-if [ "$(GNUPGHOME="$SURY_TMP" gpg --show-keys --with-colons "$SURY_TMP/x/usr/share/keyrings/debsuryorg-archive-keyring.gpg" 2>/dev/null \
+if [ -L "$SURY_TMP/x/$SURY_KEYRING" ] || [ ! -f "$SURY_TMP/x/$SURY_KEYRING" ] \
+	|| [ "$(GNUPGHOME="$SURY_TMP" gpg --show-keys --with-colons "$SURY_TMP/x/$SURY_KEYRING" 2>/dev/null \
 	| awk -F: '$1=="pub"{p=1;next} p&&$1=="fpr"{print $10;p=0}')" != "$SURY_KEY_FPR" ]; then
 	echo "The deb.sury.org keyring package does not contain exactly the expected key $SURY_KEY_FPR."
 	exit 1
 fi
-hide_output dpkg -i "$SURY_TMP/keyring.deb"
+# Only the key file that was checked above is installed, not the package:
+# dpkg -i also ran the package's maintainer scripts as root and installed its
+# other files, none of which had been checked (B158). The package that
+# earlier versions installed owns the same path; it is purged first (which
+# also removes its copy of the key in /etc/apt/trusted.gpg.d/), so that the
+# file is setup's own. The path in php.list's signed-by stays the same.
+if dpkg-query -W -f='${db:Status-Abbrev}' debsuryorg-archive-keyring 2> /dev/null | grep -q '^[ihr][iUFHWt]'; then
+	apt_get_quiet purge debsuryorg-archive-keyring
+fi
+if ! cmp -s "$SURY_TMP/x/$SURY_KEYRING" "/$SURY_KEYRING"; then
+	install -m 644 "$SURY_TMP/x/$SURY_KEYRING" "/$SURY_KEYRING"
+fi
 rm -rf "$SURY_TMP"
-# The keyring package also installs the key into /etc/apt/trusted.gpg.d/, which
+# The keyring package installed the key into /etc/apt/trusted.gpg.d/ too, which
 # makes APT trust it for every source (incl. the Ubuntu archive). We only use it
-# via signed-by=. dpkg does not restore a deleted conffile on reinstall.
+# via signed-by=. (A box whose package was removed before setup ran.)
 rm -f /etc/apt/trusted.gpg.d/debsuryorg-archive.gpg
 echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
 cat > /etc/apt/preferences.d/mailinabox-sury-php << EOF;

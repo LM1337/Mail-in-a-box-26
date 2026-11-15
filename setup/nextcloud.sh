@@ -22,8 +22,8 @@ echo "Installing Nextcloud (contacts/calendar)..."
 # * The hash is the SHA256 hash of the ZIP package. Nextcloud publishes it next to the download
 #   (https://download.nextcloud.com/server/releases/nextcloud-<ver>.zip.sha256; there is no .sha1).
 #   Check it against the hash this script prints when it doesn't match what is below.
-nextcloud_ver=34.0.5
-nextcloud_hash=d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a
+nextcloud_ver=34.0.6
+nextcloud_hash=ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e
 
 # Nextcloud apps
 # --------------
@@ -39,12 +39,12 @@ nextcloud_hash=d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a
 # (wget_verify still accepts 40-char SHA1 hashes, but don't add new ones.)
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/contacts
-contacts_ver=8.9.2
-contacts_hash=92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5
+contacts_ver=8.10.0
+contacts_hash=035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/calendar
-calendar_ver=6.6.4
-calendar_hash=0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c
+calendar_ver=6.6.5
+calendar_hash=e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/user_external
 # user_external 4.0.0 declares nextcloud min-version=31 max-version=34 and there is no release
@@ -234,8 +234,11 @@ InstallNextcloud() {
 # application version than the database.
 
 # If config.php exists, get version number, otherwise CURRENT_NEXTCLOUD_VER is empty.
+# Read from the file's 'version' line (Nextcloud writes it with var_export, one
+# key per line), as www-data, which owns it. Up to v78-r2604.1 root included
+# the file in PHP, so PHP code that www-data had added to it ran as root (B147).
 if [ -f "$STORAGE_ROOT/owncloud/config.php" ]; then
-	CURRENT_NEXTCLOUD_VER=$(php"$PHP_VER" -r "include(\"$STORAGE_ROOT/owncloud/config.php\"); echo(\$CONFIG['version']);")
+	CURRENT_NEXTCLOUD_VER=$(sudo -u www-data sed -n "/^[[:space:]]*'version'[[:space:]]*=>[[:space:]]*'\([0-9.]*\)'.*/{s//\1/p;q}" "$STORAGE_ROOT/owncloud/config.php")
 else
 	CURRENT_NEXTCLOUD_VER=""
 fi
@@ -245,7 +248,8 @@ fi
 if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextcloud_ver ]]; then
 
 	# Stop php-fpm if running. If they are not running (which happens on a previously failed install), dont bail.
-	service php"$PHP_VER"-fpm stop &> /dev/null || /bin/true
+	# setup/start.sh starts it again if the run ends before its restart after zpush.sh (B149).
+	stop_php_fpm
 
 	# Backup the existing ownCloud/Nextcloud.
 	# Create a backup directory to store the current installation and database to
@@ -255,11 +259,13 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		echo "Upgrading Nextcloud --- backing up existing installation, configuration, and database to directory to $BACKUP_DIRECTORY..."
 		cp -r /usr/local/lib/owncloud "$BACKUP_DIRECTORY/owncloud-install"
 	fi
+	# cp -P: a symbolic link that www-data (which owns $STORAGE_ROOT/owncloud) put
+	# there is copied as a link, root does not read the file it points to (B147).
 	if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
-		cp "$STORAGE_ROOT/owncloud/owncloud.db" "$BACKUP_DIRECTORY"
+		cp -P "$STORAGE_ROOT/owncloud/owncloud.db" "$BACKUP_DIRECTORY"
 	fi
 	if [ -e "$STORAGE_ROOT/owncloud/config.php" ]; then
-		cp "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
+		cp -P "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
 	fi
 
 	# If ownCloud or Nextcloud was previously installed....
@@ -341,8 +347,8 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		# and move nextcloud_ver and the app pins at the top of this file to 35.
 		# if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
 		#	# runs with PHP 8.5
-		#	InstallNextcloud 34.0.5 d077fdca3dc78ef60b5bbc51182f2a1737aa01e2044d6c23f4e7b72146f5239a 8.9.2 92f7c79c411273045ed6346f6988c05af673c3170a3adaba91a15066b8dce7c5 6.6.4 0557b6b5852a467cf3f746e59d56478d227f78bf7a66357b30dfc10cae4c7e3c 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
-		#	CURRENT_NEXTCLOUD_VER="34.0.5"
+		#	InstallNextcloud 34.0.6 ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e 8.10.0 035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549 6.6.5 e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+		#	CURRENT_NEXTCLOUD_VER="34.0.6"
 		# fi
 		##
 	fi
@@ -368,9 +374,12 @@ if [ ! -f "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
 	# Create user data directory
 	mkdir -p "$STORAGE_ROOT/owncloud"
 
-	# Create an initial configuration file.
+	# Create an initial configuration file. Both files below are written with
+	# tools/write_conf.py, which does not follow a symbolic link in a
+	# directory of www-data's: this branch also runs on an existing box whose
+	# owncloud.db is gone (B147).
 	instanceid=oc$(echo "$PRIMARY_HOSTNAME" | sha1sum | fold -w 10 | head -n 1)
-	cat > "$STORAGE_ROOT/owncloud/config.php" <<EOF;
+	tools/write_conf.py "$STORAGE_ROOT/owncloud/config.php" <<EOF;
 <?php
 \$CONFIG = array (
   'datadirectory' => '$STORAGE_ROOT/owncloud',
@@ -398,7 +407,7 @@ EOF
 	# when the install script is run. Make an administrator account
 	# here or else the install can't finish.
 	adminpassword=$(dd if=/dev/urandom bs=1 count=40 2>/dev/null | sha1sum | fold -w 30 | head -n 1)
-	cat > /usr/local/lib/owncloud/config/autoconfig.php <<EOF;
+	tools/write_conf.py /usr/local/lib/owncloud/config/autoconfig.php 640 <<EOF;
 <?php
 \$AUTOCONFIG = array (
   # storage/database
@@ -554,7 +563,8 @@ tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
 # This version was probably in use in Mail-in-a-Box v0.41 (February 26, 2019) and earlier.
 # We moved to v0.6.3 in 193763f8. Ignore errors - maybe there are duplicated users with the
 # correct backend already.
-sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
+# As www-data, which owns the database and its directory, not as root by path (B147).
+sudo -u www-data sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
 
 # Set up a general cron job for Nextcloud.
 # Also add another job for Calendar updates, per advice in the Nextcloud docs

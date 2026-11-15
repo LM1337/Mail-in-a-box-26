@@ -57,8 +57,9 @@ if [ ! -f "$STORAGE_ROOT/mail/dkim/mail.private" ]; then
 fi
 
 # Ensure files are owned by the opendkim user and are private otherwise.
+# The mode through a descriptor, see setup/mail-postfix.sh (B147).
 chown -R opendkim:opendkim "$STORAGE_ROOT/mail/dkim"
-chmod go-rwx "$STORAGE_ROOT/mail/dkim"
+tools/write_conf.py --own "$STORAGE_ROOT/mail/dkim" opendkim opendkim 700
 
 tools/editconf.py /etc/opendmarc.conf -s \
 	"Syslog=true" \

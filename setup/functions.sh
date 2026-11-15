@@ -308,6 +308,27 @@ function restart_php_fpm {
 	restart_service php"$PHP_VER"-fpm
 }
 
+function stop_php_fpm {
+	# setup/nextcloud.sh stops PHP-FPM while it upgrades Nextcloud. It runs
+	# again only after the restart that follows zpush.sh (PHP_FPM_RESTART=later
+	# above): a run that ended in between left webmail, Nextcloud and
+	# ActiveSync without PHP-FPM (HTTP 502) until a later run got that far.
+	# start.sh's EXIT trap starts it again then (start_stopped_php_fpm, B149).
+	PHP_FPM_STOPPED=1
+	service php"$PHP_VER"-fpm stop &> /dev/null || /bin/true
+}
+
+function start_stopped_php_fpm {
+	# Starts PHP-FPM if this run stopped it (stop_php_fpm) and it does not run.
+	# After the restart at the end of the service scripts it runs, so this does
+	# nothing (B122: one restart per run).
+	if [ -n "${PHP_FPM_STOPPED:-}" ] && ! systemctl is-active --quiet php"$PHP_VER"-fpm 2> /dev/null; then
+		echo "Starting PHP-FPM again, which setup had stopped for the Nextcloud upgrade."
+		service php"$PHP_VER"-fpm start &> /dev/null || echo "PHP-FPM did not start (service php$PHP_VER-fpm start)." >&2
+	fi
+	return 0
+}
+
 function load_dovecot {
 	# Load Dovecot's configuration after setup has written all of it.
 	# doveconf -n first: a configuration that Dovecot refuses stops setup with

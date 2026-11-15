@@ -3068,6 +3068,26 @@ def c_imapsieve_result(ctx, which):
     return "n%s %d -> %d" % (which, r["before"].get("n" + which, 0), r[which]["n" + which])
 
 
+def c_imapsieve_no_phantom_folder(ctx):
+    # sa-learn, which IMAPSieve runs for a message moved into or out of Spam,
+    # created its state directory .spamassassin in the Maildir root, which
+    # IMAP listed as the folder "spamassassin" (B155); setup removes those of
+    # earlier versions. All test users: alice after imapsieve-move-run, the
+    # others for a box updated from such a version.
+    found, n = [], 0
+    for user in (ctx.alice, ctx.bob, ctx.carol):
+        M = imap_login(ctx, user)
+        try:
+            names = list_folders(M)
+        finally:
+            M.logout()
+        n += len(names)
+        found += ["%s: %s" % (user, x) for x in names if x.lower() == "spamassassin"]
+    if found:
+        raise Fail("folders of sa-learn's state directory: %s" % ", ".join(found))
+    return "%d folders of 3 users, none named spamassassin" % n
+
+
 # ---------------------------------------------------------------------------
 # cleanup
 # ---------------------------------------------------------------------------
@@ -4114,6 +4134,7 @@ def main():
         run_check("imapsieve-move-run", c_imapsieve, ctx)
         run_check("imapsieve-spam-learn", c_imapsieve_result, ctx, "spam")
         run_check("imapsieve-ham-learn", c_imapsieve_result, ctx, "ham")
+        run_check("imapsieve-no-phantom-folder", c_imapsieve_no_phantom_folder, ctx)
         run_check("fts-search", c_fts, ctx)
     if not args.no_cleanup and (want("mail") or want("imapsieve")):
         run_check("cleanup-test-mail", c_cleanup, ctx)

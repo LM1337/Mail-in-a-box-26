@@ -50,6 +50,9 @@ if [ -n "$SETUP_STOPPED_CRON" ] && [ "$(systemctl is-enabled cron.service 2> /de
 fi
 function setup_ended {
 	local rc=$?
+	# PHP-FPM that setup/nextcloud.sh stopped for a Nextcloud upgrade, when the
+	# run ended before PHP-FPM's restart after zpush.sh (B149).
+	start_stopped_php_fpm
 	if [ -n "$SETUP_MASKED_CRON" ]; then
 		systemctl unmask --runtime --quiet cron.service 2> /dev/null || true
 		rm -f "$SETUP_CRON_MASK_MARKER"
@@ -114,10 +117,12 @@ source setup/questions.sh
 # Run some network checks to make sure setup on this machine makes sense.
 # Skip on existing installs since we don't want this to block the ability to
 # upgrade, and these checks are also in the control panel status checks.
-if [ -z "${DEFAULT_PRIMARY_HOSTNAME:-}" ]; then
-if [ -z "${SKIP_NETWORK_CHECKS:-}" ]; then
+# A first install is one without /etc/mailinabox.conf (see above). The test
+# was for an empty DEFAULT_PRIMARY_HOSTNAME, which questions.sh sets on a
+# first interactive install (the suggested hostname), so only installs with
+# PRIMARY_HOSTNAME in the environment ran the checks (B146).
+if [ -n "${FIRST_TIME_SETUP:-}" ] && [ -z "${SKIP_NETWORK_CHECKS:-}" ]; then
 	source setup/network-checks.sh
-fi
 fi
 
 # Create the STORAGE_USER and STORAGE_ROOT directory if they don't already exist.
@@ -137,9 +142,11 @@ if [ ! -d "$STORAGE_ROOT" ]; then
 fi
 f=$STORAGE_ROOT
 while [[ $f != / ]]; do chmod a+rx "$f"; f=$(dirname "$f"); done;
+# The storage user may write in STORAGE_ROOT (its home), so the file is
+# written and given to it without following a symbolic link there (B147).
 if [ ! -f "$STORAGE_ROOT/mailinabox.version" ]; then
-	setup/migrate.py --current > "$STORAGE_ROOT/mailinabox.version"
-	chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"
+	setup/migrate.py --current | tools/write_conf.py "$STORAGE_ROOT/mailinabox.version" 644
+	tools/write_conf.py --own "$STORAGE_ROOT/mailinabox.version" "$STORAGE_USER" "$STORAGE_USER" 644
 fi
 
 # Save the global options in /etc/mailinabox.conf so that standalone

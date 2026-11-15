@@ -79,10 +79,18 @@ fi
 
 # Download jQuery and Bootstrap local files
 
-# Make sure we have the directory to save to.
+# Into a new directory next to the installed one, which replaces it only when
+# it is complete: up to v78-r2604.1 the installed one was emptied first, and
+# a failed download left the control panel without jQuery and Bootstrap
+# until a later run (B157). A directory of root's own (mktemp -d), not a
+# fixed name in /tmp that another local user could create first (B97); one
+# that an earlier run left behind is removed.
 assets_dir=$inst_dir/vendor/assets
-rm -rf $assets_dir
-mkdir -p $assets_dir
+mkdir -p "$inst_dir/vendor"
+find "$inst_dir/vendor" -maxdepth 1 -name '.assets-new.*' -type d -user root -exec rm -rf -- {} +
+assets_tmp=$(mktemp -d "$inst_dir/vendor/.assets-new.XXXXXXXX")
+assets_new=$assets_tmp/assets
+mkdir "$assets_new"
 
 # jQuery CDN URL
 jquery_version=3.7.1 # newest 3.x; Bootstrap 3 JS refuses jQuery >= 4
@@ -90,7 +98,7 @@ jquery_url=https://code.jquery.com
 
 # Get jQuery
 # SHA256; matches the official SRI sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=
-wget_verify $jquery_url/jquery-$jquery_version.min.js fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a $assets_dir/jquery.min.js
+wget_verify $jquery_url/jquery-$jquery_version.min.js fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a "$assets_new/jquery.min.js"
 
 # Bootstrap CDN URL
 # Bootstrap 3.4.1 is the final 3.x release (EOL since 2019). The admin templates depend on
@@ -98,19 +106,26 @@ wget_verify $jquery_url/jquery-$jquery_version.min.js fc9a93dd241f6b045cbff0481c
 bootstrap_version=3.4.1
 bootstrap_url=https://github.com/twbs/bootstrap/releases/download/v$bootstrap_version/bootstrap-$bootstrap_version-dist.zip
 
-# Get Bootstrap (into a directory of root's own, not under a fixed name in /tmp, B97)
-bootstrap_tmp=$(mktemp -d)
-wget_verify $bootstrap_url d49793cf773cbd393ac2cf340c3b4ddab5365fa7c292098ac07e12eab3efd92e "$bootstrap_tmp/bootstrap.zip" # SHA256 (no digest published for this asset)
-unzip -q "$bootstrap_tmp/bootstrap.zip" -d $assets_dir
-mv $assets_dir/bootstrap-$bootstrap_version-dist $assets_dir/bootstrap
-rm -rf "$bootstrap_tmp"
+# Get Bootstrap
+wget_verify $bootstrap_url d49793cf773cbd393ac2cf340c3b4ddab5365fa7c292098ac07e12eab3efd92e "$assets_tmp/bootstrap.zip" # SHA256 (no digest published for this asset)
+unzip -q "$assets_tmp/bootstrap.zip" -d "$assets_new"
+mv "$assets_new/bootstrap-$bootstrap_version-dist" "$assets_new/bootstrap"
 
 # The fork's favicons and icon (from branding/), served as /admin/assets/branding/ and as
 # the fallback /favicon.ico of the box's web domains (see conf/nginx-alldomains.conf).
-mkdir -p $assets_dir/branding
+mkdir -p "$assets_new/branding"
 cp branding/icon.svg branding/favicon.ico branding/favicon-16.png branding/favicon-32.png \
-	branding/apple-touch-icon.png $assets_dir/branding/
-chmod a+r $assets_dir/branding/*
+	branding/apple-touch-icon.png "$assets_new/branding/"
+chmod a+r "$assets_new"/branding/*
+
+# The new directory goes into place: the installed one is renamed away first
+# and removed after, so that the assets are missing only between two renames.
+rm -rf "$assets_dir.old"
+if [ -e "$assets_dir" ]; then
+	mv "$assets_dir" "$assets_dir.old"
+fi
+mv "$assets_new" "$assets_dir"
+rm -rf "$assets_dir.old" "$assets_tmp"
 
 # Create an init script to start the management daemon and keep it
 # running after a reboot.

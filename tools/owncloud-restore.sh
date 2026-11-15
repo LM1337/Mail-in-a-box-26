@@ -29,15 +29,19 @@ fi
 echo "Restoring backup from $1"
 service php"$PHP_VER"-fpm stop
 
-# The Nextcloud version the backup was taken from.
-BACKUP_NC_VER=$(php"$PHP_VER" -r "include(\"$1/config.php\"); echo(\$CONFIG['version']);")
+# The Nextcloud version the backup was taken from, from the 'version' line of
+# its config.php (written by www-data): not by including the file in PHP as
+# root, which ran PHP code that www-data had added to it (B147).
+BACKUP_NC_VER=$(sed -n "/^[[:space:]]*'version'[[:space:]]*=>[[:space:]]*'\([0-9.]*\)'.*/{s//\1/p;q}" "$1/config.php")
 BACKUP_NC_MAJOR=${BACKUP_NC_VER%%.*}
 
 # remove the current ownCloud/Nextcloud installation
 rm -rf /usr/local/lib/owncloud/
 
-cp "$1/owncloud.db" "$STORAGE_ROOT/owncloud/"
-cp "$1/config.php" "$STORAGE_ROOT/owncloud/"
+# --remove-destination: a new file, not one written through a symbolic link
+# that www-data, which owns the directory, could have put there (B147).
+cp --remove-destination "$1/owncloud.db" "$STORAGE_ROOT/owncloud/"
+cp --remove-destination "$1/config.php" "$STORAGE_ROOT/owncloud/"
 chown -f -R www-data:www-data "$STORAGE_ROOT/owncloud"
 
 # Restore the ownCloud/Nextcloud application only if the backup has it and it can run on

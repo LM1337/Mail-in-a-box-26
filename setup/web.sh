@@ -141,7 +141,9 @@ chmod a+r /var/lib/mailinabox/mta-sts.txt
 if [ -d "$STORAGE_ROOT/www/static" ]; then mv "$STORAGE_ROOT/www/static" "$STORAGE_ROOT/www/default"; fi # migration #NODOC
 mkdir -p "$STORAGE_ROOT/www/default"
 if [ ! -f "$STORAGE_ROOT/www/default/index.html" ]; then
-	cp conf/www_default.html "$STORAGE_ROOT/www/default/index.html"
+	# Not with cp by path: the storage user owns www/ and could have put a
+	# symbolic link there, which cp writes through (B147).
+	tools/write_conf.py "$STORAGE_ROOT/www/default/index.html" < conf/www_default.html
 fi
 chown -R "$STORAGE_USER" "$STORAGE_ROOT/www"
 
