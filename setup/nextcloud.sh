@@ -259,11 +259,13 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		echo "Upgrading Nextcloud --- backing up existing installation, configuration, and database to directory to $BACKUP_DIRECTORY..."
 		cp -r /usr/local/lib/owncloud "$BACKUP_DIRECTORY/owncloud-install"
 	fi
+	# cp -P: a symbolic link that www-data (which owns $STORAGE_ROOT/owncloud) put
+	# there is copied as a link, root does not read the file it points to (B147).
 	if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
-		cp "$STORAGE_ROOT/owncloud/owncloud.db" "$BACKUP_DIRECTORY"
+		cp -P "$STORAGE_ROOT/owncloud/owncloud.db" "$BACKUP_DIRECTORY"
 	fi
 	if [ -e "$STORAGE_ROOT/owncloud/config.php" ]; then
-		cp "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
+		cp -P "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
 	fi
 
 	# If ownCloud or Nextcloud was previously installed....
@@ -372,9 +374,12 @@ if [ ! -f "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
 	# Create user data directory
 	mkdir -p "$STORAGE_ROOT/owncloud"
 
-	# Create an initial configuration file.
+	# Create an initial configuration file. Both files below are written with
+	# tools/write_conf.py, which does not follow a symbolic link in a
+	# directory of www-data's: this branch also runs on an existing box whose
+	# owncloud.db is gone (B147).
 	instanceid=oc$(echo "$PRIMARY_HOSTNAME" | sha1sum | fold -w 10 | head -n 1)
-	cat > "$STORAGE_ROOT/owncloud/config.php" <<EOF;
+	tools/write_conf.py "$STORAGE_ROOT/owncloud/config.php" <<EOF;
 <?php
 \$CONFIG = array (
   'datadirectory' => '$STORAGE_ROOT/owncloud',
@@ -402,7 +407,7 @@ EOF
 	# when the install script is run. Make an administrator account
 	# here or else the install can't finish.
 	adminpassword=$(dd if=/dev/urandom bs=1 count=40 2>/dev/null | sha1sum | fold -w 30 | head -n 1)
-	cat > /usr/local/lib/owncloud/config/autoconfig.php <<EOF;
+	tools/write_conf.py /usr/local/lib/owncloud/config/autoconfig.php 640 <<EOF;
 <?php
 \$AUTOCONFIG = array (
   # storage/database
@@ -558,7 +563,8 @@ tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
 # This version was probably in use in Mail-in-a-Box v0.41 (February 26, 2019) and earlier.
 # We moved to v0.6.3 in 193763f8. Ignore errors - maybe there are duplicated users with the
 # correct backend already.
-sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
+# As www-data, which owns the database and its directory, not as root by path (B147).
+sudo -u www-data sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
 
 # Set up a general cron job for Nextcloud.
 # Also add another job for Calendar updates, per advice in the Nextcloud docs

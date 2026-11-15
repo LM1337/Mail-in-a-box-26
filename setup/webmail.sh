@@ -303,14 +303,21 @@ if [ "$RCM_BUILD" != "$RCM_DIR" ]; then
 fi
 
 # Run Roundcube database migration script (database is created if it does not exist)
-php"$PHP_VER" ${RCM_DIR}/bin/updatedb.sh --dir ${RCM_DIR}/SQL --package roundcube
+# As www-data, which owns the database and its directory: as root, PHP opened
+# (or created) roundcube.sqlite by path, through a symbolic link that www-data
+# could have put there (B147). A database of root's from an earlier run is
+# given to www-data first.
+if [ -e "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" ]; then
+	tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
+fi
+(cd "$RCM_DIR" && sudo -u www-data php"$PHP_VER" ${RCM_DIR}/bin/updatedb.sh --dir ${RCM_DIR}/SQL --package roundcube)
 # www-data owns the directory of roundcube.sqlite, see users.sqlite above (B147).
 tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
 
 # Because Roundcube wants to set the PRAGMA we just deleted from the source, we apply it here
 # to the roundcube database (see https://github.com/roundcube/roundcubemail/issues/8035)
-# Database should exist, created by migration script
-hide_output sqlite3 "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" 'PRAGMA journal_mode=WAL;'
+# Database should exist, created by migration script. As www-data (see above).
+hide_output sudo -u www-data sqlite3 "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" 'PRAGMA journal_mode=WAL;'
 
 # Enable PHP modules.
 phpenmod -v "$PHP_VER" imap
