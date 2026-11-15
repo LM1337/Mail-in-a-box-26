@@ -1037,11 +1037,16 @@ def parse_bootstrap_tag(script):
 def get_latest_miab_version():
 	# This fetches the fork's setup/bootstrap.sh and extracts the tag named in
 	# the script to determine the current product version.
-    from urllib.request import urlopen, HTTPError, URLError
+    from urllib.request import urlopen
+    from http.client import HTTPException
 
+    # A failure while reading the response, too, is "could not be determined",
+    # not an exception that ends the whole status check run: a reset or a
+    # timeout during read() (OSError, which also covers urllib's URLError and
+    # HTTPError) or a cut response (http.client's IncompleteRead) (B170).
     try:
         return parse_bootstrap_tag(urlopen(FORK_BOOTSTRAP_URL, timeout=5).read())
-    except (TimeoutError, HTTPError, URLError):
+    except (OSError, HTTPException):
         return None
 
 def check_miab_version(env, output):
