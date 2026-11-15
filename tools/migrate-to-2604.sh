@@ -139,6 +139,10 @@ section() {
 	echo "$*"
 	echo "-----------------------------------------------"
 }
+# Text from the old box, or from processes of other accounts here, for the
+# terminal and the reports: control characters other than tab become "?", so
+# that it cannot send escape sequences to the terminal (B154).
+printable() { sed 's/[^[:print:][:blank:]]/?/g'; }
 human() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "${1:-0} bytes"; }
 fmt_dur() { # seconds -> "7 min" / "2 h 05 min"
 	local m=$(((${1:-0} + 59) / 60))
@@ -2089,7 +2093,7 @@ wait_quiet() {
 		else
 			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT") || die "Could not check the processes on this machine."
 		fi
-		out=$(grep '^BUSY ' <<< "$out" | sed 's/^BUSY /  /' || true)
+		out=$(grep '^BUSY ' <<< "$out" | sed 's/^BUSY /  /' | printable || true)
 		if [ -z "$out" ]; then
 			if [ "$shown" = 1 ]; then say "Nothing $label uses $STORAGE_ROOT any more."; fi
 			return 0
@@ -2112,7 +2116,7 @@ wait_quiet() {
 				if [ -n "$pids" ]; then kill -KILL $pids 2> /dev/null || true; fi
 				sleep 2
 			fi
-			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' || true)
+			out=$(local_bash "$QUIET_SCRIPT" "SR=$STORAGE_ROOT" | grep '^BUSY ' | sed 's/^BUSY /  /' | printable || true)
 			if [ -n "$out" ]; then
 				warn "These processes on this machine still use $STORAGE_ROOT (PID, why, command):
 $out
@@ -2135,7 +2139,8 @@ then run the command again."
 	done
 }
 
-backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT"; }
+# Only numbers count as PIDs of the old box (B154).
+backup_pids() { remote_bash "$BACKUP_PIDS_SCRIPT" | { grep -E '^[0-9]+$' || true; }; }
 
 # A Mail-in-a-Box backup that is running (the nightly one starts at 01:04,
 # /etc/cron.d/mailinabox-nightly): wait until it has finished, at most
@@ -2299,7 +2304,7 @@ stop_old_units() {
 		die "Could not stop all of these on the old box: $unit_list"
 	fi
 	if grep -q '^NOMASK ' <<< "$out"; then
-		warn "Could not mask on the old box (unit file in /etc/systemd/system?): $(sed -n 's/^NOMASK //p' <<< "$out" | tr '\n' ' ')
+		warn "Could not mask on the old box (unit file in /etc/systemd/system?): $(sed -n 's/^NOMASK //p' <<< "$out" | printable | tr '\n' ' ')
 They are stopped, but something could start them again; the final copy checks for that."
 	fi
 	old_status
@@ -2431,7 +2436,7 @@ handle_old_queue() {
 		[ "${OLD[QUEUE_LOCAL]:-1}" != 0 ] || break
 	done
 	[ "${OLD[QUEUE_TOTAL]:-0}" -gt 0 ] 2> /dev/null || return 0
-	remote "postqueue -p" > "$STATE_DIR/old-postqueue.txt" 2> /dev/null || true
+	remote "postqueue -p" 2> /dev/null | printable > "$STATE_DIR/old-postqueue.txt" || true
 	state_set OLD_QUEUE_SAVED "${OLD[QUEUE_TOTAL]}"
 	say "Still in the queue: ${OLD[QUEUE_TOTAL]} messages, ${OLD[QUEUE_LOCAL]:-?} of them for mailboxes of the box."
 	say "The listing is in $STATE_DIR/old-postqueue.txt. The queue is not migrated; it stays on the old box."
@@ -3066,7 +3071,8 @@ restriction_items() {
 etc_report() {
 	local out=$STATE_DIR/etc-report.txt old=$STATE_DIR/old-etc gone line
 	[ -d "$old/etc" ] || return 0
-	gone=$(postfix_restrictions_gone "$STATE_DIR/old-postconf.txt")
+	# From the old box: postconf -n, file names, crontab (B154: printable).
+	gone=$(postfix_restrictions_gone "$STATE_DIR/old-postconf.txt" | printable)
 	{
 		echo "Customizations of the old box that are NOT migrated (they live in /etc,"
 		echo "not in $STORAGE_ROOT). The old /etc (as of $(state_get ETC_SAVED_AT)) is in"
@@ -3108,7 +3114,7 @@ etc_report() {
 		echo
 		echo "== Crontab of root on the old box"
 		grep -vE '^[[:space:]]*(#|$)' "$STATE_DIR/old-root-crontab.txt" 2> /dev/null | sed 's/^/  /' || true
-	} > "$out"
+	} | printable > "$out"
 	say "Customizations of the old /etc that were not migrated: $out"
 	sed -n '1,80p' "$out"
 	# Restrictions decide which mail is accepted: a lost one is a failed check
@@ -3196,7 +3202,7 @@ next_steps() {
 		say "   * Zones with external DNS: change the A/AAAA records of $host (and the ones"
 		say "     listed in the admin panel under System > External DNS) to the new IPs. That"
 		say "     takes effect within their TTL."
-		sec=$(secondary_nameservers || true)
+		sec=$({ secondary_nameservers || true; } | printable)
 		if [ -n "$sec" ]; then
 			say "   * Custom secondary nameservers are set: $sec"
 			say "     Change the primary (master) IP at that DNS provider to $NEW_PUBLIC_IP ${NEW_PUBLIC_IPV6:-}."
@@ -3519,12 +3525,12 @@ keeps whatever its copy replaces here in $STORAGE_ROOT/$OVERWRITTEN/."
 	ip=$(state_get NEW_PUBLIC_IP)
 	ip6=$(state_get NEW_PUBLIC_IPV6)
 	if { [ -n "$ip" ] && [[ $vt == *"[$ip]"* ]]; } || { [ -n "$ip6" ] && [[ $vt == *"[$ip6]"* ]]; }; then
-		warn "The saved virtual_transport of the old box ($vt) points to this machine; using lmtp:[127.0.0.1]:10025."
+		warn "The saved virtual_transport of the old box ($(printable <<< "$vt")) points to this machine; using lmtp:[127.0.0.1]:10025."
 		vt="lmtp:[127.0.0.1]:10025"
 	fi
 	out=$(remote_bash "$OLD_POSTFIX_RESET_SCRIPT" "VT=$vt") || warn "Could not check Postfix on the old box."
 	if grep -q '^VTFIXED ' <<< "$out"; then
-		warn "virtual_transport on the old box was '$(sed -n 's/^VTFIXED //p' <<< "$out")', set back to '$vt'."
+		warn "virtual_transport on the old box was '$(sed -n 's/^VTFIXED //p' <<< "$out" | printable)', set back to '$(printable <<< "$vt")'."
 	fi
 	if grep -q '^PFSTOPPED' <<< "$out"; then
 		warn "Postfix ran on the old box outside systemd (postfix start); stopped it, systemd starts it now."
@@ -3532,7 +3538,7 @@ keeps whatever its copy replaces here in $STORAGE_ROOT/$OVERWRITTEN/."
 	remote_bash "$OLD_START_SCRIPT" "UNITS=$list" "START=${rev[*]}" \
 		|| die "Could not start the services on the old box. On the old box, run:
   postfix status && postfix stop  # if it was started by hand
-  postconf virtual_transport      # set it back if it points to this machine${vt:+ (old value: $vt)}
+  postconf virtual_transport      # set it back if it points to this machine${vt:+ (old value: $(printable <<< "$vt"))}
   systemctl unmask --runtime $list
   systemctl start ${rev[*]}"
 	# Mail that waited for this machine is delivered on the old box now.
