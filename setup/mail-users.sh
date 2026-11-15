@@ -17,13 +17,20 @@ source /etc/mailinabox.conf # load global vars
 
 db_path=$STORAGE_ROOT/mail/users.sqlite
 
-# Create an empty database if it doesn't yet exist.
+# Create an empty database if it doesn't yet exist. It is made in a directory
+# of root's own and written into place with tools/write_conf.py, which does not
+# follow a symbolic link: www-data may write in $STORAGE_ROOT/mail
+# (setup/webmail.sh), and sqlite3 as root created the database wherever a link
+# put there pointed (B147).
 if [ ! -f "$db_path" ]; then
 	echo "Creating new user database: $db_path";
-	echo "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, extra, privileges TEXT NOT NULL DEFAULT '', quota TEXT NOT NULL DEFAULT '0');" | sqlite3 "$db_path";
-	echo "CREATE TABLE aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_path";
-	echo "CREATE TABLE mfa (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, secret TEXT NOT NULL, mru_token TEXT, label TEXT, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);" | sqlite3 "$db_path";
-	echo "CREATE TABLE auto_aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_path";
+	db_tmp=$(mktemp -d)
+	echo "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, extra, privileges TEXT NOT NULL DEFAULT '', quota TEXT NOT NULL DEFAULT '0');" | sqlite3 "$db_tmp/users.sqlite";
+	echo "CREATE TABLE aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_tmp/users.sqlite";
+	echo "CREATE TABLE mfa (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, secret TEXT NOT NULL, mru_token TEXT, label TEXT, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);" | sqlite3 "$db_tmp/users.sqlite";
+	echo "CREATE TABLE auto_aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_tmp/users.sqlite";
+	tools/write_conf.py "$db_path" 644 < "$db_tmp/users.sqlite"
+	rm -rf "$db_tmp"
 fi
 
 # ### User Authentication

@@ -294,8 +294,13 @@ if [ ! -d "$STORAGE_ROOT/mail/postgrey/db" ]; then
 	service postgrey stop
 	# Ensure the new paths for postgrey db exists
 	mkdir -p "$STORAGE_ROOT/mail/postgrey/db"
-	# Move over database files
-	mv /var/lib/postgrey/* "$STORAGE_ROOT/mail/postgrey/db/" || true
+	# Move over database files, as postgrey, which owns them and (given to it
+	# through descriptors, refusing links) the new directories: www-data may
+	# write in $STORAGE_ROOT/mail (setup/webmail.sh), and root's mv followed a
+	# link put there into any directory (B147).
+	tools/write_conf.py --own "$STORAGE_ROOT/mail/postgrey" postgrey postgrey 700
+	tools/write_conf.py --own "$STORAGE_ROOT/mail/postgrey/db" postgrey postgrey 700
+	sudo -u postgrey mv /var/lib/postgrey/* "$STORAGE_ROOT/mail/postgrey/db/" || true
 fi
 # Ensure permissions are set. www-data may write in $STORAGE_ROOT/mail
 # (setup/webmail.sh): chown -R without a trailing slash and the modes through
