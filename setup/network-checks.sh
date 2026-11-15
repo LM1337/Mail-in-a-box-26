@@ -91,8 +91,10 @@ fi
 
 # Stop if we cannot make an outbound connection on port 25. Many residential
 # networks block outbound port 25 to prevent their network from sending spam.
-# See if we can reach one of Google's MTAs with a 5-second timeout.
-if ! nc -z -w5 aspmx.l.google.com 25; then
+# See if we can reach one of Google's MTAs with a 5-second timeout. nc of
+# Ubuntu 26.04 prints "Connection to ... succeeded!" for -z: only its exit
+# code counts (B174).
+if ! nc -z -w5 aspmx.l.google.com 25 > /dev/null 2>&1; then
 	echo
 	echo "Outbound mail (port 25) seems to be blocked by your network."
 	echo

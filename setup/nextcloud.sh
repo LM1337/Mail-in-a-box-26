@@ -259,14 +259,17 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		echo "Upgrading Nextcloud --- backing up existing installation, configuration, and database to directory to $BACKUP_DIRECTORY..."
 		cp -r /usr/local/lib/owncloud "$BACKUP_DIRECTORY/owncloud-install"
 	fi
-	# cp -P: a symbolic link that www-data (which owns $STORAGE_ROOT/owncloud) put
-	# there is copied as a link, root does not read the file it points to (B147).
-	if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
-		cp -P "$STORAGE_ROOT/owncloud/owncloud.db" "$BACKUP_DIRECTORY"
-	fi
-	if [ -e "$STORAGE_ROOT/owncloud/config.php" ]; then
-		cp -P "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
-	fi
+	# Only a regular file is backed up: www-data owns $STORAGE_ROOT/owncloud and
+	# could have put a symbolic link there, whose target root would read into
+	# the backup (or, kept as a link, tools/owncloud-restore.sh later) (B147).
+	# cp -P: a link put there after the test is copied as a link.
+	for f in owncloud.db config.php; do
+		if [ -L "$STORAGE_ROOT/owncloud/$f" ] || { [ -e "$STORAGE_ROOT/owncloud/$f" ] && [ ! -f "$STORAGE_ROOT/owncloud/$f" ]; }; then
+			echo "Not backing up $STORAGE_ROOT/owncloud/$f: it is not a regular file."
+		elif [ -e "$STORAGE_ROOT/owncloud/$f" ]; then
+			cp -P "$STORAGE_ROOT/owncloud/$f" "$BACKUP_DIRECTORY"
+		fi
+	done
 
 	# If ownCloud or Nextcloud was previously installed....
 	if [ -n "${CURRENT_NEXTCLOUD_VER}" ]; then

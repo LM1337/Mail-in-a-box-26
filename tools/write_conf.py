@@ -44,6 +44,11 @@
 #   is opened as above; PATH must be a directory or a regular file with one
 #   hard link, and a symbolic link or anything else is refused.
 #
+# tools/write_conf.py --check-own PATH...
+#   changes nothing: prints "PATH: why" for each PATH that --own would refuse
+#   (a missing PATH is fine) and exits 1 if there is one. setup/start.sh runs
+#   it before setup changes anything (B147).
+#
 # Exit code 0 (also when nothing changed), 1 on an error.
 
 import grp
@@ -200,16 +205,44 @@ def _own_dir(dfd, label, uid, gid, warn, file_mode=None, dir_mode=None):
 			warn("write_conf.py: %s is not a directory, regular file or link, left alone" % where)
 
 
+def _own_refuses(path, st):
+	"""Why --own refuses PATH with the lstat result st, or None."""
+	if stat.S_ISLNK(st.st_mode):
+		return "%s is a symbolic link" % path
+	if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+		return "%s is not a directory or regular file" % path
+	if stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+		return "%s has %d hard links" % (path, st.st_nlink)
+	return None
+
+
+def check_own(path):
+	"""See --check-own in the header: why --own would refuse PATH, or None."""
+	directory, name = os.path.split(os.path.abspath(path))
+	try:
+		dfd = open_dir(directory)
+	except FileNotFoundError:
+		return None
+	except OSError as e:
+		return str(e)
+	try:
+		try:
+			st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+		except FileNotFoundError:
+			return None
+		return _own_refuses(path, st)
+	finally:
+		os.close(dfd)
+
+
 def own(path, uid, gid, mode):
 	"""See --own in the header."""
 	directory, name = os.path.split(os.path.abspath(path))
 	dfd = open_dir(directory)
 	try:
 		st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
-		if stat.S_ISLNK(st.st_mode):
-			raise OSError("%s is a symbolic link" % path)
-		if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
-			raise OSError("%s is not a directory or regular file" % path)
+		if stat.S_ISLNK(st.st_mode) or not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+			raise OSError(_own_refuses(path, st))
 		fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=dfd)
 	finally:
 		os.close(dfd)
@@ -232,13 +265,19 @@ if __name__ == "__main__":
 			own_tree(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid,
 				file_mode=modes[0], dir_mode=modes[1])
 			sys.exit(0)
+		if len(sys.argv) >= 3 and sys.argv[1] == "--check-own":
+			problems = list(dict.fromkeys(p for p in map(check_own, sys.argv[2:]) if p))
+			for p in problems:
+				print(p)
+			sys.exit(1 if problems else 0)
 		if len(sys.argv) == 6 and sys.argv[1] == "--own":
 			own(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid, int(sys.argv[5], 8))
 			sys.exit(0)
 		if len(sys.argv) not in (2, 3) or sys.argv[1].startswith("--"):
 			print("usage: tools/write_conf.py FILE [MODE] < CONTENT\n"
 				"       tools/write_conf.py --own-tree DIR USER GROUP [FILEMODE DIRMODE]\n"
-				"       tools/write_conf.py --own PATH USER GROUP MODE", file=sys.stderr)
+				"       tools/write_conf.py --own PATH USER GROUP MODE\n"
+				"       tools/write_conf.py --check-own PATH...", file=sys.stderr)
 			sys.exit(1)
 		mode = int(sys.argv[2], 8) if len(sys.argv) == 3 else 0o644
 		write_if_changed(sys.argv[1], sys.stdin.buffer.read(), mode)

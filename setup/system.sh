@@ -192,8 +192,38 @@ SURY_KEYRING=usr/share/keyrings/debsuryorg-archive-keyring.gpg # in the package,
 SURY_TMP=$(mktemp -d)
 hide_output curl -fsSLo "$SURY_TMP/keyring.deb" https://packages.sury.org/debsuryorg-archive-keyring.deb
 dpkg-deb -x "$SURY_TMP/keyring.deb" "$SURY_TMP/x"
-if [ -L "$SURY_TMP/x/$SURY_KEYRING" ] || [ ! -f "$SURY_TMP/x/$SURY_KEYRING" ] \
-	|| [ "$(GNUPGHOME="$SURY_TMP" gpg --show-keys --with-colons "$SURY_TMP/x/$SURY_KEYRING" 2>/dev/null \
+# The key file is a regular file in the package today (2025.11.18), but a
+# later version may make it a symbolic link to the real file, as Debian's own
+# keyrings do since 2025 (.gpg to .pgp). Links on the way are followed inside
+# the unpacked package only, as if it were /, where dpkg would install it (an
+# absolute target and ".." stay inside it), at most 10 of them (B158).
+SURY_X=$(realpath -e -- "$SURY_TMP/x")
+SURY_KEY=$(python3 -I - "$SURY_X" "$SURY_KEYRING" <<'PY' || true
+import os, sys
+root, todo, cur, links = sys.argv[1], [p for p in sys.argv[2].split("/") if p], [], 0
+while todo:
+    name = todo.pop(0)
+    if name == ".":
+        continue
+    if name == "..":
+        cur = cur[:-1]
+        continue
+    path = os.path.join(root, *cur, name)
+    if os.path.islink(path):
+        links += 1
+        if links > 10:
+            sys.exit(1)
+        target = os.readlink(path)
+        if target.startswith("/"):
+            cur = []
+        todo = [p for p in target.split("/") if p] + todo
+        continue
+    cur.append(name)
+print(os.path.join(root, *cur))
+PY
+)
+if [ -z "$SURY_KEY" ] || [[ $SURY_KEY != "$SURY_X"/* ]] || [ -L "$SURY_KEY" ] || [ ! -f "$SURY_KEY" ] \
+	|| [ "$(GNUPGHOME="$SURY_TMP" gpg --show-keys --with-colons "$SURY_KEY" 2>/dev/null \
 	| awk -F: '$1=="pub"{p=1;next} p&&$1=="fpr"{print $10;p=0}')" != "$SURY_KEY_FPR" ]; then
 	echo "The deb.sury.org keyring package does not contain exactly the expected key $SURY_KEY_FPR."
 	exit 1
@@ -207,8 +237,8 @@ fi
 if dpkg-query -W -f='${db:Status-Abbrev}' debsuryorg-archive-keyring 2> /dev/null | grep -q '^[ihr][iUFHWt]'; then
 	apt_get_quiet purge debsuryorg-archive-keyring
 fi
-if ! cmp -s "$SURY_TMP/x/$SURY_KEYRING" "/$SURY_KEYRING"; then
-	install -m 644 "$SURY_TMP/x/$SURY_KEYRING" "/$SURY_KEYRING"
+if ! cmp -s "$SURY_KEY" "/$SURY_KEYRING"; then
+	install -m 644 "$SURY_KEY" "/$SURY_KEYRING"
 fi
 rm -rf "$SURY_TMP"
 # The keyring package installed the key into /etc/apt/trusted.gpg.d/ too, which

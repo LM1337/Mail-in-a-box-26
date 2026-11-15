@@ -21,8 +21,12 @@ if [ -z "$1" ]; then
 	exit
 fi
 
-if [ ! -f "$1/config.php" ] || [ ! -f "$1/owncloud.db" ]; then
-	echo "This isn't a valid backup location"
+# Both must be regular files, not symbolic links: setup's backup copies a link
+# as a link (www-data, which owns $STORAGE_ROOT/owncloud, could have made
+# owncloud.db a link to a file only root may read), and copying it back would
+# give that file's content to www-data (B147).
+if [ ! -f "$1/config.php" ] || [ ! -f "$1/owncloud.db" ] || [ -L "$1/config.php" ] || [ -L "$1/owncloud.db" ]; then
+	echo "This isn't a valid backup location (config.php and owncloud.db must be regular files)"
 	exit 1
 fi
 
@@ -39,9 +43,11 @@ BACKUP_NC_MAJOR=${BACKUP_NC_VER%%.*}
 rm -rf /usr/local/lib/owncloud/
 
 # --remove-destination: a new file, not one written through a symbolic link
-# that www-data, which owns the directory, could have put there (B147).
-cp --remove-destination "$1/owncloud.db" "$STORAGE_ROOT/owncloud/"
-cp --remove-destination "$1/config.php" "$STORAGE_ROOT/owncloud/"
+# that www-data, which owns the directory, could have put there; -P: a link
+# put into the backup after the test above is copied as a link, its target is
+# not read (B147).
+cp -P --remove-destination "$1/owncloud.db" "$STORAGE_ROOT/owncloud/"
+cp -P --remove-destination "$1/config.php" "$STORAGE_ROOT/owncloud/"
 chown -f -R www-data:www-data "$STORAGE_ROOT/owncloud"
 
 # Restore the ownCloud/Nextcloud application only if the backup has it and it can run on
