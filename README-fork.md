@@ -17,9 +17,9 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * Dovecot 2.4, Postfix and the rest of the mail stack from Ubuntu 26.04.
 * PHP 8.5 from Ubuntu. packages.sury.org is pinned to what Ubuntu lacks
   (php8.2 for the Nextcloud upgrade chain, php8.5-imap, php-common).
-* Nextcloud 34.0.5. Existing installations are upgraded step by step from
+* Nextcloud 34.0.6. Existing installations are upgraded step by step from
   Nextcloud 26; older versions are refused.
-* Roundcube 1.7.5, Z-Push 2.7.7.
+* Roundcube 1.7.6, Z-Push 2.7.7.
 * Nextcloud users only see and share with their own mail domain, admins with
   everyone (`NEXTCLOUD_SHARE_SCOPE`, see below).
 * fail2ban: repeat offenders get longer bans, slow jails catch slow attacks,
@@ -1383,11 +1383,12 @@ Where sshd asks for more than a key
 `sshd_config` or a file it includes has `Match` blocks, there is no fallback (it would let in with
 a key alone); keep a connection open instead. ufw lets the port through
 only while it runs; a firewall of the provider must allow it too. Try it before the upgrade with
-`--ssh-fallback-test` (10 minutes). The run says when port 22 stops
-answering and when it answers again. The fallback is stopped when port 22
-works again, also when the tool stops with an error; while port 22 does not
-answer it stays until the next reboot, and the next run removes it and its
-firewall rule.
+`--ssh-fallback-test` (10 minutes). The run says when the SSH port (22,
+or the ports set in `sshd_config`) stops answering and when it answers
+again. The fallback is stopped when the SSH port works again, also when the
+tool stops with an error; while the SSH port does not answer, the fallback
+stays until the next reboot, and the next run removes it and its firewall
+rule.
 
 In the rc7 test runs (OpenSSH 8.9 of 22.04 and 9.6 of 24.04 as the
 fallback, also on a box without a group `admin`) a new key login on port
@@ -1604,11 +1605,12 @@ und Einmalpasswort) oder `sshd_config` oder eine eingebundene Datei
 Ersatz-Server (er ließe mit dem Schlüssel allein herein); dann eine
 Verbindung offen halten. ufw lässt den Port nur durch, solange er läuft;
 eine Firewall des Anbieters muss ihn ebenfalls erlauben. Vor dem Upgrade lässt er sich mit `--ssh-fallback-test`
-ausprobieren (10 Minuten). Der Lauf meldet, wann Port 22 nicht mehr
-antwortet und wann wieder. Der Ersatz-Server wird beendet, sobald Port 22
-wieder geht, auch wenn das Werkzeug mit einem Fehler abbricht; solange Port 22
-nicht antwortet, bleibt er bis zum nächsten Neustart, und der nächste Lauf
-entfernt ihn und seine Firewall-Regel.
+ausprobieren (10 Minuten). Der Lauf meldet, wann der SSH-Port (22 oder
+die Ports aus `sshd_config`) nicht mehr antwortet und wann wieder. Der
+Ersatz-Server wird beendet, sobald der SSH-Port wieder geht, auch wenn das
+Werkzeug mit einem Fehler abbricht; antwortet der SSH-Port nicht, bleibt der
+Ersatz-Server bis zum nächsten Neustart, und der nächste Lauf entfernt ihn
+und seine Firewall-Regel.
 
 In den Testläufen von rc7 (OpenSSH 8.9 von 22.04 und 9.6 von 24.04 als
 Ersatz-Server, auch auf einer Box ohne Gruppe `admin`) ging eine neue
@@ -1681,7 +1683,9 @@ explains what to do when the old box is too old.
 		ssh root@old.example.com true
 
    Instead of root, a user with passwordless sudo works:
-   `--from admin@old.example.com`.
+   `--from admin@old.example.com`. An IPv6 address works with or without
+   brackets (`--from root@[2001:db8::1]`). `--check` logs in and runs
+   rsync once, as the copy will ("rsync: works").
 3. **TTLs**: lower the TTL of records hosted elsewhere (A/AAAA of the box,
    SPF with `ip4:`) to e.g. 300 seconds 1 to 2 days ahead. The zones the box
    serves itself use a fixed TTL of 1 day; see "Switch DNS" below.
@@ -1841,8 +1845,9 @@ To know it better and to shorten it:
 * `rsync --delete` only runs into an empty target or into a target that
   carries the marker of an earlier run from the same old box
   (`$STORAGE_ROOT/.migrate-to-2604` with its machine-id, hostname and
-  storage path). The `.rsync-partial` directories keep interrupted files
-  out of their real place.
+  storage path). The `.migrate-to-2604-partial` directories (up to
+  v78-r2604.1 `.rsync-partial`) keep interrupted files out of their real
+  place.
 * Once setup has run on the new machine, the tool stops and masks its
   Mail-in-a-Box services before every further copy and waits until nothing
   uses `$STORAGE_ROOT` there. Files that such a copy replaces or deletes are
@@ -1914,8 +1919,9 @@ Put the line `<new IP> <hostname>` into the hosts file of your own computer
 mail through the new box (SMTP submission) and receive one, and check
 Nextcloud (files, contacts, calendars). Remove the line afterwards.
 
-Webmail users must log in again: setup gives Roundcube a new key. The spam
-filter (Bayes) and the greylisting database are taken over as they are.
+Webmail users must log in again: Roundcube on the new machine has a key of
+its own, not the old box's. The spam filter (Bayes) and the greylisting
+database are taken over as they are.
 
 ##### 2. Switch DNS
 
@@ -2061,7 +2067,9 @@ erklärt, was zu tun ist, wenn die alte Box zu alt ist.
 		ssh root@alt.example.com true
 
    Statt root geht auch ein Benutzer mit sudo ohne Passwort:
-   `--from admin@alt.example.com`.
+   `--from admin@alt.example.com`. Eine IPv6-Adresse geht mit oder ohne
+   eckige Klammern (`--from root@[2001:db8::1]`). `--check` meldet sich an
+   und ruft rsync einmal so auf wie später die Kopie („rsync: works“).
 3. **TTL**: Die TTL von Einträgen, die anderswo gehostet werden (A/AAAA der
    Box, SPF mit `ip4:`), 1 bis 2 Tage vorher auf z. B. 300 Sekunden senken.
    Die Zonen, die die Box selbst bedient, haben eine feste TTL von einem Tag;
@@ -2235,8 +2243,9 @@ Um das genauer zu wissen und abzukürzen:
 * `rsync --delete` läuft nur in ein leeres Ziel oder in ein Ziel mit der
   Markierung eines früheren Laufs von derselben alten Box
   (`$STORAGE_ROOT/.migrate-to-2604` mit deren machine-id, Hostname und
-  Datenpfad). Die Verzeichnisse `.rsync-partial` halten abgebrochene
-  Dateien von ihrem eigentlichen Platz fern.
+  Datenpfad). Die Verzeichnisse `.migrate-to-2604-partial` (bis
+  v78-r2604.1 `.rsync-partial`) halten abgebrochene Dateien von ihrem
+  eigentlichen Platz fern.
 * Sobald das Setup auf der neuen Maschine gelaufen ist, hält das Werkzeug
   vor jeder weiteren Kopie deren Mail-in-a-Box-Dienste an, sperrt sie und
   wartet, bis dort nichts mehr `$STORAGE_ROOT` benutzt. Dateien, die eine
@@ -2316,9 +2325,9 @@ anmelden, eine Testmail über die neue Box senden (SMTP-Einlieferung) und eine
 empfangen, Nextcloud prüfen (Dateien, Kontakte, Kalender). Die Zeile danach
 wieder entfernen.
 
-Webmail-Benutzer müssen sich neu anmelden: Das Setup gibt Roundcube einen
-neuen Schlüssel. Spamfilter (Bayes) und Greylisting-Datenbank werden so
-übernommen, wie sie sind.
+Webmail-Benutzer müssen sich neu anmelden: Roundcube hat auf der neuen
+Maschine einen eigenen Schlüssel, nicht den der alten Box. Spamfilter
+(Bayes) und Greylisting-Datenbank werden so übernommen, wie sie sind.
 
 ##### 2. DNS umstellen
 

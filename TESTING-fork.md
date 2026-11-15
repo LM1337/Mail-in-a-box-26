@@ -65,6 +65,7 @@ compares against after a migration or upgrade.
 | T4 | the 22.04 test VM | in place, 22.04 → 24.04 → 26.04, two release upgrades | `curl …/tools/upgrade-in-place-to-2604.sh \| sudo bash -s -- --yes` | migrated |
 | T5 | the 24.04 test VM after an in-place upgrade with rc3 | update of a box that already runs the fork | `git remote set-url` to GitHub, then `sudo bash -c "$(curl -fsSL …/setup/bootstrap.sh)"`; the setup dialogs answered with Enter | migrated |
 | T6 | a box on the Internet (public DNS, open port 25), before a final release | fresh install, then an update of it | as T1, then as T5; `tools/update-check.sh` around the update, `mailcheck` with a real external probe address | fresh |
+| T1n | the installed T1 box (from v78-r2604.2) | setup's network checks, `setup/network-checks.sh` of the release before and of the release under test, each under setup's shell options (`set -euo pipefail`) | the script run on the box through its own resolver; cases: not listed, a listed hostname, a listed IP address, a public resolver, a failing resolver | none |
 
 Variants: **T3b** is a clean T3 run from the tag after a first run had found
 bugs. **T3c** and **T4b** repeat T3 and T4 with the automatic tmux of rc4;
@@ -1194,6 +1195,17 @@ does not make a new one.
 
 ## Not tested
 
+* **Setup's network checks under setup's shell options, up to
+  v78-r2604.1.** T1 ran setup with `SKIP_NETWORK_CHECKS=1` in every
+  release up to v78-r2604.0 (v78-r2604.1 had no test matrix), and so did
+  T6 of v78-r2604.0 after its first install had stopped (B136). The repeated T6 ran the checks, but through
+  a public resolver that Spamhaus refuses (127.255.255.254, for which
+  `host` exits 0). So `setup/network-checks.sh` never took its "not
+  listed" path (NXDOMAIN, for which `host` exits 1) under setup's
+  `set -euo pipefail`, and B145, which stops such an install without a
+  message, shipped that way in v78-r2604.0 and v78-r2604.1. From
+  v78-r2604.2 on, T1n runs the checks on the installed T1 box through its
+  own resolver (see "Scenarios").
 * **Interactive first install** with `sudo bash -c "$(curl …)"` on 26.04. The
   fresh installs ran non-interactively as root; the `sudo bash -c` form was
   tested for updating an existing box.

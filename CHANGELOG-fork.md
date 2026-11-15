@@ -11,10 +11,366 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+The bug-fix release v78-r2604.2: the fixes of a bug scan of v78-r2604.1
+(B145-B173) and upstream's fix of the IPv6 Spamhaus check (#2617, B144),
+with the security releases Roundcube 1.7.6 and CardDAV plugin 5.1.5 and
+Nextcloud 34.0.6. A fresh install with `PRIMARY_HOSTNAME` in the
+environment no longer stops without a word at its network checks (B145),
+and an interactive install runs them as well (B146). Code that runs as
+www-data can no longer become root at the next setup run (B147). A setup
+run or a backup that fails no longer leaves PHP-FPM or mail stopped (B148,
+B149), setup runs no longer log out the webmail users (B172) and stop
+when the daemon's DNS or web update fails (B159), and moving mail into or
+out of Spam no longer creates a folder "spamassassin" (B155). The status
+checks no longer take a failed DNS lookup for an answer (B150). The
+in-place tool keeps its options across reboots (B153) and gets fixes for
+SSH, its checks and the release tag (B151, B156, B160-B162, B168, B169);
+the migration tool checks every value of the old box before it uses it
+(B154) and follows no link where it writes as root (B166), with fixes for
+a symbolic link as `$STORAGE_ROOT`, folders named `.rsync-partial`,
+Spamhaus and IPv6 addresses (B163-B165, B167).
+
+### Fixed
+
+* A fresh install with `PRIMARY_HOSTNAME` in the environment no longer
+  stops without a message at the network checks when Spamhaus answers that
+  the hostname or the address is not listed, which is the normal answer:
+  `host` exits 1 for it, and setup's strict mode ended the run there. A
+  lookup that fails (SERVFAIL, REFUSED, a timeout) is now shown as "Could
+  not check whether ... is listed ...", and setup goes on, as for
+  Spamhaus' refusal of a public resolver; a listing still stops setup
+  (B145).
+* A fresh install through the dialogs now runs the network checks too
+  (the Spamhaus lists and outgoing port 25): the test that was meant to
+  skip existing installs also skipped every interactive first install.
+  Existing installs, the in-place upgrade and the migration still skip
+  them (B146).
+* Setup no longer runs Nextcloud's config.php (a file of www-data's) as
+  PHP as root to read the Nextcloud version, and no longer changes owner
+  and mode, writes, creates or moves files by path where www-data or the
+  storage user could have put a symbolic link: `$STORAGE_ROOT/mail`,
+  `users.sqlite` (also when setup creates it), `roundcube.sqlite`,
+  `mailinabox.version` (start.sh and setup/migrate.py), the postgrey, DKIM
+  and SpamAssassin directories (and the first move of postgrey's
+  database), Nextcloud's first config.php and autoconfig.php, and the
+  default homepage in `$STORAGE_ROOT/www`. Code that ran as www-data (a
+  hole in a web app) could become root at the next setup run. Roundcube's
+  database update and Nextcloud's database fix-up run as www-data, the
+  backup before a Nextcloud upgrade copies links as links, and Roundcube's
+  CardDAV plugin belongs to root and is read-only for www-data (upstream
+  let www-data change its code). tools/owncloud-restore.sh reads the
+  backup's version without running it and copies the backup without
+  writing through a link (B147).
+* Setup installs only the checked key file of deb.sury.org, not the
+  keyring package with its maintainer scripts; the package that earlier
+  versions installed is removed, the key stays at the same path (B158).
+* A setup run that ends with an error after the Nextcloud upgrade had
+  stopped PHP-FPM (a failed download, an `occ` step, the Z-Push download)
+  starts PHP-FPM again, so webmail, Nextcloud and ActiveSync no longer
+  answer 502 until a later run. A successful run still restarts PHP-FPM
+  once (B149).
+* The nightly backup starts Postfix, Dovecot, PHP-FPM and postgrey again
+  also when the `before-backup` script fails or one of the services does
+  not stop. Before, mail stayed down until someone started them, and the
+  mail about it could not be sent (B148).
+* Setup runs no longer log out all webmail users: setup keeps Roundcube's
+  `des_key`, with which Roundcube encrypts the password in each session
+  and its "remember me" logins, instead of writing a new one each time
+  (B172).
+* Moving a message into or out of Spam no longer creates a folder
+  "spamassassin" (sa-learn's state directory, which it made in the
+  Maildir); the learning was not affected. Setup removes these folders,
+  through Dovecot, when they hold no messages and nothing but Dovecot's
+  own files and were not created as real folders; one with messages or
+  other files is kept, with a note in setup's output (B155).
+* A Roundcube update no longer leaves webmail without its configuration
+  and plugins when a download fails: the new release is put together with
+  its plugins and configuration next to the installed one and replaces it
+  only then. The control panel's jQuery and Bootstrap are replaced the
+  same way (B157).
+* Setup stops with a clear message when the management daemon answers the
+  DNS or web update with an error (HTTP 500, 401) or cannot be reached.
+  Before, setup printed the daemon's answer and went on to "Your
+  Mail-in-a-Box is running" with the old DNS zones or nginx configuration
+  (or, when the daemon could not be reached, stopped without a word).
+  `tools/dns_update` and `tools/web_update` now exit with an error in that
+  case, which the daily DNSSEC job's mail shows as well (B159).
+* The status checks look up the box's IPv6 address in Spamhaus ZEN under
+  the right name, its 32 nibbles in reverse order as in ip6.arpa. Before,
+  they reversed the eight 16-bit groups, a name that never exists, so the
+  check said "IPv6 address is not blacklisted" for any address, also a
+  listed one (B144; the fix of upstream #2617 by N9ZL).
+* The status checks no longer take a failed DNS lookup for an answer. When
+  the resolver answers SERVFAIL or REFUSED (or no server can be reached),
+  the Spamhaus ZEN and DBL checks now warn that they could not check,
+  instead of "not blacklisted"; a timed-out or failed MX lookup is a "could
+  not check" warning instead of "no MX record", which was OK on the box's
+  own name and, on other domains, OK when both A lookups had timed out; the
+  DANE TLSA check warns that it could not check instead of calling the
+  record "not correct, it is '[timeout]'"; and a custom secondary
+  nameserver is no longer reported as having a "consistent SOA record"
+  when neither SOA lookup worked (B150).
+* The status checks with the version check on (privacy setting off) no
+  longer end as a whole when the connection breaks while the latest version
+  is read (a reset, a TLS error, a cut answer); the check says that the
+  latest version could not be determined, and the API call
+  `/system/latest-upstream-version` answers 503 instead of 500 (B170).
+* Messages in the control panel's dialogs are shown as text: a message
+  given as a string was inserted as HTML because the function tested a
+  name that it does not have. The random password of the Users page and
+  the answer of a reboot still show as before. Short messages now appear
+  in the small dialog, as upstream intended (B171).
+* `tools/update-check.sh after` no longer says "RESULT: OK" when
+  `status_checks.py` crashed or hit its time limit: such a run adds the line
+  "✖ status checks did not finish (exit code N)" to `status.txt`, which is
+  always UNEXPECTED, and the checks missing after the crash are no longer
+  counted as errors and warnings that are gone. The summary of the state
+  names it (B152).
+* `tools/owncloud-unlockadmin.sh` runs Nextcloud's `occ` with PHP 8.5, the
+  version Mail-in-a-Box installs, and `tools/update-check.sh` records
+  Nextcloud's status with the PHP version of the box's checkout, not with
+  whatever `php` points to (B173).
+* The in-place upgrade (`tools/upgrade-in-place-to-2604.sh`) recognises a
+  release upgrade that do-release-upgrade refused before it changed
+  anything. Before, it said that the machine "still runs Ubuntu 22.04 ...
+  or restore from the backups", and `--rollback` refused with mail offline,
+  because its check of the apt sources failed whenever one of the source
+  file patterns matched no file (every 22.04 box has no `*.sources`) (B151).
+* The in-place upgrade keeps the options given in the environment across
+  its reboots. Before, the run after the first reboot, which is the one
+  that runs setup on a box from 22.04 or 24.04, had only `TAG` and
+  `SOURCE`: `FTS=off`, `NEXTCLOUD_SHARE_SCOPE=all` and `FAVICON=off` were
+  ignored and setup wrote the defaults to `/etc/mailinabox.conf`, and the
+  fallback SSH server of the second release upgrade ignored
+  `UPGRADE_SSH_FALLBACK_USERS`. `PROBE_ADDRESS` (the probe address of
+  `update-check.sh mailcheck`, which setup keeps in `/etc/mailinabox.conf`)
+  and `DISABLE_FIREWALL=1` now reach setup too, in the tool's tmux session
+  and after a reboot; before, setup installed and enabled ufw on such a box.
+  `tools/migrate-to-2604.sh` passes these two to setup in its tmux session
+  as well, which did not get them while another tmux session was open
+  (B153).
+* The in-place upgrade no longer stops with "sshd -t fails ... Not
+  rebooting" in a boot in which nobody has logged in over SSH yet (sshd is
+  socket activated on 24.04 and 26.04, and `/run/sshd` is missing until
+  its first connection); it creates the directory first, as it already did
+  for its fallback SSH server (B156).
+* The in-place upgrade's checks whether switching packages from
+  ppa:ondrej back to Ubuntu's versions, or installing tmux for its own
+  session, would remove other packages work: before, they never stopped
+  it, because `grep -q` at the end of the pipe made apt-get fail. The same
+  trap could leave the fallback SSH server's port closed in ufw on a box
+  with a long rule list, and move `/etc/php/8.5` or `8.2` aside in the
+  cleanup before setup although packages of that version were installed
+  (B160).
+* After a `--redo-from` that fails, the in-place upgrade no longer says
+  that mail runs again while setup is pending, and `--finish` no longer
+  accepts the final check from before the redo: it needs a check that has
+  run since, and setup done (B161).
+* With sshd on another port than 22, the in-place upgrade's SSH watcher
+  and its "is SSH back?" check use sshd's ports (from `sshd -T`). Before,
+  it reported SSH down for the whole release upgrade and left the fallback
+  SSH server and its ufw rule running until the next reboot. The help and
+  the plan of `--check` no longer say that SSH is on port 22 (B162).
+* The in-place upgrade's offsite copy of the system archive is compared by
+  content and times only, as it is copied. Before, a backup account whose
+  umask gives new files other permissions (e.g. 077) made the snapshot
+  phase stop with "The copy ... differs" for a correct copy (B168).
+* The in-place upgrade uses the branch main instead of the release tag
+  only when the tag is not published in the repository (git ls-remote).
+  Before, any failure to fetch the tag, such as a network error, made setup
+  run from main with the note "The release tag ... is not published yet";
+  now such a failure stops with git's message, and the command can be run
+  again (B169).
+* `tools/migrate-to-2604.sh` no longer runs values that the old box reports
+  as bash code on the new machine, and writes only plain values into the
+  new `/etc/mailinabox.conf`. An old box that was broken into (often the
+  reason for a move) could run commands as root on the new machine,
+  already with `--check` (its clock and the size of its data went into bash
+  arithmetic), and setup sourced its storage user, MTA-STS mode and
+  hostname from the new `/etc/mailinabox.conf`. Every value of the old box
+  is now checked against the form that Mail-in-a-Box gives, right after it
+  is read, and the tool stops at a setting of another form, naming it
+  (correct it on the old box); values that are only shown get "?" for
+  control characters. The hostname (also one taken from a restored TLS
+  certificate) and the addresses (also the answer of icanhazip.com and the
+  options) are checked the same way, and `--storage-root` must be an
+  absolute path of letters, digits and `. _ - /`. Command lines, unit
+  names, settings and file names of the old box (and the command lines of
+  other accounts' processes here) reach the terminal, the report of the
+  old `/etc` and the saved Postfix queue listing with "?" for control
+  characters, so that they cannot send escape sequences to the terminal
+  (B154).
+* `tools/migrate-to-2604.sh` measures and watches a `$STORAGE_ROOT` that is
+  a symbolic link on the old box (for example to another volume) where it
+  points. Before, it showed "Data to copy: 0" and checked no disk space
+  (the copy failed hours later on a full disk), and before the final copy
+  it did not wait for processes that still had files open there (B163).
+* `tools/migrate-to-2604.sh` copies folders named `.rsync-partial`, such as
+  an IMAP folder "rsync-partial" or such a folder in Nextcloud. rsync left
+  them out without an error, because the tool used that name for
+  interrupted files, and after a resumed copy the tool deleted every such
+  folder on the new machine. The tool's own name for it is now
+  `.migrate-to-2604-partial`, and the cleanup removes only root's
+  directories of that name, without following a link put into the path
+  (B164).
+* `tools/migrate-to-2604.sh` says "could not check" when it cannot reach
+  Spamhaus, instead of reporting the new IP address as not listed. It asks
+  Spamhaus' test entries (127.0.0.2 and dbltest.com) first; only when they
+  answer does no answer mean "not listed". The result for the hostname in
+  Spamhaus' Domain Block List is shown as well (B165).
+* `tools/migrate-to-2604.sh` follows no link where root writes into trees
+  that another party shapes. It writes its marker in `$STORAGE_ROOT`
+  through `tools/write_conf.py`; before, root wrote it by path, so an
+  account that owns that directory during the migration could put a link
+  there and have any file overwritten and set to mode 0600 at the next
+  run. The greylisting exceptions are taken over from the old `/etc` only
+  as a regular file reached without a link, and never with a wider mode (a
+  link from the old box could put e.g. `/etc/shadow` of the new machine
+  into a file readable by every account). The owner mapping puts
+  setuid/setgid bits back through a descriptor of the same file. With
+  `--from-backup`, `mailinabox.version`, `www/` and the dotfiles get their
+  owner without following links, and the backup key goes only into a
+  checked `backup/` directory of root's own (B166).
+* `tools/migrate-to-2604.sh --from` takes an IPv6 address, with or without
+  brackets (`--from root@[2001:db8::1]`). Before, `--check` passed and the
+  first copy failed, because rsync needs the address in brackets and ssh
+  without them. `--check` now also runs rsync once (a listing of
+  `$STORAGE_ROOT` on the old box) with the same target and remote command
+  as the copy, so that a problem there shows up before the migration
+  (B167).
+
+### Changed
+
+* Roundcube 1.7.5 → 1.7.6 (security release of 2026-11-09), SHA256
+  `0168085bf0bfeeb5d4eca3b9730effbe610dbdb380a68567d292fec51f09db36`; its
+  Elastic skin has the same favicon.ico as 1.7.5. Roundcube's CardDAV
+  plugin (rcmcarddav) 5.1.4 → 5.1.5 (security release: photos that a
+  contact's vCard only references by a URL are no longer downloaded by the
+  server; its admin setting `download_photos` would turn that on again,
+  and setup does not set it), SHA256
+  `aea05586822848d9b2f2cdac6b59bdd500d3f93b1b0eeba0295a4aaeb335ad18`.
+* Nextcloud 34.0.5 → 34.0.6, SHA256
+  `ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e`, with
+  the contacts app 8.9.2 → 8.10.0
+  (`035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549`;
+  its `appinfo/info.xml` accepts Nextcloud 33 to 36 and PHP 8.2 to 8.5)
+  and the calendar app 6.6.4 → 6.6.5
+  (`e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107`;
+  Nextcloud 32 to 35, PHP 8.1 to 8.5), for the fresh install and the final
+  step of the upgrade chain (and the commented step to 34 for later). The
+  steps to 27 … 33 and user_external 4.0.0 (still no release for
+  Nextcloud 35) are unchanged. A box on 34.0.5 takes the upgrade at the
+  update: its `occ upgrade` also updates the two apps. The hashes were
+  checked against the publishers' digests (GitHub's asset digest,
+  Nextcloud's `.sha256`).
+* `tools/update-check.sh after` expects the new Nextcloud version in
+  `occ status` (`nextcloud.txt`: `version` and `versionstring`), and the
+  status checks' new warnings where a DNS lookup of the box fails or times
+  out ("Could not connect to zen.spamhaus.org" and "... dbl.spamhaus.org",
+  "Could not check this domain's MX record", "Could not check the DANE
+  TLSA record", and `[error]` where a check showed `[Not Set]`) (B150). A
+  listing of the box's IPv6 address, which the status checks see from this
+  release on (B144), stays UNEXPECTED. The other component updates and
+  fixes change nothing in the recorded state.
+* `tools/write_conf.py --own PATH USER GROUP MODE` changes the owner and
+  mode of one file or directory through a descriptor and refuses a
+  symbolic link, a file with more than one hard link or anything else;
+  `--own-tree` takes optional modes for files and directories (B147).
+* Tests: the smoke test's new check `imapsieve-no-phantom-folder` (group
+  imapsieve) fails when alice, bob or carol has a folder "spamassassin"
+  (B155). TESTING-fork.md has the scenario T1n: setup's network checks on
+  the installed T1 box under setup's shell options, through its own
+  resolver, which gives Spamhaus' "not listed"; no scenario ran that
+  answer under setup before (B145).
+* Docs: README.md and README-fork.md name the new component versions.
+  README-fork.md (English and German): the migration tool's partial
+  directory is `.migrate-to-2604-partial` (B164), `--from` takes an IPv6
+  address and `--check` tries the copy's rsync once (B167), the in-place
+  tool reports the SSH port of `sshd_config`, not always 22 (B162), and
+  after a migration webmail users log in again because Roundcube on the new
+  machine has a key of its own.
+
+### Upgrade note
+
+* Boxes on v78-r2604.1 are updated with the bootstrap command of "Updating
+  the fork" in README-fork.md,
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`,
+  with `tools/update-check.sh before` and `backup` before it and `after`
+  and `mailcheck` after it, all from `/root/mailinabox/tools/`, as for
+  v78-r2604.1. `git -C /root/mailinabox status --short` must print nothing
+  first. `after` judges the changes by `tools/expected-changes/any.txt` and
+  `v78-r2604.2.txt`: Nextcloud's new version, and the new warnings of the
+  status checks where a DNS lookup of the box fails (see below). When the
+  status checks crash or time out, `after` now lists "✖ status checks did
+  not finish (exit code N)" as UNEXPECTED; their output is in
+  `after/status-full.txt` of the run's directory in `/root/update-check`
+  (B152). Boxes on v78-r2604.0 or earlier take the steps of the upgrade
+  notes in between first.
+* The update upgrades Nextcloud to 34.0.6 on every box. PHP-FPM is
+  stopped while Nextcloud upgrades, so webmail, Nextcloud and ActiveSync
+  answer 502 for that time (as at every Nextcloud update); if setup ends
+  with an error, PHP-FPM is started again now (B149).
+* Webmail users stay logged in across setup runs from now on, also across
+  this update: the new setup takes the `des_key` from the installed
+  Roundcube configuration, which the last run of the old setup wrote, and
+  writes a new one only when there is none (B172). Up to v78-r2604.1 every
+  setup run, and so every update, logged them out.
+* Setup now stops with an error (from `tools/write_conf.py`) when
+  `$STORAGE_ROOT/mail`, `users.sqlite` or `roundcube/roundcube.sqlite` in
+  it, its postgrey, DKIM or SpamAssassin directory, or
+  `$STORAGE_ROOT/mailinabox.version` is a symbolic link, when one of the
+  two databases has a second hard link, and when `mailinabox.version` is
+  not a regular file ("Cannot read ..." from setup/migrate.py). If you
+  moved the mail store to another disk with a symbolic link, mount it at
+  `$STORAGE_ROOT/mail` with a bind mount instead and run setup again
+  (B147).
+* Setup removes the folders "spamassassin" that sa-learn created. It
+  prints "Removed the state directory of sa-learn (the folder
+  "spamassassin") from N mailboxes", and "Kept ..." with the reason for a
+  folder that holds messages or other files: move the messages to another
+  folder and run setup again (B155).
+* The package `debsuryorg-archive-keyring` is removed; the key file it
+  installed stays at `/usr/share/keyrings/debsuryorg-archive-keyring.gpg`,
+  now as a file of setup's (B158).
+* Contacts whose vCard links to a photo by URL show no photo in
+  Roundcube any more (CardDAV plugin 5.1.5); photos stored in the vCard
+  itself are not affected.
+* Setup now ends with exit code 1 and "Setup stopped: the management
+  daemon could not update ..." when the DNS or web update fails, after the
+  daemon's answer. Mail and the web server keep running; fix the cause and
+  run setup again (B159).
+* System Status may show new warnings: where the box's resolver fails or
+  times out for a lookup, the checks now say that they could not check
+  (Spamhaus ZEN and DBL, the MX record, the DANE TLSA record) instead of
+  OK or a wrong error, and show `[error]` where they showed `[Not Set]`
+  (B150). The box's IPv6 address is now really looked up in Spamhaus ZEN,
+  so a listing missed so far shows up as an error (B144), which `after`
+  lists as UNEXPECTED.
+* The in-place upgrade now stops when it cannot fetch its release tag (a
+  network or GitHub error) instead of running setup from the branch main;
+  run the command again when the source can be reached. It uses main only
+  when the repository answers that the tag is not published yet (B169).
+* A box upgraded in place from 22.04 or 24.04 by an earlier version of the
+  tool, with `FTS=off`, `NEXTCLOUD_SHARE_SCOPE=all`, `FAVICON=off` or
+  `PROBE_ADDRESS=...` given in the environment, got the defaults in
+  `/etc/mailinabox.conf` (B153): put the values there and run `sudo
+  mailinabox`. With `DISABLE_FIREWALL=1` given, setup installed and
+  enabled ufw: turn it off with `sudo ufw disable` if the box relies on
+  another firewall (setup reads `DISABLE_FIREWALL` from its environment
+  only).
+* A migration that is in progress can be continued with this release's
+  `tools/migrate-to-2604.sh`. Folders `.rsync-partial` that an interrupted
+  copy of an earlier version left on the new machine are removed by the
+  next copy. An old box whose `/etc/mailinabox.conf` has a `STORAGE_ROOT`,
+  `STORAGE_USER`, `PRIMARY_HOSTNAME` or `MTA_STS_MODE` of an unusual form
+  (for example a hostname with an underscore or a trailing dot) now stops
+  the tool with the name of the setting; correct it on the old box and run
+  the command again (B154).
+
 ### Planned
 
-Seen in the work on rc7, v78-r2604.0 and v78-r2604.1, not done (the
-certification runs add their open findings in TESTING-fork.md):
+Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not
+done (the certification runs add their open findings in TESTING-fork.md):
 
 * bootstrap.sh decides whether to fetch by the name that `git describe`
   prints for the checkout, so a local tag of the release's name on another
@@ -100,6 +456,49 @@ certification runs add their open findings in TESTING-fork.md):
   its own with a passphrase it knows. The fork's tools read them, and write
   the paused `custom.yaml`, only through a checked `backup/` of root's own
   (B117).
+* `$STORAGE_ROOT/mail` stays root:www-data with mode 775, as upstream has
+  it: Roundcube's password plugin writes `users.sqlite` as www-data, and
+  SQLite needs to create its journal in the same directory. So www-data
+  can rename, replace or remove anything in it: the mailboxes, the DKIM
+  keys, the user database, the postgrey and SpamAssassin data. Setup no
+  longer follows a link it finds there (B147), but code running as
+  www-data can still stop mail (remove `users.sqlite` or `mailboxes`), and
+  the management daemon, which runs as root, opens `users.sqlite` by path
+  (`open_database()` in management/mailconfig.py). A fix moves
+  `users.sqlite` into a directory of its own that only it and its journal
+  live in, and gives `$STORAGE_ROOT/mail` back to root (755); that changes
+  the paths in the Dovecot, Postfix, Roundcube and management
+  configuration and in the backups, so it needs its own release and test
+  runs.
+* The storage user owns `$STORAGE_ROOT/mailinabox.version` and its
+  directory, so it can write a lower number there, and the next setup run
+  runs the data migrations from there again as root. Each such run stops at
+  the first migration that cannot run twice, until the file is put right;
+  before that, depending on the number, migration 8 deletes the DKIM key,
+  11 moves the Let's Encrypt account away, 12 drops Roundcube's CardDAV
+  tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
+  (following a link) to 0600. It gives no root and needs code running as
+  the storage user, which no service of the box runs (B147).
+* The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
+  nor `NameTooLong`: a mail domain whose name is too long with
+  `.dbl.spamhaus.org` appended raises out of its checks and ends the
+  status check run with a traceback (from reading the code). Its guard for
+  the `at` argument tests `'[Not set]'`, which no lookup returns (the value
+  is `'[Not Set]'`, and now `'[error]'` too); the callers exclude both
+  before, so the guard is dead code.
+* When the lookup of a domain's DS record fails, the status checks still
+  say "This domain's DNSSEC DS record is not set" (a failed lookup counts
+  as no DS record, as before B150); "could not check" would be right.
+* `tools/migrate-to-2604.sh` passes the old box's standard error (the
+  error messages of its remote scripts, through ssh) to the terminal
+  unfiltered; the other text of the old box gets "?" for control
+  characters (B154).
+* The in-place upgrade's messages after a `--redo-from` that fails: on an
+  upgrade that had finished, the exit message says that cron jobs, update
+  timers and backups "stay paused", although the redo does not pause them
+  again; and while a redo of setup is pending, `--status` counts "Mail
+  offline ... so far" from the start of the original downtime, not from
+  the redo. Cosmetic; found with B161.
 
 ## v78-r2604.1 (2026-10-27)
 
