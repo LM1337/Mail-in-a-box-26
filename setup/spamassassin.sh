@@ -237,16 +237,17 @@ load_dovecot
 # that Dovecot gives the user's mail processes, the Maildir root, and
 # sa-learn created its state directory .spamassassin there, which Dovecot
 # lists as the folder "spamassassin" (Maildir++). It never held the learning
-# (bayes_path above). The wrappers now give sa-learn HOME=/nonexistent
-# (B155); the directories are removed here, as the B66 folders are in
-# setup/mail-users.sh. A .spamassassin in a Maildir root counts as
-# sa-learn's only without a "maildirfolder" file (Dovecot writes one into
-# every folder that IMAP, delivery or Sieve creates; into sa-learn's
-# directory it only put cur, new and tmp when it opened it), without
-# messages in cur and new, and without subfolders. Dovecot deletes it (only
-# while it is empty), unsubscribes it, and its full-text index goes too.
-# Anything else is kept. Files in the Maildirs are removed as the mail user,
-# which owns them.
+# (bayes_path above) and stays empty; Dovecot added cur, new, tmp and its
+# index files when a client opened the folder. The wrappers now give
+# sa-learn HOME=/nonexistent (B155); the directories are removed here, as
+# the B66 folders are in setup/mail-users.sh. A .spamassassin in a Maildir
+# root counts as sa-learn's only when cur and new are empty, it holds
+# nothing but cur, new, tmp and Dovecot's own files, it has no
+# "maildirfolder" file (Dovecot writes one into every folder that IMAP,
+# delivery or Sieve creates, not into a directory it only opens), and there
+# are no subfolders. Dovecot deletes it (only while it is empty),
+# unsubscribes it, and its full-text index goes too. Anything else is kept.
+# Files in the Maildirs are removed as the mail user, which owns them.
 n_sa_dirs=0
 while IFS= read -r -d '' sa_dir; do
 	sa_home=$(dirname "$sa_dir")
@@ -254,8 +255,15 @@ while IFS= read -r -d '' sa_dir; do
 	if [ -e "$sa_dir/maildirfolder" ] || [ -n "$(find "$sa_home" -mindepth 1 -maxdepth 1 -name '.spamassassin.*' -print -quit 2> /dev/null)" ]; then
 		continue # a folder of the user's
 	fi
-	if [ -n "$(find "$sa_dir/cur" "$sa_dir/new" -type f -print -quit 2> /dev/null)" ]; then
+	if [ -n "$(find "$sa_dir/cur" "$sa_dir/new" -mindepth 1 -print -quit 2> /dev/null)" ]; then
 		echo "Kept $sa_dir (the folder \"spamassassin\" of $sa_user): it holds messages. Move them to another folder and run setup again."
+		continue
+	fi
+	sa_other=$(find "$sa_dir" -mindepth 1 -maxdepth 1 -regextype posix-extended \
+		! -regex '.*/(cur|new|tmp|dovecot-uidlist|dovecot-uidvalidity(\..*)?|dovecot-keywords|dovecot\.index(\..*)?|dovecot\.list\.index(\..*)?|dovecot\.mailbox\.log)' \
+		-printf ' %f' 2> /dev/null || true)
+	if [ -n "$sa_other" ]; then
+		echo "Kept $sa_dir (the folder \"spamassassin\" of $sa_user): it holds other files:$sa_other."
 		continue
 	fi
 	if doveadm user "$sa_user" > /dev/null 2>&1; then sa_rc=0; else sa_rc=$?; fi
