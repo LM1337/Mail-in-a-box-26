@@ -1,0 +1,1 @@
+bash: /opt/projects/mailinabox-fork-r2604.2-setup/assets-new.sh: No such file or directory

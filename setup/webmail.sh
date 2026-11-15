@@ -52,8 +52,6 @@ UPDATE_KEY=$VERSION:$PERSISTENT_LOGIN_VERSION:$HTML5_NOTIFIER_VERSION:$CARDDAV_V
 
 # paths that are often reused.
 RCM_DIR=/usr/local/lib/roundcubemail
-RCM_PLUGIN_DIR=${RCM_DIR}/plugins
-RCM_CONFIG=${RCM_DIR}/config/config.inc.php
 
 needs_update=0 #NODOC
 if [ ! -f /usr/local/lib/roundcubemail/version ]; then
@@ -63,6 +61,19 @@ elif [[ "$UPDATE_KEY" != $(cat /usr/local/lib/roundcubemail/version) ]]; then
 	# checks if the version is what we want
 	needs_update=1 #NODOC
 fi
+
+# The tree that the configuration below goes into: the installed one, or on
+# an update a new one, built next to it, which replaces it only when it is
+# complete with its plugins and configuration. Up to v78-r2604.1 the installed
+# tree was removed first, and a failed download (a plugin) left webmail
+# without plugins and configuration until a later run (B157). A directory
+# that an earlier run left behind (setup stopped in the middle of an update)
+# is removed, only from a /usr/local/lib of root's own (as in zpush.sh).
+RCM_BUILD=$RCM_DIR
+RCM_TMP=
+if [ -n "$(find /usr/local/lib -maxdepth 0 -user root ! -perm /022)" ]; then
+	find /usr/local/lib -maxdepth 1 -name '.roundcubemail-new.*' -type d -user root -exec rm -rf -- {} +
+fi
 if [ $needs_update == 1 ]; then
   # if upgrading from 1.3.x, clear the temp_dir
   if [ -f /usr/local/lib/roundcubemail/version ]; then
@@ -71,30 +82,40 @@ if [ $needs_update == 1 ]; then
     fi
   fi
 
-	# install roundcube (the downloads go into a directory of root's own, not
-	# under fixed names in /tmp that another local user could create first, B97)
-	RCM_TMP=$(mktemp -d)
+	# install roundcube, in a directory of root's own (mktemp -d: root, 0700)
+	# next to the installed tree, on the same file system, so that it goes into
+	# place by a rename; not under fixed names in /tmp that another local user
+	# could create first (B97)
+	if [ -z "$(find /usr/local/lib -maxdepth 0 -user root ! -perm /022)" ]; then
+		echo "/usr/local/lib is not a directory of root's own."
+		exit 1
+	fi
+	RCM_TMP=$(mktemp -d /usr/local/lib/.roundcubemail-new.XXXXXXXX)
 	wget_verify \
 		https://github.com/roundcube/roundcubemail/releases/download/$VERSION/roundcubemail-$VERSION-complete.tar.gz \
 		$HASH \
 		"$RCM_TMP/roundcube.tgz"
-	tar -C /usr/local/lib --no-same-owner -zxf "$RCM_TMP/roundcube.tgz"
-	rm -rf /usr/local/lib/roundcubemail
-	mv /usr/local/lib/roundcubemail-$VERSION/ $RCM_DIR
+	tar -C "$RCM_TMP" --no-same-owner -zxf "$RCM_TMP/roundcube.tgz"
 	rm -f "$RCM_TMP/roundcube.tgz"
+	RCM_BUILD=$RCM_TMP/roundcubemail-$VERSION
+	if [ -L "$RCM_BUILD" ] || [ ! -d "$RCM_BUILD" ]; then
+		echo "The Roundcube $VERSION archive has no directory roundcubemail-$VERSION."
+		rm -rf "$RCM_TMP"
+		exit 1
+	fi
 	# The skin's own favicon as released, to tell it from one replaced by hand.
-	sha256sum 2> /dev/null < ${RCM_DIR}/skins/elastic/images/favicon.ico | cut -d" " -f1 > ${RCM_DIR}/elastic-favicon.sha256 || true
+	sha256sum 2> /dev/null < ${RCM_BUILD}/skins/elastic/images/favicon.ico | cut -d" " -f1 > ${RCM_BUILD}/elastic-favicon.sha256 || true
 
 	# install roundcube persistent_login plugin
-	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' ${RCM_PLUGIN_DIR}/persistent_login
+	git_clone https://github.com/mfreiholz/Roundcube-Persistent-Login-Plugin.git $PERSISTENT_LOGIN_VERSION '' ${RCM_BUILD}/plugins/persistent_login
 
 	# install roundcube html5_notifier plugin
 	# (github.com/kitist/html5_notifier is a 301 redirect to stremlau/html5_notifier)
-	git_clone https://github.com/stremlau/html5_notifier.git $HTML5_NOTIFIER_VERSION '' ${RCM_PLUGIN_DIR}/html5_notifier
+	git_clone https://github.com/stremlau/html5_notifier.git $HTML5_NOTIFIER_VERSION '' ${RCM_BUILD}/plugins/html5_notifier
 	# Roundcube 1.7 is served from public_html/, plugin assets are only reachable via static.php/.
 	# Use rcmail.assets_path() for the notification icon (same as unmerged upstream PR #59).
 	sed -i "s#'./plugins/html5_notifier/images/new_mail.png'#rcmail.assets_path('plugins/html5_notifier/images/new_mail.png')#" \
-		${RCM_PLUGIN_DIR}/html5_notifier/html5_notifier.js
+		${RCM_BUILD}/plugins/html5_notifier/html5_notifier.js
 
 	# download and verify the full release of the carddav plugin
 	wget_verify \
@@ -103,12 +124,14 @@ if [ $needs_update == 1 ]; then
 		"$RCM_TMP/carddav.tar.gz"
 
 	# unzip and cleanup
-	tar -C ${RCM_PLUGIN_DIR} -zxf "$RCM_TMP/carddav.tar.gz"
-	rm -rf "$RCM_TMP"
+	tar -C ${RCM_BUILD}/plugins -zxf "$RCM_TMP/carddav.tar.gz"
+	rm -f "$RCM_TMP/carddav.tar.gz"
 
 	# record the version we've installed
-	echo $UPDATE_KEY > ${RCM_DIR}/version
+	echo $UPDATE_KEY > ${RCM_BUILD}/version
 fi
+RCM_PLUGIN_DIR=${RCM_BUILD}/plugins
+RCM_CONFIG=${RCM_BUILD}/config/config.inc.php
 
 # ### Configuring Roundcube
 
@@ -124,11 +147,11 @@ SECRET_KEY=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 | sed s/=//g)
 # (its SHA256 is not the one of the release): Roundcube then shows that one.
 # Other skins keep their own favicons.
 RCM_FAVICON_CONFIG=
-rm -f ${RCM_DIR}/mailinabox-favicon.ico
+rm -f ${RCM_BUILD}/mailinabox-favicon.ico
 if [ "${FAVICON:-on}" != off ]; then
-	rcm_favicon=$(sha256sum 2> /dev/null < ${RCM_DIR}/skins/elastic/images/favicon.ico | cut -d" " -f1 || true)
-	if [ "$rcm_favicon" = "$(cat ${RCM_DIR}/elastic-favicon.sha256 2> /dev/null || echo $ELASTIC_FAVICON_HASH)" ]; then
-		install -m 644 branding/favicon.ico ${RCM_DIR}/mailinabox-favicon.ico
+	rcm_favicon=$(sha256sum 2> /dev/null < ${RCM_BUILD}/skins/elastic/images/favicon.ico | cut -d" " -f1 || true)
+	if [ "$rcm_favicon" = "$(cat ${RCM_BUILD}/elastic-favicon.sha256 2> /dev/null || echo $ELASTIC_FAVICON_HASH)" ]; then
+		install -m 644 branding/favicon.ico ${RCM_BUILD}/mailinabox-favicon.ico
 		RCM_FAVICON_CONFIG="\$config['skin_logo'] = array('elastic:[favicon]' => 'mailinabox-favicon.ico');"
 	else
 		echo "Roundcube: the favicon of the Elastic skin was replaced by hand, so it is kept."
@@ -249,15 +272,30 @@ chown -f -R root:www-data ${RCM_PLUGIN_DIR}/carddav
 # root:www-data need all permissions, others only read
 chmod -R 774 ${RCM_PLUGIN_DIR}/carddav
 
+# Patch the Roundcube code to eliminate an issue that causes postfix to reject our sqlite
+# user database (see https://github.com/mail-in-a-box/mailinabox/issues/2185)
+sed -i.miabold 's/^[^#]\+.\+PRAGMA journal_mode = WAL.\+$/#&/' \
+	${RCM_BUILD}/program/lib/Roundcube/db/sqlite.php
+
+# A new tree goes into place now (see above). The installed one is renamed
+# away first and removed after, so that Roundcube is missing only between
+# two renames in the same directory (as Z-Push in zpush.sh).
+if [ "$RCM_BUILD" != "$RCM_DIR" ]; then
+	rm -rf ${RCM_DIR}.old
+	if [ -e $RCM_DIR ]; then
+		mv $RCM_DIR ${RCM_DIR}.old
+	fi
+	mv "$RCM_BUILD" $RCM_DIR
+	rm -rf ${RCM_DIR}.old "$RCM_TMP"
+	RCM_BUILD=$RCM_DIR
+	RCM_PLUGIN_DIR=${RCM_DIR}/plugins
+	RCM_CONFIG=${RCM_DIR}/config/config.inc.php
+fi
+
 # Run Roundcube database migration script (database is created if it does not exist)
 php"$PHP_VER" ${RCM_DIR}/bin/updatedb.sh --dir ${RCM_DIR}/SQL --package roundcube
 # www-data owns the directory of roundcube.sqlite, see users.sqlite above (B147).
 tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
-
-# Patch the Roundcube code to eliminate an issue that causes postfix to reject our sqlite
-# user database (see https://github.com/mail-in-a-box/mailinabox/issues/2185)
-sed -i.miabold 's/^[^#]\+.\+PRAGMA journal_mode = WAL.\+$/#&/' \
-/usr/local/lib/roundcubemail/program/lib/Roundcube/db/sqlite.php
 
 # Because Roundcube wants to set the PRAGMA we just deleted from the source, we apply it here
 # to the roundcube database (see https://github.com/roundcube/roundcubemail/issues/8035)
