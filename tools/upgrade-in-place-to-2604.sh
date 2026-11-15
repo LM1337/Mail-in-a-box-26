@@ -3033,9 +3033,15 @@ codename_of() {
 }
 
 # Do the active apt sources name this release (codename)?
+# Read first, then searched (B151): a pattern that matches no file (22.04 has
+# no *.sources, 24.04 often no *.list) or a missing sources.list makes grep
+# exit 2, and grep -q at the end of a pipe can end the first grep early; with
+# pipefail either failed the check although the codename was there.
 sources_name() {
-	grep -hsv '^[[:space:]]*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
-		2> /dev/null | grep -qw -- "$1"
+	local out
+	out=$(grep -hsv '^[[:space:]]*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
+		2> /dev/null || true)
+	grep -qw -- "$1" <<< "$out"
 }
 
 # Nothing half-installed and nothing left to upgrade.
