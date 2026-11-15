@@ -56,7 +56,11 @@ MARKER=.migrate-to-2604
 # Files that a copy replaces or deletes on this machine after it already ran
 # as the mail server are kept below $STORAGE_ROOT/$OVERWRITTEN (same file system).
 OVERWRITTEN=.migrate-overwritten
-PARTIAL_DIR=.rsync-partial
+# rsync keeps interrupted files in a directory of this name next to them, and
+# leaves out (and keeps) every directory of this name at any depth: a name of
+# this tool's own, so that no mail folder (Maildir++ ".rsync-partial") or
+# Nextcloud folder is skipped (B164).
+PARTIAL_DIR=.migrate-to-2604-partial
 # File owners that this machine does not know yet are parked at old ID + ID_OFFSET
 # until setup has created the system users (see phase_prepare / phase_ownership).
 ID_OFFSET=2000000000
@@ -2288,7 +2292,10 @@ run_rsync() { # live|final
 	# The data here is a copy of the old box again.
 	state_set NEW_RAN_LIVE ""
 	if [ -n "$clean_partial" ]; then
-		find "$STORAGE_ROOT" -xdev -type d -name "$PARTIAL_DIR" -prune -exec rm -rf {} + 2> /dev/null || true
+		# Only rsync's own (root's) directories, removed from within the directory
+		# that holds them: other accounts can write in $STORAGE_ROOT and could put
+		# a link in the path between find and rm (B164).
+		find "$STORAGE_ROOT" -xdev -type d -name "$PARTIAL_DIR" -user root -prune -execdir rm -rf -- {} + 2> /dev/null || true
 	fi
 }
 
