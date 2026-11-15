@@ -122,9 +122,13 @@ FALLBACK_DIR=$STATE_DIR/ssh-fallback
 FALLBACK_KEYS_DIR=/etc/ssh/upgrade-2604-fallback-keys
 FALLBACK_UFW_MARK=$STATE_DIR/ssh-fallback-ufw
 TMUX_SESSION=upgrade-2604
-# The environment variables this script and setup read (passed into that session).
+# The environment variables this script and setup read (passed into that
+# session, and into the run after a reboot, see install_resume). PROBE_ADDRESS:
+# setup keeps it in /etc/mailinabox.conf; DISABLE_FIREWALL: setup reads it only
+# from the environment and then leaves ufw alone (B153).
 MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC
-	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
+	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON PROBE_ADDRESS
+	DISABLE_FIREWALL)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
@@ -193,6 +197,7 @@ BACKUP_DIR=
 BACKUP_DIR_FD=
 BACKUP_DIR_WHY=
 SSH_CHECK_HOSTS=()
+SSH_PORTS=()
 
 # ---------------------------------------------------------------------------
 # Output. Keep in sync with tools/migrate-to-2604.sh (blocker differs: it
@@ -306,17 +311,18 @@ wait for processes that still use the data, UPGRADE_BACKUP_MAX_AGE (default
 (default 7200) how many seconds to wait for a Mail-in-a-Box backup that is
 running (e.g. the nightly one) before anything is stopped.
 
-During each release upgrade the SSH server on port 22 is down for a while
-(5-45 minutes). Meanwhile a fallback SSH server listens on port 1022
-(UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key login only, for the
-administrators (members of the groups sudo and admin, and root if
-PermitRootLogin allows keys; UPGRADE_SSH_FALLBACK_USERS="user ..." names
-others), on the ListenAddress addresses of sshd and with its
-AllowUsers/AllowGroups/DenyUsers/DenyGroups, PubkeyAuthOptions, ForceCommand
-and ChrootDirectory. With StrictModes (the default) it takes only the key
-files that sshd accepts. It does not start where sshd asks for more than a
-key (AuthenticationMethods) or sshd_config or a file it includes has Match
-blocks. ufw lets its port through only while it runs. The run says when port 22 answers again.
+During each release upgrade the SSH server (port 22, or the ports set in
+sshd_config) is down for a while (5-45 minutes). Meanwhile a fallback SSH
+server listens on port 1022 (UPGRADE_SSH_FALLBACK_PORT=PORT, or off): key
+login only, for the administrators (members of the groups sudo and admin,
+and root if PermitRootLogin allows keys;
+UPGRADE_SSH_FALLBACK_USERS="user ..." names others), on the ListenAddress
+addresses of sshd and with its AllowUsers/AllowGroups/DenyUsers/DenyGroups,
+PubkeyAuthOptions, ForceCommand and ChrootDirectory. With StrictModes (the
+default) it takes only the key files that sshd accepts. It does not start
+where sshd asks for more than a key (AuthenticationMethods) or sshd_config
+or a file it includes has Match blocks. ufw lets its port through only while
+it runs. The run says when the SSH port answers again.
 UPGRADE_SSH_FALLBACK_TEST_SECONDS (default 600) is how long
 --ssh-fallback-test keeps it running.
 EOF
@@ -422,7 +428,8 @@ on_exit() {
 		if downtime_active && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
 			echo
 			echo "Mail runs again (setup has finished), but the upgrade is not finished: cron jobs,"
-			echo "update timers and backups stay paused. Continue with: $SELF (or --finish)"
+			# --finish only accepts a final check that has run (B161).
+			echo "update timers and backups stay paused. Continue with: $SELF$([ "$(state_get VERIFY_RAN)" != 1 ] || echo " (or --finish)")"
 		elif downtime_active; then
 			echo
 			echo "Mail is OFFLINE (since $(state_get QUIESCED_AT)). Continue with: $SELF"
@@ -1110,7 +1117,10 @@ install_tmux() {
 	apt_locks_free || { sleep 15 && apt_locks_free; } || return 1
 	(
 		apt-get -q -q -o DPkg::Lock::Timeout=30 update < /dev/null > /dev/null 2>&1 || exit 1
-		if apt-get -s install tmux < /dev/null 2> /dev/null | grep -qE '^(Remv |Inst [^ ]+ \[)'; then exit 1; fi
+		# Not piped into grep -q (B160): grep ends at the first match, apt-get
+		# then fails on the closed pipe, and with pipefail the guard never fired.
+		sim=$(apt-get -s install tmux < /dev/null 2> /dev/null) || exit 1
+		if grep -qE '^(Remv |Inst [^ ]+ \[)' <<< "$sim"; then exit 1; fi
 		DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=30 -o Dpkg::Options::=--force-confdef \
 			-o Dpkg::Options::=--force-confold install tmux < /dev/null > /dev/null 2>&1
 	)
@@ -1342,6 +1352,25 @@ checkout_ref() { # DIR REF [--force]
 	fi
 }
 
+# After a failed fetch or clone of the release tag: is the tag not published
+# in SOURCE (yes: the branch main may be used instead), or is it there (no:
+# the fetch failed for another reason)? Stops when SOURCE cannot be asked
+# (network, GitHub, a wrong SOURCE): before, any failure counted as "not
+# published", and setup ran from main (B169). git ls-remote --exit-code
+# exits 2 when the repository answered without the tag.
+tag_unpublished() { # SOURCE TAG
+	local rc=0 out
+	out=$(GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --tags "$1" "refs/tags/$2" < /dev/null 2>&1 > /dev/null) || rc=$?
+	case "$rc" in
+		2) return 0 ;;
+		0) return 1 ;;
+	esac
+	die "Could not fetch the release tag $2 from $1, and could not ask whether it is published
+(git ls-remote, exit code $rc)${out:+:
+$(sed 's/^/  /' <<< "$out")}
+Not using the branch main instead. Check the network (and SOURCE), then run the command again."
+}
+
 # Through curl | bash there is no file to continue from after a reboot:
 # clone this fork into DIR and run SCRIPT from there instead. (resolve_miab_dir
 # in tools/migrate-to-2604.sh, with the script name and the directory as
@@ -1367,10 +1396,12 @@ reexec_from_clone() { # SCRIPT DIR ARGS...
 		git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 	fi
 	if [ ! -f "$d/tools/$script" ] && [ -z "${TAG:-}" ]; then
-		# The release tag may not contain this tool yet.
+		# The release tag may not contain this tool yet, or not be published
+		# yet; not when it could not be fetched (B169).
 		if [ -d "$d/.git" ]; then
 			git -C "$d" fetch -q --depth 1 --force origin main < /dev/null && git -C "$d" checkout -q --force FETCH_HEAD || true
-		else
+		elif tag_unpublished "$source" "$tag"; then
+			warn "The release tag $tag is not published yet. Using the branch main instead."
 			git clone -q -b main --depth 1 "$source" "$d" < /dev/null || rm -rf "$d"
 		fi
 	fi
@@ -2105,7 +2136,9 @@ show_plan() {
 	if [ "$v" != 26.04 ]; then
 		n=$((n + 1))
 		say "$n. do-release-upgrade to Ubuntu 26.04, reboot (continues on its own)."
-		say "   During each release upgrade new SSH logins on port 22 fail for a while (in the tests"
+		# Not the port number: reading it (sshd -T) needs /run/sshd, which
+		# --check must not create (B162).
+		say "   During each release upgrade new SSH logins on the SSH port fail for a while (in the tests"
 		say "   19 to 42 minutes from 22.04, 6 to 19 minutes from 24.04), and in the one to 26.04 sudo"
 		say "   is missing for 12 to 37 minutes; open connections stay."
 		if [ "$(ssh_fallback_port)" != off ]; then
@@ -2277,7 +2310,10 @@ offsite_rsync() { # URL FILE... (the first FILE names the stamp)
 	# One command, no shell syntax: restricted shells (e.g. SFTP/rsync-only storage accounts) run it as well.
 	"${ssh[@]}" -- "$userhost" "mkdir -p $dest" < /dev/null || die "Could not create $dest on $userhost."
 	rsync -t --partial -e "$rsh" "$@" "$userhost:$dest/" < /dev/null || die "Could not copy the archive to $userhost:$dest/."
-	out=$(rsync -anc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \
+	# Compared as copied: content (checksums) and times, not the permissions,
+	# owner or group of -a, which the copy does not keep (an account with
+	# umask 077 there gave "differs" for a perfect copy, B168).
+	out=$(rsync -ntc --itemize-changes -e "$rsh" "$@" "$userhost:$dest/" < /dev/null) \
 		|| die "Could not compare the copy on $userhost:$dest/."
 	[ -z "$out" ] || die "The copy on $userhost:$dest/ differs from the archive here:
 $out"
@@ -2761,7 +2797,7 @@ set_prompt_lts() {
 
 phase_prepare_release() {
 	section "Preparing the packages for the release upgrade"
-	local held purge=() down=() p ver pins=()
+	local held purge=() down=() p ver pins=() sim
 
 	held=$(apt-mark showhold 2> /dev/null | tr '\n' ' ' || true)
 	if [ -n "$held" ]; then
@@ -2805,7 +2841,11 @@ phase_prepare_release() {
 			if [ -n "$ver" ]; then pins+=("$p=$ver"); else warn "Ubuntu has no $p; it stays as it is."; fi
 		done
 		if [ ${#pins[@]} -gt 0 ]; then
-			if apt-get -s -q --allow-downgrades install "${pins[@]}" < /dev/null 2> /dev/null | grep -q '^Remv '; then
+			# Searched after apt-get has ended, not piped into grep -q (B160, see
+			# install_tmux). A simulation that fails leaves no Remv line; the
+			# install below then fails as well and only warns.
+			sim=$(apt-get -s -q --allow-downgrades install "${pins[@]}" < /dev/null 2> /dev/null || true)
+			if grep -q '^Remv ' <<< "$sim"; then
 				warn "Switching ${pins[*]} back to Ubuntu's versions would remove other packages; left as they are."
 			else
 				say "Switching back to Ubuntu's versions: ${pins[*]}"
@@ -2840,7 +2880,7 @@ Mail stays offline. When it is offered, run the command again; or go back with -
 # Install a unit that continues the upgrade after the reboot, in a tmux
 # session the operator can attach to (or directly, without tmux).
 install_resume() {
-	local flags cmd
+	local flags cmd v
 	flags=$(state_get RESUME_FLAGS)
 	cmd="$(printf '%q' "$STATE_DIR/$SCRIPT_NAME")${flags:+ $flags} --yes --resumed"
 	{
@@ -2850,8 +2890,16 @@ install_resume() {
 		printf 'SESSION=%q\n' "$TMUX_SESSION"
 		printf 'CMD=%q\n' "$cmd"
 		printf 'export UPGRADE_STATE_DIR=%q\n' "$STATE_DIR"
-		if [ -n "${TAG:-}" ]; then printf 'export TAG=%q\n' "$TAG"; fi
-		if [ -n "${SOURCE:-}" ]; then printf 'export SOURCE=%q\n' "$SOURCE"; fi
+		# All the options given in the environment, not only TAG and SOURCE
+		# (B153): without them the run after the reboot ran setup with its
+		# defaults (FTS, NEXTCLOUD_SHARE_SCOPE, FAVICON, written to
+		# /etc/mailinabox.conf) and built the fallback SSH server of the next
+		# release upgrade for other users. Not UPGRADE_REEXEC: it only marks
+		# the run that reexec_from_clone started.
+		for v in "${MUX_ENV[@]}"; do
+			case "$v" in UPGRADE_STATE_DIR | UPGRADE_REEXEC) continue ;; esac
+			if [ -n "${!v+x}" ]; then printf 'export %s=%q\n' "$v" "${!v}"; fi
+		done
 		cat <<'EOF'
 export HOME=/root TERM=xterm-256color LANG=C.UTF-8 NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
 # In a scope of its own, outside this unit's cgroup: restarting the unit
@@ -2975,6 +3023,11 @@ not come back after the reboot. Not rebooting. Fix it ('systemctl enable ssh.soc
 the command again."
 		fi
 	fi
+	# sshd -t fails without /run/sshd like sshd -T (B119), which socket
+	# activation leaves missing until ssh.service has run since the boot: the
+	# run after a reboot that needs another one, or an interrupted release
+	# upgrade, stopped here with "Not rebooting" (B156).
+	ensure_run_sshd
 	out=$(sshd -t 2>&1) || rc=$?
 	[ "$rc" = 0 ] || die "sshd -t fails (exit code $rc); SSH would not come back after the reboot:
 $(sed 's/^/  /' <<< "$out")
@@ -3033,9 +3086,15 @@ codename_of() {
 }
 
 # Do the active apt sources name this release (codename)?
+# Read first, then searched (B151): a pattern that matches no file (22.04 has
+# no *.sources, 24.04 often no *.list) or a missing sources.list makes grep
+# exit 2, and grep -q at the end of a pipe can end the first grep early; with
+# pipefail either failed the check although the codename was there.
 sources_name() {
-	grep -hsv '^[[:space:]]*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
-		2> /dev/null | grep -qw -- "$1"
+	local out
+	out=$(grep -hsv '^[[:space:]]*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
+		2> /dev/null || true)
+	grep -qw -- "$1" <<< "$out"
 }
 
 # Nothing half-installed and nothing left to upgrade.
@@ -3131,7 +3190,7 @@ release_upgrade() { # PHASE FROM TO
 		do-release-upgrade -f DistUpgradeViewNonInteractive < /dev/null || rc=$?
 	FAILED_CMD=
 	ssh_watch_stop
-	if ssh_banner 22; then say "SSH on port 22 answers."; fi
+	if ssh_answers; then say "SSH on $(ssh_ports_text) answers."; fi
 	ssh_fallback_stop if-ssh-works
 	cur=$(os_version)
 	if [ "$cur" = "$from" ] && sources_name "$(codename_of "$from")" && ! sources_name "$(codename_of "$to")"; then
@@ -3192,12 +3251,13 @@ or restore from the backups."
 # the port through (rate limited) only while the fallback runs. Its
 # privilege separation directory /run/sshd goes away when ssh.service stops
 # (RuntimeDirectory); the watcher puts it back within 2 s (in /run, root's own).
-# It is stopped when port 22 answers again after the release upgrade, and on
-# every way out of this script; if port 22 does not answer then, it is left
+# It is stopped when sshd answers again after the release upgrade, and on
+# every way out of this script; if sshd does not answer then, it is left
 # running (a reboot ends it) and the next run of this script removes it and
 # its ufw rule. Open sessions over it are not ended.
-# The watcher also reports in the run when port 22 stops answering and when it
-# answers again (the SSH banner).
+# The watcher also reports in the run when sshd stops answering and when it
+# answers again (the SSH banner). Both look at the ports sshd listens on
+# (sshd -T), port 22 unless sshd_config sets others (B162).
 
 ssh_fallback_port() {
 	local p=${UPGRADE_SSH_FALLBACK_PORT:-}
@@ -3230,15 +3290,20 @@ port_listening() { # PORT
 }
 
 # The local addresses on which sshd listens (its ListenAddress lines, from
-# sshd -T; 0.0.0.0 and [::] as 127.0.0.1 and ::1), to check its banner. Read
-# once, before the release upgrade replaces sshd; without them 127.0.0.1 and ::1.
+# sshd -T; 0.0.0.0 and [::] as 127.0.0.1 and ::1), to check its banner, and
+# its ports (SSH_PORTS). Read once, before the release upgrade replaces sshd;
+# without them 127.0.0.1 and ::1, and port 22.
 ssh_check_hosts() {
 	[ ${#SSH_CHECK_HOSTS[@]} = 0 ] || return 0
-	local key val host
+	local key val host port
 	ensure_run_sshd
 	while read -r key val; do
 		[ "$key" = listenaddress ] || continue
 		host=${val%% *}
+		# sshd -T names each address with its port: Port, or the port given
+		# in ListenAddress. Not always 22 (B162).
+		port=${host##*:}
+		if [[ $port =~ ^[0-9]+$ ]] && [[ " ${SSH_PORTS[*]} " != *" $port "* ]]; then SSH_PORTS+=("$port"); fi
 		host=${host%:*}
 		case "$host" in
 			0.0.0.0) host=127.0.0.1 ;;
@@ -3249,6 +3314,32 @@ ssh_check_hosts() {
 		[[ " ${SSH_CHECK_HOSTS[*]} " == *" $host "* ]] || SSH_CHECK_HOSTS+=("$host")
 	done < <(sshd -T 2> /dev/null < /dev/null || true)
 	[ ${#SSH_CHECK_HOSTS[@]} -gt 0 ] || SSH_CHECK_HOSTS=(127.0.0.1 ::1)
+	[ ${#SSH_PORTS[@]} -gt 0 ] || SSH_PORTS=(22)
+}
+
+# "port 22", or "ports 22 2222", for the messages.
+ssh_ports_text() {
+	if [ ${#SSH_PORTS[@]} -gt 1 ]; then echo "ports ${SSH_PORTS[*]}"; else echo "port ${SSH_PORTS[0]:-22}"; fi
+}
+
+# Is something listening on one of sshd's ports? Builtins only (the watcher).
+ssh_listening() {
+	local p
+	ssh_check_hosts
+	for p in "${SSH_PORTS[@]}"; do
+		if port_listening "$p"; then return 0; fi
+	done
+	return 1
+}
+
+# Does sshd answer (its banner) on one of its ports?
+ssh_answers() {
+	local p
+	ssh_check_hosts
+	for p in "${SSH_PORTS[@]}"; do
+		if ssh_banner "$p"; then return 0; fi
+	done
+	return 1
 }
 
 # /run/sshd (privilege separation), without which sshd -T and the fallback
@@ -3411,8 +3502,8 @@ owned by $u or root, or others or a group with other members can write it)."
 
 # The authorized keys of USER after AuthorizedKeysFile (relative to the home
 # directory; %h, %u, %U and %% expanded), read as that user. With StrictModes
-# (sshd's default) only from the files that sshd accepts on port 22, so that
-# the fallback lets in no key that sshd refuses there (B115).
+# (sshd's default) only from the files that sshd accepts, so that the
+# fallback lets in no key that sshd refuses (B115).
 user_keys() { # STRICTMODES USER FILES...
 	local strict=$1 u=$2 home uid f
 	shift 2
@@ -3571,26 +3662,28 @@ $(sed 's/^/  /' <<< "$out")"
 		ssh_fallback_stop quiet
 		return 0
 	fi
-	if command -v ufw > /dev/null && ufw status 2> /dev/null | grep -q '^Status: active'; then
+	# Searched after ufw has ended (B160): with a long rule list, grep -q ended
+	# ufw early, and with pipefail the port was not opened.
+	if command -v ufw > /dev/null && grep -q '^Status: active' <<< "$(ufw status 2> /dev/null || true)"; then
 		echo "$port" > "$FALLBACK_UFW_MARK"
 		if ! ufw limit "$port/tcp" comment "$SCRIPT_NAME: fallback SSH during the release upgrade" > /dev/null; then
 			warn "Could not open port $port in ufw; the fallback SSH server is only reachable where the firewall allows it."
 		fi
 	fi
 	say "Fallback SSH server on port $port $until: key login for"
-	say "the administrators (${users[*]}), no passwords. If a new login on port 22 fails meanwhile:"
+	say "the administrators (${users[*]}), no passwords. If a new login on $(ssh_ports_text) fails meanwhile:"
 	say "  ssh -p $port ${SUDO_USER:-${users[0]}}@${PRIMARY_HOSTNAME:-$(hostname -f)}"
 	say "(a firewall of the provider must let port $port through). Logins there log as usual."
 }
 
 # Stop the fallback, close its ufw rule and remove its files. "if-ssh-works"
-# leaves it running while port 22 does not answer (that would lock out).
+# leaves it running while sshd does not answer (that would lock out).
 ssh_fallback_stop() { # [quiet|if-ssh-works]
 	local pid alive='' port msgs=() m
 	pid=$(cat "$FALLBACK_DIR/sshd.pid" 2> /dev/null || true)
 	if [[ $pid =~ ^[0-9]+$ ]] && [ "$(readlink "/proc/$pid/exe" 2> /dev/null || true)" = "$FALLBACK_DIR/sshd" ]; then alive=1; fi
-	if [ "${1:-}" = if-ssh-works ] && [ -n "$alive" ] && ! ssh_banner 22; then
-		warn "SSH on port 22 does not answer. The fallback SSH server on port $(ssh_fallback_port) keeps running
+	if [ "${1:-}" = if-ssh-works ] && [ -n "$alive" ] && ! ssh_answers; then
+		warn "SSH on $(ssh_ports_text) does not answer. The fallback SSH server on port $(ssh_fallback_port) keeps running
 until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall rule." || true
 		return 0
 	fi
@@ -3618,8 +3711,8 @@ until the next reboot; the next run of $SCRIPT_NAME removes it and its firewall 
 	return 0
 }
 
-# Watch port 22 while the release upgrade runs (in the background), and keep
-# the fallback's /run/sshd.
+# Watch sshd's ports while the release upgrade runs (in the background), and
+# keep the fallback's /run/sshd.
 ssh_watch_start() {
 	local port
 	port=$(ssh_fallback_port)
@@ -3627,13 +3720,13 @@ ssh_watch_start() {
 	(
 		trap - ERR EXIT
 		set +e
-		p22_down='' since=0 tick=0
+		ssh_down='' since=0 tick=0 ports=$(ssh_ports_text)
 		# Builtins only where it loops: the release upgrade replaces date and
 		# sleep (coreutils). read -t on a pipe that never delivers is the pause.
 		exec {pause_fd}<> <(:)
 		while :; do
 			# Every 2 s: until /run/sshd is back, new logins on the fallback
-			# fail (B112). Port 22 every 10 s.
+			# fail (B112). sshd's ports every 10 s.
 			if [ -f "$FALLBACK_DIR/sshd.pid" ] && [ ! -d /run/sshd ] && [ ! -L /run/sshd ]; then
 				mkdir -m 0755 /run/sshd 2> /dev/null
 			fi
@@ -3642,17 +3735,17 @@ ssh_watch_start() {
 				read -r -t 2 -u "$pause_fd" _
 				continue
 			fi
-			if [ -z "$p22_down" ] && ! port_listening 22; then
-				p22_down=1 since=$SECONDS
-				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on port 22: new logins fail until\n' -1
+			if [ -z "$ssh_down" ] && ! ssh_listening; then
+				ssh_down=1 since=$SECONDS
+				printf '\n%(%H:%M:%S)T The release upgrade has stopped the SSH server on %s: new logins fail until\n' -1 "$ports"
 				if [ -f "$FALLBACK_DIR/sshd.pid" ]; then
 					echo "  it is back (usually 5-45 minutes). Meanwhile log in on port $port: ssh -p $port USER@HOST"
 				else
 					echo "  it is back (usually 5-45 minutes). Open connections stay. Do not reboot."
 				fi
-			elif [ -n "$p22_down" ] && port_listening 22 && ssh_banner 22; then
-				p22_down=
-				printf '\n%(%H:%M:%S)T SSH on port 22 answers again (after %d min): new logins work.\n' -1 $(((SECONDS - since + 59) / 60))
+			elif [ -n "$ssh_down" ] && ssh_listening && ssh_answers; then
+				ssh_down=
+				printf '\n%(%H:%M:%S)T SSH on %s answers again (after %d min): new logins work.\n' -1 "$ports" $(((SECONDS - since + 59) / 60))
 			fi
 			read -r -t 2 -u "$pause_fd" _
 		done
@@ -3826,8 +3919,10 @@ cleanup_php() {
 		[ -d "$d" ] || continue
 		v=${d##*/}
 		if [ "$v" = "$PHP_VER" ] || [ "$v" = "$PHP_LEGACY_VER" ]; then
-			# Keep it only if packages of that version are installed.
-			if dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' "php$v-*" 2> /dev/null | grep -q '^.i'; then continue; fi
+			# Keep it only if packages of that version are installed. Searched
+			# after dpkg-query has ended (B160): grep -q could end it early,
+			# and with pipefail the directory was moved aside.
+			if grep -q '^.i' <<< "$(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' "php$v-*" 2> /dev/null || true)"; then continue; fi
 		fi
 		move_aside "$d"
 	done
@@ -3941,7 +4036,7 @@ update_fork_dir() { # DIR TAG SOURCE
 	check_origin "$d" "$source"
 	say "Updating $d from ${cur:-an unknown version} to $tag..."
 	if checkout_ref "$d" "$tag"; then return 0; fi
-	if [ -z "${TAG:-}" ] && checkout_ref "$d" main; then
+	if [ -z "${TAG:-}" ] && tag_unpublished "$source" "$tag" && checkout_ref "$d" main; then
 		warn "The release tag $tag is not published yet. Using the branch main instead."
 		return 0
 	fi
@@ -3991,7 +4086,7 @@ resolve_fork_dir() {
 		command -v git > /dev/null || install_packages git
 		say "Downloading Mail-in-a-Box $tag from $source to $d..."
 		if ! git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null; then
-			if [ -n "${TAG:-}" ]; then die "Could not download $tag from $source."; fi
+			if [ -n "${TAG:-}" ] || ! tag_unpublished "$source" "$tag"; then die "Could not download $tag from $source."; fi
 			warn "The release tag $tag is not published yet. Using the branch main instead."
 			git clone -q -b main --depth 1 "$source" "$d" < /dev/null || die "Could not download $source."
 		fi
@@ -4715,6 +4810,9 @@ mail_plugins (/etc/dovecot/conf.d/20-imap.conf, 20-pop3.conf): install it, or re
 
 do_finish() {
 	[ "$(state_get VERIFY_RAN)" = 1 ] || die "Run the upgrade up to the final check first."
+	# Not with setup pending, e.g. after a --redo-from that failed (B161):
+	# finish would mark the upgrade finished and resume the backups.
+	phase_is_done setup || die "Setup has not finished (phase setup is pending). Continue the upgrade first: $SELF"
 	ssh_fallback_cleanup_stale
 	if phase_is_done finish; then
 		say "The upgrade is already finished ($(state_get FINISHED_AT))."
@@ -4769,6 +4867,12 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 					|| die "--redo-from $REDO_FROM only works after the release upgrades."
 				phases_reset_from "${REDO_FROM//-/_}"
 				state_set FINISHED_AT ""
+				state_set FINISHED_EPOCH ""
+				# The final check runs again: until it has, --finish has no result
+				# to accept; and a setup that runs again has not finished yet, so a
+				# redo that fails must not say "Mail runs again" (on_exit, B161).
+				state_set VERIFY_RAN ""
+				case "$REDO_FROM" in cleanup-etc | setup) state_set SETUP_END_EPOCH "" ;; esac
 				;;
 			*) die "--redo-from takes snapshot, cleanup-etc, setup, local-ext or verify." ;;
 		esac
