@@ -97,6 +97,7 @@ LOCAL_UNITS=(cron.service mailinabox.service nginx.service "php$PHP_VER-fpm.serv
 declare -A OLD=() OLDFP=() NEWFP=() STATE_MEM=()
 SSH_ARGS=()
 SSH_TARGET=
+RSYNC_TARGET=
 NET_BLOCKERS=()
 CHECK_BLOCKERS=()
 VERIFY_PROBLEMS=()
@@ -666,8 +667,13 @@ ssh_init() {
 		OLD_USER=${FROM%%@*}
 		OLD_HOST=${FROM#*@}
 	fi
+	# An IPv6 address: ssh takes it without brackets (it does not remove
+	# them), rsync's HOST:PATH only in brackets (B167).
+	if [[ $OLD_HOST == \[*\] ]]; then OLD_HOST=${OLD_HOST:1:-1}; fi
 	[ -n "$OLD_HOST" ] || die "--from needs a host name."
 	SSH_TARGET="$OLD_USER@$OLD_HOST"
+	RSYNC_TARGET=$SSH_TARGET
+	if [[ $OLD_HOST == *:* ]]; then RSYNC_TARGET="$OLD_USER@[$OLD_HOST]"; fi
 
 	local ctl=$STATE_DIR
 	if [ -n "$CHECK_ONLY" ]; then ctl=$CHECK_TMP; fi
@@ -1858,6 +1864,21 @@ Their data stays in the database. Reinstall them afterwards if they support Next
 	fi
 }
 
+# --check: list $STORAGE_ROOT on the old box with rsync, with the same target,
+# SSH connection and remote command as the copy, which --check does not run
+# otherwise (B167: an IPv6 address passed --check, then rsync failed on it).
+check_rsync_old() {
+	local rc=0
+	command -v rsync > /dev/null || return 0     # installed by the migration
+	[ -n "${OLD[RSYNC_VERSION]:-}" ] || return 0 # a blocker already
+	rsync --list-only -e "$RSYNC_RSH" "--rsync-path=$RSYNC_PATH" "$RSYNC_TARGET:$STORAGE_ROOT/" > /dev/null || rc=$?
+	if [ "$rc" = 0 ]; then
+		say "rsync:             works ($RSYNC_TARGET:$STORAGE_ROOT/)"
+	else
+		blocker "rsync could not list $STORAGE_ROOT on the old box (exit code $rc, see above); the copy uses the same command."
+	fi
+}
+
 check_space() {
 	local sr=$1
 	if [ -z "$(state_get SIZE_TOTAL)" ]; then
@@ -1989,7 +2010,7 @@ show_plan_ssh() {
 	say "Old box:   $SSH_TARGET  ${OLD[CONF_PUBLIC_IP]:-} ${OLD[CONF_PUBLIC_IPV6]:-}"
 	say "New box:   this machine  $NEW_PUBLIC_IP ${NEW_PUBLIC_IPV6:-}"
 	say "Hostname:  $NEW_PRIMARY_HOSTNAME"
-	say "Data:      $SSH_TARGET:$STORAGE_ROOT -> $STORAGE_ROOT"
+	say "Data:      $RSYNC_TARGET:$STORAGE_ROOT -> $STORAGE_ROOT"
 	if [ "$NEW_PRIMARY_HOSTNAME" != "${OLD[CONF_PRIMARY_HOSTNAME]:-}" ]; then
 		warn "The hostname changes from ${OLD[CONF_PRIMARY_HOSTNAME]:-} to $NEW_PRIMARY_HOSTNAME.
 Then MX/NS records, the TLS certificate and all clients must be changed as well."
@@ -2287,7 +2308,7 @@ run_rsync() { # live|final
 			extra=(--backup "--backup-dir=$bdir")
 		fi
 		set +e
-		rsync "${args[@]}" "${extra[@]}" "$SSH_TARGET:$STORAGE_ROOT/" "$STORAGE_ROOT/" 2>&1 \
+		rsync "${args[@]}" "${extra[@]}" "$RSYNC_TARGET:$STORAGE_ROOT/" "$STORAGE_ROOT/" 2>&1 \
 			| python3 -I -c "$PROGRESS_PY" "$STATE_DIR/rsync-$mode.txt" "$LOG_FILE"
 		st=("${PIPESTATUS[@]}")
 		set -e
@@ -2773,14 +2794,14 @@ phase_extras() {
 	if [ "${OLD[HAS_ZPUSH]:-0}" = 1 ]; then
 		# Same Z-Push 2.7 state format; without it every phone does a full resync.
 		mkdir -p /var/lib/z-push
-		rsync "${args[@]}" "$SSH_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
+		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
 		chown -R www-data:www-data /var/lib/z-push
 		chmod 750 /var/lib/z-push
 		say "Z-Push state copied."
 	fi
 	if [ "${OLD[HAS_MUNIN]:-0}" = 1 ] && id munin > /dev/null 2>&1; then
 		mkdir -p /var/lib/munin
-		rsync "${args[@]}" "$SSH_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
+		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
 		chown -R munin:munin /var/lib/munin
 		say "munin graphs copied."
 	fi
@@ -3728,6 +3749,7 @@ unattended right after the copy."
 	state_set STORAGE_ROOT "$STORAGE_ROOT"
 	state_set STORAGE_USER "$STORAGE_USER"
 	state_set NC_VERSION "${OLD[NC_VERSION]:-}"
+	if [ -n "$CHECK_ONLY" ]; then check_rsync_old; fi
 
 	section "Checking this machine"
 	local key
