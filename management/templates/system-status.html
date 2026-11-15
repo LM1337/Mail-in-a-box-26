@@ -175,8 +175,9 @@ function confirm_reboot() {
         "POST",
         { },
         function(r) {
-          var msg = "<p>Please reload this page after a minute or so.</p>";
-          if (r) msg = "<p>The reboot command said:</p> <pre>" + $("<pre/>").text(r).html() + "</pre>"; // successful reboots don't produce any output; the output must be HTML-escaped
+          // Markup goes in as a jQuery object, a string would be shown as text (B171).
+          var msg = $("<p/>").text("Please reload this page after a minute or so.");
+          if (r) msg = $("<div/>").append($("<p/>").text("The reboot command said:"), $("<pre/>").text(r)); // successful reboots don't produce any output
           show_modal_error("Reboot", msg);
         });
     });
