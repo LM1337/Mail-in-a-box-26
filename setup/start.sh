@@ -241,7 +241,8 @@ source setup/management.sh
 source setup/munin.sh
 
 # Wait for the management daemon to start...
-until nc -z -w 4 127.0.0.1 10222
+# (nc of Ubuntu 26.04 prints "Connection to ... succeeded!" for -z, B174.)
+until nc -z -w 4 127.0.0.1 10222 > /dev/null 2>&1
 do
 	echo "Waiting for the Mail-in-a-Box management daemon to start..."
 	sleep 2
