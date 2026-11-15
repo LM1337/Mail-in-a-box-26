@@ -12,23 +12,25 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 ## Unreleased
 
 The bug-fix release v78-r2604.2: the fixes of a bug scan of v78-r2604.1
-(B145-B173) and upstream's fix of the IPv6 Spamhaus check (#2617, B144),
-with the security releases Roundcube 1.7.6 and CardDAV plugin 5.1.5 and
-Nextcloud 34.0.6. A fresh install with `PRIMARY_HOSTNAME` in the
-environment no longer stops without a word at its network checks (B145),
-and an interactive install runs them as well (B146). Code that runs as
-www-data can no longer become root at the next setup run (B147). A setup
-run or a backup that fails no longer leaves PHP-FPM or mail stopped (B148,
-B149), setup runs no longer log out the webmail users (B172) and stop
-when the daemon's DNS or web update fails (B159), and moving mail into or
-out of Spam no longer creates a folder "spamassassin" (B155). The status
-checks no longer take a failed DNS lookup for an answer (B150). The
-in-place tool keeps its options across reboots (B153) and gets fixes for
-SSH, its checks and the release tag (B151, B156, B160-B162, B168, B169);
-the migration tool checks every value of the old box before it uses it
-(B154) and follows no link where it writes as root (B166), with fixes for
-a symbolic link as `$STORAGE_ROOT`, folders named `.rsync-partial`,
-Spamhaus and IPv6 addresses (B163-B165, B167).
+(B145-B173) and of its test runs (B174), and upstream's fix of the IPv6
+Spamhaus check (#2617, B144), with the security releases Roundcube 1.7.6
+and CardDAV plugin 5.1.5 and Nextcloud 34.0.6. A fresh install with
+`PRIMARY_HOSTNAME` in the environment no longer stops without a word at
+its network checks (B145), and an interactive install runs them as well
+(B146). Code that runs as www-data can no longer become root at the next
+setup run (B147). A setup run or a backup that fails no longer leaves
+PHP-FPM or mail stopped (B148, B149), setup runs no longer log out the
+webmail users (B172) and stop when the daemon's DNS or web update fails
+(B159), moving mail into or out of Spam no longer creates a folder
+"spamassassin" (B155), and nc's "Connection to ... succeeded!" lines are
+gone from setup's output (B174). The status checks no longer take a
+failed DNS lookup for an answer (B150). The in-place tool keeps its
+options across reboots (B153) and gets fixes for SSH, its checks and the
+release tag (B151, B156, B160-B162, B168, B169, the last also in the
+migration tool); the migration tool checks every value of the old box
+before it uses it (B154) and follows no link where it writes as root
+(B166), with fixes for a symbolic link as `$STORAGE_ROOT`, folders named
+`.rsync-partial`, Spamhaus and IPv6 addresses (B163-B165, B167).
 
 ### Fixed
 
@@ -55,12 +57,14 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   database), Nextcloud's first config.php and autoconfig.php, and the
   default homepage in `$STORAGE_ROOT/www`. Code that ran as www-data (a
   hole in a web app) could become root at the next setup run. Roundcube's
-  database update and Nextcloud's database fix-up run as www-data, the
-  backup before a Nextcloud upgrade copies links as links, and Roundcube's
-  CardDAV plugin belongs to root and is read-only for www-data (upstream
-  let www-data change its code). tools/owncloud-restore.sh reads the
-  backup's version without running it and copies the backup without
-  writing through a link (B147).
+  database update and Nextcloud's database fix-up run as www-data, and
+  Roundcube's CardDAV plugin belongs to root and is read-only for www-data
+  (upstream let www-data change its code). The backup before a Nextcloud
+  upgrade takes only regular files, and tools/owncloud-restore.sh refuses
+  a backup whose files are links, reads the backup's version without
+  running it and copies the backup without writing through a link. Setup
+  checks these paths when it starts, before it changes anything, and stops
+  there with a list of what to fix (B147).
 * Setup installs only the checked key file of deb.sury.org, not the
   keyring package with its maintainer scripts; the package that earlier
   versions installed is removed, the key stays at the same path (B158).
@@ -88,6 +92,9 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   its plugins and configuration next to the installed one and replaces it
   only then. The control panel's jQuery and Bootstrap are replaced the
   same way (B157).
+* Setup's output no longer has "Connection to ... succeeded!" lines from
+  `nc` (the port 25 check of a fresh install and the wait for the
+  management daemon); only nc's exit code is used, as before (B174).
 * Setup stops with a clear message when the management daemon answers the
   DNS or web update with an error (HTTP 500, 401) or cannot be reached.
   Before, setup printed the daemon's answer and went on to "Your
@@ -180,7 +187,9 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   Before, any failure to fetch the tag, such as a network error, made setup
   run from main with the note "The release tag ... is not published yet";
   now such a failure stops with git's message, and the command can be run
-  again (B169).
+  again. `tools/migrate-to-2604.sh` does the same: before, a failure to
+  download the tag, or to check it out in a clone with local changes, ran
+  the migration and setup from main (B169).
 * `tools/migrate-to-2604.sh` no longer runs values that the old box reports
   as bash code on the new machine, and writes only plain values into the
   new `/etc/mailinabox.conf`. An old box that was broken into (often the
@@ -275,7 +284,9 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
 * `tools/write_conf.py --own PATH USER GROUP MODE` changes the owner and
   mode of one file or directory through a descriptor and refuses a
   symbolic link, a file with more than one hard link or anything else;
-  `--own-tree` takes optional modes for files and directories (B147).
+  `--own-tree` takes optional modes for files and directories, and
+  `--check-own PATH...` changes nothing and names each path that `--own`
+  would refuse (setup's check at its start) (B147).
 * Tests: the smoke test's new check `imapsieve-no-phantom-folder` (group
   imapsieve) fails when alice, bob or carol has a folder "spamassassin"
   (B155). TESTING-fork.md has the scenario T1n: setup's network checks on
@@ -288,7 +299,10 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   address and `--check` tries the copy's rsync once (B167), the in-place
   tool reports the SSH port of `sshd_config`, not always 22 (B162), and
   after a migration webmail users log in again because Roundcube on the new
-  machine has a key of its own.
+  machine has a key of its own. "Updating the fork" says that setup stops
+  at its start when a place it writes in `$STORAGE_ROOT` is a symbolic
+  link (B147), and "Setup output" that the "Connection to ... succeeded!"
+  line is gone (B174).
 
 ### Upgrade note
 
@@ -315,15 +329,18 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   Roundcube configuration, which the last run of the old setup wrote, and
   writes a new one only when there is none (B172). Up to v78-r2604.1 every
   setup run, and so every update, logged them out.
-* Setup now stops with an error (from `tools/write_conf.py`) when
-  `$STORAGE_ROOT/mail`, `users.sqlite` or `roundcube/roundcube.sqlite` in
-  it, its postgrey, DKIM or SpamAssassin directory, or
-  `$STORAGE_ROOT/mailinabox.version` is a symbolic link, when one of the
-  two databases has a second hard link, and when `mailinabox.version` is
-  not a regular file ("Cannot read ..." from setup/migrate.py). If you
-  moved the mail store to another disk with a symbolic link, mount it at
-  `$STORAGE_ROOT/mail` with a bind mount instead and run setup again
-  (B147).
+* Setup now stops at its start, before it changes anything ("Setup
+  stopped before it changed anything ..."), when `$STORAGE_ROOT/mail`,
+  `users.sqlite` or `roundcube/roundcube.sqlite` in it, or its postgrey,
+  DKIM or SpamAssassin directory is a symbolic link, when one of the two
+  databases has a second hard link, or when
+  `$STORAGE_ROOT/mailinabox.version` is not a regular file. It lists them
+  and says what to do: if you moved the mail store to another disk with a
+  symbolic link, put the directory back or mount the disk at
+  `$STORAGE_ROOT/mail` with a bind mount instead; remove the other name of
+  a database with a second hard link (`find / -xdev -samefile FILE` shows
+  it); then run setup again. `$STORAGE_ROOT` itself may still be a link in
+  a directory of root's own (such as `/home/user-data`) (B147).
 * Setup removes the folders "spamassassin" that sa-learn created. It
   prints "Removed the state directory of sa-learn (the folder
   "spamassassin") from N mailboxes", and "Kept ..." with the reason for a
@@ -346,10 +363,11 @@ Spamhaus and IPv6 addresses (B163-B165, B167).
   (B150). The box's IPv6 address is now really looked up in Spamhaus ZEN,
   so a listing missed so far shows up as an error (B144), which `after`
   lists as UNEXPECTED.
-* The in-place upgrade now stops when it cannot fetch its release tag (a
-  network or GitHub error) instead of running setup from the branch main;
-  run the command again when the source can be reached. It uses main only
-  when the repository answers that the tag is not published yet (B169).
+* The in-place upgrade and the migration tool now stop when they cannot
+  fetch their release tag (a network or GitHub error) instead of running
+  setup from the branch main; run the command again when the source can be
+  reached. They use main only when the repository answers that the tag is
+  not published yet (B169).
 * A box upgraded in place from 22.04 or 24.04 by an earlier version of the
   tool, with `FTS=off`, `NEXTCLOUD_SHARE_SCOPE=all`, `FAVICON=off` or
   `PROBE_ADDRESS=...` given in the environment, got the defaults in

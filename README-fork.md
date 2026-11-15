@@ -120,6 +120,17 @@ Z-Push after Nextcloud's step, before PHP-FPM and the control panel are
 restarted; the box keeps the old Z-Push). Run setup again (`sudo mailinabox`) once
 GitHub is reachable: it installs Z-Push and finishes the update.
 
+From v78-r2604.2 on, setup stops at its start, before it changes anything,
+when a place in `$STORAGE_ROOT` that it writes as root is a symbolic link:
+`mail` itself, `mail/users.sqlite`, `mail/roundcube/roundcube.sqlite`,
+and the postgrey, DKIM and SpamAssassin directories in `mail`; also when
+one of the two databases has a second hard link or `mailinabox.version`
+is not a regular file. Another account (www-data, the storage user) could
+have put such a link there (B147). It lists them and says what to do: a
+mail store on another disk belongs at `$STORAGE_ROOT/mail` as a bind
+mount, not as a link. `$STORAGE_ROOT` itself may be a link in a directory
+of root's own, such as `/home/user-data`.
+
 Boxes installed with rc1 to rc3 (with bootstrap.sh or with the in-place
 tool) were cloned from the fork's previous home. bootstrap.sh stops on them
 with "is a checkout of ..., not of https://github.com/LM1337/Mail-in-a-box-26".
@@ -324,6 +335,19 @@ Z-Push nach dem Schritt für Nextcloud, bevor PHP-FPM und das Control Panel
 neu gestartet werden; die Box behält das alte Z-Push). Sobald GitHub erreichbar
 ist, setup noch einmal aufrufen (`sudo mailinabox`): Es installiert Z-Push
 und schließt das Update ab.
+
+Ab v78-r2604.2 bricht setup gleich zu Beginn ab, bevor es etwas ändert,
+wenn eine Stelle in `$STORAGE_ROOT`, die es als root beschreibt, ein
+symbolischer Link ist: `mail` selbst, `mail/users.sqlite`,
+`mail/roundcube/roundcube.sqlite` und die Verzeichnisse von postgrey, DKIM
+und SpamAssassin in `mail`; ebenso, wenn eine der beiden Datenbanken einen
+zweiten harten Link hat oder `mailinabox.version` keine gewöhnliche Datei
+ist. Ein anderes Konto (www-data, der Speicherbenutzer) könnte einen
+solchen Link dort angelegt haben (B147). Setup zählt die Stellen auf und
+sagt, was zu tun ist: Ein Mailspeicher auf einer anderen Platte gehört
+per Bind-Mount nach `$STORAGE_ROOT/mail`, nicht per Link.
+`$STORAGE_ROOT` selbst darf ein Link in einem Verzeichnis sein, das nur
+root gehört, etwa `/home/user-data`.
 
 Boxen, die mit rc1 bis rc3 installiert wurden (mit bootstrap.sh oder mit dem
 In-place-Werkzeug), wurden von der früheren Adresse des Forks geklont.
@@ -535,8 +559,9 @@ harmless; setup goes on and ends with "Your Mail-in-a-Box is running.":
 * "Synchronizing state of fail2ban.service with SysV service script ..." and
   "Executing: /usr/lib/systemd/systemd-sysv-install enable fail2ban":
   systemctl enabling a service that also has an init script.
-* "Connection to 127.0.0.1 10222 port [tcp/*] succeeded!": setup waiting for
-  the management daemon.
+* "Connection to 127.0.0.1 10222 port [tcp/*] succeeded!" (up to
+  v78-r2604.1): setup waiting for the management daemon. From v78-r2604.2
+  on, setup no longer shows nc's output (B174).
 * "Commenting out the 127.0.1.1 line of /etc/hosts with another machine's
   name...": setup fixing a provider's host name (B60, B68).
 * "Cleaning up legacy php version": setup removing PHP 8.2, which it only
@@ -561,8 +586,9 @@ is running.“:
 * „Synchronizing state of fail2ban.service with SysV service script ...“ und
   „Executing: /usr/lib/systemd/systemd-sysv-install enable fail2ban“:
   systemctl schaltet einen Dienst ein, der auch ein Init-Skript hat.
-* „Connection to 127.0.0.1 10222 port [tcp/*] succeeded!“: setup wartet auf
-  den Verwaltungsdienst.
+* „Connection to 127.0.0.1 10222 port [tcp/*] succeeded!“ (bis
+  v78-r2604.1): setup wartet auf den Verwaltungsdienst. Ab v78-r2604.2
+  zeigt setup die Ausgabe von nc nicht mehr (B174).
 * „Commenting out the 127.0.1.1 line of /etc/hosts with another machine's
   name...“: setup ersetzt den Hostnamen eines Anbieters (B60, B68).
 * „Cleaning up legacy php version“: setup entfernt PHP 8.2, das es nur für
