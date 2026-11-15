@@ -1563,10 +1563,12 @@ Move it away (or use an empty disk) and run the command again."
 }
 
 # The ownership placeholders need 32-bit user IDs (not in some containers).
+# chown -h: another account that can write in the directory could have put a
+# link in place of the test file (B166).
 check_big_ids() {
 	local t
 	t=$(mktemp "$1/.migrate-idtest.XXXXXX")
-	if ! chown "$((ID_OFFSET + 1)):$((ID_OFFSET + 1))" "$t" 2> /dev/null; then
+	if ! chown -h "$((ID_OFFSET + 1)):$((ID_OFFSET + 1))" "$t" 2> /dev/null; then
 		rm -f "$t"
 		blocker "The file system of $1 does not accept large user IDs (a container?).
 Use a virtual machine or a real server as the new box."
@@ -1575,12 +1577,21 @@ Use a virtual machine or a real server as the new box."
 	rm -f "$t"
 }
 
+# Write the marker into SR (B166). SR belongs to the storage user (after a
+# copy, to whatever account has the old box's user ID here), who could put a
+# link to another file in place of the marker for root to write through.
+# tools/write_conf.py follows no link in a directory that another account may
+# write and replaces the file by a rename.
+write_marker() { # SR OWNER
+	printf '%s\n' "$2" | python3 -I "$MIAB_DIR/tools/write_conf.py" "$1/$MARKER" 600 \
+		|| die "Could not write the marker $1/$MARKER (see above)."
+}
+
 claim_target() {
 	local sr=$1 owner=$2
 	check_target "$sr" "$owner"
 	mkdir -p "$sr"
-	echo "$owner" > "$sr/$MARKER"
-	chmod 600 "$sr/$MARKER"
+	write_marker "$sr" "$owner"
 	state_set TARGET_OWNER "$owner"
 	check_big_ids "$sr"
 }
@@ -2862,7 +2873,7 @@ their credentials in the environment; see README-fork.md for the manual way."
 	if [ ! -f "$STORAGE_ROOT/backup/secret_key.txt" ]; then
 		install -m 600 "$BACKUP_KEY" "$STORAGE_ROOT/backup/secret_key.txt"
 	fi
-	state_get TARGET_OWNER > "$STORAGE_ROOT/$MARKER"
+	write_marker "$STORAGE_ROOT" "$(state_get TARGET_OWNER)"
 	phase_mark_done restore
 }
 
