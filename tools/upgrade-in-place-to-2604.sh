@@ -1110,7 +1110,10 @@ install_tmux() {
 	apt_locks_free || { sleep 15 && apt_locks_free; } || return 1
 	(
 		apt-get -q -q -o DPkg::Lock::Timeout=30 update < /dev/null > /dev/null 2>&1 || exit 1
-		if apt-get -s install tmux < /dev/null 2> /dev/null | grep -qE '^(Remv |Inst [^ ]+ \[)'; then exit 1; fi
+		# Not piped into grep -q (B160): grep ends at the first match, apt-get
+		# then fails on the closed pipe, and with pipefail the guard never fired.
+		sim=$(apt-get -s install tmux < /dev/null 2> /dev/null) || exit 1
+		if grep -qE '^(Remv |Inst [^ ]+ \[)' <<< "$sim"; then exit 1; fi
 		DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=30 -o Dpkg::Options::=--force-confdef \
 			-o Dpkg::Options::=--force-confold install tmux < /dev/null > /dev/null 2>&1
 	)
@@ -2761,7 +2764,7 @@ set_prompt_lts() {
 
 phase_prepare_release() {
 	section "Preparing the packages for the release upgrade"
-	local held purge=() down=() p ver pins=()
+	local held purge=() down=() p ver pins=() sim
 
 	held=$(apt-mark showhold 2> /dev/null | tr '\n' ' ' || true)
 	if [ -n "$held" ]; then
@@ -2805,7 +2808,11 @@ phase_prepare_release() {
 			if [ -n "$ver" ]; then pins+=("$p=$ver"); else warn "Ubuntu has no $p; it stays as it is."; fi
 		done
 		if [ ${#pins[@]} -gt 0 ]; then
-			if apt-get -s -q --allow-downgrades install "${pins[@]}" < /dev/null 2> /dev/null | grep -q '^Remv '; then
+			# Searched after apt-get has ended, not piped into grep -q (B160, see
+			# install_tmux). A simulation that fails leaves no Remv line; the
+			# install below then fails as well and only warns.
+			sim=$(apt-get -s -q --allow-downgrades install "${pins[@]}" < /dev/null 2> /dev/null || true)
+			if grep -q '^Remv ' <<< "$sim"; then
 				warn "Switching ${pins[*]} back to Ubuntu's versions would remove other packages; left as they are."
 			else
 				say "Switching back to Ubuntu's versions: ${pins[*]}"
