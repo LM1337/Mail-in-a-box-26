@@ -78,7 +78,10 @@ OLD_NSD_SAVE=/root/migrate-to-2604-nsd-orig
 TMUX_SESSION=migrate-2604
 # The environment variables this script and setup read (passed into that
 # session); SSH_AUTH_SOCK for an SSH agent that logs in on the old box.
-MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK FTS NEXTCLOUD_SHARE_SCOPE FAVICON)
+# PROBE_ADDRESS: setup keeps it in /etc/mailinabox.conf; DISABLE_FIREWALL:
+# setup leaves ufw alone (B153, as in tools/upgrade-in-place-to-2604.sh).
+MUX_ENV=(MIGRATE_STATE_DIR MIGRATE_QUIET_TIMEOUT MIGRATE_BACKUP_WAIT MIGRATE_REEXEC TAG SOURCE SSH_AUTH_SOCK FTS NEXTCLOUD_SHARE_SCOPE FAVICON
+	PROBE_ADDRESS DISABLE_FIREWALL)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
