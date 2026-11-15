@@ -664,24 +664,27 @@ def perform_backup(full_backup):
 			if quit:
 				sys.exit(code)
 
-	service_command("php8.5-fpm", "stop", quit=True)
-	service_command("postfix", "stop", quit=True)
-	service_command("dovecot", "stop", quit=True)
-	service_command("postgrey", "stop", quit=True)
-
-	# Execute a pre-backup script that copies files outside the homedir.
-	# Run as the STORAGE_USER user, not as root. Pass our settings in
-	# environment variables so the script has access to STORAGE_ROOT.
-	pre_script = os.path.join(backup_root, 'before-backup')
-	if os.path.exists(pre_script):
-		shell('check_call',
-			['su', env['STORAGE_USER'], '-c', pre_script, config["target"]],
-			env=env)
-
-	# Run a backup of STORAGE_ROOT (but excluding the backups themselves!).
-	# --allow-source-mismatch is needed in case the box's hostname is changed
-	# after the first backup. See #396.
+	# The stops and the pre-backup script are inside the try, so that the
+	# finally clause starts the services again also when a later stop or
+	# the pre-backup script fails; before, mail stayed down (B148).
 	try:
+		service_command("php8.5-fpm", "stop", quit=True)
+		service_command("postfix", "stop", quit=True)
+		service_command("dovecot", "stop", quit=True)
+		service_command("postgrey", "stop", quit=True)
+
+		# Execute a pre-backup script that copies files outside the homedir.
+		# Run as the STORAGE_USER user, not as root. Pass our settings in
+		# environment variables so the script has access to STORAGE_ROOT.
+		pre_script = os.path.join(backup_root, 'before-backup')
+		if os.path.exists(pre_script):
+			shell('check_call',
+				['su', env['STORAGE_USER'], '-c', pre_script, config["target"]],
+				env=env)
+
+		# Run a backup of STORAGE_ROOT (but excluding the backups themselves!).
+		# --allow-source-mismatch is needed in case the box's hostname is changed
+		# after the first backup. See #396.
 		shell('check_call', [
 			"/usr/bin/duplicity",
 			"full" if full_backup else "incr",
