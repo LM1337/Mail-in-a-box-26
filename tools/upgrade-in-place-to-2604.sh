@@ -422,7 +422,8 @@ on_exit() {
 		if downtime_active && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
 			echo
 			echo "Mail runs again (setup has finished), but the upgrade is not finished: cron jobs,"
-			echo "update timers and backups stay paused. Continue with: $SELF (or --finish)"
+			# --finish only accepts a final check that has run (B161).
+			echo "update timers and backups stay paused. Continue with: $SELF$([ "$(state_get VERIFY_RAN)" != 1 ] || echo " (or --finish)")"
 		elif downtime_active; then
 			echo
 			echo "Mail is OFFLINE (since $(state_get QUIESCED_AT)). Continue with: $SELF"
@@ -4741,6 +4742,9 @@ mail_plugins (/etc/dovecot/conf.d/20-imap.conf, 20-pop3.conf): install it, or re
 
 do_finish() {
 	[ "$(state_get VERIFY_RAN)" = 1 ] || die "Run the upgrade up to the final check first."
+	# Not with setup pending, e.g. after a --redo-from that failed (B161):
+	# finish would mark the upgrade finished and resume the backups.
+	phase_is_done setup || die "Setup has not finished (phase setup is pending). Continue the upgrade first: $SELF"
 	ssh_fallback_cleanup_stale
 	if phase_is_done finish; then
 		say "The upgrade is already finished ($(state_get FINISHED_AT))."
@@ -4795,6 +4799,12 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 					|| die "--redo-from $REDO_FROM only works after the release upgrades."
 				phases_reset_from "${REDO_FROM//-/_}"
 				state_set FINISHED_AT ""
+				state_set FINISHED_EPOCH ""
+				# The final check runs again: until it has, --finish has no result
+				# to accept; and a setup that runs again has not finished yet, so a
+				# redo that fails must not say "Mail runs again" (on_exit, B161).
+				state_set VERIFY_RAN ""
+				case "$REDO_FROM" in cleanup-etc | setup) state_set SETUP_END_EPOCH "" ;; esac
 				;;
 			*) die "--redo-from takes snapshot, cleanup-etc, setup, local-ext or verify." ;;
 		esac
