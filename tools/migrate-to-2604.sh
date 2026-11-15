@@ -1643,6 +1643,11 @@ choose_new_settings() {
 	state_set NEW_PRIVATE_IPV6 "$NEW_PRIVATE_IPV6"
 }
 
+# The first address of NAME in DNS, or nothing. NAME ends with a dot, which
+# keeps the resolver's search domains out: with a wildcard record there, "not
+# listed" would come back as an address (B76).
+dns_a() { getent -s dns hosts "$1" 2> /dev/null | awk '{print $1; exit}' || true; }
+
 # What setup/network-checks.sh checks (setup runs with SKIP_NETWORK_CHECKS=1
 # here), plus the reverse DNS. Fills NET_BLOCKERS.
 network_checks() {
@@ -1655,26 +1660,51 @@ network_checks() {
 (e.g. Hetzner Cloud, AWS, Google Cloud, DigitalOcean); ask them to unblock it.")
 	fi
 
-	local a rev ptr
+	# Spamhaus' test entries are asked first (127.0.0.2 and dbltest.com are
+	# always listed): no answer for a name means "not listed" only when the
+	# test entry has one. Without it the lookup failed (no resolver, a timeout,
+	# SERVFAIL), which gives no answer just the same (B165). Spamhaus answers
+	# a query through a public resolver, also for the test entries, with
+	# 127.255.255.254, one over the limit with 127.255.255.255.
+	local a t rev ptr refused
 	if [[ $NEW_PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 		rev=$(echo "$NEW_PUBLIC_IP" | awk -F. '{print $4"."$3"."$2"."$1}')
-		# The trailing dot keeps the resolver's search domains out: with a
-		# wildcard record there, "not listed" would come back as an address.
-		a=$(getent -s dns hosts "$rev.zen.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
-		case "$a" in
-			"") say "Spamhaus ZEN:      $NEW_PUBLIC_IP is not listed" ;;
-			127.255.255.*) say "Spamhaus ZEN:      no answer (Spamhaus refuses public resolvers); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
+		refused="no answer (Spamhaus refuses public resolvers); check $NEW_PUBLIC_IP on https://check.spamhaus.org/"
+		t=$(dns_a 2.0.0.127.zen.spamhaus.org.)
+		case "$t" in
 			127.0.0.*)
-				say "Spamhaus ZEN:      $NEW_PUBLIC_IP is LISTED ($a)"
-				NET_BLOCKERS+=("The IP address $NEW_PUBLIC_IP is listed in the Spamhaus Block List (https://check.spamhaus.org/).
+				a=$(dns_a "$rev.zen.spamhaus.org.")
+				case "$a" in
+					"") say "Spamhaus ZEN:      $NEW_PUBLIC_IP is not listed" ;;
+					127.255.255.*) say "Spamhaus ZEN:      $refused" ;;
+					127.0.0.*)
+						say "Spamhaus ZEN:      $NEW_PUBLIC_IP is LISTED ($a)"
+						NET_BLOCKERS+=("The IP address $NEW_PUBLIC_IP is listed in the Spamhaus Block List (https://check.spamhaus.org/).
 Mail from this machine would be rejected. Get another IP address or have it delisted.")
+						;;
+					*) say "Spamhaus ZEN:      unexpected answer $a" ;;
+				esac
 				;;
-			*) say "Spamhaus ZEN:      unexpected answer $a" ;;
+			127.255.255.*) say "Spamhaus ZEN:      $refused" ;;
+			"") say "Spamhaus ZEN:      could not check (no answer, not even for Spamhaus' test entry 127.0.0.2: no resolver, a timeout or an error); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
+			*) say "Spamhaus ZEN:      could not check (answer $t for Spamhaus' test entry 127.0.0.2); check $NEW_PUBLIC_IP on https://check.spamhaus.org/" ;;
 		esac
 	fi
-	a=$(getent -s dns hosts "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org." 2> /dev/null | awk '{print $1; exit}' || true)
-	case "$a" in
-		127.0.1.*) warn "The hostname $NEW_PRIMARY_HOSTNAME is listed in the Spamhaus Domain Block List ($a), see https://check.spamhaus.org/." ;;
+	refused="no answer (Spamhaus refuses public resolvers); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/"
+	t=$(dns_a dbltest.com.dbl.spamhaus.org.)
+	case "$t" in
+		127.0.1.*)
+			a=$(dns_a "$NEW_PRIMARY_HOSTNAME.dbl.spamhaus.org.")
+			case "$a" in
+				"") say "Spamhaus DBL:      $NEW_PRIMARY_HOSTNAME is not listed" ;;
+				127.255.255.*) say "Spamhaus DBL:      $refused" ;;
+				127.0.1.*) warn "The hostname $NEW_PRIMARY_HOSTNAME is listed in the Spamhaus Domain Block List ($a), see https://check.spamhaus.org/." ;;
+				*) say "Spamhaus DBL:      unexpected answer $a" ;;
+			esac
+			;;
+		127.255.255.*) say "Spamhaus DBL:      $refused" ;;
+		"") say "Spamhaus DBL:      could not check (no answer, not even for Spamhaus' test entry dbltest.com: no resolver, a timeout or an error); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/" ;;
+		*) say "Spamhaus DBL:      could not check (answer $t for Spamhaus' test entry dbltest.com); check $NEW_PRIMARY_HOSTNAME on https://check.spamhaus.org/" ;;
 	esac
 	ptr=
 	if [[ $NEW_PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
