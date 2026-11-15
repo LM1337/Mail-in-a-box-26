@@ -7,6 +7,9 @@
 # purpopses only. After this point you are on your own.
 
 source /etc/mailinabox.conf # load global vars
+# Not in /etc/mailinabox.conf: without it, "php$PHP_VER" below was plain php,
+# whatever version the alternatives link points to (B173, as B49).
+PHP_VER=8.5 # keep in sync with setup/functions.sh
 
 ADMIN=$(./mail.py user admins | head -n 1)
 test -z "$1" || ADMIN=$1

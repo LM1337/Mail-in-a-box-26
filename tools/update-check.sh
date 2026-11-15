@@ -377,8 +377,18 @@ record_status_checks() { # DIR
 }
 
 record_nextcloud() {
+	# occ runs with the PHP version that the box's Mail-in-a-Box configures:
+	# PHP_VER of its checkout's setup/functions.sh (read, not run; 8.5 on this
+	# fork, 8.0 on upstream v78 before an upgrade), not plain php, which is
+	# whatever version the alternatives link points to (B173, as B49). Plain
+	# php only if the checkout names none.
+	local php=php v=
+	if [ -n "$MIAB_DIR" ]; then
+		v=$(sed -nE 's/^PHP_VER=([0-9]+\.[0-9]+)([[:space:]].*)?$/\1/p' "$MIAB_DIR/setup/functions.sh" 2> /dev/null | head -n 1 || true)
+	fi
+	if [ -n "$v" ]; then php=php$v; fi
 	if [ -f /usr/local/lib/owncloud/occ ]; then
-		(umask 022 && timeout 120 runuser -u www-data -- php /usr/local/lib/owncloud/occ status --no-ansi < /dev/null 2>&1) \
+		(umask 022 && timeout 120 runuser -u www-data -- "$php" /usr/local/lib/owncloud/occ status --no-ansi < /dev/null 2>&1) \
 			| sed -E 's/^[[:space:]]*-[[:space:]]*//' | grep -v '^$' || true
 	else
 		echo "(Nextcloud not installed)"
