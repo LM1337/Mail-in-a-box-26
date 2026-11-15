@@ -297,9 +297,12 @@ if [ ! -d "$STORAGE_ROOT/mail/postgrey/db" ]; then
 	# Move over database files
 	mv /var/lib/postgrey/* "$STORAGE_ROOT/mail/postgrey/db/" || true
 fi
-# Ensure permissions are set
-chown -R postgrey:postgrey "$STORAGE_ROOT/mail/postgrey/"
-chmod 700 "$STORAGE_ROOT/mail/postgrey/"{,db}
+# Ensure permissions are set. www-data may write in $STORAGE_ROOT/mail
+# (setup/webmail.sh): chown -R without a trailing slash and the modes through
+# a descriptor do not follow a symbolic link put there (B147).
+chown -R postgrey:postgrey "$STORAGE_ROOT/mail/postgrey"
+tools/write_conf.py --own "$STORAGE_ROOT/mail/postgrey" postgrey postgrey 700
+tools/write_conf.py --own "$STORAGE_ROOT/mail/postgrey/db" postgrey postgrey 700
 
 # We are going to setup a newer whitelist for postgrey, the version included in the distribution is old
 cat > /etc/cron.daily/mailinabox-postgrey-whitelist << EOF;

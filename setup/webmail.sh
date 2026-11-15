@@ -236,10 +236,13 @@ usermod -a -G dovecot www-data
 
 # set permissions so that PHP can use users.sqlite
 # could use dovecot instead of www-data, but not sure it matters
-chown root:www-data "$STORAGE_ROOT/mail"
-chmod 775 "$STORAGE_ROOT/mail"
-chown root:www-data "$STORAGE_ROOT/mail/users.sqlite"
-chmod 664 "$STORAGE_ROOT/mail/users.sqlite"
+# Through a descriptor (tools/write_conf.py --own), not chown and chmod by
+# path: www-data may write in $STORAGE_ROOT/mail (this very mode) and the
+# storage user in $STORAGE_ROOT, so either could have put a symbolic link
+# there, which chown and chmod follow. users.sqlite as a link to /etc/shadow
+# made that file writable for www-data at the next setup run (B147).
+tools/write_conf.py --own "$STORAGE_ROOT/mail" root www-data 775
+tools/write_conf.py --own "$STORAGE_ROOT/mail/users.sqlite" root www-data 664
 
 # Fix Carddav permissions:
 chown -f -R root:www-data ${RCM_PLUGIN_DIR}/carddav
@@ -248,8 +251,8 @@ chmod -R 774 ${RCM_PLUGIN_DIR}/carddav
 
 # Run Roundcube database migration script (database is created if it does not exist)
 php"$PHP_VER" ${RCM_DIR}/bin/updatedb.sh --dir ${RCM_DIR}/SQL --package roundcube
-chown www-data:www-data "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite"
-chmod 664 "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite"
+# www-data owns the directory of roundcube.sqlite, see users.sqlite above (B147).
+tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
 
 # Patch the Roundcube code to eliminate an issue that causes postfix to reject our sqlite
 # user database (see https://github.com/mail-in-a-box/mailinabox/issues/2185)

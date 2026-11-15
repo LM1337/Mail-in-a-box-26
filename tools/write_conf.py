@@ -33,6 +33,17 @@
 #   and anything that is not a directory, regular file or link are left
 #   alone with a warning.
 #
+# tools/write_conf.py --own-tree DIR USER GROUP FILEMODE DIRMODE
+#   the same, but regular files get FILEMODE and directories DIRMODE (octal).
+#
+# tools/write_conf.py --own PATH USER GROUP MODE
+#   gives PATH itself to USER:GROUP with MODE (octal), through a descriptor:
+#   for a file or directory in a directory that another account may write,
+#   where chown and chmod by path would follow a symbolic link (or change a
+#   hard link to another file) that that account put there (B147). The path
+#   is opened as above; PATH must be a directory or a regular file with one
+#   hard link, and a symbolic link or anything else is refused.
+#
 # Exit code 0 (also when nothing changed), 1 on an error.
 
 import grp
@@ -144,19 +155,23 @@ def write_if_changed(path, data, new_mode=0o644, _depth=0):
 		os.close(dfd)
 
 
-def own_tree(path, uid, gid, warn=print):
+def own_tree(path, uid, gid, warn=print, file_mode=None, dir_mode=None):
 	"""See --own-tree in the header."""
 	dfd = open_dir(path)
 	try:
-		_own_dir(dfd, path.rstrip("/") or "/", uid, gid, warn)
+		_own_dir(dfd, path.rstrip("/") or "/", uid, gid, warn, file_mode, dir_mode)
 	finally:
 		os.close(dfd)
 
 
-def _own_dir(dfd, label, uid, gid, warn):
+def _new_mode(st, mode):
+	return stat.S_IMODE(st.st_mode) & ~0o027 if mode is None else mode
+
+
+def _own_dir(dfd, label, uid, gid, warn, file_mode=None, dir_mode=None):
 	st = os.fstat(dfd)
 	os.fchown(dfd, uid, gid)
-	os.fchmod(dfd, stat.S_IMODE(st.st_mode) & ~0o027)
+	os.fchmod(dfd, _new_mode(st, dir_mode))
 	for name in sorted(os.listdir(dfd)):
 		where = "%s/%s" % (label, name)
 		st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
@@ -165,7 +180,7 @@ def _own_dir(dfd, label, uid, gid, warn):
 		elif stat.S_ISDIR(st.st_mode):
 			fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dfd)
 			try:
-				_own_dir(fd, where, uid, gid, warn)
+				_own_dir(fd, where, uid, gid, warn, file_mode, dir_mode)
 			finally:
 				os.close(fd)
 		elif stat.S_ISREG(st.st_mode):
@@ -178,25 +193,56 @@ def _own_dir(dfd, label, uid, gid, warn):
 					warn("write_conf.py: %s has %d hard links, left alone" % (where, fst.st_nlink))
 				else:
 					os.fchown(fd, uid, gid)
-					os.fchmod(fd, stat.S_IMODE(fst.st_mode) & ~0o027)
+					os.fchmod(fd, _new_mode(fst, file_mode))
 			finally:
 				os.close(fd)
 		else:
 			warn("write_conf.py: %s is not a directory, regular file or link, left alone" % where)
 
 
+def own(path, uid, gid, mode):
+	"""See --own in the header."""
+	directory, name = os.path.split(os.path.abspath(path))
+	dfd = open_dir(directory)
+	try:
+		st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+		if stat.S_ISLNK(st.st_mode):
+			raise OSError("%s is a symbolic link" % path)
+		if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+			raise OSError("%s is not a directory or regular file" % path)
+		fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=dfd)
+	finally:
+		os.close(dfd)
+	try:
+		fst = os.fstat(fd)
+		if (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+			raise OSError("%s changed while it was looked at" % path)
+		if stat.S_ISREG(fst.st_mode) and fst.st_nlink > 1:
+			raise OSError("%s has %d hard links" % (path, fst.st_nlink))
+		os.fchown(fd, uid, gid)
+		os.fchmod(fd, mode)
+	finally:
+		os.close(fd)
+
+
 if __name__ == "__main__":
 	try:
-		if len(sys.argv) == 5 and sys.argv[1] == "--own-tree":
-			own_tree(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid)
+		if len(sys.argv) in (5, 7) and sys.argv[1] == "--own-tree":
+			modes = [int(m, 8) for m in sys.argv[5:7]] or [None, None]
+			own_tree(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid,
+				file_mode=modes[0], dir_mode=modes[1])
+			sys.exit(0)
+		if len(sys.argv) == 6 and sys.argv[1] == "--own":
+			own(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid, int(sys.argv[5], 8))
 			sys.exit(0)
 		if len(sys.argv) not in (2, 3) or sys.argv[1].startswith("--"):
 			print("usage: tools/write_conf.py FILE [MODE] < CONTENT\n"
-				"       tools/write_conf.py --own-tree DIR USER GROUP", file=sys.stderr)
+				"       tools/write_conf.py --own-tree DIR USER GROUP [FILEMODE DIRMODE]\n"
+				"       tools/write_conf.py --own PATH USER GROUP MODE", file=sys.stderr)
 			sys.exit(1)
 		mode = int(sys.argv[2], 8) if len(sys.argv) == 3 else 0o644
 		write_if_changed(sys.argv[1], sys.stdin.buffer.read(), mode)
 	except (OSError, ValueError, KeyError) as e:
-		args = sys.argv[2:3] if sys.argv[1:2] == ["--own-tree"] else sys.argv[1:2]
+		args = sys.argv[2:3] if sys.argv[1:2] in (["--own-tree"], ["--own"]) else sys.argv[1:2]
 		print("write_conf.py: %s: %s" % ("".join(args), e), file=sys.stderr)
 		sys.exit(1)

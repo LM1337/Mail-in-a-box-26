@@ -139,9 +139,11 @@ if [ ! -d "$STORAGE_ROOT" ]; then
 fi
 f=$STORAGE_ROOT
 while [[ $f != / ]]; do chmod a+rx "$f"; f=$(dirname "$f"); done;
+# The storage user may write in STORAGE_ROOT (its home), so the file is
+# written and given to it without following a symbolic link there (B147).
 if [ ! -f "$STORAGE_ROOT/mailinabox.version" ]; then
-	setup/migrate.py --current > "$STORAGE_ROOT/mailinabox.version"
-	chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"
+	setup/migrate.py --current | tools/write_conf.py "$STORAGE_ROOT/mailinabox.version" 644
+	tools/write_conf.py --own "$STORAGE_ROOT/mailinabox.version" "$STORAGE_USER" "$STORAGE_USER" 644
 fi
 
 # Save the global options in /etc/mailinabox.conf so that standalone

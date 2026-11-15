@@ -220,9 +220,11 @@ tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
 
 # Create empty bayes training data (if it doesn't exist). Once the files exist,
 # ensure they are group-writable so that the Dovecot process has access.
+# Through descriptors (files 660, directories 770): chmod -R by path followed a
+# symbolic link that www-data could put in $STORAGE_ROOT/mail into the tree
+# it points to (B147).
 sudo -u spampd /usr/bin/sa-learn --sync 2>/dev/null
-chmod -R 660 "$STORAGE_ROOT/mail/spamassassin"
-chmod 770 "$STORAGE_ROOT/mail/spamassassin"
+tools/write_conf.py --own-tree "$STORAGE_ROOT/mail/spamassassin" spampd spampd 660 770
 
 # Kick services. Dovecot reloads only if the settings above changed its
 # configuration (mail_access_groups on the first run), see load_dovecot

@@ -234,8 +234,11 @@ InstallNextcloud() {
 # application version than the database.
 
 # If config.php exists, get version number, otherwise CURRENT_NEXTCLOUD_VER is empty.
+# Read from the file's 'version' line (Nextcloud writes it with var_export, one
+# key per line), as www-data, which owns it. Up to v78-r2604.1 root included
+# the file in PHP, so PHP code that www-data had added to it ran as root (B147).
 if [ -f "$STORAGE_ROOT/owncloud/config.php" ]; then
-	CURRENT_NEXTCLOUD_VER=$(php"$PHP_VER" -r "include(\"$STORAGE_ROOT/owncloud/config.php\"); echo(\$CONFIG['version']);")
+	CURRENT_NEXTCLOUD_VER=$(sudo -u www-data sed -n "/^[[:space:]]*'version'[[:space:]]*=>[[:space:]]*'\([0-9.]*\)'.*/{s//\1/p;q}" "$STORAGE_ROOT/owncloud/config.php")
 else
 	CURRENT_NEXTCLOUD_VER=""
 fi
