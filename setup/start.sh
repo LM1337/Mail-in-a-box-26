@@ -50,6 +50,9 @@ if [ -n "$SETUP_STOPPED_CRON" ] && [ "$(systemctl is-enabled cron.service 2> /de
 fi
 function setup_ended {
 	local rc=$?
+	# PHP-FPM that setup/nextcloud.sh stopped for a Nextcloud upgrade, when the
+	# run ended before PHP-FPM's restart after zpush.sh (B149).
+	start_stopped_php_fpm
 	if [ -n "$SETUP_MASKED_CRON" ]; then
 		systemctl unmask --runtime --quiet cron.service 2> /dev/null || true
 		rm -f "$SETUP_CRON_MASK_MARKER"
