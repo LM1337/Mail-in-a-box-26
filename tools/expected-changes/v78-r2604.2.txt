@@ -1,0 +1,37 @@
+# Expected changes of an update to v78-r2604.2, for tools/update-check.sh
+# after: what this release changes in the recorded state, compared with
+# v78-r2604.1 ("after" uses the lists of all releases after the version
+# before the update, up to the version after it, and any.txt). The format is
+# in any.txt.
+
+nextcloud.txt - ^version: 34\.0\.5\.[0-9]+$ # v78-r2604.2: Nextcloud 34.0.5 to 34.0.6 (setup/nextcloud.sh); the version before, as "occ status" names it
+nextcloud.txt + ^version: 34\.0\.6\.[0-9]+$ # v78-r2604.2: Nextcloud 34.0.6, see the line above
+nextcloud.txt - ^versionstring: 34\.0\.5$ # v78-r2604.2: Nextcloud 34.0.5 to 34.0.6, see above
+nextcloud.txt + ^versionstring: 34\.0\.6$ # v78-r2604.2: Nextcloud 34.0.6, see above
+# Not in the state record: Roundcube 1.7.6, its CardDAV plugin 5.1.5 and
+# Nextcloud's contacts 8.10.0 and calendar 6.6.5.
+
+# The status checks (status.txt: their ✖ and ? lines, digits as N). A DNS
+# lookup that fails (SERVFAIL, REFUSED, no server reached) or times out is no
+# longer taken for an answer (B150): where a box's resolver fails for some
+# names, the update turns OK lines into these warnings, and shows "[error]"
+# where the checks showed "[Not Set]" (that line gone is in any.txt). On a
+# box whose lookups work, none of these lines comes.
+status.txt + ^\? +Could not connect to zen\.spamhaus\.org\. Could not determine whether this box's IPvN address is blacklisted\. Please try again later\.$ # v78-r2604.2 (B150): a failed lookup at Spamhaus ZEN is a warning, not "not blacklisted"; for the IPv4 and the IPv6 address (the same line with digits as N)
+status.txt + ^\? +(\S+: )?Could not connect to dbl\.spamhaus\.org\. Could not determine whether the domain \S+ is blacklisted\. Please try again later\.$ # v78-r2604.2 (B150): a failed lookup at Spamhaus DBL is a warning, not "not blacklisted"
+status.txt + ^\? +(\S+: )?Could not check this domain's MX record: the DNS lookup (timed out|failed)\. Please try again later\. # v78-r2604.2 (B150): a timed-out or failed MX lookup is a warning, not "no MX record" (which was OK on the box's own name)
+status.txt + ^\? +(\S+: )?This domain has no MX record\. Could not check whether its A record is the one of \S+, which would be OK: the DNS lookup timed out or failed\. # v78-r2604.2 (B150): without an MX record, two A lookups that timed out or failed are no match (they were "its A record is OK")
+status.txt + ^\? +Could not check the DANE TLSA record for incoming mail \(_N\._tcp\.\S+\): the DNS lookup (timed out|failed)\. # v78-r2604.2 (B150): a timed-out or failed TLSA lookup is a warning, not "is not correct. It is '[timeout]'" (an error) or nothing
+status.txt + ^(✖|\?) +(\S+: )?(Nameserver glue records|This domain must resolve|This box's reverse DNS|The nameservers set on this domain|This domain should resolve) .*\[error\] # v78-r2604.2 (B150): the checks that show the value of a lookup show "[error]" for a failed one, where they showed "[Not Set]"
+# Not here: "Latest Mail-in-a-Box version could not be determined", which a
+# network error during the version check gives instead of ending the run
+# (B170), is in any.txt ("You are running version"). A listing of the box's
+# IPv6 address, which the check sees from this release on (B144, the lookup
+# asked a name that never exists), stays UNEXPECTED on purpose: the address
+# was listed before the update too, and it needs action. Through a resolver
+# that Spamhaus refuses or limits, the IPv6 lookup got 127.255.255.254 or
+# .255 with the old name as well, so those warnings do not change. The line
+# "✖ status checks did not finish" (B152) is always UNEXPECTED.
+# Not in the state record either: file modes and owners (B147), the
+# phantom "spamassassin" folders (B155), and the sury keyring package
+# (B158; packages.txt lists other packages and is only shown).

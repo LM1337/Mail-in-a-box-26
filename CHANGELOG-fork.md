@@ -11,7 +11,146 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-The bug-fix release v78-r2604.2: the fixes of a bug scan of v78-r2604.1
+### Planned
+
+Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not
+done (the certification runs add their open findings in TESTING-fork.md):
+
+* bootstrap.sh decides whether to fetch by the name that `git describe`
+  prints for the checkout, so a local tag of the release's name on another
+  commit keeps the old code (see "Updating the fork" in README-fork.md).
+  Comparing the commit of the tag at the source (`git ls-remote`) with
+  `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
+  as every update goes through that code and that release had no test
+  run of it.
+* Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
+  polls; a reload with a `process_control_timeout` would keep them.
+* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
+  test of B126): Z-Push tries the IMAP login three times, and Dovecot
+  delays failed logins, possibly more for an address with many failures,
+  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
+  `miab-zpush` threshold slows down the ActiveSync logins of other users
+  is not measured.
+* `miab-zpush` counts failures per address, like the other jails, and is
+  always on: behind the shared servers of a mail app that syncs through its
+  provider's cloud (Outlook for iOS and Android with an ActiveSync
+  account), one person with a wrong password, or anyone on purpose, can get
+  all users of that app banned, and repeated bans reach recidive's week on
+  all ports (B126). The README, the upgrade note and the allowlist help say
+  to put such networks on the allowlist; nothing finds them on its own.
+  Leaving `miab-zpush` out of recidive would let an attacker guess 20
+  passwords every few minutes for good, so it still counts there.
+* The failed-login report does not read `nextcloud.log` yet, which now
+  has the client's address for `/caldav`, `/carddav` and `/webdav` too
+  (B121).
+* Nextcloud takes the client's address from `X-Forwarded-For` on every
+  connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
+  of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the
+  header itself. A local account or a compromised service can make
+  Nextcloud log a failed login under another address, which
+  `miab-owncloud` bans; before, such a login was logged as 127.0.0.1,
+  which fail2ban ignores. Local accounts could already write such lines
+  into the logs that fail2ban reads (logger(1); www-data owns Nextcloud's
+  log), so this is a second way to an existing one; clients on the
+  Internet cannot do it (the proxy replaces the header). A fix: the proxy
+  proves itself to the `/cloud` location with a secret header from a
+  root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
+* Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
+  postgrey, named, systemd-resolved, munin-node and the management daemon
+  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
+  (`milter_default_action`). Candidates for a reload or a restart only on a
+  change.
+* A Dovecot reload (B122) still has two client-visible moments: a login
+  that the old login process hands to the new auth process at that moment
+  fails as an internal failure (Nextcloud's `user_external` counts it as a
+  failed login of the client; harmless for 127.0.0.1 after B121), and a
+  FolderSync or Ping that Z-Push answers during the reload gets a server
+  error if Z-Push cannot connect again (B137).
+* Roundcube's CardDAV plugin can log "duplicate column name: account_id",
+  "no such column: active" or "UNIQUE constraint failed:
+  carddav_migrations.filename" when two sessions log in at the same moment
+  for the first time after an upgrade of the plugin (a race in its schema
+  migration; one of the logins fails once). After an update from rc7 or
+  earlier, `update-check.sh after` accepts the last form.
+* nginx sets no HSTS header on `/admin/`: the headers of that location
+  replace the server's (upstream). Browsers that visited another page of
+  the box have the header already.
+* Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
+  locked") while its `cron.php` holds the database (seen once in T1); the
+  client writes again later.
+* Through some public resolvers (8.8.8.8 in the test of B136) Spamhaus
+  gives no answer at all, also for its own test entries, so setup's checks
+  can neither see a listing nor say that they could not check; the comment
+  in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
+  127.255.255.254.
+* `upgrade-in-place-to-2604.sh --check` prints the start command with the
+  GitHub URL also when `SOURCE` and `TAG` name another source.
+* A Dovecot reload ends the open IMAP sessions (their clients log in
+  again); setup reloads Dovecot only when its configuration changed (B122).
+* Critical only (Munin's alerts) never mails the return to normal.
+* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
+  not installed (nginx 404).
+* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
+* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
+  `management/backup.py` and `management/dns_update.py` still write
+  `custom.yaml` as root with `open(..., "w")` (B87 covers only
+  `settings.yaml`), and the nightly backup reads its target and
+  `secret_key.txt` there by path. An account that can replace `backup/`
+  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
+  its own with a passphrase it knows. The fork's tools read them, and write
+  the paused `custom.yaml`, only through a checked `backup/` of root's own
+  (B117).
+* `$STORAGE_ROOT/mail` stays root:www-data with mode 775, as upstream has
+  it: Roundcube's password plugin writes `users.sqlite` as www-data, and
+  SQLite needs to create its journal in the same directory. So www-data
+  can rename, replace or remove anything in it: the mailboxes, the DKIM
+  keys, the user database, the postgrey and SpamAssassin data. Setup no
+  longer follows a link it finds there (B147), but code running as
+  www-data can still stop mail (remove `users.sqlite` or `mailboxes`), and
+  the management daemon, which runs as root, opens `users.sqlite` by path
+  (`open_database()` in management/mailconfig.py). A fix moves
+  `users.sqlite` into a directory of its own that only it and its journal
+  live in, and gives `$STORAGE_ROOT/mail` back to root (755); that changes
+  the paths in the Dovecot, Postfix, Roundcube and management
+  configuration and in the backups, so it needs its own release and test
+  runs.
+* The storage user owns `$STORAGE_ROOT/mailinabox.version` and its
+  directory, so it can write a lower number there, and the next setup run
+  runs the data migrations from there again as root. Each such run stops at
+  the first migration that cannot run twice, until the file is put right;
+  before that, depending on the number, migration 8 deletes the DKIM key,
+  11 moves the Let's Encrypt account away, 12 drops Roundcube's CardDAV
+  tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
+  (following a link) to 0600. It gives no root and needs code running as
+  the storage user, which no service of the box runs (B147).
+* The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
+  nor `NameTooLong`: a mail domain whose name is too long with
+  `.dbl.spamhaus.org` appended raises out of its checks and ends the
+  status check run with a traceback (from reading the code). Its guard for
+  the `at` argument tests `'[Not set]'`, which no lookup returns (the value
+  is `'[Not Set]'`, and now `'[error]'` too); the callers exclude both
+  before, so the guard is dead code.
+* When the lookup of a domain's DS record fails, the status checks still
+  say "This domain's DNSSEC DS record is not set" (a failed lookup counts
+  as no DS record, as before B150); "could not check" would be right.
+* `tools/migrate-to-2604.sh` passes the old box's standard error (the
+  error messages of its remote scripts, through ssh) to the terminal
+  unfiltered; the other text of the old box gets "?" for control
+  characters (B154).
+* The in-place upgrade's messages after a `--redo-from` that fails: on an
+  upgrade that had finished, the exit message says that cron jobs, update
+  timers and backups "stay paused", although the redo does not pause them
+  again; and while a redo of setup is pending, `--status` counts "Mail
+  offline ... so far" from the start of the original downtime, not from
+  the redo. Cosmetic; found with B161.
+* The migration tool's directory `/root/migration` is root's only (0700),
+  but the files in it are 0644, among them the copies of the old box's
+  key `old-id_rsa_miab` and of its `passwd`; they could be 0600 (seen in
+  T2 of v78-r2604.2, nothing exposed).
+
+## v78-r2604.2 (2026-11-15)
+
+A bug-fix release: the fixes of a bug scan of v78-r2604.1
 (B145-B173) and of its test runs (B174), and upstream's fix of the IPv6
 Spamhaus check (#2617, B144), with the security releases Roundcube 1.7.6
 and CardDAV plugin 5.1.5 and Nextcloud 34.0.6. A fresh install with
@@ -31,6 +170,10 @@ migration tool); the migration tool checks every value of the old box
 before it uses it (B154) and follows no link where it writes as root
 (B166), with fixes for a symbolic link as `$STORAGE_ROOT`, folders named
 `.rsync-partial`, Spamhaus and IPv6 addresses (B163-B165, B167).
+Tested by a fresh install with the network checks (T1, T1n), an update
+of a copy of a production box from v78-r2604.1 (T5b), and a migration
+and an in-place upgrade from upstream v78 on Ubuntu 22.04 (T2, T4); see
+TESTING-fork.md, "v78-r2604.2".
 
 ### Fixed
 
@@ -292,7 +435,16 @@ before it uses it (B154) and follows no link where it writes as root
   (B155). TESTING-fork.md has the scenario T1n: setup's network checks on
   the installed T1 box under setup's shell options, through its own
   resolver, which gives Spamhaus' "not listed"; no scenario ran that
-  answer under setup before (B145).
+  answer under setup before (B145). The log audit's list
+  (`tests/fork/log-audit-allow.txt`) accepts the harmless lines that T4
+  and T2 from upstream v78 showed: the boot messages of a virtual machine
+  in other forms (a PCI hotplug slot with a hex digit, the kernel's time
+  in 22.04's syslog, QEMU's interrupt overrides, the CPU bring-up lines,
+  udev of 24.04), grub's os-prober note at prepare-release's kernel
+  update, polkit's tmpfiles group and 22.04's ntp under its old AppArmor
+  profile during the release upgrade, ntpsec trying the global IPv6
+  address before it is usable, and ssh's note in the migration log that
+  it recorded the old box's host key.
 * Docs: README.md and README-fork.md name the new component versions.
   README-fork.md (English and German): the migration tool's partial
   directory is `.migrate-to-2604-partial` (B164), `--from` takes an IPv6
@@ -384,139 +536,6 @@ before it uses it (B154) and follows no link where it writes as root
   (for example a hostname with an underscore or a trailing dot) now stops
   the tool with the name of the setting; correct it on the old box and run
   the command again (B154).
-
-### Planned
-
-Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not
-done (the certification runs add their open findings in TESTING-fork.md):
-
-* bootstrap.sh decides whether to fetch by the name that `git describe`
-  prints for the checkout, so a local tag of the release's name on another
-  commit keeps the old code (see "Updating the fork" in README-fork.md).
-  Comparing the commit of the tag at the source (`git ls-remote`) with
-  `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
-  as every update goes through that code and that release had no test
-  run of it.
-* Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
-  polls; a reload with a `process_control_timeout` would keep them.
-* A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
-  test of B126): Z-Push tries the IMAP login three times, and Dovecot
-  delays failed logins, possibly more for an address with many failures,
-  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
-  `miab-zpush` threshold slows down the ActiveSync logins of other users
-  is not measured.
-* `miab-zpush` counts failures per address, like the other jails, and is
-  always on: behind the shared servers of a mail app that syncs through its
-  provider's cloud (Outlook for iOS and Android with an ActiveSync
-  account), one person with a wrong password, or anyone on purpose, can get
-  all users of that app banned, and repeated bans reach recidive's week on
-  all ports (B126). The README, the upgrade note and the allowlist help say
-  to put such networks on the allowlist; nothing finds them on its own.
-  Leaving `miab-zpush` out of recidive would let an attacker guess 20
-  passwords every few minutes for good, so it still counts there.
-* The failed-login report does not read `nextcloud.log` yet, which now
-  has the client's address for `/caldav`, `/carddav` and `/webdav` too
-  (B121).
-* Nextcloud takes the client's address from `X-Forwarded-For` on every
-  connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
-  of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the
-  header itself. A local account or a compromised service can make
-  Nextcloud log a failed login under another address, which
-  `miab-owncloud` bans; before, such a login was logged as 127.0.0.1,
-  which fail2ban ignores. Local accounts could already write such lines
-  into the logs that fail2ban reads (logger(1); www-data owns Nextcloud's
-  log), so this is a second way to an existing one; clients on the
-  Internet cannot do it (the proxy replaces the header). A fix: the proxy
-  proves itself to the `/cloud` location with a secret header from a
-  root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
-* Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
-  postgrey, named, systemd-resolved, munin-node and the management daemon
-  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
-  (`milter_default_action`). Candidates for a reload or a restart only on a
-  change.
-* A Dovecot reload (B122) still has two client-visible moments: a login
-  that the old login process hands to the new auth process at that moment
-  fails as an internal failure (Nextcloud's `user_external` counts it as a
-  failed login of the client; harmless for 127.0.0.1 after B121), and a
-  FolderSync or Ping that Z-Push answers during the reload gets a server
-  error if Z-Push cannot connect again (B137).
-* Roundcube's CardDAV plugin can log "duplicate column name: account_id",
-  "no such column: active" or "UNIQUE constraint failed:
-  carddav_migrations.filename" when two sessions log in at the same moment
-  for the first time after an upgrade of the plugin (a race in its schema
-  migration; one of the logins fails once). After an update from rc7 or
-  earlier, `update-check.sh after` accepts the last form.
-* nginx sets no HSTS header on `/admin/`: the headers of that location
-  replace the server's (upstream). Browsers that visited another page of
-  the box have the header already.
-* Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
-  locked") while its `cron.php` holds the database (seen once in T1); the
-  client writes again later.
-* Through some public resolvers (8.8.8.8 in the test of B136) Spamhaus
-  gives no answer at all, also for its own test entries, so setup's checks
-  can neither see a listing nor say that they could not check; the comment
-  in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
-  127.255.255.254.
-* `upgrade-in-place-to-2604.sh --check` prints the start command with the
-  GitHub URL also when `SOURCE` and `TAG` name another source.
-* A Dovecot reload ends the open IMAP sessions (their clients log in
-  again); setup reloads Dovecot only when its configuration changed (B122).
-* Critical only (Munin's alerts) never mails the return to normal.
-* The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
-  not installed (nginx 404).
-* `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
-* Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
-  `management/backup.py` and `management/dns_update.py` still write
-  `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the nightly backup reads its target and
-  `secret_key.txt` there by path. An account that can replace `backup/`
-  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
-  its own with a passphrase it knows. The fork's tools read them, and write
-  the paused `custom.yaml`, only through a checked `backup/` of root's own
-  (B117).
-* `$STORAGE_ROOT/mail` stays root:www-data with mode 775, as upstream has
-  it: Roundcube's password plugin writes `users.sqlite` as www-data, and
-  SQLite needs to create its journal in the same directory. So www-data
-  can rename, replace or remove anything in it: the mailboxes, the DKIM
-  keys, the user database, the postgrey and SpamAssassin data. Setup no
-  longer follows a link it finds there (B147), but code running as
-  www-data can still stop mail (remove `users.sqlite` or `mailboxes`), and
-  the management daemon, which runs as root, opens `users.sqlite` by path
-  (`open_database()` in management/mailconfig.py). A fix moves
-  `users.sqlite` into a directory of its own that only it and its journal
-  live in, and gives `$STORAGE_ROOT/mail` back to root (755); that changes
-  the paths in the Dovecot, Postfix, Roundcube and management
-  configuration and in the backups, so it needs its own release and test
-  runs.
-* The storage user owns `$STORAGE_ROOT/mailinabox.version` and its
-  directory, so it can write a lower number there, and the next setup run
-  runs the data migrations from there again as root. Each such run stops at
-  the first migration that cannot run twice, until the file is put right;
-  before that, depending on the number, migration 8 deletes the DKIM key,
-  11 moves the Let's Encrypt account away, 12 drops Roundcube's CardDAV
-  tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
-  (following a link) to 0600. It gives no root and needs code running as
-  the storage user, which no service of the box runs (B147).
-* The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
-  nor `NameTooLong`: a mail domain whose name is too long with
-  `.dbl.spamhaus.org` appended raises out of its checks and ends the
-  status check run with a traceback (from reading the code). Its guard for
-  the `at` argument tests `'[Not set]'`, which no lookup returns (the value
-  is `'[Not Set]'`, and now `'[error]'` too); the callers exclude both
-  before, so the guard is dead code.
-* When the lookup of a domain's DS record fails, the status checks still
-  say "This domain's DNSSEC DS record is not set" (a failed lookup counts
-  as no DS record, as before B150); "could not check" would be right.
-* `tools/migrate-to-2604.sh` passes the old box's standard error (the
-  error messages of its remote scripts, through ssh) to the terminal
-  unfiltered; the other text of the old box gets "?" for control
-  characters (B154).
-* The in-place upgrade's messages after a `--redo-from` that fails: on an
-  upgrade that had finished, the exit message says that cron jobs, update
-  timers and backups "stay paused", although the redo does not pause them
-  again; and while a redo of setup is pending, `--status` counts "Mail
-  offline ... so far" from the start of the original downtime, not from
-  the redo. Cosmetic; found with B161.
 
 ## v78-r2604.1 (2026-10-27)
 
