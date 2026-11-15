@@ -8,5 +8,12 @@
 # sa-learn-pipe.sh did: a failed learning run (e.g. a bayes lock timeout)
 # must not be logged as a failed Sieve pipe action (a runtime error).
 # stderr is left alone, so the cause can still reach the Dovecot log.
-/usr/bin/sa-learn --ham > /dev/null
+#
+# HOME=/nonexistent: Dovecot runs this with the user's home, the Maildir
+# root, and sa-learn created its state directory ~/.spamassassin there,
+# which IMAP listed as a folder "spamassassin" (B155). sa-learn keeps
+# nothing there that it needs: the Bayes database is the one of spampd
+# (bayes_path in /etc/spamassassin/local.cf, setup/spamassassin.sh), and a
+# state directory it cannot create is no error to it.
+HOME=/nonexistent /usr/bin/sa-learn --ham > /dev/null
 exit 0

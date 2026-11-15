@@ -233,6 +233,53 @@ restart_service spampd
 rm -rf /run/spampd
 load_dovecot
 
+# Up to v78-r2604.1 the sa-learn wrappers above ran sa-learn with the home
+# that Dovecot gives the user's mail processes, the Maildir root, and
+# sa-learn created its state directory .spamassassin there, which Dovecot
+# lists as the folder "spamassassin" (Maildir++). It never held the learning
+# (bayes_path above). The wrappers now give sa-learn HOME=/nonexistent
+# (B155); the directories are removed here, as the B66 folders are in
+# setup/mail-users.sh. A .spamassassin in a Maildir root counts as
+# sa-learn's only without a "maildirfolder" file (Dovecot writes one into
+# every folder that IMAP, delivery or Sieve creates; into sa-learn's
+# directory it only put cur, new and tmp when it opened it), without
+# messages in cur and new, and without subfolders. Dovecot deletes it (only
+# while it is empty), unsubscribes it, and its full-text index goes too.
+# Anything else is kept. Files in the Maildirs are removed as the mail user,
+# which owns them.
+n_sa_dirs=0
+while IFS= read -r -d '' sa_dir; do
+	sa_home=$(dirname "$sa_dir")
+	sa_user=$(basename "$sa_home")@$(basename "$(dirname "$sa_home")")
+	if [ -e "$sa_dir/maildirfolder" ] || [ -n "$(find "$sa_home" -mindepth 1 -maxdepth 1 -name '.spamassassin.*' -print -quit 2> /dev/null)" ]; then
+		continue # a folder of the user's
+	fi
+	if [ -n "$(find "$sa_dir/cur" "$sa_dir/new" -type f -print -quit 2> /dev/null)" ]; then
+		echo "Kept $sa_dir (the folder \"spamassassin\" of $sa_user): it holds messages. Move them to another folder and run setup again."
+		continue
+	fi
+	if doveadm user "$sa_user" > /dev/null 2>&1; then sa_rc=0; else sa_rc=$?; fi
+	if [ "$sa_rc" -eq 67 ]; then
+		# EX_NOUSER: the mailbox directory of a deleted user.
+		sudo -u mail rm -rf -- "$sa_dir"
+		n_sa_dirs=$((n_sa_dirs + 1))
+		continue
+	elif [ "$sa_rc" -ne 0 ]; then
+		echo "Kept $sa_dir: Dovecot could not look up $sa_user (exit code $sa_rc). Setup tries again on its next run."
+		continue
+	fi
+	sa_guid=$(doveadm -f flow mailbox status -u "$sa_user" guid spamassassin 2> /dev/null | sed -n 's/.*guid=\([0-9a-f]\{32\}\)$/\1/p' || true)
+	if doveadm mailbox delete -u "$sa_user" -e -s spamassassin > /dev/null 2>&1; then
+		if [ -n "$sa_guid" ]; then sudo -u mail rm -rf -- "$sa_home/xapian-indexes/db_$sa_guid" "$sa_home/xapian-indexes/db_${sa_guid}"_*; fi
+		n_sa_dirs=$((n_sa_dirs + 1))
+	else
+		echo "Kept $sa_dir: Dovecot could not remove the folder \"spamassassin\" of $sa_user. Setup tries again on its next run."
+	fi
+done < <(find "$STORAGE_ROOT/mail/mailboxes" -mindepth 3 -maxdepth 3 -type d -name .spamassassin -print0 2> /dev/null)
+if [ "$n_sa_dirs" -gt 0 ]; then
+	echo "Removed the state directory of sa-learn (the folder \"spamassassin\") from $n_sa_dirs mailboxes."
+fi
+
 # Fetch current rules once now instead of waiting for the first 06:00 timer run
 # (Persistent=true does not catch up when the timer has never run). This runs
 # after the configuration above is final, so that its lint check sees it. Don't
