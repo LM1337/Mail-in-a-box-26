@@ -3655,7 +3655,9 @@ $(sed 's/^/  /' <<< "$out")"
 		ssh_fallback_stop quiet
 		return 0
 	fi
-	if command -v ufw > /dev/null && ufw status 2> /dev/null | grep -q '^Status: active'; then
+	# Searched after ufw has ended (B160): with a long rule list, grep -q ended
+	# ufw early, and with pipefail the port was not opened.
+	if command -v ufw > /dev/null && grep -q '^Status: active' <<< "$(ufw status 2> /dev/null || true)"; then
 		echo "$port" > "$FALLBACK_UFW_MARK"
 		if ! ufw limit "$port/tcp" comment "$SCRIPT_NAME: fallback SSH during the release upgrade" > /dev/null; then
 			warn "Could not open port $port in ufw; the fallback SSH server is only reachable where the firewall allows it."
@@ -3910,8 +3912,10 @@ cleanup_php() {
 		[ -d "$d" ] || continue
 		v=${d##*/}
 		if [ "$v" = "$PHP_VER" ] || [ "$v" = "$PHP_LEGACY_VER" ]; then
-			# Keep it only if packages of that version are installed.
-			if dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' "php$v-*" 2> /dev/null | grep -q '^.i'; then continue; fi
+			# Keep it only if packages of that version are installed. Searched
+			# after dpkg-query has ended (B160): grep -q could end it early,
+			# and with pipefail the directory was moved aside.
+			if grep -q '^.i' <<< "$(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' "php$v-*" 2> /dev/null || true)"; then continue; fi
 		fi
 		move_aside "$d"
 	done
