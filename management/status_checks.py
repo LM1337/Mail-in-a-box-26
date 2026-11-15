@@ -337,7 +337,9 @@ def run_network_checks(env, output):
 
 	from ipaddress import IPv6Address
 
-	rev_ip6 = ".".join(reversed(IPv6Address(env['PUBLIC_IPV6']).exploded.split(':')))
+	# A DNSBL wants the 32 nibbles of the address in reverse order, as in
+	# ip6.arpa, not the reversed 16-bit groups (upstream #2617, B144).
+	rev_ip6 = ".".join(reversed(IPv6Address(env['PUBLIC_IPV6']).exploded.replace(':', '')))
 	zen = query_dns(rev_ip6+'.zen.spamhaus.org', 'A', nxdomain=None)
 	evaluate_spamhaus_lookup(env['PUBLIC_IPV6'], 'IPv6', rev_ip6, output, zen)
 
