@@ -124,9 +124,11 @@ FALLBACK_UFW_MARK=$STATE_DIR/ssh-fallback-ufw
 TMUX_SESSION=upgrade-2604
 # The environment variables this script and setup read (passed into that
 # session, and into the run after a reboot, see install_resume). PROBE_ADDRESS:
-# setup keeps it in /etc/mailinabox.conf (B153).
+# setup keeps it in /etc/mailinabox.conf; DISABLE_FIREWALL: setup reads it only
+# from the environment and then leaves ufw alone (B153).
 MUX_ENV=(UPGRADE_STATE_DIR UPGRADE_QUIET_TIMEOUT UPGRADE_BACKUP_MAX_AGE UPGRADE_BACKUP_WAIT UPGRADE_REEXEC
-	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON PROBE_ADDRESS)
+	UPGRADE_SSH_FALLBACK_PORT UPGRADE_SSH_FALLBACK_USERS TAG SOURCE FTS NEXTCLOUD_SHARE_SCOPE FAVICON PROBE_ADDRESS
+	DISABLE_FIREWALL)
 MUX_TERM=
 MUX_TTY=
 MUX_RAW_TTY=
