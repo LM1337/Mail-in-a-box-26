@@ -135,9 +135,19 @@ RCM_CONFIG=${RCM_BUILD}/config/config.inc.php
 
 # ### Configuring Roundcube
 
-# Generate a secret key of PHP-string-safe characters appropriate
-# for the cipher algorithm selected below.
-SECRET_KEY=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 | sed s/=//g)
+# The secret key of Roundcube's encryption (des_key: the IMAP password in each
+# session, the persistent_login cookie) is the one of the installed
+# configuration. Setup wrote a new one on every run, which logged out every
+# webmail user and ended their "remember me" logins (B172). Read with sed, not
+# by running the file (it is root's, in a directory of root's), and taken only
+# when it has the characters of a key that setup made (base64), since it goes
+# into a PHP string below.
+SECRET_KEY=$(sed -nE "/^[\$]config\['des_key'\] = '([A-Za-z0-9+\/]{24,})';.*/{s//\1/p;q}" "$RCM_DIR/config/config.inc.php" 2> /dev/null || true)
+if [ -z "$SECRET_KEY" ]; then
+	# Generate a secret key of PHP-string-safe characters appropriate
+	# for the cipher algorithm selected below.
+	SECRET_KEY=$(dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 | sed s/=//g)
+fi
 
 # The fork's favicon (branding/favicon.ico, see branding/README.md) for the
 # Elastic skin, through Roundcube's skin_logo option and a file in Roundcube's
