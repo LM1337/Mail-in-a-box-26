@@ -1206,9 +1206,18 @@ def visit(path):
 	if (u, g) != (st.st_uid, st.st_gid):
 		try:
 			os.chown(path, u, g, follow_symlinks=False)
-			# chown clears setuid/setgid bits, put them back.
-			if not stat.S_ISLNK(st.st_mode) and st.st_mode & (stat.S_ISUID | stat.S_ISGID):
-				os.chmod(path, stat.S_IMODE(st.st_mode))
+			# chown clears setuid/setgid bits, put them back: through a descriptor
+			# of the file that lstat saw (device and inode), as a link put into
+			# the path meanwhile would be followed by a chmod by path (B166).
+			if (stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode)) and st.st_mode & (stat.S_ISUID | stat.S_ISGID):
+				fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
+				try:
+					fst = os.fstat(fd)
+					if (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+						raise OSError("it changed while it was looked at, mode not restored")
+					os.fchmod(fd, stat.S_IMODE(st.st_mode))
+				finally:
+					os.close(fd)
 			changed += 1
 		except OSError as e:
 			errors += 1
@@ -1313,6 +1322,51 @@ if buf.strip():
 	full(buf.decode("utf-8", "replace"))
 if tty and shown:
 	tty.write("\n")
+EOF
+)
+
+# Copies a regular file of the old /etc unpacked in $STATE_DIR/old-etc (from
+# what the old box sent) to a new file here (B166):
+#   python3 -c "$TAKE_OLD_FILE_PY" BASE RELATIVE_PATH NEW_FILE
+# Nothing on the way is followed (a link there could point to any file of this
+# machine), anything but a regular file with one name is refused, and the mode
+# is at most the old file's and at most 0644. NEW_FILE must not exist.
+TAKE_OLD_FILE_PY=$(cat <<'EOF'
+import os, stat, sys
+
+base, rel, new = sys.argv[1:4]
+
+def refuse(why):
+	print("WARNING: %s of the old box is not taken over: %s." % (new, why), file=sys.stderr)
+	sys.exit(1)
+
+parts = rel.split("/")
+fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+try:
+	for p in parts[:-1]:
+		nfd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+		os.close(fd)
+		fd = nfd
+	st = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+	if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+		refuse("not a regular file with one name")
+	src = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=fd)
+except OSError as e:
+	refuse("not reached without following a link (%s)" % e.strerror)
+finally:
+	os.close(fd)
+fst = os.fstat(src)
+if (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+	refuse("changed while it was read")
+mode = stat.S_IMODE(fst.st_mode) & 0o644
+out = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+os.fchmod(out, mode)
+with os.fdopen(src, "rb") as i, os.fdopen(out, "wb") as o:
+	while True:
+		b = i.read(65536)
+		if not b:
+			break
+		o.write(b)
 EOF
 )
 
@@ -2650,10 +2704,12 @@ prepare_machine() {
 
 	# The greylisting exceptions are a fork feature that lives in /etc
 	# (setup/mail-postfix.sh reads the file). Not in a backup: only over SSH.
+	# Only a regular file, reached without following a link (B166).
 	local gb=/etc/postfix/greylist_bypass_senders
-	if [ -f "$STATE_DIR/old-etc$gb" ] && [ ! -e "$gb" ]; then
+	if { [ -e "$STATE_DIR/old-etc$gb" ] || [ -L "$STATE_DIR/old-etc$gb" ]; } && [ ! -e "$gb" ] && [ ! -L "$gb" ]; then
 		say "Taking over the greylisting exceptions $gb from the old box."
-		install -D -m 644 "$STATE_DIR/old-etc$gb" "$gb"
+		mkdir -p "$(dirname "$gb")"
+		python3 -I -c "$TAKE_OLD_FILE_PY" "$STATE_DIR/old-etc" "${gb#/}" "$gb" || true
 	fi
 
 	if [ "$(state_get SOURCE_MODE)" = ssh ]; then
@@ -2738,15 +2794,22 @@ map_owners() {
 # --from-backup: there is no list of the old users. Fix what belongs to the
 # storage user and report every owner that setup does not use.
 fix_restored_owners() {
-	local su sg f
+	local su sg f e
 	su=$(id -u "$STORAGE_USER")
 	sg=$(id -g "$STORAGE_USER")
 	chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT"
-	if [ -f "$STORAGE_ROOT/mailinabox.version" ]; then chown "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"; fi
-	if [ -d "$STORAGE_ROOT/www" ]; then chown -R "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/www"; fi
+	# $STORAGE_ROOT belongs to the storage user, who could put links there: below
+	# it no link is followed (chown -h), and in a tree each entry is changed from
+	# within the directory that holds it (find -execdir), so that a link put
+	# into the path meanwhile is not followed either (B166).
+	if [ -f "$STORAGE_ROOT/mailinabox.version" ]; then chown -h "$STORAGE_USER:$STORAGE_USER" "$STORAGE_ROOT/mailinabox.version"; fi
+	if [ -d "$STORAGE_ROOT/www" ]; then find "$STORAGE_ROOT/www" -execdir chown -h "$STORAGE_USER:$STORAGE_USER" -- {} +; fi
 	# The storage user's dotfiles (its home directory is $STORAGE_ROOT).
-	find "$STORAGE_ROOT" -mindepth 1 -maxdepth 1 -name '.*' ! -name "$MARKER" ! -name "$OVERWRITTEN" \
-		-exec chown -R "$STORAGE_USER:$STORAGE_USER" {} + 2> /dev/null || true
+	for e in "$STORAGE_ROOT"/.[!.]* "$STORAGE_ROOT"/..?*; do
+		[ -e "$e" ] || [ -L "$e" ] || continue
+		case "${e##*/}" in "$MARKER" | "$OVERWRITTEN") continue ;; esac
+		find "$e" -execdir chown -h "$STORAGE_USER:$STORAGE_USER" -- {} + 2> /dev/null || true
+	done
 
 	f=$STATE_DIR/foreign-owners.txt
 	find "$STORAGE_ROOT" -xdev \( -nouser -o -nogroup \
@@ -2878,10 +2941,20 @@ phase_restore() {
 their credentials in the environment; see README-fork.md for the manual way."
 
 	# Backups leave out $STORAGE_ROOT/backup. Put the key back so that this box
-	# can read the old backups and continue them.
-	install -d -m 700 "$STORAGE_ROOT/backup"
-	if [ ! -f "$STORAGE_ROOT/backup/secret_key.txt" ]; then
-		install -m 600 "$BACKUP_KEY" "$STORAGE_ROOT/backup/secret_key.txt"
+	# can read the old backups and continue them. $STORAGE_ROOT belongs to the
+	# storage user: the key goes only into a checked directory of root's own,
+	# through its descriptor (B166, as B117).
+	if [ ! -e "$STORAGE_ROOT/backup" ] && [ ! -L "$STORAGE_ROOT/backup" ]; then
+		mkdir -m 700 "$STORAGE_ROOT/backup" 2> /dev/null || true
+	fi
+	if backup_dir_open; then
+		if [ ! -f "$BACKUP_DIR/secret_key.txt" ]; then
+			install -m 600 "$BACKUP_KEY" "$BACKUP_DIR/secret_key.txt"
+		fi
+		backup_dir_close
+	else
+		warn "$BACKUP_DIR_WHY: the backup key was not put back. Check it, then copy $BACKUP_KEY
+to $STORAGE_ROOT/backup/secret_key.txt (mode 0600, in a directory of root's own) yourself."
 	fi
 	write_marker "$STORAGE_ROOT" "$(state_get TARGET_OWNER)"
 	phase_mark_done restore
