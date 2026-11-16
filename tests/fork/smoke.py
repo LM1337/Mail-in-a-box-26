@@ -1550,6 +1550,67 @@ def c_admin_tmp_user_alias(ctx):
     return "add/list/remove of user and alias ok, %s" % remove_test_mailbox(ctx, tmp)
 
 
+def login_status(ctx, credentials):
+    # POST /admin/login with the Authorization header made of these bytes.
+    r = http_req(ctx, "POST", "/admin/login",
+                 headers={"Authorization": "Basic " + base64.b64encode(credentials).decode()})
+    j = r.json() if r.status == 200 else {}
+    if j.get("api_key"):
+        SECRETS.add(j["api_key"])
+    return r.status, j.get("status"), j.get("reason", "")
+
+
+def c_admin_login_non_ascii(ctx):
+    # B175: the management daemon read the Authorization header as ASCII, so a user whose password has an
+    # umlaut could not log in to the control panel ("'ascii' codec can't decode byte ..."), although
+    # the panel had set that password. A test user logs in with "ü" and "ß" in its password, the header in
+    # UTF-8 (the panel since B175, curl) and in Latin-1 (the panel before B175); a wrong password with an
+    # umlaut is refused as a wrong password (one failed login, far below the miab-management jail); after a
+    # change through the API to a password with "€", it logs in to the panel and to Dovecot (IMAP
+    # AUTHENTICATE PLAIN, UTF-8).
+    tmp = "smokeuml-%s@%s" % (ctx.tok, ctx.domain)
+    pw = "Smüke-Paß-%s" % ctx.tok
+    pw_eur = pw + "-€"
+    SECRETS.update({pw, pw_eur})
+    r = admin_api(ctx, "POST", "mail/users/add", form={"email": tmp, "password": pw})
+    if r.status != 200:
+        raise Fail("users/add HTTP %d %s" % (r.status, r.text()[:200]))
+    notes = []
+    try:
+        for label, cred in (("UTF-8", ("%s:%s" % (tmp, pw)).encode("utf-8")),
+                            ("Latin-1", ("%s:%s" % (tmp, pw)).encode("latin-1"))):
+            st, status, reason = login_status(ctx, cred)
+            if status != "ok":
+                raise Fail("login with the header in %s: HTTP %d %s %s" % (label, st, status, reason[:120]))
+            notes.append("login %s ok" % label)
+        st, status, reason = login_status(ctx, ("%s:Smüke-falsch-%s" % (tmp, ctx.tok)).encode("utf-8"))
+        if status != "invalid" or "codec" in reason:
+            raise Fail("wrong password with an umlaut: HTTP %d %s %s" % (st, status, reason[:120]))
+        notes.append("wrong password refused")
+        r = admin_api(ctx, "POST", "mail/users/password", form={"email": tmp, "password": pw_eur})
+        if r.status != 200:
+            raise Fail("users/password HTTP %d %s" % (r.status, r.text()[:200]))
+        st, status, reason = login_status(ctx, ("%s:%s" % (tmp, pw_eur)).encode("utf-8"))
+        if status != "ok":
+            raise Fail("login with '€' in the password: HTTP %d %s %s" % (st, status, reason[:120]))
+        M = ctx.net.imap()
+        try:
+            typ, _ = M.authenticate("PLAIN", lambda _: b"\0" + tmp.encode() + b"\0" + pw_eur.encode("utf-8"))
+        finally:
+            try:
+                M.logout()
+            except Exception:
+                pass
+        if typ != "OK":
+            raise Fail("IMAP AUTHENTICATE PLAIN with '€' in the password: %s" % typ)
+        notes.append("'€': panel and IMAP ok")
+    finally:
+        r = admin_api(ctx, "POST", "mail/users/remove", form={"email": tmp})
+    if r.status != 200:
+        raise Fail("users/remove HTTP %d %s" % (r.status, r.text()[:200]))
+    return "%s, %s" % (", ".join(notes), remove_test_mailbox(ctx, tmp))
+
+
 def c_admin_journal_no_hash(ctx):
     # B127: the management daemon checked panel logins with 'doveadm pw -p PASSWORD -t HASH', whose output
     # ("{SHA512-CRYPT}$6$... (verified)" or "reverse password verification check failed") went to the journal
@@ -4131,6 +4192,7 @@ def main():
         run_check("mig-roundcube-identity", c_mig_roundcube_identity, ctx)
     if want("admin"):
         run_check("admin-api-tmp-user-alias", c_admin_tmp_user_alias, ctx)
+        run_check("admin-login-non-ascii", c_admin_login_non_ascii, ctx)
         run_check("admin-backup-status", c_backup_status, ctx)
         run_check("admin-backup-saved", c_backup_saved, ctx)
         run_check("admin-fail2ban-status", c_fail2ban_api, ctx)

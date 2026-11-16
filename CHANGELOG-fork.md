@@ -39,6 +39,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   * New smoke check `tls-key-exchange`: X25519MLKEM768, X25519 only, P-256
     only and TLS 1.2 on ports 443, 993, 465, 587 and 25.
 
+### Fixed
+
+* A user whose password has an umlaut or another character beyond ASCII
+  can log in to the control panel again. The management daemon read the
+  user name and password of the Authorization header as ASCII and
+  answered "Login failed: 'ascii' codec can't decode byte ...", although
+  the panel had set that password and mail took it. The daemon now reads
+  them as UTF-8, else as Latin-1 (what the panel's pages up to
+  v78-r2604.2 sent, 'ü' as one byte), and the panel sends UTF-8, so that
+  characters beyond Latin-1 such as '€' arrive too. New smoke check
+  `admin-login-non-ascii`: a test user with 'ü', 'ß' and later '€' in its
+  password logs in with the header in UTF-8 and in Latin-1, to the panel
+  and to IMAP (B175).
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not

@@ -387,6 +387,11 @@ function api(url, method, data, callback, callback_error, headers, options) {
   // options: { quiet: true } for no loading indicator, { timeout: ms }.
   // from http://www.webtoolkit.info/javascript-base64.html
   function base64encode(input) {
+    // Encode as UTF-8 first: the loop below reads each character as one
+    // byte, which sent 'ü' as Latin-1 and broke characters beyond U+00FF,
+    // such as '€', in a password (B175).
+    input = Array.from(new TextEncoder().encode(input),
+                       function(b) { return String.fromCharCode(b); }).join("");
     _keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
     var output = "";
     var chr1, chr2, chr3, enc1, enc2, enc3, enc4;

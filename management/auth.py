@@ -36,7 +36,17 @@ class AuthService:
 
 		def parse_http_authorization_basic(header):
 			def decode(s):
-				return base64.b64decode(s.encode('ascii')).decode('ascii')
+				# The control panel sends the credentials as UTF-8; its pages
+				# of v78-r2604.2 and older sent each character as one byte
+				# (Latin-1, 'ü' as 0xfc), as other clients may. Read UTF-8,
+				# else Latin-1, so that a password with umlauts can log in
+				# (B175); as ASCII, both failed with "'ascii' codec can't
+				# decode byte ...".
+				raw = base64.b64decode(s.encode('ascii'))
+				try:
+					return raw.decode('utf-8')
+				except UnicodeDecodeError:
+					return raw.decode('latin-1')
 			if " " not in header:
 				return None, None
 			scheme, credentials = header.split(maxsplit=1)
