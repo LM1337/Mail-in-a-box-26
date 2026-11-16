@@ -11,53 +11,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
-### Changed
-
-* Post-quantum key exchange for mail: Postfix offers the hybrid group
-  X25519MLKEM768 (ML-KEM-768 with X25519) on ports 25, 465 and 587, and its
-  SMTP client offers it to other mail servers. setup/mail-postfix.sh sets
-  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups` empty, so Postfix
-  uses OpenSSL's default groups, as postconf(5) says for post-quantum
-  cryptography; with OpenSSL 3.5 these are X25519MLKEM768, X25519, P-256,
-  X448, P-384, P-521, ffdhe2048 and ffdhe3072. Postfix's own lists
-  (`postconf -d`) have no post-quantum group, so mail was the only TLS
-  service of the box without it: nginx (443) and Dovecot (993, 995, 4190)
-  use OpenSSL's defaults and already negotiate X25519MLKEM768. Mail that is
-  recorded today cannot be decrypted later with a quantum computer, where
-  both sides offer the group ("harvest now, decrypt later").
-  * Clients and servers without the group get X25519 or P-256 as before;
-    TLS 1.2 and the cipher lists do not change. The SMTP client sends key
-    shares for X25519MLKEM768 and X25519, so a server without the new group
-    answers without an extra round trip; its first TLS message is about
-    1.2 kB larger.
-  * Not changed: the certificate (RSA 2048), DKIM (RSA 2048) and DNSSEC
-    (ECDSA P-256, RSA/SHA-256) keys. They sign; a quantum computer would
-    have to break them at the time of an attack, and there are no
-    post-quantum certificates, DKIM or DNSSEC algorithms in use yet.
-    Larger RSA keys or DH parameters (4096 bit) do not help against a
-    quantum computer.
-  * New smoke check `tls-key-exchange`: X25519MLKEM768, X25519 only, P-256
-    only and TLS 1.2 on ports 443, 993, 465, 587 and 25.
-
-### Fixed
-
-* A user whose password has an umlaut or another character beyond ASCII
-  can log in to the control panel again. The management daemon read the
-  user name and password of the Authorization header as ASCII and
-  answered "Login failed: 'ascii' codec can't decode byte ...", although
-  the panel had set that password and mail took it. The daemon now reads
-  them as UTF-8, else as Latin-1 (what the panel's pages up to
-  v78-r2604.2 sent, 'ü' as one byte), and the panel sends UTF-8, so that
-  characters beyond Latin-1 such as '€' arrive too. New smoke check
-  `admin-login-non-ascii`: a test user with 'ü', 'ß' and later '€' in its
-  password logs in with the header in UTF-8 and in Latin-1, to the panel
-  and to IMAP (B175). It and `admin-api-tmp-user-alias` remove their test
-  user's archived mailbox also when they fail.
-
 ### Planned
 
-Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not
-done (the certification runs add their open findings in TESTING-fork.md):
+Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2 and
+v78-r2604.3, not done (the certification runs add their open findings in TESTING-fork.md):
 
 * tools/update-check.sh records 24 Postfix parameters, but not
   `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
@@ -202,6 +159,76 @@ done (the certification runs add their open findings in TESTING-fork.md):
   but the files in it are 0644, among them the copies of the old box's
   key `old-id_rsa_miab` and of its `passwd`; they could be 0600 (seen in
   T2 of v78-r2604.2, nothing exposed).
+
+## v78-r2604.3 (2026-11-16)
+
+A small release: Postfix offers the post-quantum key exchange
+X25519MLKEM768 on ports 25, 465 and 587 and to other mail servers, as
+nginx and Dovecot already did, and a user whose password has an umlaut or
+another character beyond ASCII can log in to the control panel again
+(B175). Tested by a fresh install (T1) and an update of a copy of a
+production box from v78-r2604.2 (T5b); see TESTING-fork.md,
+"v78-r2604.3".
+
+### Changed
+
+* Post-quantum key exchange for mail: Postfix offers the hybrid group
+  X25519MLKEM768 (ML-KEM-768 with X25519) on ports 25, 465 and 587, and its
+  SMTP client offers it to other mail servers. setup/mail-postfix.sh sets
+  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups` empty, so Postfix
+  uses OpenSSL's default groups, as postconf(5) says for post-quantum
+  cryptography; with OpenSSL 3.5 these are X25519MLKEM768, X25519, P-256,
+  X448, P-384, P-521, ffdhe2048 and ffdhe3072. Postfix's own lists
+  (`postconf -d`) have no post-quantum group, so mail was the only TLS
+  service of the box without it: nginx (443) and Dovecot (993, 995, 4190)
+  use OpenSSL's defaults and already negotiate X25519MLKEM768. Mail that is
+  recorded today cannot be decrypted later with a quantum computer, where
+  both sides offer the group ("harvest now, decrypt later").
+  * Clients and servers without the group get X25519 or P-256 as before;
+    TLS 1.2 and the cipher lists do not change. The SMTP client sends key
+    shares for X25519MLKEM768 and X25519, so a server without the new group
+    answers without an extra round trip; its first TLS message is about
+    1.2 kB larger.
+  * Not changed: the certificate (RSA 2048), DKIM (RSA 2048) and DNSSEC
+    (ECDSA P-256, RSA/SHA-256) keys. They sign; a quantum computer would
+    have to break them at the time of an attack, and there are no
+    post-quantum certificates, DKIM or DNSSEC algorithms in use yet.
+    Larger RSA keys or DH parameters (4096 bit) do not help against a
+    quantum computer.
+  * New smoke check `tls-key-exchange`: X25519MLKEM768, X25519 only, P-256
+    only and TLS 1.2 on ports 443, 993, 465, 587 and 25.
+
+### Fixed
+
+* A user whose password has an umlaut or another character beyond ASCII
+  can log in to the control panel again. The management daemon read the
+  user name and password of the Authorization header as ASCII and
+  answered "Login failed: 'ascii' codec can't decode byte ...", although
+  the panel had set that password and mail took it. The daemon now reads
+  them as UTF-8, else as Latin-1 (what the panel's pages up to
+  v78-r2604.2 sent, 'ü' as one byte), and the panel sends UTF-8, so that
+  characters beyond Latin-1 such as '€' arrive too. New smoke check
+  `admin-login-non-ascii`: a test user with 'ü', 'ß' and later '€' in its
+  password logs in with the header in UTF-8 and in Latin-1, to the panel
+  and to IMAP (B175). It and `admin-api-tmp-user-alias` remove their test
+  user's archived mailbox also when they fail.
+
+### Upgrade note
+
+* Boxes on v78-r2604.2 are updated with the bootstrap command of "Updating
+  the fork" in README-fork.md,
+  `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"`,
+  with `tools/update-check.sh before` and `backup` before it and `after`
+  and `mailcheck` after it, all from `/root/mailinabox/tools/`, as for
+  v78-r2604.2. `git -C /root/mailinabox status --short` must print nothing
+  first. `after` has no list of changes for this release
+  (`tools/expected-changes/v78-r2604.3.txt` names none): the two Postfix
+  parameters are not in its record (see Planned), the smoke check
+  `tls-key-exchange` shows them. Boxes on v78-r2604.1 or earlier take the
+  steps of the upgrade notes in between first.
+* Setup restarts Postfix once for its new TLS groups. Mail clients and
+  servers without X25519MLKEM768 connect as before. The update restarts
+  the management daemon: control panel sessions end, log in again.
 
 ## v78-r2604.2 (2026-11-15)
 

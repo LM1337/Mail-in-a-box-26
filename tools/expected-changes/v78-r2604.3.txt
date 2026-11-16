@@ -1,0 +1,9 @@
+# Expected changes of an update to v78-r2604.3, for tools/update-check.sh
+# after: what this release changes in the recorded state, compared with
+# v78-r2604.2 ("after" uses the lists of all releases after the version
+# before the update, up to the version after it, and any.txt). The format is
+# in any.txt.
+
+# None. The release sets the Postfix parameters tls_eecdh_auto_curves and
+# tls_ffdhe_auto_groups empty (post-quantum key exchange), which the state
+# record does not include, and changes the control panel's login (B175).

@@ -232,7 +232,7 @@ upstream pull requests, independent of the 26.04 port.
 | [B172](#b172) | low | Roundcube | Every setup run writes a new des_key into Roundcube's configuration, which logs out all webmail users and ends their "remember me" logins | Upstream | yes | yes | v78-r2604.2 |
 | [B173](#b173) | low | Tools | owncloud-unlockadmin.sh and update-check.sh run Nextcloud's occ with plain php, not Mail-in-a-Box's PHP version | Upstream | partly | partly | v78-r2604.2 |
 | [B174](#b174) | low | Setup | Setup's output has "Connection to ... succeeded!" lines from nc: the port 25 check of a fresh install and the wait for the management daemon | 26.04 change | no | yes | v78-r2604.2 |
-| [B175](#b175) | medium | Management | A password with an umlaut cannot log in to the control panel: "'ascii' codec can't decode byte ..." | Upstream | yes | yes | unreleased |
+| [B175](#b175) | medium | Management | A password with an umlaut cannot log in to the control panel: "'ascii' codec can't decode byte ..." | Upstream | yes | yes | v78-r2604.3 |
 
 ## Details
 
@@ -2200,7 +2200,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** The daemon decodes the credentials as UTF-8, else as Latin-1; the password is then checked against the hash of its UTF-8 bytes as before. The panel encodes the credentials as UTF-8 (TextEncoder) before base64. A cached panel page of an older version (Latin-1) still logs in with characters up to U+00FF.
 * **Affects:** v78 yes, PR #2603 yes. Origin: Upstream.
 * **Evidence:** v78-r2604.2: POST /login with the header in UTF-8 or in Latin-1 and a password with an umlaut answered with the codec error above. The decode function of the fix for 'Püß' in UTF-8 and in Latin-1, '€' in UTF-8 and plain ASCII: each gave back the credentials. The panel's base64encode() of the fix in Node: the same as base64 of the UTF-8 bytes for 'ü', 'ß', '€', an emoji and ASCII. The fix on a v78-r2604.2 box (management daemon restarted): POST /login with an unknown user and a password with umlauts, the header in UTF-8 and in Latin-1, answered "Incorrect email address or password." instead of the codec error.
-* **Found by:** a user report; **commit:** see `git log --grep B175`; **fixed in:** unreleased
+* **Found by:** a user report; **commit:** see `git log --grep B175`; **fixed in:** v78-r2604.3
 
 ## Not counted above
 

@@ -361,6 +361,7 @@ the in-place tool reports it.
 | v78-r2604.0 | 2026-10-27 | 80/80 ⁴ | 91/91 ⁴ | 91/91 ⁴ | 91/91 ⁴ | 92/92 (T5b from rc6 through rc7), 91/91 (from rc6) ⁴ |
 | v78-r2604.1 | 2026-10-27 | not run ⁵ | not run | not run | not run | not run ⁵ |
 | v78-r2604.2 | 2026-11-15 | 70/70 twice ⁶ | 81/81 (from v78) ⁶ | not run | 81/81 (from v78) ⁶ | 80/81 (T5b from v78-r2604.1) ⁶ |
+| v78-r2604.3 | 2026-11-16 | 71/71, 72/72 ⁷ | not run | not run | not run | 81/82, 82/83 (T5b from v78-r2604.2) ⁷ |
 
 ¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
 not repeated on the code of the release (see "rc6 certification" below).
@@ -407,11 +408,20 @@ counter-check below). After `e63ffe1` only the version strings,
 `tools/expected-changes/`, the log audit's list and the documentation
 changed.
 
+⁷ Runs of the branch before the release commit, from the lab's mirror (see
+"v78-r2604.3" below): T1 and T5b at `0d5d0f9` (the post-quantum change),
+then again at `2a4024d` (with B175; T1's second setup run at `7c00f91`).
+T5b's one FAIL in both runs is the test artefact of v78-r2604.2: it fails
+the same way on the snapshot before any update (see the counter-check).
+After `2a4024d` only the clean-up of two admin checks of the smoke test
+after a failure, the version strings, `tools/expected-changes/` and the
+documentation changed.
+
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there), the first runs of rc6 T3 and T5b,
 where the stricter comparison of rc6 found mails left in the snapshot (see
-there), and T5b of v78-r2604.2, where the test's preparation had moved a
-mail (see there).
+there), and T5b of v78-r2604.2 and v78-r2604.3, where the test's preparation
+had moved a mail (see there).
 
 ### rc1 and rc2 (2026-10-23)
 
@@ -1078,6 +1088,37 @@ the log audit's list and the documentation. In the lab, the test machines
 with an IPv6 address could reach port 25 on the Internet over IPv6 (the
 status check "Outbound mail (SMTP port 25) is not blocked" passed through
 it; the tests sent no mail there).
+
+### v78-r2604.3 (2026-11-16)
+
+A small release: the post-quantum key exchange in Postfix and B175. The
+runs installed or updated the branch `fix/r2604.3` from the lab's mirror
+of the repository (`SOURCE` and `TAG` set to it), on one hypervisor; the
+commits are in the table and in note ⁷ of the results. T2, T3, T4 and T6
+did not run: the release changes two Postfix parameters, the control
+panel's login and the smoke test, not the migration or in-place tools.
+The peer for port 25, the probe address of `mailcheck` and the rsync
+target of `backup` was the second test box; it has no post-quantum group
+in Postfix.
+
+| Run | Result |
+|---|---|
+| T1 (fresh 26.04, `0d5d0f9`) | install exit 0 in 1268 s; smoke 71/71, among them `tls-key-exchange`: X25519MLKEM768, X25519 only, P-256 only and TLS 1.2 on ports 443, 993, 465, 587 and 25; `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups` empty and once each in main.cf, `postconf` without warnings; log audit 0 unknown classes; a second setup run exit 0. |
+| T1 repeated (fresh 26.04, `2a4024d`, with setup's network checks) | install exit 0 in 1212 s with "Your Mail-in-a-Box is running." and setup's two "could not check" notes for Spamhaus; smoke 72/72, among them `admin-login-non-ascii` (a test user with umlauts in its password logs in to the control panel with the Authorization header in UTF-8 and in Latin-1, a wrong password with an umlaut is refused as wrong, and after a change to a password with '€' it logs in to the panel and by IMAP AUTHENTICATE PLAIN) and `tls-key-exchange`; the test passwords are nowhere in the smoke output; log audit 0 unknown classes; a second setup run at `7c00f91` exit 0 in 99 s, which did not rewrite main.cf, restart Postfix or change Roundcube's des_key. |
+| T5b (the copy of the production box at v78-r2604.2, updated to `0d5d0f9`) | `update-check.sh before` and `backup` exit 0; the update non-interactive, exit 0 in 107 s; `after`: 7 expected changes and 1 unexpected, the lab's origin in the version line; `mailcheck` OK. Before the update the post-quantum handshakes on 465, 587 and 25 failed, after it all five ports negotiated X25519MLKEM768, and X25519, P-256 and TLS 1.2 still worked. Postfix as client to the peer: TLS 1.3 with X25519, one ServerHello, no HelloRetryRequest; its ClientHello grew from 508 to 1527 bytes (key shares for X25519MLKEM768 and X25519). Smoke 81/82: the FAIL is `mig-pop3-uidl-alice` (see the counter-check). |
+| T5b repeated (the copy at the published v78-r2604.2, rebuilt from GitHub, updated to `2a4024d`) | `before` and `backup` exit 0; the update exit 0 in 114 s, without dialogs; `after`: 7 expected, 1 unexpected (the lab's origin); in /etc only main.cf (the two parameters) and the minute of the nightly job changed; `mailcheck` OK; log audit 0 unknown classes. Before the update `admin-login-non-ascii` failed with "'ascii' codec can't decode byte ..." (B175 reproduced), after it passed; FFDHE, DHE and CBC ciphers on port 25 still worked. Smoke 82/83: the FAIL is again `mig-pop3-uidl-alice`. |
+| Counter-check of `mig-pop3-uidl-alice` | It fails the same way on the snapshot (v78-r2604.1) and on the rebuilt v78-r2604.2, before any update. The lab's preparation had moved one of alice's seeded mails to Spam and back (its IMAP session in mail.log, the file's new name in `dovecot-uidlist`), so the mail has UID 12 instead of 9, with the same Message-ID and Dovecot GUID, and so a new POP3 UIDL. With the lab's manifest corrected for that VM, `--only migrated` on a new snapshot of v78-r2604.2 passed 14/14; that snapshot is the start of later T5b runs. |
+
+Not tested in this release: T2, T3, T4 and T6; Postfix's SMTP client
+against a server that offers X25519MLKEM768 on the Internet (only against
+the lab's peer without it, and against itself); the control panel's login
+in a browser (only the smoke test's requests; the panel's new UTF-8
+encoding of the credentials was compared with base64 of the UTF-8 bytes in
+Node); `tools/update-check.sh` does not record the two Postfix parameters,
+so its list of changes does not show the post-quantum change (see Planned
+in CHANGELOG-fork.md); and the release commit itself, which after
+`7c00f91` changes only the version strings, `tools/expected-changes/` and
+the documentation.
 
 ### Production use
 
