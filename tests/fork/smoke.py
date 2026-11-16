@@ -1059,6 +1059,18 @@ def remove_test_mailbox(ctx, email):
     return "archived mailbox removed"
 
 
+def remove_test_user(ctx, email):
+    # Remove a test user of this run and then its archived mailbox. Meant for a finally block, so that a check
+    # that fails half-way leaves neither behind; it raises nothing of its own and returns (error, note).
+    r = admin_api(ctx, "POST", "mail/users/remove", form={"email": email})
+    if r.status != 200:
+        return "users/remove HTTP %d %s" % (r.status, r.text()[:200]), None
+    try:
+        return None, remove_test_mailbox(ctx, email)
+    except Fail as e:
+        return str(e), None
+
+
 # ---------------------------------------------------------------------------
 # checks: logins
 # ---------------------------------------------------------------------------
@@ -1544,10 +1556,10 @@ def c_admin_tmp_user_alias(ctx):
         if r.status != 200:
             raise Fail("aliases/remove HTTP %d" % r.status)
     finally:
-        r = admin_api(ctx, "POST", "mail/users/remove", form={"email": tmp})
-    if r.status != 200:
-        raise Fail("users/remove HTTP %d %s" % (r.status, r.text()[:200]))
-    return "add/list/remove of user and alias ok, %s" % remove_test_mailbox(ctx, tmp)
+        err, note = remove_test_user(ctx, tmp)
+    if err:
+        raise Fail(err)
+    return "add/list/remove of user and alias ok, %s" % note
 
 
 def login_status(ctx, credentials):
@@ -1605,10 +1617,10 @@ def c_admin_login_non_ascii(ctx):
             raise Fail("IMAP AUTHENTICATE PLAIN with '€' in the password: %s" % typ)
         notes.append("'€': panel and IMAP ok")
     finally:
-        r = admin_api(ctx, "POST", "mail/users/remove", form={"email": tmp})
-    if r.status != 200:
-        raise Fail("users/remove HTTP %d %s" % (r.status, r.text()[:200]))
-    return "%s, %s" % (", ".join(notes), remove_test_mailbox(ctx, tmp))
+        err, note = remove_test_user(ctx, tmp)
+    if err:
+        raise Fail(err)
+    return "%s, %s" % (", ".join(notes), note)
 
 
 def c_admin_journal_no_hash(ctx):

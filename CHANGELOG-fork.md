@@ -51,12 +51,23 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   characters beyond Latin-1 such as '€' arrive too. New smoke check
   `admin-login-non-ascii`: a test user with 'ü', 'ß' and later '€' in its
   password logs in with the header in UTF-8 and in Latin-1, to the panel
-  and to IMAP (B175).
+  and to IMAP (B175). It and `admin-api-tmp-user-alias` remove their test
+  user's archived mailbox also when they fail.
 
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not
 done (the certification runs add their open findings in TESTING-fork.md):
+
+* tools/update-check.sh records 24 Postfix parameters, but not
+  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
+  change of this release does not show in its list of changes (seen in T5b
+  of v78-r2604.3; the smoke check `tls-key-exchange` shows it).
+* The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
+  snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX
+  mail to Spam and back, which gave it a new UID and so a new POP3 UIDL
+  (UID 9 became 12). It fails the same way before any update; the
+  manifest or the preparation needs to be renewed (T5b of v78-r2604.3).
 
 * bootstrap.sh decides whether to fetch by the name that `git describe`
   prints for the checkout, so a local tag of the release's name on another
