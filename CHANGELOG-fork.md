@@ -66,8 +66,10 @@ done (the certification runs add their open findings in TESTING-fork.md):
 * The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
   snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX
   mail to Spam and back, which gave it a new UID and so a new POP3 UIDL
-  (UID 9 became 12). It fails the same way before any update; the
-  manifest or the preparation needs to be renewed (T5b of v78-r2604.3).
+  (UID 9 became 12). It fails the same way before any update. The lab
+  now has a corrected copy of the manifest for that VM and a new snapshot
+  of v78-r2604.2 as the start of T5b; the preparation still needs to
+  leave the seeded mails alone (T5b of v78-r2604.3).
 
 * bootstrap.sh decides whether to fetch by the name that `git describe`
   prints for the checkout, so a local tag of the release's name on another
