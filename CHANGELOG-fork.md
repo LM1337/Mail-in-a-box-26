@@ -11,6 +11,34 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Changed
+
+* Post-quantum key exchange for mail: Postfix offers the hybrid group
+  X25519MLKEM768 (ML-KEM-768 with X25519) on ports 25, 465 and 587, and its
+  SMTP client offers it to other mail servers. setup/mail-postfix.sh sets
+  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups` empty, so Postfix
+  uses OpenSSL's default groups, as postconf(5) says for post-quantum
+  cryptography; with OpenSSL 3.5 these are X25519MLKEM768, X25519, P-256,
+  X448, P-384, P-521, ffdhe2048 and ffdhe3072. Postfix's own lists
+  (`postconf -d`) have no post-quantum group, so mail was the only TLS
+  service of the box without it: nginx (443) and Dovecot (993, 995, 4190)
+  use OpenSSL's defaults and already negotiate X25519MLKEM768. Mail that is
+  recorded today cannot be decrypted later with a quantum computer, where
+  both sides offer the group ("harvest now, decrypt later").
+  * Clients and servers without the group get X25519 or P-256 as before;
+    TLS 1.2 and the cipher lists do not change. The SMTP client sends key
+    shares for X25519MLKEM768 and X25519, so a server without the new group
+    answers without an extra round trip; its first TLS message is about
+    1.2 kB larger.
+  * Not changed: the certificate (RSA 2048), DKIM (RSA 2048) and DNSSEC
+    (ECDSA P-256, RSA/SHA-256) keys. They sign; a quantum computer would
+    have to break them at the time of an attack, and there are no
+    post-quantum certificates, DKIM or DNSSEC algorithms in use yet.
+    Larger RSA keys or DH parameters (4096 bit) do not help against a
+    quantum computer.
+  * New smoke check `tls-key-exchange`: X25519MLKEM768, X25519 only, P-256
+    only and TLS 1.2 on ports 443, 993, 465, 587 and 25.
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1 and v78-r2604.2, not

@@ -155,6 +155,19 @@ tools/editconf.py /etc/postfix/main.cf \
 tools/editconf.py /etc/postfix/main.cf -e \
 	smtpd_tls_dh1024_param_file=
 
+# Key exchange (TLS 1.3 groups), for the SMTP server and the SMTP client: both
+# lists empty, so Postfix uses OpenSSL's own group preferences, as postconf(5)
+# says for post-quantum cryptography ("tls_eecdh_auto_curves"). With OpenSSL
+# 3.5 that is the hybrid post-quantum group X25519MLKEM768 first, then X25519,
+# P-256, X448, P-384, P-521, ffdhe2048 and ffdhe3072: the list nginx and Dovecot
+# use. A client without X25519MLKEM768 gets X25519 or P-256 as before; the
+# SMTP client sends key shares for X25519MLKEM768 and X25519, so servers
+# without it answer at once. Postfix's own lists (postconf -d) have no
+# post-quantum group. TLS 1.2 and its DHE ciphers do not change.
+tools/editconf.py /etc/postfix/main.cf \
+	tls_eecdh_auto_curves= \
+	tls_ffdhe_auto_groups=
+
 # For ports 465/587 (via the 'mandatory' settings):
 # * Use Mozilla's "Intermediate" TLS recommendations from https://ssl-config.mozilla.org/#server=postfix&server-version=3.3.0&config=intermediate&openssl-version=1.1.1
 #   using and overriding the "high" cipher list so we don't conflict with the more permissive settings for port 25.

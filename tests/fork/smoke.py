@@ -1107,6 +1107,71 @@ def c_sieve_login(ctx):
     return "login ok, scripts: %s" % (", ".join("%s%s" % (n, "*" if a else "") for n, a in scripts) or "none")
 
 
+# Key exchange (v78-r2604.3): each TLS service offers the hybrid post-quantum
+# group X25519MLKEM768 and still serves clients without it: X25519 only, P-256
+# only, and TLS 1.2. Postfix gets the group from OpenSSL's defaults once
+# tls_eecdh_auto_curves and tls_ffdhe_auto_groups are empty
+# (setup/mail-postfix.sh); nginx and Dovecot use those defaults anyway. The
+# handshakes use openssl s_client of the machine that runs this test (OpenSSL
+# 3.5 or later). Dovecot is checked on 993 only: its TLS settings are the same
+# for 995 and 4190, and each handshake without a login is a "no auth attempts"
+# line that the dovecot jail counts.
+TLS_KEX_PORTS = [(443, None), (993, None), (465, None), (587, "smtp"), (25, "smtp")]
+TLS_KEX_CASES = [
+    # name, extra s_client arguments, protocol, key exchange (None: any)
+    ("pq", ["-groups", "X25519MLKEM768"], "TLSv1.3", "X25519MLKEM768"),
+    ("x25519", ["-groups", "X25519"], "TLSv1.3", "X25519"),
+    ("p256", ["-groups", "P-256"], "TLSv1.3", "prime256v1"),
+    ("tls12", ["-tls1_2"], "TLSv1.2", None),
+]
+
+
+def tls_handshake(ctx, port, starttls, args):
+    h, p = ctx.net.addr(port)
+    argv = ["openssl", "s_client", "-connect", "%s:%d" % (h, p), "-servername", ctx.hostname] + args
+    if starttls:
+        argv += ["-starttls", starttls]
+    r = subprocess.run(argv, input=b"Q\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=40)
+    out = r.stdout.decode(errors="replace")
+    m = re.search(r"^New, (\S+), Cipher is (\S+)", out, re.M)
+    proto = m.group(1).rstrip(",") if m else None
+    if proto == "(NONE)":
+        proto = None
+    kex = None
+    g = re.search(r"^Negotiated TLS1\.3 group: (\S+)", out, re.M)
+    if g and g.group(1) != "<NULL>":
+        kex = g.group(1)
+    else:
+        t = re.search(r"^(?:Peer|Server) Temp Key: ([^,\n]+)(?:, ([^,\n]+))?", out, re.M)
+        if t:
+            kex = t.group(2) if t.group(1) == "ECDH" and t.group(2) else t.group(1)
+    return proto, kex
+
+
+def c_tls_key_exchange(ctx):
+    try:
+        v = subprocess.run(["openssl", "version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=10).stdout.decode(errors="replace").strip()
+    except OSError:
+        raise Skip("no openssl on the machine that runs this test")
+    m = re.match(r"OpenSSL (\d+)\.(\d+)", v)
+    if not m or (int(m.group(1)), int(m.group(2))) < (3, 5):
+        raise Skip("openssl here has no X25519MLKEM768 (needs OpenSSL 3.5): %s" % v)
+    bad, parts = [], []
+    for port, starttls in TLS_KEX_PORTS:
+        got = []
+        for name, args, want_proto, want_kex in TLS_KEX_CASES:
+            proto, kex = tls_handshake(ctx, port, starttls, args)
+            got.append("%s=%s/%s" % (name, proto or "-", kex or "-"))
+            if proto != want_proto or (want_kex and kex != want_kex):
+                bad.append("%d %s: %s %s, want %s %s" % (port, name, proto or "no handshake", kex or "-",
+                                                        want_proto, want_kex or "(any)"))
+        parts.append("%d %s" % (port, " ".join(got)))
+    if bad:
+        raise Fail("; ".join(bad))
+    return "X25519MLKEM768 offered, X25519/P-256/TLS 1.2 still served: " + " | ".join(parts)
+
+
 # The services of Mail-in-a-Box must be enabled, or they do not start after a
 # reboot (the in-place upgrade of rc3 left Dovecot disabled, B67). The PHP-FPM
 # unit is found, so that the baseline against an old box works too. Only the
@@ -4048,6 +4113,7 @@ def main():
         run_check("submission-465-login", c_sub465, ctx)
         run_check("submission-587-login", c_sub587, ctx)
         run_check("managesieve-4190-login", c_sieve_login, ctx)
+        run_check("tls-key-exchange", c_tls_key_exchange, ctx)
         run_check("mail-log-logins", c_mail_log_logins, ctx)
         run_check("services-enabled", c_services_enabled, ctx)
     if want("migrated"):
