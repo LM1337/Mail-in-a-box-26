@@ -83,8 +83,9 @@ tools/editconf.py /etc/php/"$PHP_VER"/mods-available/apcu.ini -c ';' \
 # Called when a Nextcloud upgrade step fails. php-fpm was stopped before the upgrade chain
 # and also serves Roundcube and Z-Push, so start it again before bailing out.
 NextcloudUpgradeFailed() {
-	echo "Nextcloud upgrade failed. A copy of the installation, database and configuration from"
+	echo "Nextcloud upgrade failed. A copy of ${NEXTCLOUD_BACKUP_WHAT:-the installation, database and configuration} from"
 	echo "before the upgrade is in ${BACKUP_DIRECTORY:-$STORAGE_ROOT/owncloud-backup}."
+	if [ -n "${NEXTCLOUD_RESTORE_HINT:-}" ]; then echo "$NEXTCLOUD_RESTORE_HINT"; fi
 	echo "See $STORAGE_ROOT/owncloud/nextcloud.log, fix the cause and run setup again."
 	service php"$PHP_VER"-fpm start &> /dev/null || /bin/true
 	exit 1
@@ -363,59 +364,120 @@ fi
 # top of this file when Nextcloud itself stays (B176). InstallNextcloud puts
 # them in only together with a new Nextcloud, so up to v78-r2604.3 a new
 # version of an app (a fix of calendar, say) reached an existing box only with
-# the next update of Nextcloud. The installed version is the one in the app's
-# appinfo/info.xml; an app that is missing is installed, a newer one is kept
-# (Nextcloud does not downgrade an app). The new copy is downloaded and
-# unpacked in a directory of root's own in /usr/local/lib (the same file
-# system as Nextcloud, not /tmp, a tmpfs, from where mv would copy file by
-# file), moved next to the old one as apps/.<app>.new and swapped in with two
-# renames; "occ upgrade" then runs the app's migrations (Nextcloud answers 503
-# until it has). occ upgrade refuses the read-only config.php that the last
-# setup run left (config_is_read_only, set again at the end of this script),
-# so the flag is removed first, as for an update of Nextcloud above. A run
-# that stopped after the swap and before the upgrade leaves Nextcloud
-# needing an upgrade, in which state occ refuses most commands (app:enable
-# below): the next run finds that and runs the upgrade here too. After
-# InstallNextcloud, and on a fresh install, the versions match and nothing
-# happens.
-UpdateNextcloudApp() {
-	local app=$1 version=$2 hash=$3 apps=/usr/local/lib/owncloud/apps installed dl
-	installed=$(sed -n 's:.*<version>\([0-9][0-9A-Za-z.~+-]*\)</version>.*:\1:p' "$apps/$app/appinfo/info.xml" 2> /dev/null | head -n 1 || true)
-	if [ "$installed" = "$version" ]; then
-		return 0
-	fi
-	if [ -n "$installed" ] && [ "$(printf '%s\n%s\n' "$installed" "$version" | sort -V | tail -n 1)" = "$installed" ]; then
-		echo "Nextcloud: $app $installed is newer than $version, keeping it."
-		return 0
-	fi
-	echo "Updating the Nextcloud app $app from ${installed:-(not installed)} to $version..."
-	dl=$(mktemp -d /usr/local/lib/.nextcloud-app.XXXXXXXX)
-	wget_verify "https://github.com/nextcloud-releases/$app/releases/download/v$version/$app-v$version.tar.gz" "$hash" "$dl/$app.tgz"
-	tar -xf "$dl/$app.tgz" -C "$dl"
-	if [ ! -f "$dl/$app/appinfo/info.xml" ]; then
-		echo "Nextcloud: the archive of $app $version has no $app/appinfo/info.xml." >&2
-		rm -rf "$dl"
-		exit 1
-	fi
-	chown -R www-data:www-data "$dl/$app"
-	rm -rf "$apps/.$app.new" "$apps/.$app.old"
-	mv "$dl/$app" "$apps/.$app.new"
-	if [ -e "$apps/$app" ] || [ -L "$apps/$app" ]; then
-		mv "$apps/$app" "$apps/.$app.old"
-	fi
-	mv "$apps/.$app.new" "$apps/$app"
-	rm -rf "$apps/.$app.old" "$dl"
-	NEXTCLOUD_APPS_UPDATED=1
+# the next update of Nextcloud. An app whose version (its appinfo/info.xml) is
+# older than the pin, or that is missing, is replaced; a newer one is kept
+# (Nextcloud does not downgrade an app). After InstallNextcloud, and on a
+# fresh install, the versions match and nothing happens.
+#
+# www-data owns /usr/local/lib/owncloud and can create, replace or link any
+# name in apps/ at any moment, so root never uses a name there that it chose
+# itself (a fixed name like apps/.calendar.old could be a link to a directory
+# by then, into which mv would move the app, e.g. into Python's library as a
+# package that shadows a module of root's) and never moves into a name there
+# without -T. The work is done in a directory of root's own in /usr/local/lib
+# (mode 0700, the same file system as Nextcloud, not the tmpfs /tmp, from
+# where mv would copy file by file):
+#  1. every app to update is downloaded, checked against its SHA256 hash and
+#     unpacked there first, so a failed download changes nothing;
+#  2. PHP-FPM is stopped, as for an update of Nextcloud above (start.sh starts
+#     it again, B149), and the database, config.php and the old apps are
+#     copied to a new directory in $STORAGE_ROOT/owncloud-backup (only
+#     regular files, as above, B147);
+#  3. each old app is moved out of apps/ into root's directory and the new one
+#     in with mv -T (rename(2), which does not follow a link: if www-data put
+#     something in the way, mv fails and setup stops);
+#  4. "occ upgrade" runs the apps' migrations. It refuses the read-only
+#     config.php that the last setup run left (config_is_read_only, set again
+#     at the end of this script), so the flag is removed first, as for an
+#     update of Nextcloud. The old apps stay in the backup directory if it
+#     fails; root's directory is removed on success, and a run that stopped
+#     before leaves one that the next run removes.
+# The installed version is read as www-data, with a time limit: root opens no
+# path in apps/, which www-data could have made a FIFO or a link.
+nextcloud_app_version() {
+	timeout 20 sudo -u www-data sed -n 's:.*<version>\([0-9][0-9A-Za-z.~+-]*\)</version>.*:\1:p' "/usr/local/lib/owncloud/apps/$1/appinfo/info.xml" 2> /dev/null | head -n 1 || true
 }
-NEXTCLOUD_APPS_UPDATED=
-UpdateNextcloudApp contacts "$contacts_ver" "$contacts_hash"
-UpdateNextcloudApp calendar "$calendar_ver" "$calendar_hash"
-UpdateNextcloudApp user_external "$user_external_ver" "$user_external_hash"
-if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
-	if [ -z "$NEXTCLOUD_APPS_UPDATED" ] && sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ status --output=json 2> /dev/null | grep -q '"needsDbUpgrade":true'; then
-		NEXTCLOUD_APPS_UPDATED=1
+UpdateNextcloudApps() {
+	local apps=/usr/local/lib/owncloud/apps dl item app version hash installed f
+	local todo=()
+	rm -rf /usr/local/lib/.nextcloud-apps.* # of a run that stopped here (root's own)
+	for item in "contacts $contacts_ver $contacts_hash" "calendar $calendar_ver $calendar_hash" "user_external $user_external_ver $user_external_hash"; do
+		read -r app version hash <<< "$item"
+		installed=$(nextcloud_app_version "$app")
+		if [ "$installed" = "$version" ]; then
+			continue
+		fi
+		if [ -n "$installed" ] && [ "$(printf '%s\n%s\n' "$installed" "$version" | sort -V | tail -n 1)" = "$installed" ]; then
+			echo "Nextcloud: $app $installed is newer than $version, keeping it."
+			continue
+		fi
+		todo+=("$app $version $hash ${installed:--}")
+	done
+	if [ ${#todo[@]} = 0 ]; then
+		return 0
 	fi
-	if [ -n "$NEXTCLOUD_APPS_UPDATED" ]; then
+
+	# 1. Download, check and unpack.
+	dl=$(mktemp -d /usr/local/lib/.nextcloud-apps.XXXXXXXX)
+	mkdir "$dl/new" "$dl/old"
+	for item in "${todo[@]}"; do
+		read -r app version hash installed <<< "$item"
+		echo "Downloading the Nextcloud app $app $version..."
+		wget_verify "https://github.com/nextcloud-releases/$app/releases/download/v$version/$app-v$version.tar.gz" "$hash" "$dl/$app.tgz"
+		mkdir "$dl/unpack-$app"
+		if ! tar -xf "$dl/$app.tgz" -C "$dl/unpack-$app" || [ ! -f "$dl/unpack-$app/$app/appinfo/info.xml" ]; then
+			echo "Nextcloud: the archive of $app $version could not be unpacked or has no $app/appinfo/info.xml. Nothing was changed." >&2
+			rm -rf "$dl"
+			exit 1
+		fi
+		mv -T "$dl/unpack-$app/$app" "$dl/new/$app"
+		chown -R www-data:www-data "$dl/new/$app"
+	done
+
+	# 2. Stop PHP-FPM and back up.
+	stop_php_fpm
+	BACKUP_DIRECTORY=$STORAGE_ROOT/owncloud-backup/$(date +"%Y-%m-%d-%T")
+	mkdir -p "$BACKUP_DIRECTORY/apps"
+	for f in owncloud.db config.php; do
+		if [ -L "$STORAGE_ROOT/owncloud/$f" ] || { [ -e "$STORAGE_ROOT/owncloud/$f" ] && [ ! -f "$STORAGE_ROOT/owncloud/$f" ]; }; then
+			echo "Not backing up $STORAGE_ROOT/owncloud/$f: it is not a regular file."
+		elif [ -e "$STORAGE_ROOT/owncloud/$f" ]; then
+			cp -P "$STORAGE_ROOT/owncloud/$f" "$BACKUP_DIRECTORY"
+		fi
+	done
+
+	# 3. Swap.
+	for item in "${todo[@]}"; do
+		read -r app version hash installed <<< "$item"
+		echo "Updating the Nextcloud app $app from ${installed/#-/(not installed)} to $version..."
+		if [ -e "$apps/$app" ] || [ -L "$apps/$app" ]; then
+			mv -T "$apps/$app" "$dl/old/$app"
+			cp -a "$dl/old/$app" "$BACKUP_DIRECTORY/apps/$app"
+		fi
+		mv -T "$dl/new/$app" "$apps/$app"
+	done
+
+	# 4. Upgrade.
+	if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
+		sudo -u www-data sed -i -e '/config_is_read_only/d' "$STORAGE_ROOT/owncloud/config.php"
+		NEXTCLOUD_BACKUP_WHAT="the replaced apps (apps/), the database and the configuration"
+		NEXTCLOUD_RESTORE_HINT="To go back: with PHP-FPM stopped, copy owncloud.db and config.php from there to $STORAGE_ROOT/owncloud/ and the directories in apps/ to /usr/local/lib/owncloud/apps/ (all owned by www-data)."
+		NextcloudUpgrade php"$PHP_VER"
+		NEXTCLOUD_BACKUP_WHAT=
+		NEXTCLOUD_RESTORE_HINT=
+	fi
+	rm -rf "$dl"
+}
+UpdateNextcloudApps
+
+# A run that stopped after a swap and before its upgrade left Nextcloud
+# needing an upgrade, in which state occ refuses most commands (app:enable
+# below): finish it here. (The output is read first: with pipefail, grep -q
+# ending the pipe early could fail it.)
+if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
+	nc_status=$(sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ status --output=json 2> /dev/null || true)
+	if [[ $nc_status == *'"needsDbUpgrade":true'* ]]; then
+		echo "Nextcloud needs an upgrade (an earlier setup run stopped before it), running it now..."
 		sudo -u www-data sed -i -e '/config_is_read_only/d' "$STORAGE_ROOT/owncloud/config.php"
 		NextcloudUpgrade php"$PHP_VER"
 	fi

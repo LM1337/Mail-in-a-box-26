@@ -73,11 +73,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * A new version of the Nextcloud apps contacts, calendar or user_external
   that setup pins reaches an existing box now also when Nextcloud itself
-  stays: setup compares the installed versions with the pins, swaps in the
-  new release and runs `occ upgrade`. Before, a new pin took effect only
-  with the next Nextcloud version, and a fresh install and an updated box
-  differed (B176). Calendar 6.6.5 to 6.6.6. New smoke check
-  `admin-nextcloud-app-versions`.
+  stays: setup compares the installed versions with the pins, downloads and
+  checks every new release first (a failed download changes nothing),
+  stops PHP-FPM, backs up the database, config.php and the old apps to
+  `$STORAGE_ROOT/owncloud-backup`, swaps the apps without using a name of
+  its own in Nextcloud's directory (which www-data owns) and runs `occ
+  upgrade`. Before, a new pin took effect only with the next Nextcloud
+  version, and a fresh install and an updated box differed (B176).
+  Calendar 6.6.5 to 6.6.6. New smoke check `admin-nextcloud-app-versions`.
 
 ### Security
 
