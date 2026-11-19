@@ -61,6 +61,7 @@ MAX_DELAY_MS = 25000        # Throttler::MAX_DELAY_MS
 WINDOW_HOURS = 12           # the delay counts the failures of the last 12 hours
 BLOCK_MINUTES = 30          # the 429 counts those of the last 30 minutes too
 MAX_ROWS = 20000            # (network, action, address) groups read
+MAX_NAMES = 20000           # (network, login name) pairs read, the most recent
 MAX_ENTRIES = 500
 MAX_ACCOUNTS = 20
 SYSTEM_BYPASS = "127.0.0.1/32" # setup/nextcloud.sh (B121)
@@ -126,9 +127,10 @@ def nc_config(env, set_values=None):
 # its directory and its -wal and -shm files (a connection of root could
 # create these with the wrong owner). Reading is aggregated in SQL: an attack
 # can leave many thousand rows, also with a new login name in each. The
-# parameters come on standard input. The accounts of the box go there only as
-# salted hashes (a new random salt each time), so that www-data does not get
-# the list of accounts and aliases; root maps the hashes back.
+# parameters come on standard input. Nothing about the accounts of the box
+# goes to www-data: root sends a random salt (new each time), the reader
+# returns the login names of each network as salted hashes (the most recent
+# MAX_NAMES), and root compares them with the hashes of its accounts.
 DB_READER = r"""
 import hashlib, json, sqlite3, sys, urllib.parse
 p = json.load(sys.stdin)
@@ -145,8 +147,8 @@ try:
             + " WHERE occurred >= ? GROUP BY subnet, action, ip ORDER BY MAX(occurred) DESC LIMIT ?", (p["recent"], p["since"], p["limit"])).fetchall()
         out["names"] = con.execute("SELECT subnet, COUNT(DISTINCT CASE WHEN json_valid(metadata) THEN lower(json_extract(metadata, '$.user')) END) FROM " + t
             + " WHERE occurred >= ? GROUP BY subnet", (p["since"],)).fetchall()
-        out["known"] = con.execute("SELECT subnet, hu FROM (SELECT subnet, h(CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.user') END) AS hu FROM " + t
-            + " WHERE occurred >= ?) WHERE hu IN (SELECT value FROM json_each(?)) GROUP BY subnet, hu", (p["since"], json.dumps(p["known"]))).fetchall()
+        out["hashes"] = con.execute("SELECT subnet, h(u) FROM (SELECT subnet, CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.user') END AS u, MAX(occurred) AS last FROM " + t
+            + " WHERE occurred >= ? GROUP BY subnet, u) WHERE u IS NOT NULL ORDER BY last DESC LIMIT ?", (p["since"], p["names"])).fetchall()
     out["bypass"] = con.execute("SELECT configkey, configvalue FROM " + p["prefix"] + "appconfig WHERE appid = 'bruteForce' AND configkey LIKE 'whitelist\\_%' ESCAPE '\\'").fetchall()
 finally:
     con.close()
@@ -211,11 +213,12 @@ def _run_db(script, params, what):
 def _read_db(env, cfg, since=0, recent=0, known=(), attempts=True):
 	# "known" of the result: (network, account) for the accounts given.
 	salt = os.urandom(16)
-	hashes = { hashlib.sha256(salt + a.strip().lower().encode("utf-8")).hexdigest(): a for a in known }
-	params = dict(_db(env, cfg), since=int(since), recent=int(recent), salt=salt.hex(), known=sorted(hashes),
-		attempts=attempts, limit=MAX_ROWS)
+	params = dict(_db(env, cfg), since=int(since), recent=int(recent), salt=salt.hex(), attempts=attempts,
+		limit=MAX_ROWS, names=MAX_NAMES)
 	r = _run_db(DB_READER, params, "Reading Nextcloud's database")
-	r["known"] = [(s, hashes[hu]) for s, hu in r.get("known") or [] if hu in hashes]
+	hashes = { hashlib.sha256(salt + a.strip().lower().encode("utf-8")).hexdigest(): a for a in known }
+	r["known"] = sorted({ (str(s), hashes[hu]) for s, hu in r.get("hashes") or [] if hu in hashes })
+	r["names_truncated"] = len(r.get("hashes") or []) >= MAX_NAMES
 	return r
 
 def delete_attempts(env, cfg, ip=None):
@@ -382,10 +385,28 @@ def get_overview(env, settings=None, now=None):
 			"bypassed": bool(ips) and len(bypassed_ips) == len(ips),
 		})
 	entries.sort(key=lambda e: (e["bypassed"], not e["blocked"], -e["delay_ms"], -e["last"], e["address"]))
+	# With the protection off every row is stale: counted before it was
+	# turned off, or by a login that was already waiting in the throttle
+	# then (up to 25 s, with the old configuration) and registered its
+	# failure after the deletion. Nextcloud still applies them for up to
+	# 12 hours. Setup and the daily status checks delete them; the control
+	# panel shows them with a button (a GET deletes nothing).
+	ret["stale"] = (not enabled) and bool(entries)
 	ret["entries_total"] = len(entries)
 	ret["entries_truncated"] = len(data.get("rows") or []) >= MAX_ROWS
 	ret["entries"] = entries[:MAX_ENTRIES]
 	return ret
+
+def delete_stale(env, cfg=None):
+	# With the protection off: deletes every failure still in the database
+	# (see "stale" in get_overview). Returns the number deleted, None when
+	# the protection is on.
+	if cfg is None:
+		cfg = nc_config(env)
+	enabled, _ = _effective(cfg)
+	if enabled:
+		return None
+	return int(delete_attempts(env, cfg).get("deleted") or 0)
 
 def reset(env, ip):
 	# Deletes the failures of the network of an address (all actions), as
@@ -510,26 +531,26 @@ def apply_settings(env, settings):
 	return result
 
 def hand_set_values(env, cfg=None):
-	# While the settings have no value of their own for Nextcloud's
-	# protection (nc_protection, nc_max_attempts: never saved, or saved at the
-	# defaults), the values that an administrator set in config.php by hand,
-	# as Nextcloud reads them, to be taken over instead of overwritten:
+	# For each of nc_protection and nc_max_attempts on its own: while the
+	# settings have no value of their own for it (never saved, or saved at
+	# its default), the value that an administrator set in config.php by
+	# hand, as Nextcloud reads it, to be taken over instead of overwritten:
 	# ({setting: value}, [description]). The control panel shows them in its
 	# form (and stores them with the next save), setup stores them at once.
 	import fail2ban_admin
 	stored = utils.load_settings(env).get("fail2ban")
 	if not isinstance(stored, dict):
 		stored = {}
-	if any(k in stored for k in ("nc_protection", "nc_max_attempts")):
+	if all(k in stored for k in ("nc_protection", "nc_max_attempts")):
 		return {}, []
 	if cfg is None:
 		cfg = nc_config(env)
 	enabled, ma = _effective(cfg)
 	vals, msgs = {}, []
-	if not enabled:
+	if "nc_protection" not in stored and not enabled:
 		vals["nc_protection"] = False
 		msgs.append("auth.bruteforce.protection.enabled = " + json.dumps(cfg.get("enabled")))
-	if cfg.get("max_attempts") is not None and ma != DEFAULT_MAX_ATTEMPTS:
+	if "nc_max_attempts" not in stored and cfg.get("max_attempts") is not None and ma != DEFAULT_MAX_ATTEMPTS:
 		lo, hi = fail2ban_admin.LIMITS["nc_max_attempts"]
 		vals["nc_max_attempts"] = min(hi, max(lo, ma))
 		msgs.append("auth.bruteforce.max-attempts = " + json.dumps(cfg.get("max_attempts"))

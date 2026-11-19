@@ -2144,11 +2144,13 @@ def c_nc_hand_set(ctx):
     return "taken over by the panel (17) and by setup (19), not overwritten; restored to the default"
 
 
-def c_ban_reasons_local(ctx):
-    # tests/fork/ban-reasons.py (no box needed): the masking of the user
-    # names in the reasons of bans.
+def c_local_test(ctx, script):
+    # A local test of tests/fork (no box needed): ban-reasons.py (the
+    # masking of user names in the reasons of bans), nextcloud-throttle.py
+    # (the reader of Nextcloud's throttle, the stale failures, the takeover
+    # of values set by hand).
     here = os.path.dirname(os.path.abspath(__file__))
-    p = subprocess.run([sys.executable, "-I", os.path.join(here, "ban-reasons.py")], capture_output=True, text=True, timeout=120)
+    p = subprocess.run([sys.executable, "-I", os.path.join(here, script)], capture_output=True, text=True, timeout=120)
     last = (p.stdout.strip().splitlines() or [""])[-1]
     if p.returncode != 0:
         bad = [l for l in p.stdout.splitlines() if l.startswith("FAIL")]
@@ -4691,7 +4693,8 @@ def main():
         run_check("admin-nextcloud-protection-off", c_nc_protection_off, ctx)
         run_check("admin-nextcloud-setup-no-drift", c_nc_setup_no_drift, ctx)
         run_check("admin-nextcloud-hand-set", c_nc_hand_set, ctx)
-        run_check("admin-ban-reasons-masking", c_ban_reasons_local, ctx)
+        run_check("admin-ban-reasons-masking", c_local_test, ctx, "ban-reasons.py")
+        run_check("admin-nextcloud-throttle-unit", c_local_test, ctx, "nextcloud-throttle.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):

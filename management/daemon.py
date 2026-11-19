@@ -873,15 +873,22 @@ def nextcloud_throttle_status():
 @app.route('/system/nextcloud-throttle/reset', methods=["POST"])
 @authorized_personnel_only
 def nextcloud_throttle_reset():
-	# ip: deletes Nextcloud's failures of that address (for IPv6 of its /64).
-	from nextcloud_throttle import reset, NCError
+	# ip: deletes Nextcloud's failures of the network of that address.
+	# stale=1 (only with the protection off): deletes every failure left.
+	from nextcloud_throttle import reset, delete_stale, NCError
 	try:
-		result = reset(env, request.form.get('ip', ''))
+		if request.form.get('stale') == '1':
+			n = delete_stale(env)
+			if n is None:
+				return ("Nextcloud's brute-force protection is on: its failures are not stale. Reset single addresses.", 400)
+			result = { "ip": None, "subnets": None, "deleted": n }
+		else:
+			result = reset(env, request.form.get('ip', ''))
 	except ValueError as e:
 		return (str(e), 400)
 	except NCError as e:
 		return (str(e), 500)
-	app.logger.warning("nextcloud: %s reset the brute-force failures of %s", request.user_email, result["ip"])
+	app.logger.warning("nextcloud: %s reset the brute-force failures of %s", request.user_email, result["ip"] or "all addresses (stale)")
 	result["status"] = "ok"
 	return json_response(result)
 

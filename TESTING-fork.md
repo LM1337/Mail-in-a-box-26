@@ -267,8 +267,14 @@ report. The groups:
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
   with names that the line repeats or that have spaces, and lines of
-  Nextcloud's log that are not valid JSON. Group admin runs it
-  (`admin-ban-reasons-masking`), so a certification run includes it.
+  Nextcloud's log that are not valid JSON, and long lines that must not
+  take long. `tests/fork/nextcloud-throttle.py` (v78-r2604.4; no box
+  needed) checks the reader of Nextcloud's throttle on a temporary
+  database (no account of the box goes to it, no login name comes back),
+  the stale failures with the protection off, and the takeover of values
+  set in config.php by hand, per value. Group admin runs both
+  (`admin-ban-reasons-masking`, `admin-nextcloud-throttle-unit`), so a
+  certification run includes them.
 * **dns**: DNSSEC (RRSIG, DNSKEY), MX and DKIM for each zone, SSHFP against the
   host keys sshd serves, custom records.
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail

@@ -1055,7 +1055,11 @@ the following, on by default:
   can be turned off (`nc_protection`, not recommended: then only
   `miab-owncloud` limits password guessing on Nextcloud); Nextcloud then
   counts no new failures but goes on applying those it counted before for up
-  to 12 hours, so turning it off also deletes them. `nc_allowlist`
+  to 12 hours, so turning it off also deletes them. A login that was
+  already waiting in the throttle then can still add one; with the
+  throttle off setup and the daily status checks delete such stale
+  failures, and the control panel shows them with a button to delete them.
+  `nc_allowlist`
   (off by default) puts the allowlist on Nextcloud's bypass list too (the
   entries it adds are recorded under `nextcloud_bypass` in settings.yaml and
   removed again when they leave the allowlist; `127.0.0.1/32`, B121, and
@@ -1068,10 +1072,13 @@ the following, on by default:
   `tools/nextcloud-bruteforce-config.php` as www-data, because Nextcloud's
   own `occ config:system:set` refuses once setup has made the file read-only
   (`management/nextcloud_throttle.py --setup`, `--status`, `--reset <ip>`).
-  While the settings have no value of their own for the throttle, values
-  set in `config.php` by hand (as Nextcloud reads them: `0` and `false` are
-  off) are taken over instead of overwritten: setup stores them at once and
-  says so, the control panel shows them and stores them with the next save.
+  For each of the two values on its own: while the settings have no value
+  of their own for it, a value set in `config.php` by hand (as Nextcloud
+  reads it: `0` and `false` are off) is taken over instead of overwritten:
+  setup stores it at once and says so, the control panel shows it and stores
+  it with the next save. The overview names only accounts of the box; it
+  gets them without giving the list of accounts to www-data (the login names
+  come back as salted hashes, which root compares with its own).
 
 The settings are stored in `$STORAGE_ROOT/settings.yaml` under `fail2ban`,
 only the values that differ from the defaults, so they survive setup runs, the
@@ -1284,7 +1291,11 @@ eingeschaltet:
   empfohlen: Dann begrenzt nur noch `miab-owncloud` das Raten von Passwörtern
   bei Nextcloud); Nextcloud zählt dann keine neuen Fehlversuche, wendet die
   bisher gezählten aber noch bis zu 12 Stunden an, deshalb löscht das
-  Abschalten sie. `nc_allowlist` (anfangs aus)
+  Abschalten sie. Eine Anmeldung, die da schon in der Drossel wartete, kann
+  noch einen hinzufügen; bei abgeschalteter Drossel löschen das Setup und
+  die täglichen Statusprüfungen solche veralteten Fehlversuche, und die
+  Admin-Oberfläche zeigt sie mit einem Knopf zum Löschen an. `nc_allowlist`
+  (anfangs aus)
   setzt die Freigabeliste auch auf die Ausnahmeliste von Nextcloud (was sie
   dort einträgt, wird unter `nextcloud_bypass` in settings.yaml vermerkt
   und wieder entfernt, wenn es die Freigabeliste verlässt;
@@ -1297,11 +1308,14 @@ eingeschaltet:
   `tools/nextcloud-bruteforce-config.php` als www-data, weil
   `occ config:system:set` die Datei ablehnt, sobald das Setup sie
   schreibgeschützt hat (`management/nextcloud_throttle.py --setup`,
-  `--status`, `--reset <ip>`). Solange die Einstellungen keinen eigenen Wert
-  für die Drossel haben, werden von Hand in `config.php` gesetzte Werte (so,
-  wie Nextcloud sie liest: `0` und `false` sind aus) übernommen statt
-  überschrieben: Das Setup speichert sie sofort und meldet das, die
-  Admin-Oberfläche zeigt sie an und speichert sie beim nächsten Sichern.
+  `--status`, `--reset <ip>`). Für jeden der beiden Werte einzeln: Solange
+  die Einstellungen keinen eigenen Wert dafür haben, wird ein von Hand in
+  `config.php` gesetzter Wert (so, wie Nextcloud ihn liest: `0` und `false`
+  sind aus) übernommen statt überschrieben: Das Setup speichert ihn sofort
+  und meldet das, die Admin-Oberfläche zeigt ihn an und speichert ihn beim
+  nächsten Sichern. Die Übersicht nennt nur Konten der Box; sie erfährt sie,
+  ohne www-data die Liste der Konten zu geben (die Anmeldenamen kommen als
+  gesalzene Hashes zurück, die root mit seinen eigenen vergleicht).
 
 Die Einstellungen stehen in `$STORAGE_ROOT/settings.yaml` unter `fail2ban`,
 nur die Werte, die vom Standard abweichen. Sie überstehen so Setup-Läufe, den

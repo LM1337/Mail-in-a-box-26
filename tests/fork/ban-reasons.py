@@ -88,6 +88,36 @@ def main():
         print("%s  %-50s %s" % ("FAIL" if errs else "ok  ", desc, "; ".join(errs) or text[:90]))
         bad += bool(errs)
 
+    # Long lines (16 KB) of the kinds that made a regex take time growing
+    # with the square of the line: each must take well under 0.1 s, in the
+    # reasons and in the failed-login report's SMTP regex.
+    import time
+    pre = b"2026-10-26T13:00:00+01:00 box "
+    n = 16000
+    long_lines = {
+        "sasl_username with a run of spaces": pre + b"postfix/submission/smtpd[1]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (r), sasl_username=x" + b" " * n + b"y",
+        "SMTP failure with a run of spaces": pre + b"postfix/submission/smtpd[1]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: " + b" " * n + b"y",
+        "many user=<": pre + b"dovecot: imap-login: Login aborted: (auth failed) " + b"user=<" * (n // 6) + b"x",
+        "user=< with a run of spaces": pre + b"dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<" + b" " * n + b">",
+        "invalid user with many from": pre + b"sshd-session[1]: Invalid user " + b" from " * (n // 6) + b"x",
+        "nginx with many brackets": b"192.0.2.1 - " + b" [" * (n // 2) + b"x",
+        "z-push with many escapes": b"26/10/2026 13:00:00 [1] [WARN] [" + b"\\]" * (n // 2) + b"x",
+    }
+    for desc, line in long_lines.items():
+        t = time.time()
+        f._reason_line(line, KNOWN)
+        m = f.RE_SMTP.search(line)
+        if m:
+            f.smtp_user(m)
+        d = time.time() - t
+        ok = d < 0.1
+        print("%s  %-50s %.3f s" % ("ok  " if ok else "FAIL", "long line: " + desc, d))
+        bad += not ok
+    m = f.RE_SMTP.search(b"postfix/submission/smtpd[1]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (r), sasl_username=my name  \n")
+    ok = m is not None and f.smtp_user(m)[0] == b"my name"
+    print("%s  %-50s %s" % ("ok  " if ok else "FAIL", "SMTP user of the failed-login report", f.smtp_user(m)[0] if m else None))
+    bad += not ok
+
     data = json.dumps({"matches": [CASES[0][1].decode(), CASES[1][1].decode(), CASES[6][1].decode()], "failures": 20}).encode()
     r = f._reason(data, KNOWN)
     ok = (r["failures"] == 20 and r["accounts"] == ["bob@example.com"] and r["unknown_names"] == 2
@@ -98,7 +128,7 @@ def main():
     ok = r["manual"] and r["lines"] == [] and r["failures"] == 0
     print("%s  %-50s %s" % ("ok  " if ok else "FAIL", "ban by hand", r if not ok else ""))
     bad += not ok
-    print("%d of %d checks failed" % (bad, len(CASES) + 2))
+    print("%d of %d checks failed" % (bad, len(CASES) + 2 + len(long_lines) + 1))
     return 1 if bad else 0
 
 if __name__ == "__main__":

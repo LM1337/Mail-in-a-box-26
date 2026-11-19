@@ -548,7 +548,7 @@ function f2b_nc_status(e) {
   if (e.bypassed_ips.length)
     div.append($('<div class="small text-muted"/>').text("not for " + e.bypassed_ips.join(", ") + " (bypass list)"));
   if (!f2b_nc_state.enabled && (e.blocked || e.delay_ms > 0))
-    div.append($('<div class="small text-muted"/>').text("from failures counted before the throttle was turned off"));
+    div.append($('<div class="small text-muted"/>').text("stale: the throttle is off, but Nextcloud still applies these failures"));
   return div;
 }
 
@@ -567,13 +567,15 @@ function f2b_render_nc() {
   var delayed = r.entries.filter(function(e) { return !e.blocked && e.delay_ms > 0; }).length;
   var text;
   if (!r.enabled && r.entries_total == 0) text = "Nextcloud's throttle is off (see the settings below).";
-  else if (!r.enabled) text = "Nextcloud's throttle is off (see the settings below), but it still applies the failures it counted before, until they are " + r.window_hours + " hours old: " + r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + ". Reset them, or save the settings to delete them.";
+  else if (!r.enabled) text = "Nextcloud's throttle is off (see the settings below), but it still applies these stale failures until they are " + r.window_hours + " hours old: " + r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + ". Setup and the daily status checks delete them, or delete them now.";
   else if (r.entries_total == 0) text = "No failed Nextcloud logins in the last " + r.window_hours + " hours.";
   else text = r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + " with failed Nextcloud logins in the last " + r.window_hours + " hours: "
     + blocked + " blocked, " + delayed + " delayed.";
   if (r.config_current === false || r.bypass_current === false)
     text += " Nextcloud's settings do not match the settings below; save them to write them again.";
   $('#f2b-nc-summary').text(text).removeClass("text-muted");
+  if (r.stale)
+    $('#f2b-nc-summary').append(" ").append($('<button type="button" class="btn btn-default btn-xs">Delete the stale failures</button>').click(function() { f2b_nc_reset_stale(); }));
   if (r.entries.length == 0) {
     tbody.append($('<tr/>').append($('<td colspan="7" class="text-muted"/>').text("Nobody is throttled.")));
     return;
@@ -602,6 +604,14 @@ function f2b_render_nc() {
   });
   if (r.entries_total > r.entries.length || r.entries_truncated)
     $('#f2b-nc-more').text("Showing " + r.entries.length + " of " + r.entries_total + " addresses" + (r.entries_truncated ? " (of the most recent failures; there are more)" : "") + ".").show();
+}
+
+function f2b_nc_reset_stale() {
+  api("/system/nextcloud-throttle/reset", "POST", { stale: "1" },
+    function(r) {
+      show_modal_error("Nextcloud throttle", $("<p/>").text(r.deleted + " stale failure" + (r.deleted == 1 ? " was" : "s were") + " deleted."), function() { f2b_load_nc(); });
+    },
+    f2b_api_error("Nextcloud throttle"));
 }
 
 function f2b_nc_reset(ip) {

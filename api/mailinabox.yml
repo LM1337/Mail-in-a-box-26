@@ -2236,7 +2236,9 @@ paths:
         for IPv4, its network for IPv6), so that its next login is neither
         delayed nor refused, also with the throttle off and for an address on
         the bypass list. Returns the networks and the number of failures
-        deleted.
+        deleted. With `stale=1` instead of `ip` (only while Nextcloud's
+        protection is off, else HTTP 400) it deletes every failure left,
+        which Nextcloud would still apply for up to 12 hours.
       operationId: resetNextcloudThrottle
       requestBody:
         required: true
@@ -2244,12 +2246,13 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required:
-                - ip
               properties:
                 ip:
                   type: string
                   example: 192.0.2.1
+                stale:
+                  type: string
+                  enum: ['1']
       x-codeSamples:
         - lang: curl
           source: |
@@ -2276,7 +2279,7 @@ paths:
                   deleted:
                     type: integer
         400:
-          description: Invalid address
+          description: Invalid address, or stale=1 with the protection on
           content:
             text/html:
               schema:
@@ -3580,6 +3583,9 @@ components:
         ipv6_prefix:
           type: integer
           description: The size of the IPv6 networks Nextcloud counts (security.ipv6_normalized_subnet_size, 56 by default).
+        stale:
+          type: boolean
+          description: The protection is off, but failures are left that Nextcloud still applies (see the reset with stale=1).
         entries_truncated:
           type: boolean
           description: More failures than were read (only the most recent are counted here).

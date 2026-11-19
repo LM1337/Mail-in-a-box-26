@@ -895,7 +895,24 @@ RE_TS_BSD = re.compile(rb"([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d)\s")
 RE_TS_ZPUSH = re.compile(rb"(\d\d)/(\d\d)/(\d{4}) (\d\d):(\d\d):(\d\d) ") # local time, day first
 # postfix (465 and 587 both log as postfix/submission/smtpd):
 #   warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=a@b
-RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-Fa-f:.]+)\]: SASL \S+ authentication failed: .*?(?:, sasl_username=(\S+))?\s*$")
+# The user is split off the rest of the line in Python (smtp_user): a regex
+# with a lazy part before an optional group at the end of the line took a
+# quarter of a second for a line with a long run of spaces.
+RE_SMTP = re.compile(rb"postfix/[\w/-]*smtpd\[\d+\]: warning: [^\[\s]*\[([0-9A-Fa-f:.]+)\]: SASL \S+ authentication failed: (.*)$")
+SASL_USER = b", sasl_username="
+
+def smtp_user(m):
+	# (user, start, end) of a match of RE_SMTP: the text after Postfix's
+	# ", sasl_username=" behind the reason, to the end of the line (a
+	# client's name can have spaces); (b"", None, None) without it.
+	tail = m.group(2)
+	i = tail.find(SASL_USER)
+	if i < 0:
+		return b"", None, None
+	start = m.start(2) + i + len(SASL_USER)
+	value = tail[i + len(SASL_USER):]
+	lead = len(value) - len(value.lstrip())
+	return value.strip(), start + lead, start + len(value.rstrip())
 # Dovecot 2.4 (and 2.3 "Aborted login"/"Disconnected"), through syslog without "Info: " (B85),
 # in older files written by Dovecot itself with it:
 #   dovecot: imap-login: Login aborted: ... (auth failed, 3 attempts in 9 secs) (auth_failed): user=<a@b>, method=PLAIN, rip=192.0.2.1, lip=...
@@ -1067,7 +1084,7 @@ def scan_failed_logins(hours=SCAN_HOURS, files=SCAN_LOGS, now=None):
 				elif b"authentication failed" in line:
 					m = RE_SMTP.search(line)
 					if not m: continue
-					ip, user, proto, count = m.group(1), m.group(2) or b"", "smtp", 1
+					ip, user, proto, count = m.group(1), smtp_user(m)[0], "smtp", 1
 				elif b"-login: " in line and (b"auth failed" in line or b"authorization failed" in line or b"user disabled" in line):
 					m = RE_DOVECOT.search(line)
 					if not m: continue
@@ -1145,17 +1162,53 @@ UNKNOWN_NAME = b"[unknown name]"
 # lines of the filters that the report's regexes do not match (Dovecot's
 # "tried to use ..." and "no auth attempts" lines, a user=<...> anywhere).
 _USER_FIELDS = [
-	(RE_SMTP, 2, "search"),
 	(RE_DOVECOT, 3, "search"),
 	(RE_ZPUSH, "user", "match"),
 	(RE_AUTODISCOVER, "user", "match"),
 	(RE_ROUNDCUBE, 1, "search"),
 	(RE_NGINX_USER, 1, "match"),
 	(RE_SSH_INVALID, 2, "search"),
-	(re.compile(rb"\buser=<(.*)>, (?:method=\S+, )?rip="), 1, "search"),
-	(re.compile(rb"\buser=<([^>]*)>"), 1, "search"),
-	(re.compile(rb"\bsasl_username=(.*?)\s*$"), 1, "search"),
 ]
+
+def _smtp_span(line):
+	m = RE_SMTP.search(line)
+	if not m:
+		return []
+	name, start, end = smtp_user(m)
+	return [(start, end, name)] if name else []
+
+def _sasl_span(line):
+	# sasl_username= in another line of Postfix: to the end of the line.
+	i = line.find(b"sasl_username=")
+	while i > 0 and (line[i - 1:i].isalnum() or line[i - 1:i] == b"_"):
+		i = line.find(b"sasl_username=", i + 1)
+	if i < 0:
+		return []
+	start = i + len(b"sasl_username=")
+	value = line[start:]
+	lead = len(value) - len(value.lstrip())
+	name = value.strip()
+	return [(start + lead, start + len(value.rstrip()), name)] if name else []
+
+RE_USER_FIELD = re.compile(rb"user=<(.*)>, (?:method=\S+, )?rip=")
+RE_USER_FIELD_SHORT = re.compile(rb"user=<([^>]*)>")
+
+def _user_field_span(line):
+	# user=<...> in a line of Dovecot that RE_DOVECOT does not match (the
+	# filter's "tried to use ...", "no auth attempts"), at its first place
+	# only: tried at every "user=<" of a line, the regexes take time that
+	# grows with the square of their number.
+	i = line.find(b"user=<")
+	while i > 0 and (line[i - 1:i].isalnum() or line[i - 1:i] == b"_"):
+		i = line.find(b"user=<", i + 1)
+	if i < 0:
+		return []
+	m = RE_USER_FIELD.match(line, i) or RE_USER_FIELD_SHORT.match(line, i)
+	if not m or not m.group(1).strip():
+		return []
+	return [(m.start(1), m.end(1), m.group(1))]
+
+_USER_SPAN_FUNCS = [_smtp_span, _sasl_span, _user_field_span]
 # Z-Push's user names in brackets ("[<user>]" or "[<user>#<user of the
 # request>]", escaped by setup/zpush.sh), which repeat what the client sent.
 RE_ZPUSH_NAMES = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[((?:[^\]\\]|\\.)*)\]")
@@ -1170,6 +1223,8 @@ def _unescape(name):
 def _name_spans(line):
 	# (start, end, name) of each place where the line names a user.
 	spans = []
+	for fn in _USER_SPAN_FUNCS:
+		spans += fn(line)
 	for rx, group, how in _USER_FIELDS:
 		m = getattr(rx, how)(line)
 		if m and m.group(group) not in (None, b"", b"-") and m.group(group).strip():
@@ -1483,6 +1538,17 @@ def check_failed_logins(rounded_values, env, output):
 	if not nc_current:
 		output.print_warning("""Nextcloud's brute-force settings do not match the intrusion protection settings.
 			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
+	# With Nextcloud's protection off, the failures left in its database are
+	# stale but still delay logins for up to 12 hours (a login that was
+	# waiting in the throttle when it was turned off can add one after the
+	# deletion): the daily run of the status checks deletes them.
+	try:
+		import nextcloud_throttle
+		n = nextcloud_throttle.delete_stale(env)
+		if n:
+			output.print_ok(f"Deleted {n} stale failed Nextcloud logins (Nextcloud's brute-force protection is off).")
+	except Exception:
+		pass
 
 	try:
 		report = failed_login_report(env, settings)

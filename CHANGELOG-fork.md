@@ -42,7 +42,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   a banned address that Nextcloud throttles too gets a hint with a button.
   New settings: `nc_protection` (Nextcloud's throttle on, the default;
   turning it off asks first and deletes the failures counted so far, which
-  Nextcloud would otherwise go on applying for up to 12 hours),
+  Nextcloud would otherwise go on applying for up to 12 hours; failures
+  that logins already waiting in the throttle add afterwards are stale too:
+  setup and the daily status checks delete them, and the control panel
+  shows them with a button),
   `nc_max_attempts` (failures before the
   maximum delay and the block, 10 by default, 3 to 1000) and `nc_allowlist`
   (off by default: the allowlist goes on Nextcloud's bypass list too; the
@@ -55,12 +58,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `occ config:system:set` refuses once setup has made the file read-only),
   and atomically as setup writes it (B124); the overview reads Nextcloud's
   database read-only as www-data, and a reset deletes there as www-data.
-  While the settings have no value of their own for the throttle, values
-  set in `config.php` by hand are taken over instead of overwritten, as
-  Nextcloud reads them (`0` and `false` are off, the string `'false'` is
-  on): setup stores them at once, the control panel shows them and stores
-  them with the next save. The overview gets the box's accounts from
-  Nextcloud's database by salted hashes, not as a list. New API: `GET
+  For each of the two on its own, while the settings have no value of their
+  own for it, a value set in `config.php` by hand is taken over instead of
+  overwritten, as Nextcloud reads it (`0` and `false` are off, the string
+  `'false'` is on): setup stores it at once, the control panel shows it and
+  stores it with the next save. The overview names only accounts of the
+  box without giving their list to www-data: the reader returns the login
+  names as salted hashes (a new salt each time), which root compares with
+  the hashes of its accounts. New API: `GET
   /admin/system/nextcloud-throttle`, `POST
   /admin/system/nextcloud-throttle/reset`; `management/nextcloud_throttle.py
   --setup | --status | --reset <ip>`; setup/start.sh applies the settings
