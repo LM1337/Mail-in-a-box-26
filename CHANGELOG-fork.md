@@ -79,8 +79,21 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   differed (B176). Calendar 6.6.5 to 6.6.6. New smoke check
   `admin-nextcloud-app-versions`.
 
+### Security
+
+* nginx: Ubuntu's security update 1.28.3-2ubuntu1.13 fixes CVE-2026-123633
+  (use-after-free in HTTP/2 when proxying, with few free
+  `worker_connections`) and CVE-2026-123007 (heap buffer overflow in the
+  HTTP/2 flow control). The box serves HTTPS with HTTP/2 and proxies
+  `/admin`, `/caldav`, `/carddav` and `/webdav`. No change of the fork's
+  code: setup installs the update with the other package updates
+  (setup/system.sh), and unattended-upgrades does within a day.
+
 ### Upgrade note
 
+* Install the nginx update now, independent of this release:
+  `sudo apt update && sudo apt upgrade` (nginx restarts for a second). The
+  version must be 1.28.3-2ubuntu1.13 or later (`dpkg-query -W nginx`).
 * The update installs calendar 6.6.6 and runs `occ upgrade`: Nextcloud
   answers 503 for a few seconds.
 * The new settings start with Nextcloud's and fail2ban's present values, so
