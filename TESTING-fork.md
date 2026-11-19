@@ -263,6 +263,12 @@ report. The groups:
   `management/daemon.py` is documented and every documented operation has a
   route, that `smoke.py` calls or excludes each of them, and the content
   types it expects.
+  `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
+  reasons of bans in System > Intrusion Protection show no user name that
+  is not an account of the box: the log lines of each jail's filter, also
+  with names that the line repeats or that have spaces, and lines of
+  Nextcloud's log that are not valid JSON. Group admin runs it
+  (`admin-ban-reasons-masking`), so a certification run includes it.
 * **dns**: DNSSEC (RRSIG, DNSKEY), MX and DKIM for each zone, SSHFP against the
   host keys sshd serves, custom records.
 * **web**: Nextcloud version, CalDAV, CardDAV and WebDAV with the mail

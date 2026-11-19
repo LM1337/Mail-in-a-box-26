@@ -361,6 +361,8 @@ function f2b_render_alerts() {
   (r.settings_warnings || []).forEach(function(w) {
     alert("alert-warning", $("<p/>").text(w));
   });
+  if (r.nc_hand_set && r.nc_hand_set.length)
+    alert("alert-info", $("<p/>").text("Nextcloud's config.php has values set by hand (" + r.nc_hand_set.join(", ") + "). The settings below show them, and the next save stores them, so they are not overwritten."));
 
   // The address this page is used from.
   var c = r.client;

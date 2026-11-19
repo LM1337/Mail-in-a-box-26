@@ -20,8 +20,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   ports it blocks). A user name that is no account of the box is replaced
   by "[unknown name]", as the failed-login report leaves such names out (it
   is whatever the client sent, a password typed into the wrong field too); a
-  ban without lines was set by hand. `GET /admin/system/fail2ban` gives the
-  same as `reason` of each ban and `jail_info`.
+  ban without lines was set by hand. The name is replaced wherever the line
+  repeats it (Z-Push's brackets, also with spaces as sshd, nginx and
+  Postfix log them); a line of Nextcloud's log shows its URL only for an
+  account, and one that is not valid JSON no more than its login message.
+  `GET /admin/system/fail2ban` gives the same as `reason` of each ban and
+  `jail_info`.
 * Nextcloud's own brute-force throttle in the control panel. Apart from
   fail2ban, Nextcloud counts failed logins per address (IPv4) or IPv6
   network (/56 by default): after failures within 12 hours it delays every
@@ -51,9 +55,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `occ config:system:set` refuses once setup has made the file read-only),
   and atomically as setup writes it (B124); the overview reads Nextcloud's
   database read-only as www-data, and a reset deletes there as www-data.
-  While the settings have no value of their own for the throttle, setup
-  takes values set in `config.php` by hand over into them instead of
-  overwriting them. New API: `GET
+  While the settings have no value of their own for the throttle, values
+  set in `config.php` by hand are taken over instead of overwritten, as
+  Nextcloud reads them (`0` and `false` are off, the string `'false'` is
+  on): setup stores them at once, the control panel shows them and stores
+  them with the next save. The overview gets the box's accounts from
+  Nextcloud's database by salted hashes, not as a list. New API: `GET
   /admin/system/nextcloud-throttle`, `POST
   /admin/system/nextcloud-throttle/reset`; `management/nextcloud_throttle.py
   --setup | --status | --reset <ip>`; setup/start.sh applies the settings

@@ -83,8 +83,13 @@ if ($set !== false && $set !== '') {
 }
 
 echo json_encode(array(
+  // As stored (null: not set), and as Nextcloud reads them
+  // (getSystemValueBool and getSystemValueInt cast: 0, '0' and '' are off,
+  // 'false' is on).
   'enabled' => array_key_exists('auth.bruteforce.protection.enabled', $CONFIG) ? $CONFIG['auth.bruteforce.protection.enabled'] : null,
+  'enabled_effective' => (bool)(array_key_exists('auth.bruteforce.protection.enabled', $CONFIG) ? $CONFIG['auth.bruteforce.protection.enabled'] : true),
   'max_attempts' => array_key_exists('auth.bruteforce.max-attempts', $CONFIG) ? $CONFIG['auth.bruteforce.max-attempts'] : null,
+  'max_attempts_effective' => (int)(array_key_exists('auth.bruteforce.max-attempts', $CONFIG) ? $CONFIG['auth.bruteforce.max-attempts'] : 10),
   'force_database' => !empty($CONFIG['auth.bruteforce.protection.force.database']),
   'memcache_distributed' => isset($CONFIG['memcache.distributed']) ? (string)$CONFIG['memcache.distributed'] : null,
   'dbtype' => isset($CONFIG['dbtype']) ? (string)$CONFIG['dbtype'] : null,

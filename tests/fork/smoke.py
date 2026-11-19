@@ -1899,9 +1899,15 @@ done
 
 
 def nc_reset_public(ctx, public):
-    # The failures of the test logins (also when a check failed half-way).
+    # The failures of the test logins (also when a check failed half-way),
+    # through the control panel's reset, which deletes them also with the
+    # throttle off or the address on the bypass list (occ's reset does
+    # nothing then).
     if public:
-        ctx.remote.run(OCC + "security:bruteforce:reset %s" % shlex.quote(public), timeout=120)
+        try:
+            admin_api(ctx, "POST", "system/nextcloud-throttle/reset", form={"ip": public})
+        except Exception:
+            pass
 
 
 def miab_checkout(ctx):
@@ -2080,6 +2086,74 @@ def c_nc_protection_off(ctx):
         admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_protection": "1" if cur["nc_protection"] else "0"})
         nc_reset_public(ctx, public)
     return "off: failures deleted, %d failed logins neither counted nor refused (all 401); on again: counted" % (max_attempts + 2)
+
+
+def c_nc_hand_set(ctx):
+    # A value set by hand in Nextcloud's config.php, while the settings have
+    # none of their own, is taken over, not overwritten: the control panel
+    # shows it and stores it with the next save, setup stores it at once.
+    # Set by hand here with tools/nextcloud-bruteforce-config.php as www-data
+    # (config.php is read-only for occ). The setting is restored.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    st = admin_api(ctx, "GET", "system/fail2ban").json()
+    if st["settings"]["nc_max_attempts"] != 10 or st.get("nc_hand_set"):
+        raise Skip("nc_max_attempts is not at its default here")
+    miab = miab_checkout(ctx)
+    def hand_set(value):
+        cmd = ("cd %s && . /etc/mailinabox.conf && NC_CONFIG=\"$STORAGE_ROOT/owncloud/config.php\" NC_SET=%s "
+               "runuser -u www-data -- php%s < tools/nextcloud-bruteforce-config.php"
+               % (shlex.quote(miab), shlex.quote(json.dumps({"auth.bruteforce.max-attempts": value})),
+                  "$(sed -nE 's/^PHP_VER=([0-9.]+).*/\\1/p' setup/functions.sh | head -n 1)"))
+        rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=120)
+        if rc != 0:
+            raise Fail("setting max-attempts by hand: %s" % (err or out).strip()[:200])
+    def stored():
+        rc, out, _ = ctx.remote.run("bash -c %s" % shlex.quote(". /etc/mailinabox.conf; grep -E '^  nc_max_attempts:' \"$STORAGE_ROOT/settings.yaml\" || true"), sudo=True)
+        return out.strip()
+    occ_get = OCC + "config:system:get auth.bruteforce.max-attempts"
+    try:
+        # the control panel
+        hand_set(17)
+        st = admin_api(ctx, "GET", "system/fail2ban").json()
+        if st["settings"]["nc_max_attempts"] != 17 or not st.get("nc_hand_set"):
+            raise Fail("panel: nc_max_attempts %s, nc_hand_set %s" % (st["settings"]["nc_max_attempts"], st.get("nc_hand_set")))
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"spray_min_ips": str(st["settings"]["spray_min_ips"])})
+        if r.status != 200 or r.json()["settings"]["nc_max_attempts"] != 17 or stored() != "nc_max_attempts: 17":
+            raise Fail("panel save: HTTP %d, stored %r" % (r.status, stored()))
+        rc, out, _ = ctx.remote.run(occ_get, timeout=120)
+        if out.strip() != "17":
+            raise Fail("the save overwrote the value set by hand: %r" % out.strip())
+        admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_max_attempts": "10"})
+        if stored():
+            raise Fail("nc_max_attempts still stored after the reset to 10: %r" % stored())
+        # setup
+        hand_set(19)
+        cmd = "cd %s && management/nextcloud_throttle.py --setup" % shlex.quote(miab)
+        rc, out, err = ctx.remote.run("bash -c %s" % shlex.quote(cmd), sudo=True, timeout=300)
+        if "took over auth.bruteforce.max-attempts = 19" not in out or stored() != "nc_max_attempts: 19":
+            raise Fail("setup: %s, stored %r" % (out.strip()[:200], stored()))
+        rc, out, _ = ctx.remote.run(occ_get, timeout=120)
+        if out.strip() != "19":
+            raise Fail("setup overwrote the value set by hand: %r" % out.strip())
+    finally:
+        admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_max_attempts": "10"})
+    rc, out, _ = ctx.remote.run(occ_get, timeout=120)
+    if out.strip() or stored():
+        raise Fail("not restored: config.php %r, stored %r" % (out.strip(), stored()))
+    return "taken over by the panel (17) and by setup (19), not overwritten; restored to the default"
+
+
+def c_ban_reasons_local(ctx):
+    # tests/fork/ban-reasons.py (no box needed): the masking of the user
+    # names in the reasons of bans.
+    here = os.path.dirname(os.path.abspath(__file__))
+    p = subprocess.run([sys.executable, "-I", os.path.join(here, "ban-reasons.py")], capture_output=True, text=True, timeout=120)
+    last = (p.stdout.strip().splitlines() or [""])[-1]
+    if p.returncode != 0:
+        bad = [l for l in p.stdout.splitlines() if l.startswith("FAIL")]
+        raise Fail("%s: %s" % (last, "; ".join(bad)[:300]))
+    return last
 
 
 def c_nc_throttle_settings(ctx):
@@ -4616,6 +4690,8 @@ def main():
         run_check("admin-nextcloud-bypass-allowlist", c_nc_bypass_allowlist, ctx)
         run_check("admin-nextcloud-protection-off", c_nc_protection_off, ctx)
         run_check("admin-nextcloud-setup-no-drift", c_nc_setup_no_drift, ctx)
+        run_check("admin-nextcloud-hand-set", c_nc_hand_set, ctx)
+        run_check("admin-ban-reasons-masking", c_ban_reasons_local, ctx)
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):

@@ -4,8 +4,11 @@
 No box needed. Each case is a log line of a kind that a jail's filter
 matches, with a user name that is an account of the box or not. A name that
 is not an account must not appear anywhere in the text shown (apart from
-case), also where the line repeats it (Z-Push's brackets, Nextcloud's URL);
-an account is shown and named as the line's account. Also the summary of a
+case), also where the line repeats it (Z-Push's brackets, Nextcloud's URL),
+also when it has a space (sshd, nginx and Postfix log it so), and a line of
+Nextcloud's log that is not valid JSON shows no more than its login message;
+an account is shown and named as the line's account. A short name hits no
+other word of the line. Also the summary of a
 ban (_reason) from the data that fail2ban keeps, and a ban by hand.
 
 Usage: python3 -I tests/fork/ban-reasons.py
@@ -46,6 +49,14 @@ CASES = [
     ("nextcloud, unknown name (URL and user agent)", nc(SECRET), SECRET, None),
     ("nextcloud, account", nc("bob@example.com"), None, "bob@example.com"),
     ("nextcloud, other message with a name in the URL", nc(SECRET, message="Trusted domain error.", ua="curl/8"), SECRET, None),
+    ("sshd, invalid user with a space", b"2026-10-26T13:00:00+01:00 box sshd-session[1]: Invalid user my %s from 192.0.2.1 port 5555" % SECRET.encode(), SECRET, None),
+    ("sshd, failed password of an invalid user with a space", b"2026-10-26T13:00:00+01:00 box sshd-session[1]: Failed password for invalid user my %s from 192.0.2.1 port 5555 ssh2" % SECRET.encode(), SECRET, None),
+    ("munin, Basic user with a space", b'192.0.2.1 - my %s [26/Oct/2026:13:00:00 +0100] "GET /admin/munin/ HTTP/2.0" 401 0 "-" "curl"' % SECRET.encode(), SECRET, None),
+    ("smtp, name with a space", b"2026-10-26T13:00:00+01:00 box postfix/submission/smtpd[123]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=my %s" % SECRET.encode(), SECRET, None),
+    ("nextcloud, not valid JSON, unknown name", b'{"reqId":"abc","level":2,"time":"2026-10-26 13:00:00","remoteAddr":"192.0.2.1","url":"/cloud/remote.php/dav/principals/users/%s/","message":"Login failed: \'%s\' (Remote IP: \'192.0.2.1\')","userAgent":"x' % (SECRET.encode(), SECRET.encode()), SECRET, None),
+    ("nextcloud, not valid JSON, account", b'{"reqId":"abc","level":2,"time":"2026-10-26 13:00:00","remoteAddr":"192.0.2.1","message":"Login failed: \'bob@example.com\' (Remote IP: \'192.0.2.1\')","userAgent":"x', None, "bob@example.com"),
+    ("nextcloud, not valid JSON, no login message", b'{"reqId":"abc","level":2,"time":"2026-10-26 13:00:00","url":"/cloud/remote.php/dav/principals/users/%s/","message":"something' % SECRET.encode(), SECRET, None),
+    ("name that is in the replacement text", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<name>, method=PLAIN, rip=192.0.2.9, lip=10.0.0.1, TLS, session=<x>", None, None),
     ("short unknown name", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<1>, method=PLAIN, rip=192.0.2.9, lip=10.0.0.1, TLS, session=<x>", None, None),
 ]
 
@@ -62,8 +73,14 @@ def main():
             errs.append("account %r, expected %r" % (acc, account))
         if account and account not in text:
             errs.append("the account is not shown")
-        if desc == "short unknown name" and ("2026-10-26T13:00:00" not in text or "user=<[unknown name]>" not in text):
+        if desc == "short unknown name" and ("2026-10-26T13:00:00" not in text or "user=<[unknown name]>" not in text or "(auth failed, 1 attempts" not in text):
             errs.append("a short name garbles the line: %s" % text)
+        if desc == "name that is in the replacement text" and ("user=<[unknown name]>" not in text or "[[" in text):
+            errs.append("the replacement was replaced again: %s" % text)
+        if desc.startswith("nextcloud, not valid JSON") and "/principals/" in text:
+            errs.append("the URL is shown: %s" % text)
+        if "with a space" in desc and "my " in text.lower():
+            errs.append("part of the name is shown: %s" % text)
         if desc == "autodiscover, unknown address" and "[#unknown]" not in text:
             errs.append("Autodiscover's placeholder [#unknown] was changed: %s" % text)
         if desc == "nextcloud, account" and "/principals/users/bob@example.com/" not in text:

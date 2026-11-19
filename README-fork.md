@@ -1068,9 +1068,10 @@ the following, on by default:
   `tools/nextcloud-bruteforce-config.php` as www-data, because Nextcloud's
   own `occ config:system:set` refuses once setup has made the file read-only
   (`management/nextcloud_throttle.py --setup`, `--status`, `--reset <ip>`).
-  While the settings have no value of their own for the throttle, setup
-  takes values set in `config.php` by hand over into them instead of
-  overwriting them, and says so.
+  While the settings have no value of their own for the throttle, values
+  set in `config.php` by hand (as Nextcloud reads them: `0` and `false` are
+  off) are taken over instead of overwritten: setup stores them at once and
+  says so, the control panel shows them and stores them with the next save.
 
 The settings are stored in `$STORAGE_ROOT/settings.yaml` under `fail2ban`,
 only the values that differ from the defaults, so they survive setup runs, the
@@ -1297,8 +1298,10 @@ eingeschaltet:
   `occ config:system:set` die Datei ablehnt, sobald das Setup sie
   schreibgeschützt hat (`management/nextcloud_throttle.py --setup`,
   `--status`, `--reset <ip>`). Solange die Einstellungen keinen eigenen Wert
-  für die Drossel haben, übernimmt das Setup von Hand in `config.php`
-  gesetzte Werte in sie, statt sie zu überschreiben, und meldet das.
+  für die Drossel haben, werden von Hand in `config.php` gesetzte Werte (so,
+  wie Nextcloud sie liest: `0` und `false` sind aus) übernommen statt
+  überschrieben: Das Setup speichert sie sofort und meldet das, die
+  Admin-Oberfläche zeigt sie an und speichert sie beim nächsten Sichern.
 
 Die Einstellungen stehen in `$STORAGE_ROOT/settings.yaml` unter `fail2ban`,
 nur die Werte, die vom Standard abweichen. Sie überstehen so Setup-Läufe, den

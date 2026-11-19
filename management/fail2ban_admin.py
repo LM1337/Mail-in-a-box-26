@@ -346,6 +346,15 @@ def update_settings(env, values, reset=False):
 	# Validate and store new values (a partial dict) and apply them. On a
 	# failed apply the previous settings and files are restored.
 	old, _ = get_settings(env)
+	# Values set in Nextcloud's config.php by hand, while the settings have
+	# none of their own, are taken over (unless this request sets them), so
+	# that a save does not overwrite them (nextcloud_throttle.hand_set_values).
+	if not reset:
+		try:
+			import nextcloud_throttle
+			old.update(nextcloud_throttle.hand_set_values(env)[0])
+		except Exception:
+			pass
 	merged = {} if reset else { k: v for k, v in old.items() }
 	merged.update(values)
 	new, _ = validate_settings(merged, strict=True)
@@ -721,6 +730,15 @@ def jail_kind(name):
 def get_status(env):
 	from concurrent.futures import ThreadPoolExecutor
 	settings, warnings = get_settings(env)
+	# The form shows values set in Nextcloud's config.php by hand while the
+	# settings have none of their own (stored with the next save).
+	nc_hand_set = []
+	try:
+		import nextcloud_throttle
+		vals, nc_hand_set = nextcloud_throttle.hand_set_values(env)
+		settings = dict(settings, **vals)
+	except Exception:
+		pass
 	ret = {
 		"running": False,
 		"error": None,
@@ -729,6 +747,7 @@ def get_status(env):
 		"banned_ips": 0,
 		"settings": settings,
 		"settings_warnings": warnings,
+		"nc_hand_set": nc_hand_set,
 		"defaults": DEFAULTS,
 		"limits": { k: { "min": lo, "max": hi } for k, (lo, hi) in LIMITS.items() },
 		"max_allowlist": MAX_ALLOWLIST,
@@ -906,8 +925,12 @@ RE_NC_LOGIN = re.compile(r"^Login failed: '(.*)' \(Remote IP: '([0-9A-Fa-f:.]+)'
 # reasons of the bans): Roundcube's errors.log, nginx's access log (Munin's
 # Basic login) and sshd (the name of an account that does not exist).
 RE_ROUNDCUBE = re.compile(rb"IMAP Error: Login failed for (.*?) against \S+ from ")
-RE_NGINX_USER = re.compile(rb"^\S+ - (\S+) \[")
-RE_SSH_INVALID = re.compile(rb"([Ii]nvalid user )(\S*)( from )")
+# The names are taken up to the text that follows them, as the filters do:
+# nginx logs $remote_user and sshd the user name without escaping spaces.
+RE_NGINX_USER = re.compile(rb"^\S+ - (.*?) \[\d\d/[A-Z][a-z]{2}/\d{4}:\d\d:\d\d:\d\d [+-]\d{4}\] ")
+RE_SSH_INVALID = re.compile(rb"([Ii]nvalid user )(.*)( from [0-9A-Fa-f:.]+ port \d+)")
+# A line of Nextcloud's log that is not valid JSON: the login message in it.
+RE_NC_LOGIN_RAW = re.compile(rb'"message":"Login failed: \'(.*?)\' \(Remote IP: \'([0-9A-Fa-f:.]+)\'\)"')
 
 def nextcloud_logs(env):
 	# Nextcloud's log and the file of its own rotation (log_rotate_size);
@@ -1131,85 +1154,128 @@ _USER_FIELDS = [
 	(RE_SSH_INVALID, 2, "search"),
 	(re.compile(rb"\buser=<(.*)>, (?:method=\S+, )?rip="), 1, "search"),
 	(re.compile(rb"\buser=<([^>]*)>"), 1, "search"),
-	(re.compile(rb"\bsasl_username=([^\s,]+)"), 1, "search"),
+	(re.compile(rb"\bsasl_username=(.*?)\s*$"), 1, "search"),
 ]
 # Z-Push's user names in brackets ("[<user>]" or "[<user>#<user of the
 # request>]", escaped by setup/zpush.sh), which repeat what the client sent.
 RE_ZPUSH_NAMES = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[((?:[^\]\\]|\\.)*)\]")
 _NAME_CHARS = rb"A-Za-z0-9._@+\-"
 
-def _line_names(line):
-	# The user names a log line names, in order, without duplicates.
-	names = []
+MIN_REPEAT_NAME = 4 # shorter names are masked only where the line names them
+
+def _unescape(name):
+	# Z-Push escapes "]", "#" and "\" in the brackets.
+	return re.sub(rb"\\(.)", rb"\1", name)
+
+def _name_spans(line):
+	# (start, end, name) of each place where the line names a user.
+	spans = []
 	for rx, group, how in _USER_FIELDS:
 		m = getattr(rx, how)(line)
-		if m and m.group(group) not in (None, b"", b"-"):
-			names.append(m.group(group))
+		if m and m.group(group) not in (None, b"", b"-") and m.group(group).strip():
+			spans.append((m.start(group), m.end(group), m.group(group)))
 	m = RE_ZPUSH_NAMES.match(line)
-	if m:
-		# "[#unknown]": Autodiscover's placeholder, no name of the client.
-		names += [n for n in re.split(rb"(?<!\\)#", m.group(1)) if n and m.group(1) != b"#unknown"]
-	ret = []
-	for n in names:
-		if n not in ret and n.strip():
-			ret.append(n)
-	return ret
+	if m and m.group(1) != b"#unknown": # "[#unknown]": Autodiscover's placeholder
+		pos = m.start(1)
+		for part in re.split(rb"(?<!\\)#", m.group(1)):
+			if part.strip():
+				spans.append((pos, pos + len(part), part))
+			pos += len(part) + 1
+	return spans
 
-def _mask_name(text, name):
-	# Every occurrence of a name in the line, apart from case: where it stands
-	# on its own (between other characters than those of an address), else
-	# wherever it is.
+def _mask_name(text, name, repl=UNKNOWN_NAME):
+	# The other occurrences of a name in the line, apart from case: where it
+	# stands on its own (between other characters than those of an address),
+	# else wherever it is.
 	pat = re.compile(rb"(?<![" + _NAME_CHARS + rb"])" + re.escape(name) + rb"(?![" + _NAME_CHARS + rb"])", re.I)
-	new = pat.sub(lambda m: UNKNOWN_NAME, text)
+	new = pat.sub(lambda m: repl, text)
 	if new == text:
-		new = re.compile(re.escape(name), re.I).sub(lambda m: UNKNOWN_NAME, text)
+		new = re.compile(re.escape(name), re.I).sub(lambda m: repl, text)
 	return new
+
+def _nc_reason_line(line, known):
+	# A line of Nextcloud's log: the fields that matter instead of the whole
+	# JSON object. The URL only for an account of the box: a WebDAV path names
+	# the login name (.../principals/users/<name>/), also in other messages.
+	try:
+		j = json.loads(line)
+	except ValueError:
+		j = None
+	if not isinstance(j, dict):
+		# Not valid JSON: only the time and the login message, else nothing.
+		ts = RE_TS_NC.search(line, 0, 400)
+		when = (ts.group(1) + b" " + ts.group(2)).decode() + " – " if ts else ""
+		m = RE_NC_LOGIN_RAW.search(line)
+		if not m:
+			return when + "[a line of Nextcloud's log that could not be read]", None, True
+		try:
+			user = json.loads(b'"' + m.group(1) + b'"').strip().lower()
+		except ValueError:
+			user = None
+		if user in known:
+			return (when + "Login failed: '%s' (Remote IP: '%s')" % (user, m.group(2).decode()))[:REASON_LINE_CHARS], user, False
+		return when + "Login failed: %s (Remote IP: '%s')" % (UNKNOWN_NAME.decode(), m.group(2).decode()), None, True
+	msg = str(j.get("message", ""))
+	m = RE_NC_LOGIN.match(msg)
+	user = m.group(1).strip().lower() if m else None
+	own = bool(m) and user in known
+	parts = [str(j.get(k)) for k in ("time", "remoteAddr", "method") if j.get(k)]
+	if own and j.get("url"):
+		parts.append(str(j["url"]))
+	if m and not own:
+		msg = "Login failed: %s (Remote IP: '%s')" % (UNKNOWN_NAME.decode(), m.group(2))
+	text = " ".join(parts) + " – " + msg
+	if j.get("userAgent"):
+		ua = str(j["userAgent"])
+		if m and not own and len(m.group(1).strip()) >= MIN_REPEAT_NAME:
+			ua = _mask_name(ua.encode("utf-8", "replace"), m.group(1).encode("utf-8", "replace")).decode("utf-8", "replace")
+		text += " – " + ua
+	return text[:REASON_LINE_CHARS], (user if own else None), bool(m) and not own
 
 def _reason_line(line, known):
 	# One log line of a ban, for the control panel: (text, account, masked).
 	# account is the first account of this box the line names. Every user
-	# name that is not an account of this box is replaced, wherever it
-	# appears in the line, as the failed-login report leaves such names out:
-	# it is whatever the client sent, a password typed into the wrong field
-	# too.
+	# name that is not an account of this box is replaced, as the
+	# failed-login report leaves such names out: it is whatever the client
+	# sent, a password typed into the wrong field too. It is replaced where
+	# the line names a user (also in Z-Push's brackets), and a name of 4 or
+	# more characters also wherever else the line repeats it (a shorter one
+	# would hit other words, "1" the "1 attempts" of Dovecot).
 	if line[:1] == b"{":
-		# Nextcloud: the fields that matter instead of the whole JSON object.
-		# The URL only for an account of the box: a WebDAV path names the
-		# login name (.../principals/users/<name>/), also in other messages.
-		try:
-			j = json.loads(line)
-		except ValueError:
-			j = None
-		if isinstance(j, dict):
-			msg = str(j.get("message", ""))
-			m = RE_NC_LOGIN.match(msg)
-			user = m.group(1).strip().lower() if m else None
-			own = bool(m) and user in known
-			parts = [str(j.get(k)) for k in ("time", "remoteAddr", "method") if j.get(k)]
-			if own and j.get("url"):
-				parts.append(str(j["url"]))
-			if m and not own:
-				msg = "Login failed: %s (Remote IP: '%s')" % (UNKNOWN_NAME.decode(), m.group(2))
-			text = " ".join(parts) + " – " + msg
-			if j.get("userAgent"):
-				ua = str(j["userAgent"])
-				if m and not own and m.group(1):
-					ua = _mask_name(ua.encode("utf-8", "replace"), m.group(1).encode("utf-8", "replace")).decode("utf-8", "replace")
-				text += " – " + ua
-			return text[:REASON_LINE_CHARS], (user if own else None), bool(m) and not own
-	account, masked, text = None, False, line
-	for name in _line_names(line):
+		return _nc_reason_line(line, known)
+	account, unknown = None, []
+	for start, end, name in _name_spans(line):
 		user = name.decode("utf-8", "replace").strip().lower()
-		# Z-Push escapes "]", "#" and "\" in the brackets.
-		plain = re.sub(rb"\\(.)", rb"\1", name).decode("utf-8", "replace").strip().lower()
+		plain = _unescape(name).decode("utf-8", "replace").strip().lower()
 		if user in known or plain in known:
 			account = account or (user if user in known else plain)
-			continue
-		text = _mask_name(text, name)
-		if plain != user:
-			text = _mask_name(text, re.sub(rb"\\(.)", rb"\1", name))
-		masked = True
-	return text.decode("utf-8", "replace")[:REASON_LINE_CHARS], account, masked
+		else:
+			unknown.append((start, end, name))
+	if not unknown:
+		return line.decode("utf-8", "replace")[:REASON_LINE_CHARS], account, False
+	# The places, merged where they overlap (sasl_username=<name with a
+	# space> is matched by two regexes).
+	mark = bytearray(len(line))
+	for start, end, _ in unknown:
+		mark[start:end] = b"\x01" * (end - start)
+	# A NUL stands for the replacement until the end (a log line has none), so
+	# that a name like "name" does not hit the replacement text itself.
+	out, i = bytearray(), 0
+	while i < len(line):
+		if mark[i]:
+			while i < len(line) and mark[i]:
+				i += 1
+			out += b"\0"
+		else:
+			out.append(line[i])
+			i += 1
+	text = bytes(out)
+	for _, _, name in sorted(unknown, key=lambda u: -len(u[2])):
+		for n in (name, _unescape(name)):
+			if len(n.strip()) >= MIN_REPEAT_NAME:
+				text = _mask_name(text, n.strip(), b"\0")
+	text = text.replace(b"\0", UNKNOWN_NAME)
+	return text.decode("utf-8", "replace")[:REASON_LINE_CHARS], account, True
 
 def _reason(data, known):
 	if isinstance(data, bytes):
