@@ -1039,7 +1039,8 @@ the following, on by default:
   whatever the client sent, a password typed into the wrong field too. A ban
   without lines was set by hand.
 * **Nextcloud's own throttle** (since v78-r2604.4). Apart from fail2ban,
-  Nextcloud counts failed logins per address (IPv4) or /64 network (IPv6):
+  Nextcloud counts failed logins per address (IPv4) or IPv6 network (/56 by
+  default, `security.ipv6_normalized_subnet_size`):
   after failures within 12 hours it delays every login from there (0.2 s,
   0.4 s, ... up to 25 s), and after more than 10 failures (`nc_max_attempts`)
   within 30 minutes it refuses them with HTTP 429, also for the accounts with
@@ -1048,9 +1049,13 @@ the following, on by default:
   a successful login removes only the failures of its own account. The
   control panel lists the counted addresses (failures in 12 hours and in 30
   minutes, the accounts of the box they tried, the delay, whether they are
-  blocked) and resets an address (`occ security:bruteforce:reset`). The
-  throttle can be turned off (`nc_protection`, not recommended: then only
-  `miab-owncloud` limits password guessing on Nextcloud), and `nc_allowlist`
+  blocked) and resets an address: it deletes the failures of its network,
+  as `occ security:bruteforce:reset` does, but also where that does nothing
+  (with the throttle off, for an address on the bypass list). The throttle
+  can be turned off (`nc_protection`, not recommended: then only
+  `miab-owncloud` limits password guessing on Nextcloud); Nextcloud then
+  counts no new failures but goes on applying those it counted before for up
+  to 12 hours, so turning it off also deletes them. `nc_allowlist`
   (off by default) puts the allowlist on Nextcloud's bypass list too (the
   entries it adds are recorded under `nextcloud_bypass` in settings.yaml and
   removed again when they leave the allowlist; `127.0.0.1/32`, B121, and
@@ -1063,6 +1068,9 @@ the following, on by default:
   `tools/nextcloud-bruteforce-config.php` as www-data, because Nextcloud's
   own `occ config:system:set` refuses once setup has made the file read-only
   (`management/nextcloud_throttle.py --setup`, `--status`, `--reset <ip>`).
+  While the settings have no value of their own for the throttle, setup
+  takes values set in `config.php` by hand over into them instead of
+  overwriting them, and says so.
 
 The settings are stored in `$STORAGE_ROOT/settings.yaml` under `fail2ban`,
 only the values that differ from the defaults, so they survive setup runs, the
@@ -1129,7 +1137,7 @@ only, changes by POST with form fields):
 | `POST /admin/system/fail2ban/unban-all` | `jail`: unbans every address banned in that jail |
 | `GET /admin/system/fail2ban/report` | the failed-login report as JSON |
 | `GET /admin/system/nextcloud-throttle` | Nextcloud's throttle: on or off, `max_attempts`, the counted addresses (failures in 12 hours and 30 minutes, accounts, `delay_ms`, `blocked`) and its bypass list |
-| `POST /admin/system/nextcloud-throttle/reset` | `ip`: deletes Nextcloud's failures of that address (for IPv6 of its /64) |
+| `POST /admin/system/nextcloud-throttle/reset` | `ip`: deletes Nextcloud's failures of the network of that address; answers with `subnets` and `deleted` |
 
 Unbanning without a jail runs `fail2ban-client unban <ip>`: the address is
 unbanned in all jails, recidive included, and its ban history is deleted (by
@@ -1258,7 +1266,8 @@ eingeschaltet:
   Logzeilen wurde von Hand gesetzt.
 * **Die eigene Drossel von Nextcloud** (seit v78-r2604.4). Unabhängig von
   fail2ban zählt Nextcloud fehlgeschlagene Anmeldungen je Adresse (IPv4) oder
-  /64-Netz (IPv6): Nach Fehlversuchen innerhalb von 12 Stunden verzögert es
+  IPv6-Netz (standardmäßig /56, `security.ipv6_normalized_subnet_size`): Nach
+  Fehlversuchen innerhalb von 12 Stunden verzögert es
   jede Anmeldung von dort (0,2 s, 0,4 s … bis 25 s), und nach mehr als 10
   Fehlversuchen (`nc_max_attempts`) innerhalb von 30 Minuten weist es sie mit
   HTTP 429 ab, auch für die Konten mit richtigem Passwort hinter dieser
@@ -1267,10 +1276,14 @@ eingeschaltet:
   Anmeldung löscht nur die Fehlversuche ihres eigenen Kontos. Die
   Admin-Oberfläche listet die gezählten Adressen (Fehlversuche in 12 Stunden
   und in 30 Minuten, die versuchten Konten der Box, die Verzögerung, ob sie
-  gesperrt sind) und setzt eine Adresse zurück
-  (`occ security:bruteforce:reset`). Die Drossel lässt sich abschalten
-  (`nc_protection`, nicht empfohlen: Dann begrenzt nur noch `miab-owncloud`
-  das Raten von Passwörtern bei Nextcloud), und `nc_allowlist` (anfangs aus)
+  gesperrt sind) und setzt eine Adresse zurück: Sie löscht die Fehlversuche
+  ihres Netzes wie `occ security:bruteforce:reset`, aber auch dort, wo dieses
+  nichts tut (bei abgeschalteter Drossel, für eine Adresse auf der
+  Ausnahmeliste). Die Drossel lässt sich abschalten (`nc_protection`, nicht
+  empfohlen: Dann begrenzt nur noch `miab-owncloud` das Raten von Passwörtern
+  bei Nextcloud); Nextcloud zählt dann keine neuen Fehlversuche, wendet die
+  bisher gezählten aber noch bis zu 12 Stunden an, deshalb löscht das
+  Abschalten sie. `nc_allowlist` (anfangs aus)
   setzt die Freigabeliste auch auf die Ausnahmeliste von Nextcloud (was sie
   dort einträgt, wird unter `nextcloud_bypass` in settings.yaml vermerkt
   und wieder entfernt, wenn es die Freigabeliste verlässt;
@@ -1283,7 +1296,9 @@ eingeschaltet:
   `tools/nextcloud-bruteforce-config.php` als www-data, weil
   `occ config:system:set` die Datei ablehnt, sobald das Setup sie
   schreibgeschützt hat (`management/nextcloud_throttle.py --setup`,
-  `--status`, `--reset <ip>`).
+  `--status`, `--reset <ip>`). Solange die Einstellungen keinen eigenen Wert
+  für die Drossel haben, übernimmt das Setup von Hand in `config.php`
+  gesetzte Werte in sie, statt sie zu überschreiben, und meldet das.
 
 Die Einstellungen stehen in `$STORAGE_ROOT/settings.yaml` unter `fail2ban`,
 nur die Werte, die vom Standard abweichen. Sie überstehen so Setup-Läufe, den

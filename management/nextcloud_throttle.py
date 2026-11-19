@@ -3,9 +3,10 @@
 # Nextcloud's brute-force throttle (fork), for System > Intrusion Protection.
 #
 # Nextcloud counts each failed login in its table bruteforce_attempts, under
-# the address of the client: an IPv4 address (stored as <address>/32) or the
-# /64 network of an IPv6 address. Before it checks a login it counts the
-# failures of that address (lib/private/Security/Bruteforce/Throttler.php):
+# the network of the client: an IPv4 address (stored as <address>/32) or the
+# IPv6 network of the address (/56 by default, security.ipv6_normalized_subnet_size,
+# 32 to 64). Before it checks a login it counts the failures of that network
+# (lib/private/Security/Bruteforce/Throttler.php):
 #
 #  * within the last 12 hours: the login is delayed by 0.1 s * 2^failures, up
 #    to 25 s; above auth.bruteforce.max-attempts (10 by default) always 25 s,
@@ -14,28 +15,37 @@
 #    also for an account with the right password behind the same address.
 #
 # A successful login removes only the failures of that account from that
-# address, so a device with an old password keeps a whole network throttled
+# network, so a device with an old password keeps a whole network throttled
 # (and the devices with the right password behind it). The failures are kept
 # per action ("login" for the logins of the web interface and of CalDAV,
 # CardDAV and WebDAV, others for share links and the like), and each action is
-# counted on its own. Addresses on the bypass list (the "whitelist_N" keys of
-# the app config "bruteForce") are never counted or throttled.
+# counted on its own. An address on the bypass list (the "whitelist_N" keys of
+# the app config "bruteForce") is never counted or throttled; the other
+# addresses of its network are. With auth.bruteforce.protection.enabled off,
+# Nextcloud counts no new failures and resets none ("occ
+# security:bruteforce:reset" does nothing then), but the failures counted
+# before still delay and refuse logins until they are older than 12 hours.
 #
-# This module shows the throttled addresses (read from the database, read-only
-# and as www-data, which owns it), resets an address ("occ
-# security:bruteforce:reset"), and applies the settings nc_protection,
-# nc_max_attempts and nc_allowlist that fail2ban_admin.py stores with the
-# other intrusion protection settings: the first two are system settings in
-# config.php (tools/nextcloud-bruteforce-config.php), the last puts the
-# allowlist on the bypass list. The entries it adds there are recorded in
-# settings.yaml ("nextcloud_bypass"), so that only these are removed again:
-# 127.0.0.1/32 (setup/nextcloud.sh, B121) and entries of an administrator
-# (Administration > Security) are never touched.
+# This module shows the counted networks (read from the database, read-only
+# and as www-data, which owns it), resets one (deletes its rows, as
+# www-data, which also works with the protection off or for an address on
+# the bypass list, where occ does nothing), and applies the settings
+# nc_protection, nc_max_attempts and nc_allowlist that fail2ban_admin.py
+# stores with the other intrusion protection settings: the first two are
+# system settings in config.php (tools/nextcloud-bruteforce-config.php), the
+# last puts the allowlist on the bypass list. Turning the protection off also
+# deletes the failures counted so far. The entries this module adds to the
+# bypass list are recorded in settings.yaml ("nextcloud_bypass", after each
+# change), so that only these are removed again: 127.0.0.1/32
+# (setup/nextcloud.sh, B121) and entries of an administrator (Administration
+# > Security) are never touched.
 #
 # Command line (as root, from the Mail-in-a-Box directory):
-#   management/nextcloud_throttle.py --setup     apply the settings (setup/start.sh; never fails)
-#   management/nextcloud_throttle.py --status    print the throttled addresses
-#   management/nextcloud_throttle.py --reset IP  reset the failures of an address
+#   management/nextcloud_throttle.py --setup     apply the settings (setup/start.sh); while the
+#                                                 settings have no value of their own, it takes
+#                                                 over values set in config.php by hand
+#   management/nextcloud_throttle.py --status    print the counted networks
+#   management/nextcloud_throttle.py --reset IP  reset the failures of the network of an address
 
 import os, os.path, re, sys, json, math, time, ipaddress, subprocess
 
@@ -50,6 +60,7 @@ DEFAULT_MAX_ATTEMPTS = 10   # Throttler::MAX_ATTEMPTS
 MAX_DELAY_MS = 25000        # Throttler::MAX_DELAY_MS
 WINDOW_HOURS = 12           # the delay counts the failures of the last 12 hours
 BLOCK_MINUTES = 30          # the 429 counts those of the last 30 minutes too
+MAX_ROWS = 20000            # (network, action, address) groups read
 MAX_ENTRIES = 500
 MAX_ACCOUNTS = 20
 SYSTEM_BYPASS = "127.0.0.1/32" # setup/nextcloud.sh (B121)
@@ -111,38 +122,93 @@ def nc_config(env, set_values=None):
 	except (ValueError, IndexError):
 		raise NCError("Unexpected output when reading Nextcloud's config.php.") from None
 
-# Read as www-data (the owner of the database, its directory and its -wal
-# and -shm files, which a connection of root could create with the wrong
-# owner), read-only. Aggregated in SQL: an attack can leave many thousand rows.
+# The database is read and written as www-data, the owner of the database,
+# its directory and its -wal and -shm files (a connection of root could
+# create these with the wrong owner). Reading is aggregated in SQL: an attack
+# can leave many thousand rows, also with a new login name in each. The
+# parameters come on standard input.
 DB_READER = r"""
 import json, sqlite3, sys, urllib.parse
-path, prefix, since, recent = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-con = sqlite3.connect("file:" + urllib.parse.quote(path) + "?mode=ro", uri=True, timeout=10)
+p = json.load(sys.stdin)
+con = sqlite3.connect("file:" + urllib.parse.quote(p["path"]) + "?mode=ro", uri=True, timeout=10)
 try:
-    t = prefix + "bruteforce_attempts"
-    rows = con.execute("SELECT subnet, action, ip, metadata, COUNT(*), SUM(occurred >= ?), MIN(occurred), MAX(occurred) FROM " + t
-        + " WHERE occurred >= ? GROUP BY subnet, action, ip, metadata ORDER BY MAX(occurred) DESC LIMIT 50000", (recent, since)).fetchall()
-    bypass = con.execute("SELECT configkey, configvalue FROM " + prefix + "appconfig WHERE appid = 'bruteForce' AND configkey LIKE 'whitelist\\_%' ESCAPE '\\'").fetchall()
+    t = p["prefix"] + "bruteforce_attempts"
+    out = {}
+    if p["attempts"]:
+        out["rows"] = con.execute("SELECT subnet, action, ip, COUNT(*), SUM(occurred >= ?), MIN(occurred), MAX(occurred) FROM " + t
+            + " WHERE occurred >= ? GROUP BY subnet, action, ip ORDER BY MAX(occurred) DESC LIMIT ?", (p["recent"], p["since"], p["limit"])).fetchall()
+        out["names"] = con.execute("SELECT subnet, COUNT(DISTINCT CASE WHEN json_valid(metadata) THEN lower(json_extract(metadata, '$.user')) END) FROM " + t
+            + " WHERE occurred >= ? GROUP BY subnet", (p["since"],)).fetchall()
+        out["known"] = con.execute("SELECT subnet, u FROM (SELECT subnet, CASE WHEN json_valid(metadata) THEN lower(json_extract(metadata, '$.user')) END AS u FROM " + t
+            + " WHERE occurred >= ?) WHERE u IN (SELECT value FROM json_each(?)) GROUP BY subnet, u", (p["since"], json.dumps(p["known"]))).fetchall()
+    out["bypass"] = con.execute("SELECT configkey, configvalue FROM " + p["prefix"] + "appconfig WHERE appid = 'bruteForce' AND configkey LIKE 'whitelist\\_%' ESCAPE '\\'").fetchall()
 finally:
     con.close()
-json.dump({"rows": rows, "bypass": bypass}, sys.stdout)
+json.dump(out, sys.stdout)
 """
 
-def _read_db(env, cfg, since, recent):
+# Deletes the failures of the networks that contain an address, or all of
+# them ("ip": null), as Nextcloud's own reset does (its backend deletes by
+# network). Prints the networks and the number of rows deleted.
+DB_DELETER = r"""
+import ipaddress, json, sqlite3, sys, urllib.parse
+p = json.load(sys.stdin)
+con = sqlite3.connect("file:" + urllib.parse.quote(p["path"]) + "?mode=rw", uri=True, timeout=30)
+try:
+    t = p["prefix"] + "bruteforce_attempts"
+    with con:
+        if p["ip"] is None:
+            subnets = None
+            n = con.execute("DELETE FROM " + t).rowcount
+        else:
+            a = ipaddress.ip_address(p["ip"])
+            subnets = []
+            for (s,) in con.execute("SELECT DISTINCT subnet FROM " + t).fetchall():
+                try:
+                    net = ipaddress.ip_network(s, strict=False)
+                except ValueError:
+                    continue
+                if net.version == a.version and a in net:
+                    subnets.append(s)
+            n = 0
+            for s in subnets:
+                n += con.execute("DELETE FROM " + t + " WHERE subnet = ?", (s,)).rowcount
+finally:
+    con.close()
+json.dump({"subnets": subnets, "deleted": n}, sys.stdout)
+"""
+
+def _db(env, cfg):
 	if (cfg.get("dbtype") or "sqlite3") not in ("sqlite", "sqlite3"):
-		raise NCError("Nextcloud does not use SQLite here, so the overview cannot read its throttle.")
+		raise NCError("Nextcloud does not use SQLite here, so its throttle cannot be read or reset here.")
+	if cfg.get("memcache_distributed") and not cfg.get("force_database"):
+		# Nextcloud then counts in the distributed cache (Redis), not in the
+		# database.
+		raise NCError("Nextcloud keeps its brute-force counters in its distributed cache (memcache.distributed), so they cannot be read or reset here.")
 	prefix = cfg.get("dbtableprefix") or "oc_"
 	if not re.fullmatch(r"[A-Za-z0-9_]{0,32}", prefix):
 		raise NCError("Nextcloud's table prefix is not a plain name.")
-	datadir = cfg.get("datadirectory") or os.path.join(env["STORAGE_ROOT"], "owncloud")
-	path = os.path.join(datadir, "owncloud.db")
-	p = _run_www(["/usr/bin/python3", "-I", "-c", DB_READER, path, prefix, str(int(since)), str(int(recent))], timeout=60)
+	datadir = cfg.get("datadirectory") or ""
+	if not datadir.startswith("/"):
+		raise NCError("Nextcloud's data directory is not known.")
+	return { "path": os.path.join(datadir, "owncloud.db"), "prefix": prefix }
+
+def _run_db(script, params, what):
+	p = _run_www(["/usr/bin/python3", "-I", "-c", script], stdin=json.dumps(params), timeout=120)
 	if p.returncode != 0:
-		raise _fail("Reading Nextcloud's database", p)
+		raise _fail(what, p)
 	try:
 		return json.loads(p.stdout)
 	except ValueError:
-		raise NCError("Unexpected output when reading Nextcloud's database.") from None
+		raise NCError(f"Unexpected output when {what.lower()}.") from None
+
+def _read_db(env, cfg, since=0, recent=0, known=(), attempts=True):
+	params = dict(_db(env, cfg), since=int(since), recent=int(recent), known=sorted(known), attempts=attempts, limit=MAX_ROWS)
+	return _run_db(DB_READER, params, "Reading Nextcloud's database")
+
+def delete_attempts(env, cfg, ip=None):
+	# ip None: every failure of every network.
+	return _run_db(DB_DELETER, dict(_db(env, cfg), ip=ip), "Deleting Nextcloud's failed logins")
 
 def delay_ms(attempts, max_attempts):
 	# Throttler::calculateDelay.
@@ -167,14 +233,6 @@ def _cidr(net):
 	# The form this module writes to the bypass list: always with a prefix.
 	n = ipaddress.ip_network(net, strict=False)
 	return f"{n.network_address}/{n.prefixlen}"
-
-def _user(metadata):
-	try:
-		m = json.loads(metadata) if metadata else {}
-	except ValueError:
-		return None
-	u = m.get("user") if isinstance(m, dict) else None
-	return str(u).strip().lower()[:320] if u else None
 
 def _effective(cfg):
 	enabled = cfg.get("enabled")
@@ -232,14 +290,14 @@ def get_overview(env, settings=None, now=None):
 		ret["error"] = str(e)
 		return ret
 	enabled, max_attempts = _effective(cfg)
-	ret.update(enabled=enabled, max_attempts=max_attempts, config_current=_config_matches(cfg, settings))
-	if cfg.get("memcache_distributed") and not cfg.get("force_database"):
-		# Nextcloud then counts in the distributed cache (Redis), not in the
-		# database.
-		ret["error"] = "Nextcloud keeps its brute-force counters in its distributed cache (memcache.distributed), so they cannot be shown here."
-		return ret
+	ret.update(enabled=enabled, max_attempts=max_attempts, ipv6_prefix=cfg.get("ipv6_prefix"),
+		config_current=_config_matches(cfg, settings))
+	# Only the accounts of this box are named, as in the failed-login report:
+	# another login name is whatever the client sent (a password typed into
+	# the wrong field too).
+	known = fail2ban_admin._known_accounts(env)
 	try:
-		data = _read_db(env, cfg, now - WINDOW_HOURS * 3600, now - BLOCK_MINUTES * 60)
+		data = _read_db(env, cfg, now - WINDOW_HOURS * 3600, now - BLOCK_MINUTES * 60, known)
 	except NCError as e:
 		ret["error"] = str(e)
 		return ret
@@ -248,83 +306,84 @@ def get_overview(env, settings=None, now=None):
 	ret["bypass"] = _bypass_entries(data.get("bypass") or [], state)
 	ret["bypass_current"] = _bypass_matches(settings, data.get("bypass") or [], state)
 	bypass_nets = [n for n in (_network(v) for _, v in (data.get("bypass") or [])) if n is not None]
-	# Only the accounts of this box are named, as in the failed-login report:
-	# another login name is whatever the client sent (a password typed into
-	# the wrong field too).
-	known = fail2ban_admin._known_accounts(env)
 
+	names = { str(s): int(n or 0) for s, n in data.get("names") or [] }
+	accounts = {}
+	for s, u in data.get("known") or []:
+		accounts.setdefault(str(s), set()).add(str(u))
 	groups = {}
-	for subnet, action, ip, metadata, count, recent, first, last in data.get("rows") or []:
-		g = groups.setdefault(str(subnet), { "subnet": str(subnet), "ips": set(), "accounts": set(), "actions": {}, "first": first, "last": last })
+	for subnet, action, ip, count, recent, first, last in data.get("rows") or []:
+		g = groups.setdefault(str(subnet), { "ips": set(), "actions": {}, "first": first, "last": last })
 		g["ips"].add(str(ip))
-		u = _user(metadata)
-		if u:
-			g["accounts"].add(u)
 		a = g["actions"].setdefault(str(action), [0, 0])
 		a[0] += int(count)
 		a[1] += int(recent or 0)
 		g["first"] = min(g["first"], first)
 		g["last"] = max(g["last"], last)
 
+	def bypassed(ip):
+		try:
+			a = ipaddress.ip_address(ip)
+		except ValueError:
+			return False
+		return any(a.version == n.version and a in n for n in bypass_nets)
+
 	entries = []
-	for g in groups.values():
+	for subnet, g in groups.items():
 		attempts = sum(a[0] for a in g["actions"].values())
 		recent = sum(a[1] for a in g["actions"].values())
-		# Each action is counted on its own: the worst one decides.
+		# Each action is counted on its own: the worst one decides. Also with
+		# the protection off: Nextcloud still applies the failures counted
+		# before (it only stops counting new ones).
 		worst = max(a[0] for a in g["actions"].values())
-		blocked = enabled and any(a[0] > max_attempts and a[1] > max_attempts for a in g["actions"].values())
-		addrs = []
-		for ip in g["ips"]:
-			try:
-				addrs.append(ipaddress.ip_address(ip))
-			except ValueError:
-				pass
-		bypassed = any(a in n for a in addrs for n in bypass_nets if a.version == n.version)
-		net = _network(g["subnet"])
+		blocked = any(a[0] > max_attempts and a[1] > max_attempts for a in g["actions"].values())
+		ips = sorted(g["ips"])
+		bypassed_ips = [ip for ip in ips if bypassed(ip)]
+		net = _network(subnet)
 		if net is not None and net.num_addresses == 1:
 			address = str(net.network_address)
 		else:
-			address = str(net) if net is not None else g["subnet"]
+			address = str(net) if net is not None else subnet
+		known_here = sorted(accounts.get(subnet, ()))
 		entries.append({
-			"subnet": g["subnet"],
+			"subnet": subnet,
 			"address": address,
-			"ips": sorted(g["ips"])[:20],
-			"ips_total": len(g["ips"]),
+			"network": net is not None and net.num_addresses > 1,
+			"ips": ips[:20],
+			"ips_total": len(ips),
 			"attempts": attempts,
 			"recent": recent,
 			"actions": { k: v[0] for k, v in sorted(g["actions"].items()) },
-			"accounts": sorted(a for a in g["accounts"] if a in known)[:MAX_ACCOUNTS],
-			"accounts_total": len([a for a in g["accounts"] if a in known]),
-			"unknown_names": len([a for a in g["accounts"] if a not in known]),
+			"accounts": known_here[:MAX_ACCOUNTS],
+			"accounts_total": len(known_here),
+			"unknown_names": max(0, names.get(subnet, 0) - len(known_here)),
 			"first": int(g["first"]),
 			"last": int(g["last"]),
-			"delay_ms": 0 if (bypassed or not enabled) else delay_ms(worst, max_attempts),
-			"blocked": blocked and not bypassed,
-			"bypassed": bypassed,
+			# What Nextcloud applies to an address of this network that is not
+			# on the bypass list.
+			"delay_ms": delay_ms(worst, max_attempts),
+			"blocked": blocked,
+			# The addresses that failed here and are on the bypass list now
+			# (Nextcloud does not throttle them); "bypassed": all of them.
+			"bypassed_ips": bypassed_ips[:20],
+			"bypassed": bool(ips) and len(bypassed_ips) == len(ips),
 		})
-	entries.sort(key=lambda e: (not e["blocked"], -e["delay_ms"], -e["last"], e["address"]))
+	entries.sort(key=lambda e: (e["bypassed"], not e["blocked"], -e["delay_ms"], -e["last"], e["address"]))
 	ret["entries_total"] = len(entries)
+	ret["entries_truncated"] = len(data.get("rows") or []) >= MAX_ROWS
 	ret["entries"] = entries[:MAX_ENTRIES]
 	return ret
 
 def reset(env, ip):
-	# Deletes the failures of an address (all actions; for IPv6 those of its
-	# /64), as Administration > Security and "occ security:bruteforce:reset"
-	# do. Returns the attempts Nextcloud counts afterwards.
+	# Deletes the failures of the network of an address (all actions), as
+	# Administration > Security and "occ security:bruteforce:reset" do, but
+	# also with the protection off and for an address on the bypass list,
+	# where these do nothing.
 	import fail2ban_admin
 	ip = fail2ban_admin.normalize_ip(ip)
 	cfg = nc_config(env)
-	enabled, _ = _effective(cfg)
-	if not enabled:
-		raise ValueError("Nextcloud's brute-force protection is off, so it neither counts nor resets failures.")
-	occ("security:bruteforce:reset", ip)
-	after = None
-	try:
-		j = json.loads(occ("security:bruteforce:attempts", ip, "--output=json").strip().splitlines()[-1])
-		after = j.get("attempts")
-	except (NCError, ValueError, IndexError):
-		pass
-	return { "ip": ip, "attempts": after }
+	r = delete_attempts(env, cfg, ip)
+	return { "ip": ip, "subnets": r.get("subnets") or [], "deleted": int(r.get("deleted") or 0) }
 
 # SETTINGS
 
@@ -364,7 +423,7 @@ def config_is_current(env, settings):
 	state = _state(env)
 	if not settings["nc_allowlist"] and not state:
 		return True
-	data = _read_db(env, cfg, time.time(), time.time())
+	data = _read_db(env, cfg, attempts=False)
 	return _bypass_matches(settings, data.get("bypass") or [], state)
 
 def _list_bypass():
@@ -379,30 +438,40 @@ def _list_bypass():
 
 def apply_settings(env, settings):
 	# Writes config.php and the bypass list as the settings say. Returns what
-	# changed.
-	result = { "config_changed": False, "bypass_added": [], "bypass_removed": [] }
+	# changed. The bypass entries this module adds or removes are recorded
+	# after each change, so a failure in between leaves no entry unrecorded.
+	result = { "config_changed": False, "attempts_deleted": 0, "bypass_added": [], "bypass_removed": [] }
 	cfg = nc_config(env)
 	want = desired_config(settings)
 	have = { "auth.bruteforce.protection.enabled": cfg.get("enabled"), "auth.bruteforce.max-attempts": cfg.get("max_attempts") }
 	change = { k: v for k, v in want.items() if have[k] != v }
 	if change:
-		nc_config(env, change)
+		cfg = nc_config(env, change)
 		result["config_changed"] = True
+	if not settings["nc_protection"]:
+		# Off: Nextcloud stops counting (config.php first, so that no new
+		# failure is counted after the deletion), but it goes on applying
+		# the failures counted before, for up to 12 hours.
+		try:
+			result["attempts_deleted"] = int(delete_attempts(env, cfg).get("deleted") or 0)
+		except NCError as e:
+			raise NCError(f"The protection is off now, but the failures counted before could not be deleted, so they still delay logins for up to {WINDOW_HOURS} hours: {e}") from None
 
 	state = _state(env)
 	wanted = desired_bypass(settings)
 	if not wanted and not state:
 		return result
 	current = _list_bypass()
-	new_state = dict(state)
-	for key, net in state.items():
+	for key, net in list(state.items()):
 		if current.get(key) != net:
 			# Removed or changed by an administrator: no longer ours.
-			del new_state[key]
+			del state[key]
+			_save_state(env, state)
 		elif net not in wanted:
 			occ("config:app:delete", "bruteForce", key)
-			del new_state[key]
+			del state[key]
 			del current[key]
+			_save_state(env, state)
 			result["bypass_removed"].append(net)
 	present = { str(_network(v)) for v in current.values() if _network(v) is not None }
 	used = [int(k[10:]) for k in current]
@@ -411,14 +480,42 @@ def apply_settings(env, settings):
 			continue
 		n = max(used + [0]) + 1
 		key = f"whitelist_{n}"
+		# Recorded before it is set: an entry that is recorded but not set is
+		# dropped on the next run (above), one that is set but not recorded
+		# would stay for good.
+		state[key] = net
+		_save_state(env, state)
 		occ("config:app:set", "bruteForce", key, "--value", net, "--type", "string")
 		used.append(n)
 		present.add(str(_network(net)))
-		new_state[key] = net
 		result["bypass_added"].append(net)
-	if new_state != state:
-		_save_state(env, new_state)
 	return result
+
+def import_hand_set(env, settings):
+	# While the settings have no value of their own for Nextcloud's
+	# protection (nc_protection, nc_max_attempts: never saved, or saved at the
+	# defaults), values that an administrator set in config.php by hand are
+	# taken over into the settings instead of being overwritten. Returns
+	# (settings, messages).
+	import fail2ban_admin
+	stored = utils.load_settings(env).get("fail2ban")
+	if not isinstance(stored, dict):
+		stored = {}
+	if any(k in stored for k in ("nc_protection", "nc_max_attempts")):
+		return settings, []
+	cfg = nc_config(env)
+	new, msgs = dict(settings), []
+	if cfg.get("enabled") is False:
+		new["nc_protection"] = False
+		msgs.append("auth.bruteforce.protection.enabled = false")
+	ma = cfg.get("max_attempts")
+	if isinstance(ma, int) and not isinstance(ma, bool) and ma != DEFAULT_MAX_ATTEMPTS:
+		lo, hi = fail2ban_admin.LIMITS["nc_max_attempts"]
+		new["nc_max_attempts"] = min(hi, max(lo, ma))
+		msgs.append(f"auth.bruteforce.max-attempts = {ma}" + ("" if lo <= ma <= hi else f" (as {new['nc_max_attempts']}, the settings take {lo} to {hi})"))
+	if msgs:
+		fail2ban_admin.save_settings(env, new)
+	return new, msgs
 
 # COMMAND LINE
 
@@ -429,14 +526,19 @@ if __name__ == "__main__":
 	if args == ["--setup"]:
 		# Called by setup/start.sh after fail2ban_admin.py --setup. Never stops
 		# setup: on a problem Nextcloud keeps its current settings.
-		settings, _ = fail2ban_admin.get_settings(env)
 		try:
+			settings, _ = fail2ban_admin.get_settings(env)
+			settings, imported = import_hand_set(env, settings)
+			if imported:
+				print("Nextcloud: took over " + ", ".join(imported) + " from config.php into the intrusion protection settings (System > Intrusion Protection).")
 			r = apply_settings(env, settings)
 		except Exception as e:
 			print("Nextcloud's brute-force settings were not applied:", e)
 			sys.exit(0)
 		if r["config_changed"]:
 			print("Nextcloud: brute-force settings written to config.php.")
+		if r["attempts_deleted"]:
+			print(f"Nextcloud: the protection is off, {r['attempts_deleted']} failed logins counted before were deleted.")
 		if r["bypass_added"]:
 			print("Nextcloud: added to the brute-force bypass list (allowlist):", ", ".join(r["bypass_added"]))
 		if r["bypass_removed"]:

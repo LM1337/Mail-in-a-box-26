@@ -2195,8 +2195,9 @@ paths:
         - System
       summary: Get the addresses that Nextcloud's brute-force throttle counts
       description: |
-        Nextcloud's own throttle (fork): the addresses (IPv4) and /64 networks
-        (IPv6) with failed Nextcloud logins in the last 12 hours, with their
+        Nextcloud's own throttle (fork): the addresses (IPv4) and networks
+        (IPv6, /56 by default) with failed Nextcloud logins in the last 12
+        hours, with their
         failures in 12 hours and in 30 minutes, the accounts of the box they
         tried, the delay Nextcloud puts on their next login and whether it
         refuses it (`blocked`, HTTP 429), and Nextcloud's bypass list. With
@@ -2231,9 +2232,11 @@ paths:
         - System
       summary: Reset Nextcloud's failures of an address
       description: |
-        Deletes Nextcloud's failed logins of `ip` (for an IPv6 address those of
-        its /64 network), so that its next login is neither delayed nor
-        refused. Returns the failures Nextcloud counts afterwards.
+        Deletes Nextcloud's failed logins of the network of `ip` (the address
+        for IPv4, its network for IPv6), so that its next login is neither
+        delayed nor refused, also with the throttle off and for an address on
+        the bypass list. Returns the networks and the number of failures
+        deleted.
       operationId: resetNextcloudThrottle
       requestBody:
         required: true
@@ -2266,11 +2269,14 @@ paths:
                     example: ok
                   ip:
                     type: string
-                  attempts:
+                  subnets:
+                    type: array
+                    items:
+                      type: string
+                  deleted:
                     type: integer
-                    nullable: true
         400:
-          description: Invalid address, or the throttle is off
+          description: Invalid address
           content:
             text/html:
               schema:
@@ -3571,6 +3577,12 @@ components:
           type: integer
         block_minutes:
           type: integer
+        ipv6_prefix:
+          type: integer
+          description: The size of the IPv6 networks Nextcloud counts (security.ipv6_normalized_subnet_size, 56 by default).
+        entries_truncated:
+          type: boolean
+          description: More failures than were read (only the most recent are counted here).
         entries:
           type: array
           items:
@@ -3580,6 +3592,9 @@ components:
                 type: string
               address:
                 type: string
+              network:
+                type: boolean
+                description: An IPv6 network rather than one address.
               ips:
                 type: array
                 items:
@@ -3606,8 +3621,14 @@ components:
                 type: integer
               blocked:
                 type: boolean
+                description: Nextcloud refuses logins from the network (HTTP 429), also with the throttle off (failures counted before).
+              bypassed_ips:
+                type: array
+                items:
+                  type: string
               bypassed:
                 type: boolean
+                description: All addresses that failed here are on the bypass list.
         entries_total:
           type: integer
         bypass:
@@ -3775,6 +3796,9 @@ components:
           properties:
             config_changed:
               type: boolean
+            attempts_deleted:
+              type: integer
+              description: With the throttle turned off, the failures counted before that were deleted.
             bypass_added:
               type: array
               items:

@@ -88,7 +88,7 @@
 </div>
 <p id="f2b-nc-more" class="small text-muted" style="display: none"></p>
 
-<p class="small text-muted">&ldquo;Reset&rdquo; deletes Nextcloud&rsquo;s failures of the address (for an IPv6 address, those of its /64 network, which Nextcloud counts as one), so its next login is not delayed. If a device keeps failing, fix its password: the failures come back.</p>
+<p class="small text-muted">Nextcloud counts an IPv6 address together with its network (<span class="f2b-nc-v6">/56</span> by default, <tt>security.ipv6_normalized_subnet_size</tt>). &ldquo;Reset&rdquo; deletes Nextcloud&rsquo;s failures of the address&rsquo;s network, so its next login is not delayed (also while the throttle is off or the address is on the bypass list, where Nextcloud&rsquo;s own reset does nothing). If a device keeps failing, fix its password: the failures come back.</p>
 
 <h3>Jails</h3>
 
@@ -522,12 +522,32 @@ function f2b_nc_entry(ip) {
   return null;
 }
 
+function f2b_nc_delay(ms) {
+  return ms >= 1000 ? Math.round(ms / 100) / 10 + " s" : ms + " ms";
+}
+
 function f2b_nc_status(e) {
-  if (e.bypassed) return $('<span class="text-muted"/>').text("on the bypass list (not throttled)");
-  if (!f2b_nc_state.enabled) return $('<span class="text-muted"/>').text("throttle off");
-  if (e.blocked) return $('<strong class="text-danger"/>').text("BLOCKED (HTTP 429)");
-  if (e.delay_ms > 0) return $('<span class="text-warning"/>').text("delayed " + (e.delay_ms >= 1000 ? Math.round(e.delay_ms / 100) / 10 + " s" : e.delay_ms + " ms"));
-  return $('<span class="text-muted"/>').text("not throttled");
+  // What Nextcloud does to a login from this network. Failures counted
+  // before the throttle was turned off still count until they are 12 hours
+  // old; an address on the bypass list is not throttled, the other
+  // addresses of its network are.
+  var div = $('<div/>');
+  var what;
+  if (e.blocked) what = $('<strong class="text-danger"/>').text("BLOCKED (HTTP 429)");
+  else if (e.delay_ms > 0) what = $('<span class="text-warning"/>').text("delayed " + f2b_nc_delay(e.delay_ms));
+  else what = $('<span class="text-muted"/>').text("not throttled");
+  if (e.bypassed) {
+    div.append($('<span class="text-muted"/>').text("on the bypass list (not throttled)"));
+    if (e.network && (e.blocked || e.delay_ms > 0))
+      div.append($('<div class="small"/>').text("other addresses of the network: ").append(what));
+    return div;
+  }
+  div.append(what);
+  if (e.bypassed_ips.length)
+    div.append($('<div class="small text-muted"/>').text("not for " + e.bypassed_ips.join(", ") + " (bypass list)"));
+  if (!f2b_nc_state.enabled && (e.blocked || e.delay_ms > 0))
+    div.append($('<div class="small text-muted"/>').text("from failures counted before the throttle was turned off"));
+  return div;
 }
 
 function f2b_render_nc() {
@@ -536,6 +556,7 @@ function f2b_render_nc() {
   tbody.html("");
   $('#f2b-nc-more').hide();
   if (r.max_attempts) $('.f2b-nc-max').text(r.max_attempts);
+  if (r.ipv6_prefix) $('.f2b-nc-v6').text("/" + r.ipv6_prefix);
   if (!r.available) {
     $('#f2b-nc-summary').text(r.error || "Nextcloud's throttle could not be read.").removeClass("text-muted");
     return;
@@ -543,7 +564,8 @@ function f2b_render_nc() {
   var blocked = r.entries.filter(function(e) { return e.blocked; }).length;
   var delayed = r.entries.filter(function(e) { return !e.blocked && e.delay_ms > 0; }).length;
   var text;
-  if (!r.enabled) text = "Nextcloud's throttle is off (see the settings below).";
+  if (!r.enabled && r.entries_total == 0) text = "Nextcloud's throttle is off (see the settings below).";
+  else if (!r.enabled) text = "Nextcloud's throttle is off (see the settings below), but it still applies the failures it counted before, until they are " + r.window_hours + " hours old: " + r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + ". Reset them, or save the settings to delete them.";
   else if (r.entries_total == 0) text = "No failed Nextcloud logins in the last " + r.window_hours + " hours.";
   else text = r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + " with failed Nextcloud logins in the last " + r.window_hours + " hours: "
     + blocked + " blocked, " + delayed + " delayed.";
@@ -576,15 +598,16 @@ function f2b_render_nc() {
     tr.append($('<td/>').append($('<button type="button" class="btn btn-default btn-xs">Reset</button>').click(function() { f2b_nc_reset(e.ips[0] || e.address); })));
     tbody.append(tr);
   });
-  if (r.entries_total > r.entries.length)
-    $('#f2b-nc-more').text("Showing " + r.entries.length + " of " + r.entries_total + " addresses.").show();
+  if (r.entries_total > r.entries.length || r.entries_truncated)
+    $('#f2b-nc-more').text("Showing " + r.entries.length + " of " + r.entries_total + " addresses" + (r.entries_truncated ? " (of the most recent failures; there are more)" : "") + ".").show();
 }
 
 function f2b_nc_reset(ip) {
   api("/system/nextcloud-throttle/reset", "POST", { ip: ip },
     function(r) {
-      var text = "Nextcloud's failures of " + r.ip + " were reset.";
-      if (r.attempts) text += " Nextcloud still counts " + r.attempts + " (new failures since).";
+      var text;
+      if (r.deleted) text = r.deleted + " failure" + (r.deleted == 1 ? " of " : "s of ") + r.subnets.join(", ") + (r.deleted == 1 ? " was" : " were") + " deleted, so the next login from " + r.ip + " is not delayed.";
+      else text = "Nextcloud had no failures of " + r.ip + " (any more).";
       show_modal_error("Nextcloud throttle", $("<p/>").text(text), function() { f2b_load_nc(); });
     },
     f2b_api_error("Nextcloud throttle"));
@@ -744,7 +767,7 @@ function f2b_save_settings() {
   if (f2b_state.settings.slow_web_jails && values.slow_web_jails == "0")
     off.push("Slow jails for webmail, Nextcloud, ActiveSync and the control panel: the addresses they banned are released (bans that have not run out yet come back if you turn them on again).");
   if (f2b_state.settings.nc_protection && values.nc_protection == "0")
-    off.push("Nextcloud's throttle: Nextcloud no longer delays or refuses logins after failures, so passwords can be tried on Nextcloud, CalDAV and CardDAV as fast as the server answers; only fail2ban's Nextcloud jail stays (20 failures within 2 minutes).");
+    off.push("Nextcloud's throttle: Nextcloud no longer delays or refuses logins after failures, so passwords can be tried on Nextcloud, CalDAV and CardDAV as fast as the server answers; only fail2ban's Nextcloud jail stays (20 failures within 2 minutes). The failures counted so far are deleted.");
   if (off.length == 0) {
     f2b_post_settings(values);
     return;
@@ -786,6 +809,7 @@ function f2b_post_settings(values) {
       if (r.nextcloud) {
         var nc = [];
         if (r.nextcloud.config_changed) nc.push("Nextcloud's throttle settings were written to its config.php.");
+        if (r.nextcloud.attempts_deleted) nc.push("The throttle is off: the " + r.nextcloud.attempts_deleted + " failed logins it had counted were deleted, so they delay no login any more.");
         if (r.nextcloud.bypass_added.length) nc.push("Added to Nextcloud's bypass list: " + r.nextcloud.bypass_added.join(", ") + ".");
         if (r.nextcloud.bypass_removed.length) nc.push("Removed from Nextcloud's bypass list: " + r.nextcloud.bypass_removed.join(", ") + ".");
         nc.forEach(function(t) { msg.append($("<p/>").text(t)); });

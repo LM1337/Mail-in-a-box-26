@@ -1875,33 +1875,55 @@ def c_fail2ban_ban_reason(ctx):
 
 
 NC_THROTTLE_USER = "throttletest-nouser@invalid.example"
+OCC = "cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ "
 
 
-def c_nc_throttle(ctx):
-    # Nextcloud's own brute-force throttle in the control panel: two failed
-    # logins of a user that does not exist, from the box's public address
-    # (fail2ban ignores it) through /webdav/ (the address reaches Nextcloud in
-    # X-Forwarded-For, see nextcloud-forwarded-for), must show up for that
-    # address with 2 failures, the name not shown (no account of the box),
-    # and a delay; the reset through the API must leave 0.
-    if not ctx.remote.available():
-        raise Skip("needs --ssh (a login from the box's public address)")
+def nc_fail_logins(ctx, count):
+    # count failed logins of a user that does not exist, from the box's public
+    # address (fail2ban ignores it), through /webdav/ (the address reaches
+    # Nextcloud in X-Forwarded-For, see nextcloud-forwarded-for). Returns
+    # (the HTTP codes, the public address).
     script = r"""
 set -u
 . /etc/mailinabox.conf
 cd /
-for i in 1 2; do
+echo "public=$PUBLIC_IP"
+for i in $(seq %(count)d); do
     curl -sk -o /dev/null -w 'http=%%{http_code}\n' --max-time 90 --resolve "$PRIMARY_HOSTNAME:443:$PUBLIC_IP" \
         -u '%(user)s:not-the-password' -X PROPFIND -H 'Depth: 0' "https://$PRIMARY_HOSTNAME/webdav/"
 done
-echo "public=$PUBLIC_IP"
-""" % {"user": NC_THROTTLE_USER}
-    rc, so, se = ctx.remote.run("bash -c %s" % shlex.quote(script), timeout=300)
-    codes = re.findall(r"^http=(\d+)$", so, re.M)
+""" % {"user": NC_THROTTLE_USER, "count": count}
+    rc, so, se = ctx.remote.run("bash -c %s" % shlex.quote(script), timeout=120 + 60 * count)
     public = (re.findall(r"^public=(\S+)$", so, re.M) or [""])[0]
-    if codes != ["401", "401"] or not public:
-        raise Fail("PROPFIND /webdav/ with a wrong login: %s %s" % (codes, se.strip()[:200]))
+    return re.findall(r"^http=(\d+)$", so, re.M), public
+
+
+def nc_reset_public(ctx, public):
+    # The failures of the test logins (also when a check failed half-way).
+    if public:
+        ctx.remote.run(OCC + "security:bruteforce:reset %s" % shlex.quote(public), timeout=120)
+
+
+def miab_checkout(ctx):
+    rc, miab, _err = ctx.remote.run("awk '$1 == \"cd\" { print $2; exit }' /usr/local/bin/mailinabox")
+    miab = miab.strip()
+    if rc != 0 or not miab:
+        raise Skip("Mail-in-a-Box checkout not found in /usr/local/bin/mailinabox")
+    return miab
+
+
+def c_nc_throttle(ctx):
+    # Nextcloud's own brute-force throttle in the control panel: two failed
+    # logins must show up for the box's public address with 2 failures, the
+    # name not shown (no account of the box), and a delay; the reset through
+    # the API must delete them.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh (a login from the box's public address)")
+    public = ""
     try:
+        codes, public = nc_fail_logins(ctx, 2)
+        if codes != ["401", "401"] or not public:
+            raise Fail("PROPFIND /webdav/ with a wrong login: %s" % codes)
         r = admin_api(ctx, "GET", "system/nextcloud-throttle")
         if r.status != 200:
             raise Fail("GET: HTTP %d %s" % (r.status, r.text()[:200]))
@@ -1918,23 +1940,146 @@ echo "public=$PUBLIC_IP"
             raise Fail("entry for %s: %s" % (public, e))
         if NC_THROTTLE_USER in e["accounts"] or e["unknown_names"] < 1:
             raise Fail("the login name that is no account is shown: %s" % e["accounts"])
-        if e["delay_ms"] <= 0 or e["blocked"]:
-            raise Fail("entry for %s: delay %s, blocked %s" % (public, e["delay_ms"], e["blocked"]))
+        if e["delay_ms"] <= 0 or e["blocked"] or e["bypassed"]:
+            raise Fail("entry for %s: delay %s, blocked %s, bypassed %s" % (public, e["delay_ms"], e["blocked"], e["bypassed"]))
         if not any(b["source"] == "system" and b["network"] == "127.0.0.1/32" for b in j["bypass"]):
             raise Fail("127.0.0.1/32 is not on the bypass list: %s" % j["bypass"])
         r = admin_api(ctx, "POST", "system/nextcloud-throttle/reset", form={"ip": "not an address"})
         if r.status != 400:
             raise Fail("reset of an invalid address: HTTP %d" % r.status)
         r = admin_api(ctx, "POST", "system/nextcloud-throttle/reset", form={"ip": public})
-        if r.status != 200 or r.json().get("attempts") != 0:
+        if r.status != 200 or r.json().get("deleted", 0) < 2 or public + "/32" not in r.json().get("subnets", []):
             raise Fail("reset: HTTP %d %s" % (r.status, r.text()[:200]))
-        attempts, delay = e["attempts"], e["delay_ms"]
+        attempts, delay, deleted = e["attempts"], e["delay_ms"], r.json()["deleted"]
     finally:
-        ctx.remote.run("cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ security:bruteforce:reset %s" % shlex.quote(public or "127.0.0.2"), timeout=120)
+        nc_reset_public(ctx, public)
     left = [x for x in admin_api(ctx, "GET", "system/nextcloud-throttle").json()["entries"] if x["address"] == public]
     if left:
         raise Fail("still listed after the reset: %s" % left[0])
-    return "%s: %d failures, delay %d ms, name not shown; reset to 0" % (public, attempts, delay)
+    return "%s: %d failures, delay %d ms, name not shown; reset deleted %d" % (public, attempts, delay, deleted)
+
+
+NC_BYPASS_TEST_NET = "203.0.113.0/24"   # TEST-NET-3, put on the allowlist for a moment
+NC_BYPASS_FOREIGN = "198.51.100.0/24"   # TEST-NET-2, an entry "made in Nextcloud"
+NC_BYPASS_FOREIGN_KEY = "whitelist_9001"
+
+
+def c_nc_bypass_allowlist(ctx):
+    # nc_allowlist puts the allowlist on Nextcloud's bypass list and takes its
+    # own entries off again; 127.0.0.1/32 (B121) and an entry made in Nextcloud
+    # stay. The previous settings are restored.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh (occ on the box)")
+    cur = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+    if NC_BYPASS_TEST_NET in cur["allowlist"]:
+        raise Skip("%s is on the allowlist already" % NC_BYPASS_TEST_NET)
+
+    def bypass():
+        rc, out, err = ctx.remote.run(OCC + "config:list bruteForce", timeout=120)
+        try:
+            keys = json.loads(out).get("apps", {}).get("bruteForce") or {}
+        except ValueError:
+            raise Fail("occ config:list bruteForce: %s %s" % (out.strip()[:200], err.strip()[:100]))
+        return {k: str(v) for k, v in keys.items() if k.startswith("whitelist_")}
+
+    ctx.remote.run(OCC + "config:app:set bruteForce %s --value %s --type string" % (NC_BYPASS_FOREIGN_KEY, NC_BYPASS_FOREIGN), timeout=120)
+    try:
+        r = admin_api(ctx, "POST", "system/fail2ban/settings",
+                      form={"allowlist": "\n".join(cur["allowlist"] + [NC_BYPASS_TEST_NET]), "nc_allowlist": "1"})
+        if r.status != 200 or NC_BYPASS_TEST_NET not in (r.json().get("nextcloud") or {}).get("bypass_added", []):
+            raise Fail("set: HTTP %d %s" % (r.status, r.text()[:300]))
+        b = bypass()
+        values = sorted(b.values())
+        for want in ("127.0.0.1/32", NC_BYPASS_FOREIGN, NC_BYPASS_TEST_NET):
+            if want not in values:
+                raise Fail("%s not on the bypass list: %s" % (want, values))
+        j = admin_api(ctx, "GET", "system/nextcloud-throttle").json()
+        src = {x["network"]: x["source"] for x in j["bypass"]}
+        if src.get(NC_BYPASS_TEST_NET) != "panel" or src.get(NC_BYPASS_FOREIGN) != "other" or src.get("127.0.0.1/32") != "system":
+            raise Fail("sources of the bypass entries: %s" % src)
+        if j.get("bypass_current") is not True:
+            raise Fail("bypass_current %s" % j.get("bypass_current"))
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_allowlist": "0"})
+        if r.status != 200 or NC_BYPASS_TEST_NET not in (r.json().get("nextcloud") or {}).get("bypass_removed", []):
+            raise Fail("nc_allowlist off: HTTP %d %s" % (r.status, r.text()[:300]))
+        values = sorted(bypass().values())
+        if NC_BYPASS_TEST_NET in values or "127.0.0.1/32" not in values or NC_BYPASS_FOREIGN not in values:
+            raise Fail("after nc_allowlist off: %s" % values)
+    finally:
+        admin_api(ctx, "POST", "system/fail2ban/settings",
+                  form={"allowlist": "\n".join(cur["allowlist"]), "nc_allowlist": "1" if cur["nc_allowlist"] else "0"})
+        ctx.remote.run(OCC + "config:app:delete bruteForce %s" % NC_BYPASS_FOREIGN_KEY, timeout=120)
+    after = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+    if after["allowlist"] != cur["allowlist"] or after["nc_allowlist"] != cur["nc_allowlist"]:
+        raise Fail("settings not restored: %s %s" % (after["allowlist"], after["nc_allowlist"]))
+    return "%s added and removed again; 127.0.0.1/32 and an entry made in Nextcloud stayed" % NC_BYPASS_TEST_NET
+
+
+def c_nc_setup_no_drift(ctx):
+    # management/nextcloud_throttle.py --setup (setup/start.sh) twice: the
+    # second run changes nothing (no line, config.php and the bypass list as
+    # before).
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    miab = miab_checkout(ctx)
+    run = "bash -c %s" % shlex.quote("cd %s && management/nextcloud_throttle.py --setup" % shlex.quote(miab))
+    state = ("bash -c %s" % shlex.quote(". /etc/mailinabox.conf; stat -c %Y \"$STORAGE_ROOT/owncloud/config.php\"; " + OCC + "config:list bruteForce"))
+    rc1, out1, err1 = ctx.remote.run(run, sudo=True, timeout=300)
+    _, before, _ = ctx.remote.run(state, sudo=True, timeout=120)
+    rc2, out2, err2 = ctx.remote.run(run, sudo=True, timeout=300)
+    _, after, _ = ctx.remote.run(state, sudo=True, timeout=120)
+    if rc1 != 0 or rc2 != 0:
+        raise Fail("exit codes %d, %d: %s" % (rc1, rc2, (err1 + err2).strip()[:200]))
+    if out2.strip():
+        raise Fail("the second run changed something: %s" % out2.strip()[:300])
+    if before != after:
+        raise Fail("config.php or the bypass list changed in the second run")
+    return "second run without output, config.php and bypass list unchanged" + ("; first run: " + out1.strip()[:100] if out1.strip() else "")
+
+
+def c_nc_protection_off(ctx):
+    # nc_protection off: config.php gets auth.bruteforce.protection.enabled
+    # false, the failures counted before are deleted (Nextcloud would go on
+    # applying them), and failed logins are neither counted nor refused (no
+    # HTTP 429 after more than max-attempts). Back on, failures are counted
+    # again. The setting is restored.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    cur = admin_api(ctx, "GET", "system/fail2ban/settings").json()["settings"]
+    if not cur["nc_protection"]:
+        raise Skip("Nextcloud's throttle is off on this box")
+    public = ""
+    try:
+        codes, public = nc_fail_logins(ctx, 2)
+        if codes != ["401", "401"]:
+            raise Fail("failed logins before: %s" % codes)
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_protection": "0"})
+        nc = (r.json() or {}).get("nextcloud") if r.status == 200 else None
+        if not nc or not nc.get("config_changed") or nc.get("attempts_deleted", 0) < 2:
+            raise Fail("off: HTTP %d %s" % (r.status, r.text()[:300]))
+        rc, out, _ = ctx.remote.run(OCC + "config:system:get auth.bruteforce.protection.enabled", timeout=120)
+        if out.strip() != "false":
+            raise Fail("auth.bruteforce.protection.enabled is %r" % out.strip())
+        j = admin_api(ctx, "GET", "system/nextcloud-throttle").json()
+        if j.get("enabled") is not False or [x for x in j["entries"] if x["address"] == public]:
+            raise Fail("overview after off: enabled %s, entries %s" % (j.get("enabled"), [x["address"] for x in j["entries"]]))
+        max_attempts = cur["nc_max_attempts"]
+        codes, _ = nc_fail_logins(ctx, max_attempts + 2)
+        if set(codes) != {"401"} or len(codes) != max_attempts + 2:
+            raise Fail("%d failed logins with the throttle off: %s" % (max_attempts + 2, codes))
+        if [x for x in admin_api(ctx, "GET", "system/nextcloud-throttle").json()["entries"] if x["address"] == public]:
+            raise Fail("failures counted with the throttle off")
+        r = admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_protection": "1"})
+        if r.status != 200:
+            raise Fail("on again: HTTP %d %s" % (r.status, r.text()[:200]))
+        codes, _ = nc_fail_logins(ctx, 1)
+        e = [x for x in admin_api(ctx, "GET", "system/nextcloud-throttle").json()["entries"] if x["address"] == public]
+        if codes != ["401"] or not e or e[0]["attempts"] != 1:
+            raise Fail("on again: %s, entry %s" % (codes, e))
+    finally:
+        admin_api(ctx, "POST", "system/fail2ban/settings", form={"nc_protection": "1" if cur["nc_protection"] else "0"})
+        nc_reset_public(ctx, public)
+    return "off: failures deleted, %d failed logins neither counted nor refused (all 401); on again: counted" % (max_attempts + 2)
 
 
 def c_nc_throttle_settings(ctx):
@@ -4450,6 +4595,9 @@ def main():
         run_check("admin-fail2ban-ban-reason", c_fail2ban_ban_reason, ctx)
         run_check("admin-nextcloud-throttle", c_nc_throttle, ctx)
         run_check("admin-nextcloud-throttle-settings", c_nc_throttle_settings, ctx)
+        run_check("admin-nextcloud-bypass-allowlist", c_nc_bypass_allowlist, ctx)
+        run_check("admin-nextcloud-protection-off", c_nc_protection_off, ctx)
+        run_check("admin-nextcloud-setup-no-drift", c_nc_setup_no_drift, ctx)
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
     if want("api"):
         print("== api (management API as api/mailinabox.yml documents it)")

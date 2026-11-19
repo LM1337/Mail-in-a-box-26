@@ -372,16 +372,22 @@ def update_settings(env, values, reset=False):
 		try:
 			result["nextcloud"] = nextcloud_throttle.apply_settings(env, new)
 		except Exception as e:
+			# Part of it may have been written (config.php, some bypass
+			# entries, which are recorded as they are made): put back the
+			# previous settings everywhere, and say whether that worked.
 			save_settings(env, old)
+			restored = True
 			try:
 				apply_config(env, old)
 			except Exception:
-				pass
+				restored = False
 			try:
 				nextcloud_throttle.apply_settings(env, old)
 			except Exception:
-				pass
-			raise RuntimeError(f"Nextcloud's brute-force settings could not be changed, nothing was changed: {e}") from None
+				restored = False
+			if restored:
+				raise RuntimeError(f"Nextcloud's brute-force settings could not be changed, the previous settings were restored: {e}") from None
+			raise RuntimeError(f"Nextcloud's brute-force settings could not be changed: {e} The previous settings are saved again, but could not be applied everywhere; save them again or re-run setup.") from None
 	result["settings"] = new
 	result["unbanned_allowlisted"] = unban_allowlisted(new)
 	return result
@@ -1111,7 +1117,10 @@ REASON_LINES = 10        # fail2ban keeps up to dbmaxmatches (10) lines per ban
 REASON_LINE_CHARS = 300
 UNKNOWN_NAME = b"[unknown name]"
 
-# Where the user name is in a log line: (regex, group, method).
+# Where a user name is in a log line: (regex, group, method). The first ones
+# are those of the failed-login report and the filters; the others catch the
+# lines of the filters that the report's regexes do not match (Dovecot's
+# "tried to use ..." and "no auth attempts" lines, a user=<...> anywhere).
 _USER_FIELDS = [
 	(RE_SMTP, 2, "search"),
 	(RE_DOVECOT, 3, "search"),
@@ -1120,16 +1129,53 @@ _USER_FIELDS = [
 	(RE_ROUNDCUBE, 1, "search"),
 	(RE_NGINX_USER, 1, "match"),
 	(RE_SSH_INVALID, 2, "search"),
+	(re.compile(rb"\buser=<(.*)>, (?:method=\S+, )?rip="), 1, "search"),
+	(re.compile(rb"\buser=<([^>]*)>"), 1, "search"),
+	(re.compile(rb"\bsasl_username=([^\s,]+)"), 1, "search"),
 ]
+# Z-Push's user names in brackets ("[<user>]" or "[<user>#<user of the
+# request>]", escaped by setup/zpush.sh), which repeat what the client sent.
+RE_ZPUSH_NAMES = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[((?:[^\]\\]|\\.)*)\]")
+_NAME_CHARS = rb"A-Za-z0-9._@+\-"
+
+def _line_names(line):
+	# The user names a log line names, in order, without duplicates.
+	names = []
+	for rx, group, how in _USER_FIELDS:
+		m = getattr(rx, how)(line)
+		if m and m.group(group) not in (None, b"", b"-"):
+			names.append(m.group(group))
+	m = RE_ZPUSH_NAMES.match(line)
+	if m:
+		# "[#unknown]": Autodiscover's placeholder, no name of the client.
+		names += [n for n in re.split(rb"(?<!\\)#", m.group(1)) if n and m.group(1) != b"#unknown"]
+	ret = []
+	for n in names:
+		if n not in ret and n.strip():
+			ret.append(n)
+	return ret
+
+def _mask_name(text, name):
+	# Every occurrence of a name in the line, apart from case: where it stands
+	# on its own (between other characters than those of an address), else
+	# wherever it is.
+	pat = re.compile(rb"(?<![" + _NAME_CHARS + rb"])" + re.escape(name) + rb"(?![" + _NAME_CHARS + rb"])", re.I)
+	new = pat.sub(lambda m: UNKNOWN_NAME, text)
+	if new == text:
+		new = re.compile(re.escape(name), re.I).sub(lambda m: UNKNOWN_NAME, text)
+	return new
 
 def _reason_line(line, known):
 	# One log line of a ban, for the control panel: (text, account, masked).
-	# account is the account the line names if it is one of this box. A user
-	# name that is not an account of this box is replaced, as the failed-login
-	# report leaves such names out: it is whatever the client sent, a password
-	# typed into the wrong field too.
+	# account is the first account of this box the line names. Every user
+	# name that is not an account of this box is replaced, wherever it
+	# appears in the line, as the failed-login report leaves such names out:
+	# it is whatever the client sent, a password typed into the wrong field
+	# too.
 	if line[:1] == b"{":
 		# Nextcloud: the fields that matter instead of the whole JSON object.
+		# The URL only for an account of the box: a WebDAV path names the
+		# login name (.../principals/users/<name>/), also in other messages.
 		try:
 			j = json.loads(line)
 		except ValueError:
@@ -1138,23 +1184,32 @@ def _reason_line(line, known):
 			msg = str(j.get("message", ""))
 			m = RE_NC_LOGIN.match(msg)
 			user = m.group(1).strip().lower() if m else None
-			masked = bool(m) and user not in known
-			if masked:
+			own = bool(m) and user in known
+			parts = [str(j.get(k)) for k in ("time", "remoteAddr", "method") if j.get(k)]
+			if own and j.get("url"):
+				parts.append(str(j["url"]))
+			if m and not own:
 				msg = "Login failed: %s (Remote IP: '%s')" % (UNKNOWN_NAME.decode(), m.group(2))
-			text = " ".join(str(j.get(k)) for k in ("time", "remoteAddr", "method", "url") if j.get(k)) + " – " + msg
+			text = " ".join(parts) + " – " + msg
 			if j.get("userAgent"):
-				text += " – " + str(j["userAgent"])
-			return text[:REASON_LINE_CHARS], (user if m and not masked else None), masked
-	for rx, group, how in _USER_FIELDS:
-		m = getattr(rx, how)(line)
-		if not m or m.group(group) is None or m.group(group) in (b"", b"-"):
+				ua = str(j["userAgent"])
+				if m and not own and m.group(1):
+					ua = _mask_name(ua.encode("utf-8", "replace"), m.group(1).encode("utf-8", "replace")).decode("utf-8", "replace")
+				text += " – " + ua
+			return text[:REASON_LINE_CHARS], (user if own else None), bool(m) and not own
+	account, masked, text = None, False, line
+	for name in _line_names(line):
+		user = name.decode("utf-8", "replace").strip().lower()
+		# Z-Push escapes "]", "#" and "\" in the brackets.
+		plain = re.sub(rb"\\(.)", rb"\1", name).decode("utf-8", "replace").strip().lower()
+		if user in known or plain in known:
+			account = account or (user if user in known else plain)
 			continue
-		user = m.group(group).decode("utf-8", "replace").strip().lower()
-		if user in known:
-			return line.decode("utf-8", "replace")[:REASON_LINE_CHARS], user, False
-		a, b = m.span(group)
-		return (line[:a] + UNKNOWN_NAME + line[b:]).decode("utf-8", "replace")[:REASON_LINE_CHARS], None, True
-	return line.decode("utf-8", "replace")[:REASON_LINE_CHARS], None, False
+		text = _mask_name(text, name)
+		if plain != user:
+			text = _mask_name(text, re.sub(rb"\\(.)", rb"\1", name))
+		masked = True
+	return text.decode("utf-8", "replace")[:REASON_LINE_CHARS], account, masked
 
 def _reason(data, known):
 	if isinstance(data, bytes):
@@ -1198,15 +1253,16 @@ def ban_reasons(env, bans):
 	path = db_path()
 	if not path or not os.path.exists(path):
 		return {}
-	want = { (jail, ip): start for jail, ip, start in bans }
-	since = min(want.values()) - 5
 	rows = {}
 	con = sqlite3.connect("file:" + urllib.parse.quote(path) + "?mode=ro", uri=True, timeout=5)
 	try:
-		for jail, ip, timeofban, data in con.execute("SELECT jail, ip, timeofban, data FROM bans WHERE timeofban >= ? ORDER BY timeofban", (int(since),)):
-			key = (str(jail), str(ip))
-			if key in want and timeofban <= want[key] + 5:
-				rows[key] = data
+		# One row per ban, through the index on (jail, ip): the newest that
+		# began by the start of the current ban.
+		for jail, ip, start in bans:
+			r = con.execute("SELECT data FROM bans WHERE jail = ? AND ip = ? AND timeofban <= ? ORDER BY timeofban DESC LIMIT 1",
+				(jail, ip, int(start) + 5)).fetchone()
+			if r is not None:
+				rows[(jail, ip)] = r[0]
 	finally:
 		con.close()
 	known = _known_accounts(env)

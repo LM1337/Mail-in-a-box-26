@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Checks the reasons of bans in management/fail2ban_admin.py (System > Intrusion Protection).
+
+No box needed. Each case is a log line of a kind that a jail's filter
+matches, with a user name that is an account of the box or not. A name that
+is not an account must not appear anywhere in the text shown (apart from
+case), also where the line repeats it (Z-Push's brackets, Nextcloud's URL);
+an account is shown and named as the line's account. Also the summary of a
+ban (_reason) from the data that fail2ban keeps, and a ban by hand.
+
+Usage: python3 -I tests/fork/ban-reasons.py
+Exit code 0 when every check passed.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "management"))
+import fail2ban_admin as f  # noqa: E402
+
+KNOWN = {"bob@example.com", "carol@example.com"}
+SECRET = "Hunter2-Secret"
+
+def nc(user, url="/cloud/remote.php/dav/principals/users/%s/", message=None, ua="SomeDAVClient/1.0 (%s)"):
+    return json.dumps({
+        "reqId": "abc", "level": 2, "time": "2026-10-26 13:00:00", "remoteAddr": "192.0.2.1", "user": "--",
+        "app": "core", "method": "PROPFIND", "url": url % user if "%s" in url else url, "scriptName": "/cloud/remote.php",
+        "message": message if message is not None else "Login failed: '%s' (Remote IP: '192.0.2.1')" % user,
+        "userAgent": ua % user if "%s" in ua else ua, "version": "34.0.6.2",
+    }).encode()
+
+# (description, line, secret that must not be shown or None, expected account or None)
+CASES = [
+    ("dovecot, unknown name", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<%s>, method=PLAIN, rip=192.0.2.9, lip=10.0.0.1, TLS, session=<x>" % SECRET.encode(), SECRET, None),
+    ("dovecot, account", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<bob@example.com>, method=PLAIN, rip=192.0.2.9, lip=10.0.0.1, TLS, session=<x>", None, "bob@example.com"),
+    ("dovecot, tried to use", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (tried to use disallowed plaintext auth) (tls_required): user=<%s>, rip=192.0.2.9, lip=10.0.0.1, session=<x>" % SECRET.encode(), SECRET, None),
+    ("dovecot, no auth attempts with a user", b"2026-10-26T13:00:00+01:00 box dovecot: pop3-login: Disconnected (no auth attempts in 0 secs): user=<%s>, rip=192.0.2.9, lip=10.0.0.1, session=<x>" % SECRET.encode(), SECRET, None),
+    ("smtp, unknown name", b"2026-10-26T13:00:00+01:00 box postfix/submission/smtpd[123]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=%s" % SECRET.encode(), SECRET, None),
+    ("smtp, account", b"2026-10-26T13:00:00+01:00 box postfix/submission/smtpd[123]: warning: unknown[192.0.2.1]: SASL LOGIN authentication failed: (reason), sasl_username=bob@example.com", None, "bob@example.com"),
+    ("z-push, unknown name in brackets and message", b"26/10/2026 13:00:00 [12345] [WARN] [%s] Failed to authenticate user '%s' from IP 192.0.2.1." % (SECRET.encode(), SECRET.lower().encode()), SECRET, None),
+    ("z-push, account with an unknown user of the request", b"26/10/2026 13:00:00 [12345] [WARN] [bob@example.com#%s] Failed to authenticate user 'bob@example.com' from IP 192.0.2.1." % SECRET.encode(), SECRET, "bob@example.com"),
+    ("autodiscover, unknown address", b"26/10/2026 13:00:00 [12345] [WARN] [#unknown] Unable to complete autodiscover because login failed for user with email '%s@example.net' from IP 192.0.2.1." % SECRET.encode(), SECRET, None),
+    ("roundcube, unknown name", b"[26-Oct-2026 13:00:00 +0100]: <abc> IMAP Error: Login failed for %s against localhost from 192.0.2.1. AUTHENTICATE PLAIN: Authentication failed. in /x.php on line 1 (POST /mail/?_task=login&_action=login)" % SECRET.encode(), SECRET, None),
+    ("munin, unknown Basic user", b'192.0.2.1 - %s [26/Oct/2026:13:00:00 +0100] "GET /admin/munin/ HTTP/2.0" 401 0 "-" "curl"' % SECRET.encode(), SECRET, None),
+    ("sshd, invalid user", b"2026-10-26T13:00:00+01:00 box sshd-session[1]: Invalid user %s from 192.0.2.1 port 5555" % SECRET.encode(), SECRET, None),
+    ("nextcloud, unknown name (URL and user agent)", nc(SECRET), SECRET, None),
+    ("nextcloud, account", nc("bob@example.com"), None, "bob@example.com"),
+    ("nextcloud, other message with a name in the URL", nc(SECRET, message="Trusted domain error.", ua="curl/8"), SECRET, None),
+    ("short unknown name", b"2026-10-26T13:00:00+01:00 box dovecot: imap-login: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<1>, method=PLAIN, rip=192.0.2.9, lip=10.0.0.1, TLS, session=<x>", None, None),
+]
+
+def main():
+    bad = 0
+    for desc, line, secret, account in CASES:
+        text, acc, masked = f._reason_line(line, KNOWN)
+        errs = []
+        if secret and secret.lower() in text.lower():
+            errs.append("the name is shown")
+        if secret and not masked and "other message" not in desc:
+            errs.append("not marked as masked")
+        if acc != account:
+            errs.append("account %r, expected %r" % (acc, account))
+        if account and account not in text:
+            errs.append("the account is not shown")
+        if desc == "short unknown name" and ("2026-10-26T13:00:00" not in text or "user=<[unknown name]>" not in text):
+            errs.append("a short name garbles the line: %s" % text)
+        if desc == "autodiscover, unknown address" and "[#unknown]" not in text:
+            errs.append("Autodiscover's placeholder [#unknown] was changed: %s" % text)
+        if desc == "nextcloud, account" and "/principals/users/bob@example.com/" not in text:
+            errs.append("the URL of an account is missing")
+        print("%s  %-50s %s" % ("FAIL" if errs else "ok  ", desc, "; ".join(errs) or text[:90]))
+        bad += bool(errs)
+
+    data = json.dumps({"matches": [CASES[0][1].decode(), CASES[1][1].decode(), CASES[6][1].decode()], "failures": 20}).encode()
+    r = f._reason(data, KNOWN)
+    ok = (r["failures"] == 20 and r["accounts"] == ["bob@example.com"] and r["unknown_names"] == 2
+          and not r["manual"] and len(r["lines"]) == 3 and not any(SECRET.lower() in l.lower() for l in r["lines"]))
+    print("%s  %-50s %s" % ("ok  " if ok else "FAIL", "summary of a ban", r if not ok else ""))
+    bad += not ok
+    r = f._reason(b'{"matches": [], "failures": 0}', KNOWN)
+    ok = r["manual"] and r["lines"] == [] and r["failures"] == 0
+    print("%s  %-50s %s" % ("ok  " if ok else "FAIL", "ban by hand", r if not ok else ""))
+    bad += not ok
+    print("%d of %d checks failed" % (bad, len(CASES) + 2))
+    return 1 if bad else 0
+
+if __name__ == "__main__":
+    sys.exit(main())

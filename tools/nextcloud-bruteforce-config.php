@@ -16,10 +16,22 @@
 // request, and "occ config:system:set" is refused once setup has set
 // config_is_read_only. Prints the current values as JSON. Exit code 1: the
 // file could not be read or written, 2: invalid NC_SET.
+//
+// Two runs of this script (the control panel and setup) are serialized with
+// a lock file next to config.php, so that one does not write back what it
+// read before the other's change. The other writers of config.php (setup's
+// own block in setup/nextcloud.sh, Nextcloud while config_is_read_only is
+// off during setup) do not take the lock; they do not run at the same time
+// as the control panel's save in practice.
 
 $path = getenv('NC_CONFIG');
 if ($path === false || $path === '') {
   fwrite(STDERR, "NC_CONFIG is not set.\n");
+  exit(1);
+}
+$lock = @fopen(dirname($path) . '/.config.php.mailinabox-lock', 'c');
+if ($lock === false || !flock($lock, LOCK_EX)) {
+  fwrite(STDERR, "Nextcloud: could not lock " . dirname($path) . "/.config.php.mailinabox-lock.\n");
   exit(1);
 }
 if ((include $path) === false || !isset($CONFIG) || !is_array($CONFIG)) {
@@ -78,4 +90,6 @@ echo json_encode(array(
   'dbtype' => isset($CONFIG['dbtype']) ? (string)$CONFIG['dbtype'] : null,
   'dbtableprefix' => isset($CONFIG['dbtableprefix']) ? (string)$CONFIG['dbtableprefix'] : 'oc_',
   'datadirectory' => isset($CONFIG['datadirectory']) ? (string)$CONFIG['datadirectory'] : null,
+  // The size of the IPv6 networks Nextcloud counts (IpAddress::getIPv6Subnet).
+  'ipv6_prefix' => min(64, max(32, isset($CONFIG['security.ipv6_normalized_subnet_size']) ? (int)$CONFIG['security.ipv6_normalized_subnet_size'] : 56)),
 )), "\n";

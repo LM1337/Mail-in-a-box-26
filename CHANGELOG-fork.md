@@ -23,18 +23,23 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   ban without lines was set by hand. `GET /admin/system/fail2ban` gives the
   same as `reason` of each ban and `jail_info`.
 * Nextcloud's own brute-force throttle in the control panel. Apart from
-  fail2ban, Nextcloud counts failed logins per address (IPv4) or /64 network
-  (IPv6): after failures within 12 hours it delays every login from there,
+  fail2ban, Nextcloud counts failed logins per address (IPv4) or IPv6
+  network (/56 by default): after failures within 12 hours it delays every
+  login from there,
   up to 25 seconds, and after more than 10 failures within 30 minutes it
   refuses them with HTTP 429, also for the accounts with the right password
   behind that address, so one calendar or contacts app with an old password
   keeps the other devices of its network from syncing. Nothing showed this
   so far. The new section "Nextcloud throttle" lists the counted addresses
   (failures in 12 hours and in 30 minutes, the accounts of the box they
-  tried, the delay, whether they are blocked) and resets an address; a
-  banned address that Nextcloud throttles too gets a hint with a button.
+  tried, the delay, whether they are blocked) and resets an address (it
+  deletes the failures of its network, also with the throttle off and for
+  an address on the bypass list, where Nextcloud's own reset does nothing);
+  a banned address that Nextcloud throttles too gets a hint with a button.
   New settings: `nc_protection` (Nextcloud's throttle on, the default;
-  turning it off asks first), `nc_max_attempts` (failures before the
+  turning it off asks first and deletes the failures counted so far, which
+  Nextcloud would otherwise go on applying for up to 12 hours),
+  `nc_max_attempts` (failures before the
   maximum delay and the block, 10 by default, 3 to 1000) and `nc_allowlist`
   (off by default: the allowlist goes on Nextcloud's bypass list too; the
   entries it adds are recorded under `nextcloud_bypass` in settings.yaml and
@@ -45,7 +50,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `tools/nextcloud-bruteforce-config.php` (Nextcloud's own
   `occ config:system:set` refuses once setup has made the file read-only),
   and atomically as setup writes it (B124); the overview reads Nextcloud's
-  database read-only as www-data. New API: `GET
+  database read-only as www-data, and a reset deletes there as www-data.
+  While the settings have no value of their own for the throttle, setup
+  takes values set in `config.php` by hand over into them instead of
+  overwriting them. New API: `GET
   /admin/system/nextcloud-throttle`, `POST
   /admin/system/nextcloud-throttle/reset`; `management/nextcloud_throttle.py
   --setup | --status | --reset <ip>`; setup/start.sh applies the settings
