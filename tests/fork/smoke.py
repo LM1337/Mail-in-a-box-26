@@ -1804,6 +1804,51 @@ def c_fail2ban_settings_roundtrip(ctx):
     return "set/restore ok, invalid allowlist refused (400)"
 
 
+def c_nc_app_versions(ctx):
+    # The apps contacts, calendar and user_external at the versions that
+    # setup/nextcloud.sh pins (B176: before, a new pin reached an existing box
+    # only with the next Nextcloud update).
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(here, "..", "..", "setup", "nextcloud.sh"), encoding="utf-8") as f:
+            src = f.read()
+    except OSError as e:
+        raise Skip("setup/nextcloud.sh not readable here: %s" % e)
+    pins = dict(re.findall(r"^(contacts|calendar|user_external)_ver=(\S+)$", src, re.M))
+    if len(pins) != 3:
+        raise Fail("pins not found in setup/nextcloud.sh: %s" % pins)
+    # The files (appinfo/info.xml) and the version Nextcloud has upgraded
+    # its database to (occ app:list): a swapped app without "occ upgrade"
+    # leaves Nextcloud needing an upgrade.
+    occ = "cd / && sudo -n -u www-data php /usr/local/lib/owncloud/occ "
+    rc, out, err = ctx.remote.run(occ + "app:list --output=json", timeout=120)
+    try:
+        listed = json.loads(out.strip().splitlines()[-1]).get("enabled") or {}
+    except (ValueError, IndexError):
+        raise Fail("unexpected output of occ app:list: %s %s" % (out.strip()[:200], err.strip()[:100]))
+    rc, out, _ = ctx.remote.run(occ + "status --output=json", timeout=120)
+    try:
+        needs = json.loads(out.strip().splitlines()[-1]).get("needsDbUpgrade")
+    except (ValueError, IndexError):
+        raise Fail("unexpected output of occ status: %s" % out.strip()[:200])
+    bad, have = [], []
+    for app, ver in sorted(pins.items()):
+        rc, out, _ = ctx.remote.run("sed -n 's:.*<version>\\([^<]*\\)</version>.*:\\1:p' /usr/local/lib/owncloud/apps/%s/appinfo/info.xml | head -n 1" % app, sudo=True)
+        v = out.strip()
+        have.append("%s %s" % (app, v))
+        if v != ver:
+            bad.append("%s is %s, setup pins %s" % (app, v or "missing", ver))
+        elif listed.get(app) != ver:
+            bad.append("%s %s installed, Nextcloud has %s (enabled apps)" % (app, v, listed.get(app) or "it not enabled"))
+    if needs is not False:
+        bad.append("Nextcloud needs an upgrade (needsDbUpgrade %s)" % needs)
+    if bad:
+        raise Fail("; ".join(bad))
+    return ", ".join(have) + "; enabled, no upgrade pending"
+
+
 # Log lines for the installed fail2ban filters: (filter, line, expected host or
 # None for no match). Client-chosen user names must neither move the host to a
 # third-party address nor hide a real failure. Only fail2ban-regex runs: no
@@ -4212,6 +4257,7 @@ def main():
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
         run_check("admin-fail2ban-filters", c_fail2ban_filters, ctx)
         run_check("admin-fail2ban-panel", c_fail2ban_panel, ctx)
+        run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
     if want("api"):
         print("== api (management API as api/mailinabox.yml documents it)")
         run_check("api-auth", c_api_auth, ctx)

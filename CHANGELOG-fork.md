@@ -11,6 +11,21 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Fixed
+
+* A new version of the Nextcloud apps contacts, calendar or user_external
+  that setup pins reaches an existing box now also when Nextcloud itself
+  stays: setup compares the installed versions with the pins, swaps in the
+  new release and runs `occ upgrade`. Before, a new pin took effect only
+  with the next Nextcloud version, and a fresh install and an updated box
+  differed (B176). Calendar 6.6.5 to 6.6.6. New smoke check
+  `admin-nextcloud-app-versions`.
+
+### Upgrade note
+
+* The update installs calendar 6.6.6 and runs `occ upgrade`: Nextcloud
+  answers 503 for a few seconds.
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2 and

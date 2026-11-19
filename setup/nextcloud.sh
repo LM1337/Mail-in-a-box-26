@@ -43,8 +43,8 @@ contacts_ver=8.10.0
 contacts_hash=035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/calendar
-calendar_ver=6.6.5
-calendar_hash=e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107
+calendar_ver=6.6.6
+calendar_hash=b19149fad6462ce8ec028e53551651d1b1291f30cd3dbd70e85434b1d28b4abe
 
 # Always ensure the versions are supported, see https://apps.nextcloud.com/apps/user_external
 # user_external 4.0.0 declares nextcloud min-version=31 max-version=34 and there is no release
@@ -350,13 +350,75 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 		# and move nextcloud_ver and the app pins at the top of this file to 35.
 		# if [[ ${CURRENT_NEXTCLOUD_VER} =~ ^33 ]]; then
 		#	# runs with PHP 8.5
-		#	InstallNextcloud 34.0.6 ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e 8.10.0 035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549 6.6.5 e3afbc2a10db87920f5347279423422411010550a809b2902c0e8cf2f2492107 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
+		#	InstallNextcloud 34.0.6 ec74a0cf6de20e2a234c5bde55e370e4a7f12b46a266ae3d33c8f3edc17b153e 8.10.0 035d943115f129d20fbaba19b2124a0d2f65a59c35cabe142495bb6ae650d549 6.6.6 b19149fad6462ce8ec028e53551651d1b1291f30cd3dbd70e85434b1d28b4abe 4.0.0 f1f98c577bd02177fe74e9199f8e50d0c288ffa94bb50a227101a5ba0633c529
 		#	CURRENT_NEXTCLOUD_VER="34.0.6"
 		# fi
 		##
 	fi
 
 	InstallNextcloud $nextcloud_ver $nextcloud_hash $contacts_ver $contacts_hash $calendar_ver $calendar_hash $user_external_ver $user_external_hash
+fi
+
+# Update the apps contacts, calendar and user_external to the versions at the
+# top of this file when Nextcloud itself stays (B176). InstallNextcloud puts
+# them in only together with a new Nextcloud, so up to v78-r2604.3 a new
+# version of an app (a fix of calendar, say) reached an existing box only with
+# the next update of Nextcloud. The installed version is the one in the app's
+# appinfo/info.xml; an app that is missing is installed, a newer one is kept
+# (Nextcloud does not downgrade an app). The new copy is downloaded and
+# unpacked in a directory of root's own in /usr/local/lib (the same file
+# system as Nextcloud, not /tmp, a tmpfs, from where mv would copy file by
+# file), moved next to the old one as apps/.<app>.new and swapped in with two
+# renames; "occ upgrade" then runs the app's migrations (Nextcloud answers 503
+# until it has). occ upgrade refuses the read-only config.php that the last
+# setup run left (config_is_read_only, set again at the end of this script),
+# so the flag is removed first, as for an update of Nextcloud above. A run
+# that stopped after the swap and before the upgrade leaves Nextcloud
+# needing an upgrade, in which state occ refuses most commands (app:enable
+# below): the next run finds that and runs the upgrade here too. After
+# InstallNextcloud, and on a fresh install, the versions match and nothing
+# happens.
+UpdateNextcloudApp() {
+	local app=$1 version=$2 hash=$3 apps=/usr/local/lib/owncloud/apps installed dl
+	installed=$(sed -n 's:.*<version>\([0-9][0-9A-Za-z.~+-]*\)</version>.*:\1:p' "$apps/$app/appinfo/info.xml" 2> /dev/null | head -n 1 || true)
+	if [ "$installed" = "$version" ]; then
+		return 0
+	fi
+	if [ -n "$installed" ] && [ "$(printf '%s\n%s\n' "$installed" "$version" | sort -V | tail -n 1)" = "$installed" ]; then
+		echo "Nextcloud: $app $installed is newer than $version, keeping it."
+		return 0
+	fi
+	echo "Updating the Nextcloud app $app from ${installed:-(not installed)} to $version..."
+	dl=$(mktemp -d /usr/local/lib/.nextcloud-app.XXXXXXXX)
+	wget_verify "https://github.com/nextcloud-releases/$app/releases/download/v$version/$app-v$version.tar.gz" "$hash" "$dl/$app.tgz"
+	tar -xf "$dl/$app.tgz" -C "$dl"
+	if [ ! -f "$dl/$app/appinfo/info.xml" ]; then
+		echo "Nextcloud: the archive of $app $version has no $app/appinfo/info.xml." >&2
+		rm -rf "$dl"
+		exit 1
+	fi
+	chown -R www-data:www-data "$dl/$app"
+	rm -rf "$apps/.$app.new" "$apps/.$app.old"
+	mv "$dl/$app" "$apps/.$app.new"
+	if [ -e "$apps/$app" ] || [ -L "$apps/$app" ]; then
+		mv "$apps/$app" "$apps/.$app.old"
+	fi
+	mv "$apps/.$app.new" "$apps/$app"
+	rm -rf "$apps/.$app.old" "$dl"
+	NEXTCLOUD_APPS_UPDATED=1
+}
+NEXTCLOUD_APPS_UPDATED=
+UpdateNextcloudApp contacts "$contacts_ver" "$contacts_hash"
+UpdateNextcloudApp calendar "$calendar_ver" "$calendar_hash"
+UpdateNextcloudApp user_external "$user_external_ver" "$user_external_hash"
+if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
+	if [ -z "$NEXTCLOUD_APPS_UPDATED" ] && sudo -u www-data php"$PHP_VER" /usr/local/lib/owncloud/occ status --output=json 2> /dev/null | grep -q '"needsDbUpgrade":true'; then
+		NEXTCLOUD_APPS_UPDATED=1
+	fi
+	if [ -n "$NEXTCLOUD_APPS_UPDATED" ]; then
+		sudo -u www-data sed -i -e '/config_is_read_only/d' "$STORAGE_ROOT/owncloud/config.php"
+		NextcloudUpgrade php"$PHP_VER"
+	fi
 fi
 
 # ### Configuring Nextcloud
