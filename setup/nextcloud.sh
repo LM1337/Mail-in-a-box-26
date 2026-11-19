@@ -239,12 +239,18 @@ InstallNextcloud() {
 # and its subdirectories 0755, the database copies 0644 (B177). Only root needs
 # them (tools/owncloud-restore.sh), so the directory is 0700, which closes all
 # copies, also those of earlier runs. With "create" it is made if missing (just
-# before a backup); otherwise only an existing one is closed. A symbolic link
-# there is left alone (chmod would follow it).
+# before a backup); otherwise only an existing one is closed. Something else
+# than a directory there (a symbolic link, which chmod, mkdir -p and cp would
+# follow, or a file) is left alone: without "create" it is reported, with
+# "create" setup stops, as the backup must not be written through it.
 owncloud_backup_private() {
 	local d="$STORAGE_ROOT/owncloud-backup"
-	if [ -L "$d" ]; then
-		echo "Not changing $d: it is a symbolic link."
+	if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
+		if [ "${1:-}" = "create" ]; then
+			echo "Setup stopped: $d is not a directory (a symbolic link or a file), so Nextcloud's backup copies cannot go there. Move it away and run setup again." >&2
+			exit 1
+		fi
+		echo "Not changing $d: it is not a directory (a symbolic link or a file)."
 		return 0
 	fi
 	if [ ! -e "$d" ] && [ "${1:-}" = "create" ]; then
@@ -423,7 +429,7 @@ nextcloud_app_version() {
 UpdateNextcloudApps() {
 	local apps=/usr/local/lib/owncloud/apps dl item app version hash installed f
 	local todo=()
-	rm -rf /usr/local/lib/.nextcloud-apps.* # of a run that stopped here (root's own)
+	rm -rf /usr/local/lib/.nextcloud-apps.* /usr/local/lib/.nextcloud-db.* # of a run that stopped here
 	for item in "contacts $contacts_ver $contacts_hash" "calendar $calendar_ver $calendar_hash" "user_external $user_external_ver $user_external_hash"; do
 		read -r app version hash <<< "$item"
 		installed=$(nextcloud_app_version "$app")
@@ -457,18 +463,40 @@ UpdateNextcloudApps() {
 		chown -R www-data:www-data "$dl/new/$app"
 	done
 
-	# 2. Stop PHP-FPM and back up.
+	# 2. Stop PHP-FPM and back up. The database is in WAL mode, and a cron.php
+	# that started before setup stopped cron may still write to it (cron's
+	# KillMode leaves its jobs running, see setup/start.sh), so copying
+	# owncloud.db could miss transactions that are only in owncloud.db-wal.
+	# www-data, the owner of the database, writes a consistent copy with
+	# "VACUUM INTO" (root opens no database of www-data's) into a directory of
+	# its own that root made for it in /usr/local/lib; root takes the file
+	# from there if it is a regular file (B147) and removes the directory.
 	stop_php_fpm
 	BACKUP_DIRECTORY=$STORAGE_ROOT/owncloud-backup/$(date +"%Y-%m-%d-%T")
 	owncloud_backup_private create
 	mkdir -p "$BACKUP_DIRECTORY/apps"
-	for f in owncloud.db config.php; do
-		if [ -L "$STORAGE_ROOT/owncloud/$f" ] || { [ -e "$STORAGE_ROOT/owncloud/$f" ] && [ ! -f "$STORAGE_ROOT/owncloud/$f" ]; }; then
-			echo "Not backing up $STORAGE_ROOT/owncloud/$f: it is not a regular file."
-		elif [ -e "$STORAGE_ROOT/owncloud/$f" ]; then
-			cp -P "$STORAGE_ROOT/owncloud/$f" "$BACKUP_DIRECTORY"
+	if [ -L "$STORAGE_ROOT/owncloud/owncloud.db" ] || { [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ] && [ ! -f "$STORAGE_ROOT/owncloud/owncloud.db" ]; }; then
+		echo "Not backing up $STORAGE_ROOT/owncloud/owncloud.db: it is not a regular file."
+	elif [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
+		local dbcopy; dbcopy=$(mktemp -d /usr/local/lib/.nextcloud-db.XXXXXXXX)
+		chown www-data:www-data "$dbcopy"
+		if ! timeout 900 sudo -u www-data python3 -I -c 'import sqlite3, sys, urllib.parse
+con = sqlite3.connect("file:" + urllib.parse.quote(sys.argv[1]) + "?mode=ro", uri=True, timeout=60)
+con.execute("VACUUM INTO ?", (sys.argv[2],))
+con.close()' "$STORAGE_ROOT/owncloud/owncloud.db" "$dbcopy/owncloud.db" \
+				|| [ -L "$dbcopy/owncloud.db" ] || [ ! -f "$dbcopy/owncloud.db" ]; then
+			rm -rf "$dbcopy"
+			echo "Nextcloud: could not make a copy of the database for the backup (VACUUM INTO). Nothing was changed." >&2
+			exit 1
 		fi
-	done
+		cp -P "$dbcopy/owncloud.db" "$BACKUP_DIRECTORY/owncloud.db"
+		rm -rf "$dbcopy"
+	fi
+	if [ -L "$STORAGE_ROOT/owncloud/config.php" ] || { [ -e "$STORAGE_ROOT/owncloud/config.php" ] && [ ! -f "$STORAGE_ROOT/owncloud/config.php" ]; }; then
+		echo "Not backing up $STORAGE_ROOT/owncloud/config.php: it is not a regular file."
+	elif [ -e "$STORAGE_ROOT/owncloud/config.php" ]; then
+		cp -P "$STORAGE_ROOT/owncloud/config.php" "$BACKUP_DIRECTORY"
+	fi
 
 	# 3. Swap.
 	for item in "${todo[@]}"; do

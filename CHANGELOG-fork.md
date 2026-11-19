@@ -83,7 +83,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   that setup pins reaches an existing box now also when Nextcloud itself
   stays: setup compares the installed versions with the pins, downloads and
   checks every new release first (a failed download changes nothing),
-  stops PHP-FPM, backs up the database, config.php and the old apps to
+  stops PHP-FPM, backs up the database (a consistent copy with `VACUUM
+  INTO`, as www-data), config.php and the old apps to
   `$STORAGE_ROOT/owncloud-backup`, swaps the apps without using a name of
   its own in Nextcloud's directory (which www-data owns) and runs `occ
   upgrade`. Before, a new pin took effect only with the next Nextcloud
@@ -94,7 +95,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   calendars and contacts, Nextcloud's code) were readable by every local
   account (directory 0755, database copies 0644). Setup now keeps the
   directory at 0700 on every run, which closes the copies of earlier
-  updates too. New smoke check `admin-nextcloud-backup-private` (B177).
+  updates too; if something else than a directory is in its place (a
+  symbolic link, a file), setup stops before a backup instead of writing
+  through it. New smoke check `admin-nextcloud-backup-private` (B177).
 
 ### Security
 
@@ -123,6 +126,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2 and
 v78-r2604.3, not done (the certification runs add their open findings in TESTING-fork.md):
 
+* `$STORAGE_ROOT/owncloud-backup` grows with every update of Nextcloud and,
+  since B176, with every new pin of one of its apps: each keeps a copy of
+  the database, `config.php` and the replaced code, and nothing removes old
+  copies (one box had 2.5 GB there; the directory is not in the box's
+  backup). Setup could keep the newest few copies and remove older ones
+  (seen in the review of v78-r2604.4).
 * tools/update-check.sh records 24 Postfix parameters, but not
   `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
   change of this release does not show in its list of changes (seen in T5b
