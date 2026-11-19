@@ -89,6 +89,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   upgrade`. Before, a new pin took effect only with the next Nextcloud
   version, and a fresh install and an updated box differed (B176).
   Calendar 6.6.5 to 6.6.6. New smoke check `admin-nextcloud-app-versions`.
+* The copies that setup keeps in `$STORAGE_ROOT/owncloud-backup` before an
+  update of Nextcloud or of its apps (the database with every user's
+  calendars and contacts, Nextcloud's code) were readable by every local
+  account (directory 0755, database copies 0644). Setup now keeps the
+  directory at 0700 on every run, which closes the copies of earlier
+  updates too. New smoke check `admin-nextcloud-backup-private` (B177).
 
 ### Security
 

@@ -2159,6 +2159,24 @@ def c_nc_app_versions(ctx):
     return ", ".join(have) + "; enabled, no upgrade pending"
 
 
+def c_nc_backup_private(ctx):
+    # $STORAGE_ROOT/owncloud-backup, the copies of Nextcloud's database
+    # (every user's calendars and contacts), its code and config.php that
+    # setup makes before an update of Nextcloud or of its apps, is root's
+    # only (0700, B177). A box that never updated Nextcloud has none.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    script = ("d=$(sed -n 's/^STORAGE_ROOT=//p' /etc/mailinabox.conf)/owncloud-backup; "
+        "if [ -L \"$d\" ]; then echo link; elif [ -d \"$d\" ]; then stat -c '%a %U' \"$d\"; else echo none; fi")
+    rc, out, _ = ctx.remote.run("bash -c %s" % shlex.quote(script), sudo=True)
+    state = out.strip()
+    if state == "none":
+        return "no owncloud-backup directory (no update of Nextcloud or its apps yet)"
+    if state != "700 root":
+        raise Fail("owncloud-backup is %s, expected mode 700 owned by root" % (state or "unreadable"))
+    return "owncloud-backup is 700, root"
+
+
 # Log lines for the installed fail2ban filters: (filter, line, expected host or
 # None for no match). Client-chosen user names must neither move the host to a
 # third-party address nor hide a real failure. Only fail2ban-regex runs: no
@@ -4599,6 +4617,7 @@ def main():
         run_check("admin-nextcloud-protection-off", c_nc_protection_off, ctx)
         run_check("admin-nextcloud-setup-no-drift", c_nc_setup_no_drift, ctx)
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
+        run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):
         print("== api (management API as api/mailinabox.yml documents it)")
         run_check("api-auth", c_api_auth, ctx)

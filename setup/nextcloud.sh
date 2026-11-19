@@ -234,6 +234,28 @@ InstallNextcloud() {
 # version.php since the restore procedure can leave the system in a state where you have a newer Nextcloud
 # application version than the database.
 
+# The copies in $STORAGE_ROOT/owncloud-backup (owncloud.db holds every user's
+# calendars and contacts) were readable by every local account: the directory
+# and its subdirectories 0755, the database copies 0644 (B177). Only root needs
+# them (tools/owncloud-restore.sh), so the directory is 0700, which closes all
+# copies, also those of earlier runs. With "create" it is made if missing (just
+# before a backup); otherwise only an existing one is closed. A symbolic link
+# there is left alone (chmod would follow it).
+owncloud_backup_private() {
+	local d="$STORAGE_ROOT/owncloud-backup"
+	if [ -L "$d" ]; then
+		echo "Not changing $d: it is a symbolic link."
+		return 0
+	fi
+	if [ ! -e "$d" ] && [ "${1:-}" = "create" ]; then
+		mkdir -m 0700 "$d"
+	fi
+	if [ -d "$d" ]; then
+		chmod 0700 "$d"
+	fi
+}
+owncloud_backup_private
+
 # If config.php exists, get version number, otherwise CURRENT_NEXTCLOUD_VER is empty.
 # Read from the file's 'version' line (Nextcloud writes it with var_export, one
 # key per line), as www-data, which owns it. Up to v78-r2604.1 root included
@@ -255,6 +277,7 @@ if [ ! -d /usr/local/lib/owncloud/ ] || [[ ! ${CURRENT_NEXTCLOUD_VER} =~ ^$nextc
 	# Backup the existing ownCloud/Nextcloud.
 	# Create a backup directory to store the current installation and database to
 	BACKUP_DIRECTORY=$STORAGE_ROOT/owncloud-backup/$(date +"%Y-%m-%d-%T")
+	owncloud_backup_private create
 	mkdir -p "$BACKUP_DIRECTORY"
 	if [ -d /usr/local/lib/owncloud/ ]; then
 		echo "Upgrading Nextcloud --- backing up existing installation, configuration, and database to directory to $BACKUP_DIRECTORY..."
@@ -437,6 +460,7 @@ UpdateNextcloudApps() {
 	# 2. Stop PHP-FPM and back up.
 	stop_php_fpm
 	BACKUP_DIRECTORY=$STORAGE_ROOT/owncloud-backup/$(date +"%Y-%m-%d-%T")
+	owncloud_backup_private create
 	mkdir -p "$BACKUP_DIRECTORY/apps"
 	for f in owncloud.db config.php; do
 		if [ -L "$STORAGE_ROOT/owncloud/$f" ] || { [ -e "$STORAGE_ROOT/owncloud/$f" ] && [ ! -f "$STORAGE_ROOT/owncloud/$f" ]; }; then
