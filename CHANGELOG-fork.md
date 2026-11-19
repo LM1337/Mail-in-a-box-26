@@ -22,6 +22,20 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   copies (one box had 2.5 GB there; the directory is not in the box's
   backup). Setup could keep the newest few copies and remove older ones
   (seen in the review of v78-r2604.4).
+* The in-place upgrade (tools/upgrade-in-place-to-2604.sh) does not see
+  local changes to Roundcube: the upgrade moves Roundcube to a new version,
+  setup builds a new tree in `/usr/local/lib/roundcubemail` and writes its
+  own plugin list into `config/config.inc.php`, so extra plugins (and
+  changes to that file) are gone afterwards, and neither the preflight
+  check nor `etc-report.txt` names them. Planned: the preflight check
+  lists the plugin directories that setup does not install and the
+  differences of the plugin list and of other settings in
+  `config.inc.php` (blocking like the other local extensions unless
+  `--keep-local`), the system archive keeps the old tree, and the report
+  of phase verify names what a hook in `/etc/mailinabox/upgrade-2604.d/`
+  has to bring back (a question about local changes in the in-place
+  upgrade, after v78-r2604.4). The migration tool (tools/migrate-to-2604.sh)
+  has the same gap and gets the same report.
 * tools/update-check.sh records 24 Postfix parameters, but not
   `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
   change of this release does not show in its list of changes (seen in T5b
