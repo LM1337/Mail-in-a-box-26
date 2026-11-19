@@ -484,7 +484,10 @@ UpdateNextcloudApps() {
 con = sqlite3.connect("file:" + urllib.parse.quote(sys.argv[1]) + "?mode=ro", uri=True, timeout=60)
 con.execute("VACUUM INTO ?", (sys.argv[2],))
 con.close()' "$STORAGE_ROOT/owncloud/owncloud.db" "$dbcopy/owncloud.db" \
+				|| ! chown root:root "$dbcopy" || ! chmod 0700 "$dbcopy" \
 				|| [ -L "$dbcopy/owncloud.db" ] || [ ! -f "$dbcopy/owncloud.db" ]; then
+			# (The directory is root's again before the checks: www-data can no
+			# longer swap the file for a link or a FIFO between them and cp.)
 			rm -rf "$dbcopy"
 			echo "Nextcloud: could not make a copy of the database for the backup (VACUUM INTO). Nothing was changed." >&2
 			exit 1
