@@ -808,12 +808,14 @@ def fail2ban_settings_set():
 	# value. reset=1 starts from the defaults.
 	from fail2ban_admin import update_settings, DEFAULTS
 	values = { k: request.form[k] for k in DEFAULTS if k in request.form }
+	reset = request.form.get('reset') == '1'
 	try:
-		result = update_settings(env, values, reset=(request.form.get('reset') == '1'))
+		result = update_settings(env, values, reset=reset)
 	except ValueError as e:
 		return (str(e), 400)
 	except Exception as e:
 		return (str(e), 500)
+	app.logger.warning("fail2ban: %s %s the intrusion protection settings", request.user_email, "reset" if reset else "saved")
 	result["status"] = "ok"
 	return json_response(result)
 
@@ -855,6 +857,33 @@ def fail2ban_report():
 		return json_response(failed_login_report(env))
 	except Exception as e:
 		return (str(e), 500)
+
+# Nextcloud's brute-force throttle (see nextcloud_throttle.py). Its settings
+# are part of the intrusion protection settings above.
+
+@app.route('/system/nextcloud-throttle', methods=["GET"])
+@authorized_personnel_only
+def nextcloud_throttle_status():
+	from nextcloud_throttle import get_overview
+	try:
+		return json_response(get_overview(env))
+	except Exception as e:
+		return (str(e), 500)
+
+@app.route('/system/nextcloud-throttle/reset', methods=["POST"])
+@authorized_personnel_only
+def nextcloud_throttle_reset():
+	# ip: deletes Nextcloud's failures of that address (for IPv6 of its /64).
+	from nextcloud_throttle import reset, NCError
+	try:
+		result = reset(env, request.form.get('ip', ''))
+	except ValueError as e:
+		return (str(e), 400)
+	except NCError as e:
+		return (str(e), 500)
+	app.logger.warning("nextcloud: %s reset the brute-force failures of %s", request.user_email, result["ip"])
+	result["status"] = "ok"
+	return json_response(result)
 
 # Munin's alerts (recipient and level of munin-limits' mails, see munin_admin.py)
 

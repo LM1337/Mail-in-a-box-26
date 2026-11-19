@@ -8,6 +8,13 @@
 #fail2ban-settings .help-block { margin-bottom: 0; }
 #fail2ban-settings .f2b-section { font-weight: bold; }
 #f2b-allowlist { font-family: monospace; }
+#f2b-bans .f2b-reason { margin: 1px 0 4px 1em; }
+#f2b-bans .f2b-reason pre { font-size: 85%; white-space: pre-wrap; word-break: break-all; margin: 3px 0; max-width: 60em; }
+#f2b-nc td { vertical-align: top; }
+#f2b-nc td.num, #f2b-nc th.num { text-align: right; }
+#f2b-nc .f2b-ip { font-family: monospace; white-space: nowrap; }
+#f2b-jail-values td, #f2b-jail-values th { vertical-align: middle; }
+#f2b-jail-values input { width: 7em; }
 </style>
 
 <h2>Intrusion Protection</h2>
@@ -44,7 +51,7 @@
   <thead>
     <tr>
       <th scope="col">Address</th>
-      <th scope="col">Banned in</th>
+      <th scope="col">Banned in, and why</th>
       <th scope="col"></th>
     </tr>
   </thead>
@@ -55,6 +62,33 @@
 <p id="f2b-bans-more" class="small text-muted" style="display: none"></p>
 
 <p class="small text-muted">&ldquo;Unban&rdquo; releases the address in all jails, recidive included, and deletes its ban history, so a new ban starts again at the initial ban time. &ldquo;in this jail only&rdquo; releases only that jail&rsquo;s ban. Failures that other jails counted but did not ban yet stay counted: if a device keeps getting banned, fix its password or put its network on the allowlist below.</p>
+
+<h3>Nextcloud throttle</h3>
+
+<p>Nextcloud has a throttle of its own, apart from fail2ban. After failed logins from an address (within the last 12 hours) it delays every login from there, up to 25 seconds, and after more than <span class="f2b-nc-max">10</span> failures within 30 minutes it refuses them with HTTP 429 (&ldquo;Too many requests&rdquo;). This hits every account behind that address, also those with the right password: one calendar or contacts app with an old password keeps the other devices of its network from syncing. A successful login removes only the failures of that account.</p>
+
+<p id="f2b-nc-summary" class="text-muted">Loading...</p>
+
+<div class="table-responsive">
+<table id="f2b-nc" class="table" style="width: auto; min-width: 50%">
+  <thead>
+    <tr>
+      <th scope="col">Address</th>
+      <th scope="col" class="num">12 h</th>
+      <th scope="col" class="num">30 min</th>
+      <th scope="col">Accounts</th>
+      <th scope="col">Last failure</th>
+      <th scope="col">Status</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+</div>
+<p id="f2b-nc-more" class="small text-muted" style="display: none"></p>
+
+<p class="small text-muted">&ldquo;Reset&rdquo; deletes Nextcloud&rsquo;s failures of the address (for an IPv6 address, those of its /64 network, which Nextcloud counts as one), so its next login is not delayed. If a device keeps failing, fix its password: the failures come back.</p>
 
 <h3>Jails</h3>
 
@@ -156,6 +190,44 @@
   </div>
 
   <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-8">
+      <p class="f2b-section" style="margin-bottom: 0">Thresholds of Mail-in-a-Box&rsquo;s jails</p>
+      <p class="help-block">Failed logins of one address within the window that lead to a ban, and how long the ban lasts (for repeat offenders on the mail ports the first ban, if adaptive banning is on). Leave a field at its default to follow Mail-in-a-Box&rsquo;s value. recidive is not listed: it bans addresses that these jails banned again and again.</p>
+      <div class="table-responsive">
+      <table id="f2b-jail-values" class="table table-condensed" style="width: auto">
+        <thead><tr><th scope="col">Jail</th><th scope="col">Failures</th><th scope="col">Within</th><th scope="col">Ban time</th><th scope="col">Watches</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-8">
+      <div class="checkbox">
+        <label class="f2b-section"><input type="checkbox" id="f2b-nc_protection" onchange="f2b_toggle_inputs()"> Throttle failed Nextcloud logins (recommended)</label>
+      </div>
+      <p class="help-block">Nextcloud&rsquo;s own throttle, see above. Turned off, only the Nextcloud jail of fail2ban stays (20 failures within 2 minutes), and passwords can be tried on Nextcloud, CalDAV and CardDAV as fast as the server answers.</p>
+    </div>
+  </div>
+  <div class="form-group">
+    <label for="f2b-nc_max_attempts" class="col-sm-2 control-label">Failures before the block</label>
+    <div class="col-sm-3">
+      <input type="number" class="form-control f2b-nc-input" id="f2b-nc_max_attempts">
+      <p class="help-block small" id="f2b-help-nc_max_attempts"></p>
+    </div>
+  </div>
+  <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-8">
+      <div class="checkbox">
+        <label><input type="checkbox" id="f2b-nc_allowlist" class="f2b-nc-input"> Also exempt the allowlist from Nextcloud&rsquo;s throttle</label>
+      </div>
+      <p class="help-block">The addresses and networks of the allowlist above go on Nextcloud&rsquo;s bypass list too, so Nextcloud never delays or refuses them. Only for networks of your own: an address that you share with others (mobile networks, satellite and other carrier-grade NAT) would be exempt for them as well.</p>
+      <p class="help-block small" id="f2b-nc-bypass"></p>
+    </div>
+  </div>
+
+  <div class="form-group">
     <label for="f2b-spray_min_ips" class="col-sm-2 control-label">Spraying report</label>
     <div class="col-sm-3">
       <input type="number" class="form-control" id="f2b-spray_min_ips">
@@ -165,7 +237,7 @@
 
   <div class="form-group">
     <div class="col-sm-offset-2 col-sm-10">
-      <p class="small text-muted">Durations are in seconds, or with a unit: <tt>30m</tt>, <tt>6h</tt>, <tt>2d</tt>, <tt>1w</tt>. With adaptive banning and the slow jails off and an empty allowlist, fail2ban runs exactly with Mail-in-a-Box&rsquo;s original configuration.</p>
+      <p class="small text-muted">Durations are in seconds, or with a unit: <tt>30m</tt>, <tt>6h</tt>, <tt>2d</tt>, <tt>1w</tt>. With adaptive banning and the slow jails off, an empty allowlist and the jails&rsquo; default thresholds, fail2ban runs exactly with Mail-in-a-Box&rsquo;s original configuration.</p>
       <button type="submit" class="btn btn-primary">Save</button>
       <button type="button" class="btn btn-default" onclick="f2b_reset_settings(); return false;">Restore defaults</button>
     </div>
@@ -176,7 +248,9 @@
 var f2b_state = null;
 var f2b_settings_dirty = false; // the settings form has unsaved edits
 var F2B_MAX_ROWS = 300;
-var F2B_INPUTS = ["bantime_max", "memory", "slow_maxretry", "slow_findtime", "slow_bantime", "spray_min_ips"];
+var F2B_INPUTS = ["bantime_max", "memory", "slow_maxretry", "slow_findtime", "slow_bantime", "spray_min_ips", "nc_max_attempts"];
+var F2B_JAIL_OPTIONS = ["maxretry", "findtime", "bantime"];
+var f2b_nc_state = null;
 var F2B_DURATIONS = ["bantime_max", "memory", "slow_findtime", "slow_bantime"];
 
 function f2b_nice_duration(s) {
@@ -224,8 +298,12 @@ function show_fail2ban() {
   $('#f2b-bans tbody').html("");
   $('#f2b-jails tbody').html("");
   $('#f2b-report').html("<p class='text-muted'>Loading...</p>");
+  $('#f2b-nc-summary').text("Loading...").addClass("text-muted");
+  $('#f2b-nc tbody').html("");
   f2b_settings_dirty = false;
+  f2b_nc_state = null;
   f2b_load_status();
+  f2b_load_nc();
   f2b_load_report();
 }
 
@@ -348,6 +426,11 @@ function f2b_render_bans() {
     var tr = $('<tr/>');
     var td_ip = $('<td class="f2b-ip"/>').text(ip);
     if (ip == client_ip) td_ip.append($('<div class="small text-danger"/>').text("your address"));
+    var nc = f2b_nc_entry(ip);
+    if (nc && (nc.blocked || nc.delay_ms > 0)) {
+      td_ip.append($('<div class="small text-warning"/>').text(nc.blocked ? "also blocked by Nextcloud (HTTP 429)" : "also delayed by Nextcloud"));
+      td_ip.append($('<button type="button" class="btn btn-default btn-xs">Reset Nextcloud</button>').click(function() { f2b_nc_reset(ip); }));
+    }
     tr.append(td_ip);
 
     var td_bans = $('<td/>');
@@ -363,6 +446,7 @@ function f2b_render_bans() {
       if (data.by_ip[ip].length > 1)
         div.append($('<a href="#">in this jail only</a>').click(function() { f2b_unban(ip, b.jail); return false; }));
       td_bans.append(div);
+      td_bans.append(f2b_reason(b));
     });
     tr.append(td_bans);
 
@@ -373,6 +457,175 @@ function f2b_render_bans() {
 
   if (ips.length > F2B_MAX_ROWS)
     $('#f2b-bans-more').text("Showing " + F2B_MAX_ROWS + " of " + ips.length + " addresses (the most recently banned). Use the filter to find others.").show();
+}
+
+function f2b_rule_text(name) {
+  // "failed ... logins: 20 failures within 30 s, banned for 10 min from the mail ports"
+  var info = (f2b_state.jail_info || {})[name];
+  if (!info || !info.watches) return null;
+  var t = info.watches;
+  if (info.maxretry) t += ": " + info.maxretry + " failures within " + f2b_nice_duration(info.findtime) + ", banned for " + f2b_nice_duration(info.bantime);
+  if (info.blocks) t += (info.maxretry ? " from " : ", banned from ") + info.blocks;
+  return t + ".";
+}
+
+function f2b_reason(b) {
+  // Why the address is banned in this jail: the failures and accounts of the
+  // log lines fail2ban kept (names that are no account here are replaced on
+  // the server), and the jail's rule.
+  var div = $('<div class="small f2b-reason"/>');
+  var r = b.reason;
+  var parts = [];
+  if (r && r.manual) {
+    parts.push("banned by hand (no log lines)");
+  } else if (r) {
+    if (r.failures != null) parts.push(r.failures + " failure" + (r.failures == 1 ? "" : "s"));
+    if (r.accounts.length) parts.push(r.accounts.join(", "));
+    if (r.unknown_names) parts.push(r.unknown_names + " with a name that is no account here");
+  } else {
+    parts.push("no record in fail2ban's database");
+  }
+  div.append($('<span/>').text(parts.join(" · ")));
+  if (r && r.lines.length) {
+    var pre = $('<pre/>').text(r.lines.join("\n")).hide();
+    div.append(" ").append($('<a href="#"/>').text("log lines (" + r.lines.length + ")").click(function() { pre.toggle(); return false; }));
+    div.append(pre);
+  }
+  var rule = f2b_rule_text(b.jail);
+  if (rule) div.append($('<div class="text-muted"/>').text("Rule: " + rule));
+  return div;
+}
+
+function f2b_load_nc() {
+  api(
+    "/system/nextcloud-throttle",
+    "GET",
+    { },
+    function(r) {
+      f2b_nc_state = r;
+      f2b_render_nc();
+      f2b_render_bans(); // the hints of addresses that Nextcloud throttles too
+      if (!f2b_settings_dirty && f2b_state) f2b_render_settings();
+    },
+    function(text, xhr) {
+      if (xhr && xhr.status == 403) return;
+      $('#f2b-nc-summary').text("Nextcloud's throttle could not be read: " + text).removeClass("text-muted");
+    });
+}
+
+function f2b_nc_entry(ip) {
+  if (!f2b_nc_state || !f2b_nc_state.entries) return null;
+  for (var i = 0; i < f2b_nc_state.entries.length; i++) {
+    var e = f2b_nc_state.entries[i];
+    if (e.address == ip || e.ips.indexOf(ip) >= 0) return e;
+  }
+  return null;
+}
+
+function f2b_nc_status(e) {
+  if (e.bypassed) return $('<span class="text-muted"/>').text("on the bypass list (not throttled)");
+  if (!f2b_nc_state.enabled) return $('<span class="text-muted"/>').text("throttle off");
+  if (e.blocked) return $('<strong class="text-danger"/>').text("BLOCKED (HTTP 429)");
+  if (e.delay_ms > 0) return $('<span class="text-warning"/>').text("delayed " + (e.delay_ms >= 1000 ? Math.round(e.delay_ms / 100) / 10 + " s" : e.delay_ms + " ms"));
+  return $('<span class="text-muted"/>').text("not throttled");
+}
+
+function f2b_render_nc() {
+  var r = f2b_nc_state;
+  var tbody = $('#f2b-nc tbody');
+  tbody.html("");
+  $('#f2b-nc-more').hide();
+  if (r.max_attempts) $('.f2b-nc-max').text(r.max_attempts);
+  if (!r.available) {
+    $('#f2b-nc-summary').text(r.error || "Nextcloud's throttle could not be read.").removeClass("text-muted");
+    return;
+  }
+  var blocked = r.entries.filter(function(e) { return e.blocked; }).length;
+  var delayed = r.entries.filter(function(e) { return !e.blocked && e.delay_ms > 0; }).length;
+  var text;
+  if (!r.enabled) text = "Nextcloud's throttle is off (see the settings below).";
+  else if (r.entries_total == 0) text = "No failed Nextcloud logins in the last " + r.window_hours + " hours.";
+  else text = r.entries_total + " address" + (r.entries_total == 1 ? "" : "es") + " with failed Nextcloud logins in the last " + r.window_hours + " hours: "
+    + blocked + " blocked, " + delayed + " delayed.";
+  if (r.config_current === false || r.bypass_current === false)
+    text += " Nextcloud's settings do not match the settings below; save them to write them again.";
+  $('#f2b-nc-summary').text(text).removeClass("text-muted");
+  if (r.entries.length == 0) {
+    tbody.append($('<tr/>').append($('<td colspan="7" class="text-muted"/>').text("Nobody is throttled.")));
+    return;
+  }
+  var client_ip = f2b_state && f2b_state.client ? f2b_state.client.ip : null;
+  r.entries.forEach(function(e) {
+    var tr = $('<tr/>');
+    var td_ip = $('<td class="f2b-ip"/>').text(e.address);
+    if (client_ip && (e.address == client_ip || e.ips.indexOf(client_ip) >= 0)) td_ip.append($('<div class="small text-danger"/>').text("your address"));
+    var details = [];
+    Object.keys(e.actions).forEach(function(a) { details.push(a + " " + e.actions[a]); });
+    details.push("first failure " + f2b_time(e.first));
+    if (e.ips_total > 1) details.push(e.ips_total + " addresses");
+    td_ip.append($('<div class="small text-muted"/>').text(details.join(" · ")));
+    tr.append(td_ip);
+    tr.append($('<td class="num"/>').text(e.attempts));
+    tr.append($('<td class="num"/>').text(e.recent));
+    var acc = e.accounts.slice();
+    if (e.accounts_total > e.accounts.length) acc.push("and " + (e.accounts_total - e.accounts.length) + " more");
+    if (e.unknown_names) acc.push(e.unknown_names + " unknown name" + (e.unknown_names == 1 ? "" : "s"));
+    tr.append($('<td/>').text(acc.join(", ")));
+    tr.append($('<td/>').text(f2b_time(e.last)));
+    tr.append($('<td/>').append(f2b_nc_status(e)));
+    tr.append($('<td/>').append($('<button type="button" class="btn btn-default btn-xs">Reset</button>').click(function() { f2b_nc_reset(e.ips[0] || e.address); })));
+    tbody.append(tr);
+  });
+  if (r.entries_total > r.entries.length)
+    $('#f2b-nc-more').text("Showing " + r.entries.length + " of " + r.entries_total + " addresses.").show();
+}
+
+function f2b_nc_reset(ip) {
+  api("/system/nextcloud-throttle/reset", "POST", { ip: ip },
+    function(r) {
+      var text = "Nextcloud's failures of " + r.ip + " were reset.";
+      if (r.attempts) text += " Nextcloud still counts " + r.attempts + " (new failures since).";
+      show_modal_error("Nextcloud throttle", $("<p/>").text(text), function() { f2b_load_nc(); });
+    },
+    f2b_api_error("Nextcloud throttle"));
+}
+
+function f2b_render_jail_values() {
+  var tbody = $('#f2b-jail-values tbody');
+  tbody.html("");
+  var s = f2b_state.settings, d = f2b_state.jail_defaults, lim = f2b_state.jail_limits;
+  f2b_state.override_jails.forEach(function(name) {
+    var tr = $('<tr/>');
+    tr.append($('<td/>').append($('<tt/>').text(name)));
+    F2B_JAIL_OPTIONS.forEach(function(opt) {
+      var v = (s.jails[name] && s.jails[name][opt] != null) ? s.jails[name][opt] : d[name][opt];
+      var input = $('<input type="text" class="form-control input-sm"/>').attr('id', 'f2b-jail-' + name + '-' + opt)
+        .attr('data-jail', name).attr('data-opt', opt)
+        .val(opt == "maxretry" ? v : f2b_duration_input(v));
+      var def = opt == "maxretry" ? String(d[name][opt]) : f2b_nice_duration(d[name][opt]);
+      var range = opt == "maxretry" ? lim[opt].min + "–" + lim[opt].max : f2b_nice_duration(lim[opt].min) + "–" + f2b_nice_duration(lim[opt].max);
+      input.attr('title', "Default " + def + ", from " + range);
+      tr.append($('<td/>').append(input));
+    });
+    var info = (f2b_state.jail_info || {})[name];
+    tr.append($('<td class="small text-muted"/>').text(info && info.watches ? info.watches : ""));
+    tbody.append(tr);
+  });
+}
+
+function f2b_jail_values() {
+  // The changed thresholds as the API takes them (JSON): only values that
+  // differ from the default.
+  var d = f2b_state.jail_defaults, ret = { };
+  $('#f2b-jail-values input').each(function() {
+    var name = $(this).attr('data-jail'), opt = $(this).attr('data-opt'), v = $(this).val().trim();
+    if (v === "") return;
+    var def = opt == "maxretry" ? String(d[name][opt]) : f2b_duration_input(d[name][opt]);
+    if (v == def || v == String(d[name][opt])) return;
+    if (!ret[name]) ret[name] = { };
+    ret[name][opt] = v;
+  });
+  return JSON.stringify(ret);
 }
 
 function f2b_render_jails() {
@@ -415,6 +668,9 @@ function f2b_render_settings() {
   $('#f2b-adaptive').prop('checked', s.adaptive);
   $('#f2b-slow_jails').prop('checked', s.slow_jails);
   $('#f2b-slow_web_jails').prop('checked', s.slow_web_jails);
+  $('#f2b-nc_protection').prop('checked', s.nc_protection);
+  $('#f2b-nc_allowlist').prop('checked', s.nc_allowlist);
+  f2b_render_jail_values();
   F2B_INPUTS.forEach(function(k) {
     var is_duration = F2B_DURATIONS.indexOf(k) >= 0;
     $('#f2b-' + k).val(is_duration ? f2b_duration_input(s[k]) : s[k]);
@@ -424,6 +680,7 @@ function f2b_render_settings() {
     if (k == "slow_maxretry") help = "Failed logins of one address that lead to a ban. " + help;
     if (k == "slow_bantime") help = "On the mail ports repeat offenders get longer bans if adaptive banning is on. A change also applies to the current first bans of the slow jails. " + help;
     if (k == "spray_min_ips") help = "Report an account that failed to log in from this many addresses within 24 hours. " + help;
+    if (k == "nc_max_attempts") help = "Up to this number each failure doubles the delay of the next login (0.2 s, 0.4 s, ... up to 25 s); above it every login waits 25 s, and above it within 30 minutes Nextcloud refuses the logins. " + help;
     $('#f2b-help-' + k).text(help);
   });
   $('#f2b-allowlist').val(s.allowlist.join("\n"));
@@ -432,6 +689,14 @@ function f2b_render_settings() {
     + " (such as Outlook for iOS and Android with an Exchange ActiveSync account): all its users come from these few addresses, so 20 wrong passwords there"
     + " within 2 minutes ban them all from ActiveSync, webmail, Nextcloud and this control panel. Anyone can cause that on purpose, with any account name"
     + " and a wrong password in the app, and repeated bans of an address lead to recidive's one-week ban on all ports.");
+  var bp = $('#f2b-nc-bypass');
+  if (f2b_nc_state && f2b_nc_state.available) {
+    var names = { system: "the box itself", panel: "from the allowlist", other: "set in Nextcloud" };
+    var list = f2b_nc_state.bypass.map(function(b) { return b.network + " (" + (names[b.source] || b.source) + ")"; });
+    bp.text("On Nextcloud's bypass list now: " + (list.length ? list.join(", ") : "nothing") + ".");
+  } else {
+    bp.text("");
+  }
   f2b_toggle_inputs();
   f2b_settings_dirty = false;
 }
@@ -439,6 +704,7 @@ function f2b_render_settings() {
 function f2b_toggle_inputs() {
   $('.f2b-adaptive-input').prop('disabled', !$('#f2b-adaptive').prop('checked'));
   $('.f2b-slow-input').prop('disabled', !$('#f2b-slow_jails').prop('checked') && !$('#f2b-slow_web_jails').prop('checked'));
+  $('.f2b-nc-input').prop('disabled', !$('#f2b-nc_protection').prop('checked'));
 }
 
 function f2b_allowlist_add(net) {
@@ -460,8 +726,11 @@ function f2b_save_settings() {
     adaptive: $('#f2b-adaptive').prop('checked') ? "1" : "0",
     slow_jails: $('#f2b-slow_jails').prop('checked') ? "1" : "0",
     slow_web_jails: $('#f2b-slow_web_jails').prop('checked') ? "1" : "0",
-    allowlist: $('#f2b-allowlist').val()
+    nc_protection: $('#f2b-nc_protection').prop('checked') ? "1" : "0",
+    allowlist: $('#f2b-allowlist').val(),
+    jails: f2b_jail_values()
   };
+  if (!$('#f2b-nc_allowlist').prop('disabled')) values.nc_allowlist = $('#f2b-nc_allowlist').prop('checked') ? "1" : "0";
   F2B_INPUTS.forEach(function(k) {
     // disabled inputs keep their stored value
     if (!$('#f2b-' + k).prop('disabled')) values[k] = $('#f2b-' + k).val().trim();
@@ -474,6 +743,8 @@ function f2b_save_settings() {
     off.push("Slow jails: attacks with a few attempts per hour are no longer banned, and the addresses the slow jails banned are released (bans that have not run out yet come back if you turn them on again).");
   if (f2b_state.settings.slow_web_jails && values.slow_web_jails == "0")
     off.push("Slow jails for webmail, Nextcloud, ActiveSync and the control panel: the addresses they banned are released (bans that have not run out yet come back if you turn them on again).");
+  if (f2b_state.settings.nc_protection && values.nc_protection == "0")
+    off.push("Nextcloud's throttle: Nextcloud no longer delays or refuses logins after failures, so passwords can be tried on Nextcloud, CalDAV and CardDAV as fast as the server answers; only fail2ban's Nextcloud jail stays (20 failures within 2 minutes).");
   if (off.length == 0) {
     f2b_post_settings(values);
     return;
@@ -490,7 +761,7 @@ function f2b_save_settings() {
 
 function f2b_reset_settings() {
   show_modal_confirm("Intrusion Protection",
-    "Restore all intrusion protection settings to the defaults? This also empties the allowlist.",
+    "Restore all intrusion protection settings to the defaults? This also empties the allowlist and restores the thresholds of the jails and of Nextcloud's throttle.",
     "Restore defaults",
     function() { f2b_post_settings({ reset: "1" }); });
 }
@@ -512,6 +783,13 @@ function f2b_post_settings(values) {
         msg.append($("<p/>").text("Unbanned because they are on the allowlist now: " + r.unbanned_allowlisted.join(", ") + "."));
       if (r.skipped_jails && r.skipped_jails.length)
         msg.append($("<p/>").text("Left out because their log file does not exist yet: " + r.skipped_jails.join(", ") + ". Save again later, or re-run setup."));
+      if (r.nextcloud) {
+        var nc = [];
+        if (r.nextcloud.config_changed) nc.push("Nextcloud's throttle settings were written to its config.php.");
+        if (r.nextcloud.bypass_added.length) nc.push("Added to Nextcloud's bypass list: " + r.nextcloud.bypass_added.join(", ") + ".");
+        if (r.nextcloud.bypass_removed.length) nc.push("Removed from Nextcloud's bypass list: " + r.nextcloud.bypass_removed.join(", ") + ".");
+        nc.forEach(function(t) { msg.append($("<p/>").text(t)); });
+      }
       show_modal_error("Intrusion Protection", msg, function() { show_fail2ban(); });
     },
     f2b_api_error("Intrusion Protection"));
@@ -529,7 +807,7 @@ function f2b_unban_result(r) {
     msg.append($("<p/>").text("Its ban history was deleted for the running jails; the history of jails that no longer run could not be deleted."));
   if (r.still_banned_in.length)
     msg.append($("<p/>").text("It is still banned in " + r.still_banned_in.join(", ") + "."));
-  show_modal_error("Unban " + r.ip, msg, function() { f2b_load_status(); f2b_load_report(); });
+  show_modal_error("Unban " + r.ip, msg, function() { f2b_load_status(); f2b_load_nc(); f2b_load_report(); });
 }
 
 function f2b_unban(ip, jail) {
@@ -579,7 +857,7 @@ function f2b_load_report() {
 function f2b_render_report(r) {
   var div = $('#f2b-report');
   div.html("");
-  div.append($("<p/>").text("In the last " + r.scan_hours + " hours the mail log (SMTP AUTH, IMAP, POP3, ManageSieve) and the ActiveSync log (ActiveSync, Autodiscover) have "
+  div.append($("<p/>").text("In the last " + r.scan_hours + " hours the mail log (SMTP AUTH, IMAP, POP3, ManageSieve), the ActiveSync log (ActiveSync, Autodiscover) and Nextcloud's log (Nextcloud, CalDAV, CardDAV, WebDAV) have "
     + r.failures + " failed login" + (r.failures == 1 ? "" : "s") + " from " + r.distinct_ips + " address" + (r.distinct_ips == 1 ? "" : "es") + "."));
 
   // Password spraying

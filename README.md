@@ -53,7 +53,8 @@ builds on that port. Its goals:
 * Protect the logins better than v78 does: repeat offenders get longer
   fail2ban bans (up to a week), slow jails catch attacks that stay below
   the normal limits, own networks can be put on an allowlist, and the status
-  checks report password spraying. Bans and settings are managed in the
+  checks report password spraying. Bans (with the reason of each),
+  Nextcloud's own login throttle and the settings are managed in the
   control panel (System > Intrusion Protection).
 * Keep the mail domains of a box apart in Nextcloud: in the web interface
   and the system address book, users only find and share with the accounts

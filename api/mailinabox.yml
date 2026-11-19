@@ -1933,7 +1933,11 @@ paths:
         their counters and current bans, the settings, their defaults and
         limits, whether the written jail files match the settings, and the
         address of the calling client (for the allowlist hint of the control
-        panel). With fail2ban not running, `running` is false and `error` says
+        panel). Each ban has a `reason`: the failures and the log lines that
+        fail2ban kept for it (user names that are no account of the box
+        replaced), the accounts of the box they name, and `manual` for a ban
+        without lines. `jail_info` gives each jail's thresholds and what it
+        watches. With fail2ban not running, `running` is false and `error` says
         why.
       operationId: getFail2banStatus
       x-codeSamples:
@@ -1982,12 +1986,21 @@ paths:
       description: |
         Form fields named like the settings (`adaptive`, `bantime_max`,
         `memory`, `slow_jails`, `slow_web_jails`, `slow_maxretry`,
-        `slow_findtime`, `slow_bantime`, `allowlist`, `spray_min_ips`); fields
-        that are not sent keep their value, `reset=1` starts from the defaults.
+        `slow_findtime`, `slow_bantime`, `allowlist`, `spray_min_ips`, `jails`,
+        `nc_protection`, `nc_max_attempts`, `nc_allowlist`); fields that are
+        not sent keep their value, `reset=1` starts from the defaults.
         Durations in seconds or with a unit (`30m`, `6h`, `2d`, `1w`), booleans
         as `1`/`0`, the allowlist as addresses or networks separated by spaces,
-        commas or line breaks. The jail files are written and fail2ban is
-        reloaded when they change; on an error nothing is changed.
+        commas or line breaks. `jails` is a JSON object of the changed
+        thresholds of Mail-in-a-Box's own jails, e.g.
+        `{"miab-roundcube": {"maxretry": 25, "bantime": "1h"}}` (it replaces
+        the stored one; values equal to the default are dropped). The `nc_*`
+        settings are Nextcloud's own brute-force throttle: on or off, the
+        failures before the maximum delay and the block, and whether the
+        allowlist goes on Nextcloud's bypass list too. The jail files are
+        written and fail2ban is reloaded when they change, Nextcloud's
+        config.php and bypass list when its settings change; on an error
+        nothing is changed.
       operationId: setFail2banSettings
       requestBody:
         required: true
@@ -2000,6 +2013,11 @@ paths:
             example:
               spray_min_ips: '20'
       x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/fail2ban/settings" \
+              -d "nc_max_attempts=12" \
+              -u "<email>:<password>"
         - lang: curl
           source: |
             curl -X POST "https://{host}/admin/system/fail2ban/settings" \
@@ -2163,6 +2181,102 @@ paths:
                 $ref: '#/components/schemas/Fail2banReportResponse'
         500:
           description: The logs could not be read
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/nextcloud-throttle:
+    get:
+      tags:
+        - System
+      summary: Get the addresses that Nextcloud's brute-force throttle counts
+      description: |
+        Nextcloud's own throttle (fork): the addresses (IPv4) and /64 networks
+        (IPv6) with failed Nextcloud logins in the last 12 hours, with their
+        failures in 12 hours and in 30 minutes, the accounts of the box they
+        tried, the delay Nextcloud puts on their next login and whether it
+        refuses it (`blocked`, HTTP 429), and Nextcloud's bypass list. With
+        the counters not readable (another database, a distributed cache),
+        `available` is false and `error` says why.
+      operationId: getNextcloudThrottle
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/nextcloud-throttle" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NextcloudThrottleResponse'
+        500:
+          description: Nextcloud could not be read
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/nextcloud-throttle/reset:
+    post:
+      tags:
+        - System
+      summary: Reset Nextcloud's failures of an address
+      description: |
+        Deletes Nextcloud's failed logins of `ip` (for an IPv6 address those of
+        its /64 network), so that its next login is neither delayed nor
+        refused. Returns the failures Nextcloud counts afterwards.
+      operationId: resetNextcloudThrottle
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - ip
+              properties:
+                ip:
+                  type: string
+                  example: 192.0.2.1
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/nextcloud-throttle/reset" \
+              -d "ip=192.0.2.1" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  ip:
+                    type: string
+                  attempts:
+                    type: integer
+                    nullable: true
+        400:
+          description: Invalid address, or the throttle is off
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: Nextcloud could not reset it
           content:
             text/html:
               schema:
@@ -3413,6 +3527,101 @@ components:
             type: string
         spray_min_ips:
           type: integer
+        jails:
+          type: object
+          description: "Changed thresholds of Mail-in-a-Box's jails: jail to maxretry, findtime and bantime (seconds)."
+          additionalProperties:
+            type: object
+            properties:
+              maxretry:
+                type: integer
+              findtime:
+                type: integer
+              bantime:
+                type: integer
+        nc_protection:
+          type: boolean
+          description: Nextcloud's brute-force throttle on (auth.bruteforce.protection.enabled).
+        nc_max_attempts:
+          type: integer
+          description: Failures before Nextcloud's maximum delay and block (auth.bruteforce.max-attempts).
+        nc_allowlist:
+          type: boolean
+          description: The allowlist goes on Nextcloud's bypass list too.
+    NextcloudThrottleResponse:
+      type: object
+      required:
+        - available
+        - entries
+      properties:
+        available:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        max_attempts:
+          type: integer
+        config_current:
+          type: boolean
+        bypass_current:
+          type: boolean
+        window_hours:
+          type: integer
+        block_minutes:
+          type: integer
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              subnet:
+                type: string
+              address:
+                type: string
+              ips:
+                type: array
+                items:
+                  type: string
+              attempts:
+                type: integer
+              recent:
+                type: integer
+              actions:
+                type: object
+                additionalProperties:
+                  type: integer
+              accounts:
+                type: array
+                items:
+                  type: string
+              unknown_names:
+                type: integer
+              first:
+                type: integer
+              last:
+                type: integer
+              delay_ms:
+                type: integer
+              blocked:
+                type: boolean
+              bypassed:
+                type: boolean
+        entries_total:
+          type: integer
+        bypass:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              network:
+                type: string
+              source:
+                type: string
+                enum: [system, panel, other]
     Fail2banStatusResponse:
       type: object
       required:
@@ -3452,6 +3661,25 @@ components:
                     remaining:
                       type: integer
                       nullable: true
+                    reason:
+                      type: object
+                      nullable: true
+                      properties:
+                        failures:
+                          type: integer
+                          nullable: true
+                        accounts:
+                          type: array
+                          items:
+                            type: string
+                        unknown_names:
+                          type: integer
+                        lines:
+                          type: array
+                          items:
+                            type: string
+                        manual:
+                          type: boolean
               currently_failed:
                 type: integer
               total_failed:
@@ -3540,6 +3768,21 @@ components:
           type: array
           items:
             type: string
+        nextcloud:
+          type: object
+          nullable: true
+          description: What changed in Nextcloud (null when its settings did not change).
+          properties:
+            config_changed:
+              type: boolean
+            bypass_added:
+              type: array
+              items:
+                type: string
+            bypass_removed:
+              type: array
+              items:
+                type: string
     Fail2banUnbanResponse:
       type: object
       properties:

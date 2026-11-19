@@ -13,13 +13,18 @@
 #    default, the web logins only when turned on),
 #  * an allowlist of own networks (added to ignoreip),
 #  * a report of failed logins from many IP addresses for one account
-#    (password spraying) and of IPs that keep failing below the ban threshold.
+#    (password spraying) and of IPs that keep failing below the ban threshold,
+#  * the thresholds of Mail-in-a-Box's own jails (setting "jails"), and why
+#    each address is banned (the log lines fail2ban kept),
+#  * the settings of Nextcloud's own brute-force throttle (nc_*), which
+#    management/nextcloud_throttle.py applies.
 #
 # The settings live in $STORAGE_ROOT/settings.yaml under "fail2ban" (only the
 # values that differ from DEFAULTS are stored). render_config() turns them into
 # JAIL_FILE and SERVER_FILE; apply_config() writes them and reloads fail2ban
-# when they changed. With adaptive banning and the slow jails off and an empty
-# allowlist no file is written, which is exactly Mail-in-a-Box's own setup.
+# when they changed. With adaptive banning and the slow jails off, an empty
+# allowlist and no changed thresholds no file is written, which is exactly
+# Mail-in-a-Box's own setup. The nc_* settings do not go into these files.
 #
 # Command line (as root, from the Mail-in-a-Box directory):
 #   management/fail2ban_admin.py --setup        write the files, no reload (setup/start.sh;
@@ -29,7 +34,7 @@
 #   management/fail2ban_admin.py --allow NET    add an address or network to the allowlist and apply
 #   management/fail2ban_admin.py --report       print the spraying report
 
-import os, os.path, re, stat, sys, time, datetime, ipaddress, subprocess, ast
+import os, os.path, re, stat, sys, time, datetime, ipaddress, subprocess, ast, json
 
 import utils
 
@@ -47,6 +52,11 @@ DEFAULTS = {
 	"slow_bantime": 3600,
 	"allowlist": [],              # addresses/networks added to ignoreip
 	"spray_min_ips": 20,          # report an account failing from this many IPs in 24 h
+	"jails": {},                  # changed thresholds of Mail-in-a-Box's own jails, see OVERRIDE_JAILS
+	# Nextcloud's own throttle (management/nextcloud_throttle.py)
+	"nc_protection": True,        # auth.bruteforce.protection.enabled
+	"nc_max_attempts": 10,        # auth.bruteforce.max-attempts (Nextcloud's default)
+	"nc_allowlist": False,        # put the allowlist on Nextcloud's bypass list too
 }
 
 # Inclusive ranges, in seconds for durations. bantime_max is at least one week
@@ -58,8 +68,9 @@ LIMITS = {
 	"slow_findtime": (600, 7 * 86400),
 	"slow_bantime": (60, 7 * 86400),
 	"spray_min_ips": (2, 100000),
+	"nc_max_attempts": (3, 1000),
 }
-BOOLEANS = ("adaptive", "slow_jails", "slow_web_jails")
+BOOLEANS = ("adaptive", "slow_jails", "slow_web_jails", "nc_protection", "nc_allowlist")
 DURATIONS = ("bantime_max", "memory", "slow_findtime", "slow_bantime")
 MAX_ALLOWLIST = 100
 MIN_PREFIX = { 4: 8, 6: 16 } # refuse networks so wide that they switch fail2ban off
@@ -95,6 +106,44 @@ SLOW_JAILS = SLOW_MAIL_JAILS + SLOW_WEB_JAILS
 # panel (where it could unban itself), webmail and Nextcloud for days.
 # recidive still bans addresses that are banned again and again.
 WEB_JAILS = ["miab-management", "miab-munin", "miab-owncloud", "miab-roundcube", "miab-zpush"]
+
+# Mail-in-a-Box's own jails whose thresholds can be changed in the control
+# panel (setting "jails": {jail: {maxretry, findtime, bantime}}, only the
+# values that differ from conf/fail2ban/jails.conf are stored). They are
+# written into JAIL_FILE, which fail2ban reads after mailinabox.conf. recidive
+# is left out: it watches the bans of all the other jails, and the maximum ban
+# time of adaptive banning is measured against its one-week ban.
+OVERRIDE_JAILS = ["dovecot", "miab-management", "miab-munin", "miab-owncloud", "miab-postfix465",
+	"miab-postfix587", "miab-roundcube", "miab-zpush", "postfix-sasl", "sshd"]
+JAIL_OPTIONS = ("maxretry", "findtime", "bantime")
+JAIL_LIMITS = { "maxretry": (3, 1000), "findtime": (10, 7 * 86400), "bantime": (60, 365 * 86400) }
+# Debian's /etc/fail2ban/jail.conf [DEFAULT] (fail2ban 1.1), for the values
+# that jails.conf leaves out, and its [recidive].
+DEBIAN_JAIL_DEFAULTS = { "maxretry": 5, "findtime": 600, "bantime": 600 }
+DEBIAN_RECIDIVE = { "findtime": 86400, "bantime": 604800 }
+JAILS_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "conf", "fail2ban", "jails.conf")
+
+# What each jail watches and which ports its bans block, for the reasons of
+# the bans in the control panel.
+JAIL_INFO = {
+	"dovecot": ("failed IMAP and POP3 logins (Dovecot)", "the mail ports"),
+	"miab-management": ("failed logins to this control panel", "HTTP and HTTPS"),
+	"miab-munin": ("failed logins to Munin (/admin/munin)", "HTTP and HTTPS"),
+	"miab-owncloud": ("failed Nextcloud logins (also CalDAV, CardDAV and WebDAV)", "HTTP and HTTPS"),
+	"miab-postfix465": ("failed SMTP AUTH logins on port 465", "port 465"),
+	"miab-postfix587": ("failed SMTP AUTH logins on port 587", "port 587"),
+	"miab-roundcube": ("failed webmail logins (Roundcube)", "HTTP and HTTPS"),
+	"miab-zpush": ("failed ActiveSync and Autodiscover logins (Z-Push)", "HTTP and HTTPS"),
+	"postfix-sasl": ("failed SMTP AUTH logins (Postfix)", "SMTP and the mail ports"),
+	"sshd": ("failed SSH logins", "SSH"),
+	"recidive": ("addresses that other jails banned again and again", "all ports"),
+	"miab-slow-smtp": ("failed SMTP AUTH logins over hours", "the mail ports"),
+	"miab-slow-dovecot": ("failed IMAP, POP3 and ManageSieve logins over hours", "the mail ports"),
+	"miab-slow-roundcube": ("failed webmail logins over hours", "HTTP and HTTPS"),
+	"miab-slow-owncloud": ("failed Nextcloud logins over hours", "HTTP and HTTPS"),
+	"miab-slow-management": ("failed control panel logins over hours", "HTTP and HTTPS"),
+	"miab-slow-zpush": ("failed ActiveSync and Autodiscover logins over hours", "HTTP and HTTPS"),
+}
 
 # SETTINGS
 
@@ -155,6 +204,89 @@ def parse_allowlist(value):
 		raise ValueError(f"has more than {MAX_ALLOWLIST} entries")
 	return ret
 
+_jail_defaults = None
+
+def jail_defaults():
+	# {jail: {maxretry, findtime, bantime}} as conf/fail2ban/jails.conf (and
+	# Debian's defaults where it sets nothing) configure the jails, for
+	# OVERRIDE_JAILS and recidive.
+	global _jail_defaults
+	if _jail_defaults is None:
+		import configparser
+		cp = configparser.ConfigParser(interpolation=None, strict=False)
+		try:
+			cp.read(JAILS_CONF, encoding="utf-8")
+		except configparser.Error:
+			pass
+		ret = {}
+		for name in OVERRIDE_JAILS + ["recidive"]:
+			d = dict(DEBIAN_JAIL_DEFAULTS)
+			if name == "recidive":
+				d.update(DEBIAN_RECIDIVE)
+			if cp.has_section(name):
+				for opt in JAIL_OPTIONS:
+					if cp.has_option(name, opt):
+						try:
+							d[opt] = parse_int(cp.get(name, opt).strip(), units=True)
+						except ValueError:
+							pass
+			ret[name] = d
+		_jail_defaults = ret
+	return _jail_defaults
+
+def parse_jails(value):
+	# The changed thresholds of Mail-in-a-Box's own jails: a mapping (or its
+	# JSON, as the control panel sends it) of jail to {maxretry, findtime,
+	# bantime}. Values equal to the default, empty ones and null are dropped,
+	# so that a jail follows future defaults again.
+	if value is None or value == "":
+		return {}
+	if isinstance(value, str):
+		try:
+			value = json.loads(value)
+		except ValueError:
+			raise ValueError("must be a JSON object of jails") from None
+	if not isinstance(value, dict):
+		raise ValueError("must be a mapping of jails")
+	defaults = jail_defaults()
+	ret = {}
+	for jail in sorted(value, key=str):
+		opts = value[jail]
+		if jail not in OVERRIDE_JAILS:
+			raise ValueError(f"'{str(jail)[:40]}' is not a jail whose thresholds can be changed")
+		if opts is None:
+			continue
+		if not isinstance(opts, dict):
+			raise ValueError(f"{jail}: must be a mapping of maxretry, findtime and bantime")
+		o = {}
+		for opt in sorted(opts, key=str):
+			v = opts[opt]
+			if opt not in JAIL_OPTIONS:
+				raise ValueError(f"{jail}: '{str(opt)[:40]}' is not maxretry, findtime or bantime")
+			if v is None or (isinstance(v, str) and v.strip() == ""):
+				continue
+			n = parse_int(v, units=(opt != "maxretry"))
+			lo, hi = JAIL_LIMITS[opt]
+			if not lo <= n <= hi:
+				raise ValueError(f"{jail} {opt}: must be between {lo} and {hi}")
+			if n != defaults[jail][opt]:
+				o[opt] = n
+		if o:
+			ret[jail] = o
+	return ret
+
+def jail_rules(settings):
+	# {jail: {maxretry, findtime, bantime}} as the settings configure them,
+	# for Mail-in-a-Box's jails and the slow jails.
+	ret = {}
+	for name, d in jail_defaults().items():
+		r = dict(d)
+		r.update(settings["jails"].get(name, {}))
+		ret[name] = r
+	for name, *_ in SLOW_JAILS:
+		ret[name] = { "maxretry": settings["slow_maxretry"], "findtime": settings["slow_findtime"], "bantime": settings["slow_bantime"] }
+	return ret
+
 def validate_settings(values, strict=True):
 	# Returns (settings, warnings): a complete settings dict. With strict=True
 	# (API input) any invalid or unknown value raises ValueError. With
@@ -162,6 +294,7 @@ def validate_settings(values, strict=True):
 	# and are reported as warnings.
 	settings = dict(DEFAULTS)
 	settings["allowlist"] = []
+	settings["jails"] = {}
 	warnings = []
 	if not isinstance(values, dict):
 		if strict: raise ValueError("Invalid fail2ban settings.")
@@ -174,6 +307,8 @@ def validate_settings(values, strict=True):
 				value = parse_bool(value)
 			elif key == "allowlist":
 				value = parse_allowlist(value)
+			elif key == "jails":
+				value = parse_jails(value)
 			else:
 				value = parse_int(value, units=(key in DURATIONS))
 				lo, hi = LIMITS[key]
@@ -220,6 +355,33 @@ def update_settings(env, values, reset=False):
 	except Exception:
 		save_settings(env, old)
 		raise
+	# Nextcloud's throttle (its config.php and bypass list), when one of its
+	# settings changed or its configuration does not match them. On a
+	# failure the previous settings are restored there and in fail2ban.
+	import nextcloud_throttle
+	result["nextcloud"] = None
+	nc_apply = nextcloud_throttle.settings_changed(old, new)
+	if not nc_apply:
+		try:
+			nc_apply = not nextcloud_throttle.config_is_current(env, new)
+		except Exception:
+			# Nextcloud cannot be read now; its settings did not change, so
+			# the fail2ban part stays saved (the status checks report it).
+			nc_apply = False
+	if nc_apply:
+		try:
+			result["nextcloud"] = nextcloud_throttle.apply_settings(env, new)
+		except Exception as e:
+			save_settings(env, old)
+			try:
+				apply_config(env, old)
+			except Exception:
+				pass
+			try:
+				nextcloud_throttle.apply_settings(env, old)
+			except Exception:
+				pass
+			raise RuntimeError(f"Nextcloud's brute-force settings could not be changed, nothing was changed: {e}") from None
 	result["settings"] = new
 	result["unbanned_allowlisted"] = unban_allowlisted(new)
 	return result
@@ -274,8 +436,13 @@ def render_config(env, settings):
 	# not exist (fail2ban refuses to start with a jail without a log file).
 	files = { JAIL_FILE: None, SERVER_FILE: None }
 	skipped = []
-	if not (settings["adaptive"] or settings["slow_jails"] or settings["slow_web_jails"] or settings["allowlist"]):
+	if not (settings["adaptive"] or settings["slow_jails"] or settings["slow_web_jails"] or settings["allowlist"] or settings["jails"]):
 		return files, skipped
+
+	def jail_lines(name):
+		# The changed thresholds of one of Mail-in-a-Box's jails.
+		o = settings["jails"].get(name, {})
+		return [f"{opt} = {o[opt]}" for opt in JAIL_OPTIONS if opt in o]
 
 	lines = [
 		"# Mail-in-a-Box (fork): adaptive fail2ban. Do not edit.",
@@ -307,7 +474,16 @@ def render_config(env, settings):
 			"# one address cannot lose the control panel, webmail and Nextcloud for days.",
 		]
 		for name in WEB_JAILS:
-			lines += [f"[{name}]", "bantime.increment = false"]
+			lines += [f"[{name}]", "bantime.increment = false"] + jail_lines(name)
+
+	others = [name for name in OVERRIDE_JAILS if settings["jails"].get(name) and not (settings["adaptive"] and name in WEB_JAILS)]
+	if others:
+		lines += [
+			"",
+			"# Thresholds of Mail-in-a-Box's jails changed in the control panel (setting \"jails\").",
+		]
+		for name in others:
+			lines += [f"[{name}]"] + jail_lines(name)
 
 	slow = (SLOW_MAIL_JAILS if settings["slow_jails"] else []) + (SLOW_WEB_JAILS if settings["slow_web_jails"] else [])
 	for name, filt, logpath, ports in slow:
@@ -553,7 +729,15 @@ def get_status(env):
 		"config_current": config_is_current(env, settings),
 		"slow_jails": [ j[0] for j in SLOW_MAIL_JAILS ],
 		"slow_web_jails": [ j[0] for j in SLOW_WEB_JAILS ],
+		"override_jails": OVERRIDE_JAILS,
+		"jail_defaults": jail_defaults(),
+		"jail_limits": { k: { "min": lo, "max": hi } for k, (lo, hi) in JAIL_LIMITS.items() },
+		"jail_info": {},
 	}
+	rules = jail_rules(settings)
+	for name in set(rules) | set(JAIL_INFO):
+		watches, blocks = JAIL_INFO.get(name, (None, None))
+		ret["jail_info"][name] = dict(rules.get(name, {}), watches=watches, blocks=blocks)
 	try:
 		jails = get_jails()
 		banned = {}
@@ -576,6 +760,15 @@ def get_status(env):
 
 	with ThreadPoolExecutor(max_workers=8) as pool:
 		ret["jails"] = list(pool.map(one, jails))
+	# Why each address is banned: the failures and log lines fail2ban kept.
+	try:
+		reasons = ban_reasons(env, [(j["name"], b["ip"], b["start"]) for j in ret["jails"] for b in j["banned"]])
+	except Exception as e:
+		reasons = {}
+		ret["reasons_error"] = f"The reasons of the bans could not be read from fail2ban's database: {e}"
+	for j in ret["jails"]:
+		for b in j["banned"]:
+			b["reason"] = reasons.get((j["name"], b["ip"]))
 	ret["banned_entries"] = sum(len(j["banned"]) for j in ret["jails"])
 	ret["banned_ips"] = len({ b["ip"] for j in ret["jails"] for b in j["banned"] })
 	return ret
@@ -695,8 +888,39 @@ RE_DOVECOT = re.compile(rb"(imap|pop3|managesieve|submission)-login: (?:Info: )?
 #   26/10/2026 13:00:00 [12345] [WARN] [#unknown] Unable to complete autodiscover because login failed for user with email 'bob@example.com' from IP 192.0.2.1.
 RE_ZPUSH = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[(?:(?P<same>[^\]\\#]*)|(?P<auth>[^\]\\#]+)#(?:[^\]\\]|\\.)*)\] Failed to authenticate user '(?P<user>(?i:(?P=same))|(?P=auth))' from IP (?P<ip>[0-9A-Fa-f:.]+)\.\r?\n?$")
 RE_AUTODISCOVER = re.compile(rb"^\d\d/\d\d/\d{4} \d\d:\d\d:\d\d \[\s*\d+\] \[ ?WARN\] \[#unknown\] Unable to complete autodiscover because login failed for user with email '(?P<user>.*)' from IP (?P<ip>[0-9A-Fa-f:.]+)\.\r?\n?$")
+# Nextcloud's log, one JSON object per line (setup/nextcloud.sh sets
+# logdateformat 'Y-m-d H:i:s' in the box's time zone), one line per failed
+# login; the address is remoteAddr, as the miab-owncloud filter takes it:
+#   {"reqId":"...","level":2,"time":"2026-10-26 13:00:00","remoteAddr":"192.0.2.1",...,"message":"Login failed: 'bob@example.com' (Remote IP: '192.0.2.1')",...}
+# (user_external's "IMAP Login failed via curl" lines, several per failed
+# login, are not counted.)
+RE_TS_NC = re.compile(rb'"time":"(\d{4}-\d\d-\d\d)[ T](\d\d:\d\d:\d\d)(?:\.\d+)?(Z|[+-]\d\d:?\d\d)?"')
+RE_NC_LOGIN = re.compile(r"^Login failed: '(.*)' \(Remote IP: '([0-9A-Fa-f:.]+)'\)$", re.S)
+# The user names in other log lines that fail2ban keeps for a ban (the
+# reasons of the bans): Roundcube's errors.log, nginx's access log (Munin's
+# Basic login) and sshd (the name of an account that does not exist).
+RE_ROUNDCUBE = re.compile(rb"IMAP Error: Login failed for (.*?) against \S+ from ")
+RE_NGINX_USER = re.compile(rb"^\S+ - (\S+) \[")
+RE_SSH_INVALID = re.compile(rb"([Ii]nvalid user )(\S*)( from )")
+
+def nextcloud_logs(env):
+	# Nextcloud's log and the file of its own rotation (log_rotate_size);
+	# logrotate compresses its rotated file at once (setup/nextcloud.sh).
+	base = os.path.join(env["STORAGE_ROOT"], "owncloud", "nextcloud.log")
+	return (base + ".1", base)
 
 def _line_time(line, now):
+	if line[:1] == b"{":
+		# Nextcloud (local time unless its log date format names a zone).
+		m = RE_TS_NC.search(line, 0, 400)
+		if not m:
+			return None
+		tz = m.group(3).decode() if m.group(3) else ""
+		try:
+			dt = datetime.datetime.fromisoformat(m.group(1).decode() + "T" + m.group(2).decode() + ("+00:00" if tz == "Z" else tz))
+		except ValueError:
+			return None
+		return dt.timestamp() if dt.tzinfo else time.mktime(dt.timetuple())
 	m = RE_TS_ISO.match(line)
 	if m:
 		s = m.group(1).decode()
@@ -795,6 +1019,22 @@ def scan_failed_logins(hours=SCAN_HOURS, files=SCAN_LOGS, now=None):
 						user, ip, proto, count = m.group("user"), m.group("ip"), "autodiscover", 1
 					else:
 						continue
+				elif line[:1] == b"{":
+					# A line of Nextcloud's log (no line of the other logs starts so).
+					if b"Login failed: '" not in line: continue
+					try:
+						j = json.loads(line)
+					except ValueError:
+						continue
+					if not isinstance(j, dict): continue
+					m = RE_NC_LOGIN.match(str(j.get("message", "")))
+					if not m: continue
+					addr = str(j.get("remoteAddr") or m.group(2))
+					try:
+						ipaddress.ip_address(addr)
+					except ValueError:
+						continue
+					user, ip, proto, count = m.group(1).encode("utf-8", "replace"), addr.encode(), "nextcloud", 1
 				elif b"authentication failed" in line:
 					m = RE_SMTP.search(line)
 					if not m: continue
@@ -857,6 +1097,121 @@ def bans_since(since):
 	finally:
 		con.close()
 
+def _known_accounts(env):
+	# The mail users and aliases of the box, lower case.
+	try:
+		import mailconfig
+		return { u.lower() for u in mailconfig.get_mail_users(env) } | { a[0].lower() for a in mailconfig.get_mail_aliases(env) }
+	except Exception:
+		return set()
+
+# REASONS OF BANS
+
+REASON_LINES = 10        # fail2ban keeps up to dbmaxmatches (10) lines per ban
+REASON_LINE_CHARS = 300
+UNKNOWN_NAME = b"[unknown name]"
+
+# Where the user name is in a log line: (regex, group, method).
+_USER_FIELDS = [
+	(RE_SMTP, 2, "search"),
+	(RE_DOVECOT, 3, "search"),
+	(RE_ZPUSH, "user", "match"),
+	(RE_AUTODISCOVER, "user", "match"),
+	(RE_ROUNDCUBE, 1, "search"),
+	(RE_NGINX_USER, 1, "match"),
+	(RE_SSH_INVALID, 2, "search"),
+]
+
+def _reason_line(line, known):
+	# One log line of a ban, for the control panel: (text, account, masked).
+	# account is the account the line names if it is one of this box. A user
+	# name that is not an account of this box is replaced, as the failed-login
+	# report leaves such names out: it is whatever the client sent, a password
+	# typed into the wrong field too.
+	if line[:1] == b"{":
+		# Nextcloud: the fields that matter instead of the whole JSON object.
+		try:
+			j = json.loads(line)
+		except ValueError:
+			j = None
+		if isinstance(j, dict):
+			msg = str(j.get("message", ""))
+			m = RE_NC_LOGIN.match(msg)
+			user = m.group(1).strip().lower() if m else None
+			masked = bool(m) and user not in known
+			if masked:
+				msg = "Login failed: %s (Remote IP: '%s')" % (UNKNOWN_NAME.decode(), m.group(2))
+			text = " ".join(str(j.get(k)) for k in ("time", "remoteAddr", "method", "url") if j.get(k)) + " – " + msg
+			if j.get("userAgent"):
+				text += " – " + str(j["userAgent"])
+			return text[:REASON_LINE_CHARS], (user if m and not masked else None), masked
+	for rx, group, how in _USER_FIELDS:
+		m = getattr(rx, how)(line)
+		if not m or m.group(group) is None or m.group(group) in (b"", b"-"):
+			continue
+		user = m.group(group).decode("utf-8", "replace").strip().lower()
+		if user in known:
+			return line.decode("utf-8", "replace")[:REASON_LINE_CHARS], user, False
+		a, b = m.span(group)
+		return (line[:a] + UNKNOWN_NAME + line[b:]).decode("utf-8", "replace")[:REASON_LINE_CHARS], None, True
+	return line.decode("utf-8", "replace")[:REASON_LINE_CHARS], None, False
+
+def _reason(data, known):
+	if isinstance(data, bytes):
+		data = data.decode("utf-8", "replace")
+	try:
+		d = json.loads(data) if data else {}
+	except (ValueError, TypeError):
+		d = {}
+	if not isinstance(d, dict):
+		d = {}
+	raw = d.get("matches") or []
+	if not isinstance(raw, list):
+		raw = []
+	lines, accounts, masked = [], [], 0
+	for m in raw[-REASON_LINES:]:
+		if isinstance(m, (list, tuple)):
+			m = "".join(str(x) for x in m)
+		text, account, was_masked = _reason_line(str(m).rstrip("\r\n").encode("utf-8", "replace"), known)
+		lines.append(text)
+		if account and account not in accounts:
+			accounts.append(account)
+		if was_masked:
+			masked += 1
+	failures = d.get("failures")
+	return {
+		"failures": failures if isinstance(failures, int) and not isinstance(failures, bool) else None,
+		"accounts": accounts,       # accounts of this box named in the lines
+		"unknown_names": masked,    # lines with a name that is no account here (replaced)
+		"lines": lines,             # the newest of the lines fail2ban kept, at most REASON_LINES
+		"manual": not raw,          # no lines: banned by hand (fail2ban-client ... banip)
+	}
+
+def ban_reasons(env, bans):
+	# {(jail, ip): reason} for the current bans, a list of (jail, ip, start of
+	# the ban), from the newest row of each in fail2ban's bans table (opened
+	# read-only, like bans_since): the number of failures and the log lines
+	# that fail2ban kept for the ban.
+	import sqlite3, urllib.parse
+	if not bans:
+		return {}
+	path = db_path()
+	if not path or not os.path.exists(path):
+		return {}
+	want = { (jail, ip): start for jail, ip, start in bans }
+	since = min(want.values()) - 5
+	rows = {}
+	con = sqlite3.connect("file:" + urllib.parse.quote(path) + "?mode=ro", uri=True, timeout=5)
+	try:
+		for jail, ip, timeofban, data in con.execute("SELECT jail, ip, timeofban, data FROM bans WHERE timeofban >= ? ORDER BY timeofban", (int(since),)):
+			key = (str(jail), str(ip))
+			if key in want and timeofban <= want[key] + 5:
+				rows[key] = data
+	finally:
+		con.close()
+	known = _known_accounts(env)
+	return { key: _reason(data, known) for key, data in rows.items() }
+
 def failed_login_report(env, settings=None, now=None, events=None, with_bans=True):
 	# Accounts with failed logins from many IPs in the last 24 h, and IPs that
 	# keep failing for 12 h or more within the last 48 h. Only accounts that
@@ -867,15 +1222,11 @@ def failed_login_report(env, settings=None, now=None, events=None, with_bans=Tru
 	now = now or time.time()
 	t0 = time.time()
 	if events is None:
-		events = scan_failed_logins(now=now)
+		events = scan_failed_logins(now=now, files=SCAN_LOGS + nextcloud_logs(env))
 	own = _own_ips(env)
 	allow = [ipaddress.ip_network(n, strict=False) for n in settings["allowlist"]]
 
-	try:
-		import mailconfig
-		known = { u.lower() for u in mailconfig.get_mail_users(env) } | { a[0].lower() for a in mailconfig.get_mail_aliases(env) }
-	except Exception:
-		known = set()
+	known = _known_accounts(env)
 
 	def skip(ip):
 		try:
@@ -1002,11 +1353,19 @@ def check_failed_logins(rounded_values, env, output):
 	if not config_is_current(env, settings):
 		output.print_warning("""The fail2ban configuration does not match the intrusion protection settings.
 			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
+	try:
+		import nextcloud_throttle
+		nc_current = nextcloud_throttle.config_is_current(env, settings)
+	except Exception:
+		nc_current = True # Nextcloud not readable now; its own checks report that
+	if not nc_current:
+		output.print_warning("""Nextcloud's brute-force settings do not match the intrusion protection settings.
+			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
 
 	try:
 		report = failed_login_report(env, settings)
 	except Exception as e:
-		output.print_warning("Could not read the mail and ActiveSync logs for failed logins: " + str(e))
+		output.print_warning("Could not read the mail, ActiveSync and Nextcloud logs for failed logins: " + str(e))
 		return
 
 	problems = False
@@ -1066,7 +1425,7 @@ def check_failed_logins(rounded_values, env, output):
 				{p['failures']} times in {p['hours']} hours. It probably has an old password.""")
 
 	if not problems:
-		output.print_ok(f"No signs of password spraying or slow login attacks in the mail and ActiveSync logs of the last {report['scan_hours']} hours.")
+		output.print_ok(f"No signs of password spraying or slow login attacks in the mail, ActiveSync and Nextcloud logs of the last {report['scan_hours']} hours.")
 
 # COMMAND LINE
 

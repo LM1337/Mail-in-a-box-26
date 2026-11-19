@@ -11,6 +11,64 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### New
+
+* Intrusion protection (System > Intrusion Protection) shows why an
+  address is banned: for each ban the failures and the log lines that
+  fail2ban kept for it (up to 10, from its database), the accounts of the
+  box they name, and the jail's rule (what it watches, its thresholds, the
+  ports it blocks). A user name that is no account of the box is replaced
+  by "[unknown name]", as the failed-login report leaves such names out (it
+  is whatever the client sent, a password typed into the wrong field too); a
+  ban without lines was set by hand. `GET /admin/system/fail2ban` gives the
+  same as `reason` of each ban and `jail_info`.
+* Nextcloud's own brute-force throttle in the control panel. Apart from
+  fail2ban, Nextcloud counts failed logins per address (IPv4) or /64 network
+  (IPv6): after failures within 12 hours it delays every login from there,
+  up to 25 seconds, and after more than 10 failures within 30 minutes it
+  refuses them with HTTP 429, also for the accounts with the right password
+  behind that address, so one calendar or contacts app with an old password
+  keeps the other devices of its network from syncing. Nothing showed this
+  so far. The new section "Nextcloud throttle" lists the counted addresses
+  (failures in 12 hours and in 30 minutes, the accounts of the box they
+  tried, the delay, whether they are blocked) and resets an address; a
+  banned address that Nextcloud throttles too gets a hint with a button.
+  New settings: `nc_protection` (Nextcloud's throttle on, the default;
+  turning it off asks first), `nc_max_attempts` (failures before the
+  maximum delay and the block, 10 by default, 3 to 1000) and `nc_allowlist`
+  (off by default: the allowlist goes on Nextcloud's bypass list too; the
+  entries it adds are recorded under `nextcloud_bypass` in settings.yaml and
+  removed again when they leave the allowlist, `127.0.0.1/32` of B121 and
+  entries made in Nextcloud stay). Setup and the control panel write the
+  first two into Nextcloud's `config.php` only when they differ from
+  Nextcloud's defaults, as www-data with the new
+  `tools/nextcloud-bruteforce-config.php` (Nextcloud's own
+  `occ config:system:set` refuses once setup has made the file read-only),
+  and atomically as setup writes it (B124); the overview reads Nextcloud's
+  database read-only as www-data. New API: `GET
+  /admin/system/nextcloud-throttle`, `POST
+  /admin/system/nextcloud-throttle/reset`; `management/nextcloud_throttle.py
+  --setup | --status | --reset <ip>`; setup/start.sh applies the settings
+  after fail2ban's (never stopping setup). The status checks warn when
+  Nextcloud's settings do not match.
+* The thresholds of Mail-in-a-Box's own jails can be changed (setting
+  `jails`; the control panel shows a table with failures, window and ban
+  time): `dovecot`, `miab-management`, `miab-munin`, `miab-owncloud`,
+  `miab-postfix465`, `miab-postfix587`, `miab-roundcube`, `miab-zpush`,
+  `postfix-sasl` and `sshd`, not recidive. Only the values that differ from
+  `conf/fail2ban/jails.conf` are stored and written into
+  `mailinabox_adaptive.conf`; fail2ban is reloaded, and `fail2ban-client
+  -t` checks the configuration first as for the other settings.
+* The failed-login report and its status check read Nextcloud's log too
+  (one line per failed login of Nextcloud, CalDAV, CardDAV and WebDAV, with
+  the address that the miab-owncloud jail takes), so accounts and addresses
+  that fail only there show up.
+* New smoke checks (group admin): `admin-fail2ban-jail-values`,
+  `admin-fail2ban-ban-reason`, `admin-nextcloud-throttle`,
+  `admin-nextcloud-throttle-settings`; the opt-in group fail2ban checks the
+  reason of its real ban. Every change of the settings writes a line to the
+  management daemon's log, as an unban and a reset do.
+
 ### Fixed
 
 * A new version of the Nextcloud apps contacts, calendar or user_external
@@ -25,6 +83,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * The update installs calendar 6.6.6 and runs `occ upgrade`: Nextcloud
   answers 503 for a few seconds.
+* The new settings start with Nextcloud's and fail2ban's present values, so
+  nothing changes on its own. A device with an old password that keeps a
+  network throttled shows up under System > Intrusion Protection, "Nextcloud
+  throttle": fix its password, then reset the address.
 
 ### Planned
 
@@ -67,9 +129,6 @@ v78-r2604.3, not done (the certification runs add their open findings in TESTING
   to put such networks on the allowlist; nothing finds them on its own.
   Leaving `miab-zpush` out of recidive would let an attacker guess 20
   passwords every few minutes for good, so it still counts there.
-* The failed-login report does not read `nextcloud.log` yet, which now
-  has the client's address for `/caldav`, `/carddav` and `/webdav` too
-  (B121).
 * Nextcloud takes the client's address from `X-Forwarded-For` on every
   connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
   of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the

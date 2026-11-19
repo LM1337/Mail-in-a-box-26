@@ -283,6 +283,14 @@ else
 	exit "$f2b_setup_rc"
 fi
 
+# Nextcloud's own brute-force throttle: the settings nc_protection,
+# nc_max_attempts and nc_allowlist of the same "fail2ban" settings go into
+# Nextcloud's config.php and its bypass list (management/nextcloud_throttle.py;
+# needs the management venv, so it runs here and not in nextcloud.sh). It
+# never stops setup: on a problem it prints a warning and Nextcloud keeps its
+# settings.
+management/nextcloud_throttle.py --setup
+
 # If there aren't any mail users yet, create one.
 source setup/firstuser.sh
 

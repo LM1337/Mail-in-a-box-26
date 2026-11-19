@@ -5,3 +5,9 @@
 # or when the version after the update has no list of its own. When the
 # release is tagged, rename this file to <version>.txt and start a new,
 # empty unreleased.txt. The format is in any.txt.
+#
+# No rule so far: the update to calendar 6.6.6 (B176) is not in the record
+# (nextcloud.txt is "occ status", Nextcloud's own version), the new
+# settings of the intrusion protection change no jail and no file while
+# they keep their defaults (fail2ban.txt lists the jails), and the nginx
+# security update shows only in packages.txt, which is not compared.

@@ -23,7 +23,8 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * Nextcloud users only see and share with their own mail domain, admins with
   everyone (`NEXTCLOUD_SHARE_SCOPE`, see below).
 * fail2ban: repeat offenders get longer bans, slow jails catch slow attacks,
-  an allowlist for own networks, a report of password spraying (see
+  an allowlist for own networks, a report of password spraying, the reason
+  of each ban, and Nextcloud's own login throttle in the control panel (see
   "Intrusion protection" below).
 
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
@@ -1013,14 +1014,55 @@ the following, on by default:
   that fail2ban never opens a link or a FIFO there; setup and logrotate
   create the log files.
 * **Failed-login report.** The status checks read the mail log of the last
-  48 hours (SMTP AUTH, IMAP, POP3, ManageSieve) and Z-Push's error logs
-  (ActiveSync, Autodiscover) and report accounts with failed
+  48 hours (SMTP AUTH, IMAP, POP3, ManageSieve), Z-Push's error logs
+  (ActiveSync, Autodiscover) and Nextcloud's log (Nextcloud, CalDAV, CardDAV,
+  WebDAV; since v78-r2604.4) and report accounts with failed
   logins from 20 or more addresses within 24 hours (`spray_min_ips`, password
   spraying) and addresses that keep failing for 12 hours or more without being
   banned once in that time (bans that have run out are looked up in
   fail2ban's database). Only accounts that exist on the box are named. Give
   such an account a long password that is not used anywhere else, and if it is an
   administrator, turn on two-factor authentication for the control panel.
+* **Thresholds of Mail-in-a-Box's jails** (since v78-r2604.4). The failures,
+  window and ban time of Mail-in-a-Box's own jails (`dovecot`,
+  `miab-management`, `miab-munin`, `miab-owncloud`, `miab-postfix465`,
+  `miab-postfix587`, `miab-roundcube`, `miab-zpush`, `postfix-sasl`, `sshd`)
+  can be changed (`jails`); only the changed values are stored and written
+  to `mailinabox_adaptive.conf`, the others follow `conf/fail2ban/jails.conf`.
+  recidive is not among them: it bans addresses that the others banned again
+  and again.
+* **Why an address is banned** (since v78-r2604.4). For each ban the control
+  panel shows the failures and the log lines that fail2ban kept for it (up to
+  10, from its database), the accounts of the box they name and the jail's
+  rule (what it watches, its thresholds, the ports it blocks). A user name
+  that is no account of the box is replaced by "[unknown name]": it is
+  whatever the client sent, a password typed into the wrong field too. A ban
+  without lines was set by hand.
+* **Nextcloud's own throttle** (since v78-r2604.4). Apart from fail2ban,
+  Nextcloud counts failed logins per address (IPv4) or /64 network (IPv6):
+  after failures within 12 hours it delays every login from there (0.2 s,
+  0.4 s, ... up to 25 s), and after more than 10 failures (`nc_max_attempts`)
+  within 30 minutes it refuses them with HTTP 429, also for the accounts with
+  the right password behind that address. A calendar or contacts app with an
+  old password thus keeps the other devices of its network from syncing, and
+  a successful login removes only the failures of its own account. The
+  control panel lists the counted addresses (failures in 12 hours and in 30
+  minutes, the accounts of the box they tried, the delay, whether they are
+  blocked) and resets an address (`occ security:bruteforce:reset`). The
+  throttle can be turned off (`nc_protection`, not recommended: then only
+  `miab-owncloud` limits password guessing on Nextcloud), and `nc_allowlist`
+  (off by default) puts the allowlist on Nextcloud's bypass list too (the
+  entries it adds are recorded under `nextcloud_bypass` in settings.yaml and
+  removed again when they leave the allowlist; `127.0.0.1/32`, B121, and
+  entries made in Nextcloud stay). Only for networks of your own: an address
+  that is shared with others (mobile networks, satellite and other
+  carrier-grade NAT) would be exempt for them too. Setup and the control
+  panel write `auth.bruteforce.protection.enabled` and
+  `auth.bruteforce.max-attempts` into Nextcloud's `config.php` (only when
+  they differ from Nextcloud's defaults), with
+  `tools/nextcloud-bruteforce-config.php` as www-data, because Nextcloud's
+  own `occ config:system:set` refuses once setup has made the file read-only
+  (`management/nextcloud_throttle.py --setup`, `--status`, `--reset <ip>`).
 
 The settings are stored in `$STORAGE_ROOT/settings.yaml` under `fail2ban`,
 only the values that differ from the defaults, so they survive setup runs, the
@@ -1037,13 +1079,20 @@ migration and the in-place upgrade:
       slow_bantime: 3600      # seconds, 1 minute to 7 days
       allowlist: []           # e.g. [192.0.2.0/24, 2001:db8:1::/48], at most 100
       spray_min_ips: 20
+      jails: {}               # e.g. {miab-roundcube: {maxretry: 25, bantime: 3600}}: maxretry 3 to 1000,
+                              # findtime 10 s to 7 days, bantime 1 minute to 365 days
+      nc_protection: true     # Nextcloud's own throttle
+      nc_max_attempts: 10     # 3 to 1000
+      nc_allowlist: false     # the allowlist on Nextcloud's bypass list too
 
 `bantime_max` is at least one week so that it never shortens the recidive
 ban. Setup writes `/etc/fail2ban/jail.d/mailinabox_adaptive.conf` and
 `/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf` from them
 (`management/fail2ban_admin.py --setup`). A slow jail whose log file does not
-exist yet is left out. With `adaptive`, `slow_jails` and `slow_web_jails` off
-and an empty allowlist neither file exists, which is exactly upstream's configuration.
+exist yet is left out. With `adaptive`, `slow_jails` and `slow_web_jails` off,
+an empty allowlist and no changed thresholds (`jails`) neither file exists,
+which is exactly upstream's configuration. The `nc_*` settings do not go into
+these files.
 After editing settings.yaml by hand run `sudo management/fail2ban_admin.py
 --apply`: it checks the whole configuration with `fail2ban-client -t`, puts
 the old files back if fail2ban rejects it, and reloads fail2ban only if a file
@@ -1052,13 +1101,18 @@ changed. `--print` shows the files, `--allow 192.0.2.0/24` adds a network,
 
 In the control panel, **System > Intrusion Protection** shows whether
 fail2ban runs, the banned addresses (per address: the jails, time left, length
-and start of each ban; with a filter), the jails with their counters and the
-failed-login report (accounts with failures from many addresses, addresses
-that keep failing, with their ban status). It unbans an address in all jails
-or in one jail, unbans all addresses of a jail (after a confirmation), and
-edits the settings: adaptive banning and the two kinds of slow jails on/off
-(turning one off asks first), the thresholds (durations also as `30m`, `6h`, `2d`, `1w`), the
-allowlist (one address or network per line) and "Restore defaults". It also
+and start of each ban and why, with the log lines; with a filter), the
+addresses that Nextcloud's own throttle counts (with a "Reset" button, and a
+hint at a banned address that Nextcloud throttles too), the jails with their
+counters and the failed-login report (accounts with failures from many
+addresses, addresses that keep failing, with their ban status). It unbans an
+address in all jails or in one jail, unbans all addresses of a jail (after a
+confirmation), and edits the settings: adaptive banning and the two kinds of
+slow jails on/off (turning one off asks first), the thresholds of the slow
+jails and of Mail-in-a-Box's jails (durations also as `30m`, `6h`, `2d`,
+`1w`), the allowlist (one address or network per line), Nextcloud's throttle
+(on/off, which asks first, the failures before the block, the allowlist on
+its bypass list) and "Restore defaults". It also
 shows the address you use the panel from and offers to put it on the
 allowlist (for IPv6 its /64, because the browser's own address changes), or
 to unban it if it is banned (the slow mail jails block only the mail ports, so
@@ -1068,12 +1122,14 @@ only, changes by POST with form fields):
 
 | Request | |
 |---|---|
-| `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban), the settings, defaults and limits, and `client` (the address of the request, whether it is allowlisted or one of the box's own) |
+| `GET /admin/system/fail2ban` | fail2ban running, the jails with their counters and banned addresses (start, length, end and seconds left of each ban, and its `reason`: failures, log lines, accounts, `manual`), the settings, defaults and limits, `jail_info` (each jail's thresholds and what it watches), and `client` (the address of the request, whether it is allowlisted or one of the box's own) |
 | `GET /admin/system/fail2ban/settings` | the settings, defaults and warnings about invalid stored values |
 | `POST /admin/system/fail2ban/settings` | fields named like the settings; fields not sent keep their value, `reset=1` starts from the defaults. Answers with `changed`, `reloaded`, `restarted` (the jails were restarted), `skipped_jails`, `unbanned_allowlisted` (banned addresses that are on the allowlist now and were unbanned) and the new settings, or HTTP 400 with the reason |
 | `POST /admin/system/fail2ban/unban` | `ip`, optionally `jail`. Answers with `unbanned_from`, `still_banned_in` and `history_deleted` |
 | `POST /admin/system/fail2ban/unban-all` | `jail`: unbans every address banned in that jail |
 | `GET /admin/system/fail2ban/report` | the failed-login report as JSON |
+| `GET /admin/system/nextcloud-throttle` | Nextcloud's throttle: on or off, `max_attempts`, the counted addresses (failures in 12 hours and 30 minutes, accounts, `delay_ms`, `blocked`) and its bypass list |
+| `POST /admin/system/nextcloud-throttle/reset` | `ip`: deletes Nextcloud's failures of that address (for IPv6 of its /64) |
 
 Unbanning without a jail runs `fail2ban-client unban <ip>`: the address is
 unbanned in all jails, recidive included, and its ban history is deleted (by
@@ -1173,8 +1229,9 @@ eingeschaltet:
   beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
   oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.
 * **Bericht über Fehlanmeldungen.** Die Statusprüfungen lesen das Mail-Log der
-  letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve) und die Fehler-Logs
-  von Z-Push (ActiveSync, Autodiscover) und melden Konten
+  letzten 48 Stunden (SMTP AUTH, IMAP, POP3, ManageSieve), die Fehler-Logs
+  von Z-Push (ActiveSync, Autodiscover) und das Log von Nextcloud (Nextcloud,
+  CalDAV, CardDAV, WebDAV; seit v78-r2604.4) und melden Konten
   mit Fehlanmeldungen von 20 oder mehr Adressen innerhalb von 24 Stunden
   (`spray_min_ips`, Password Spraying) sowie Adressen, die 12 Stunden oder
   länger scheitern, ohne in dieser Zeit ein einziges Mal gesperrt worden zu
@@ -1183,6 +1240,50 @@ eingeschaltet:
   auf der Box gibt. Ein solches Konto braucht ein langes Passwort, das nirgends
   sonst verwendet wird, und, wenn es ein Administrator ist, die
   Zwei-Faktor-Anmeldung für die Admin-Oberfläche.
+* **Schwellen der Jails von Mail-in-a-Box** (seit v78-r2604.4). Fehlversuche,
+  Zeitfenster und Sperrdauer der eigenen Jails von Mail-in-a-Box (`dovecot`,
+  `miab-management`, `miab-munin`, `miab-owncloud`, `miab-postfix465`,
+  `miab-postfix587`, `miab-roundcube`, `miab-zpush`, `postfix-sasl`, `sshd`)
+  lassen sich ändern (`jails`). Gespeichert und in `mailinabox_adaptive.conf`
+  geschrieben werden nur die geänderten Werte, die übrigen folgen
+  `conf/fail2ban/jails.conf`. recidive gehört nicht dazu: Es sperrt Adressen,
+  die die anderen Jails immer wieder gesperrt haben.
+* **Warum eine Adresse gesperrt ist** (seit v78-r2604.4). Zu jeder Sperre
+  zeigt die Admin-Oberfläche die Fehlversuche und die Logzeilen, die fail2ban
+  dafür aufbewahrt hat (bis zu 10, aus seiner Datenbank), die Konten der Box,
+  die darin vorkommen, und die Regel des Jails (was es beobachtet, seine
+  Schwellen, welche Ports es sperrt). Ein Benutzername, der kein Konto der
+  Box ist, wird durch „[unknown name]“ ersetzt: Er ist, was der Client
+  geschickt hat, auch ein Passwort im falschen Feld. Eine Sperre ohne
+  Logzeilen wurde von Hand gesetzt.
+* **Die eigene Drossel von Nextcloud** (seit v78-r2604.4). Unabhängig von
+  fail2ban zählt Nextcloud fehlgeschlagene Anmeldungen je Adresse (IPv4) oder
+  /64-Netz (IPv6): Nach Fehlversuchen innerhalb von 12 Stunden verzögert es
+  jede Anmeldung von dort (0,2 s, 0,4 s … bis 25 s), und nach mehr als 10
+  Fehlversuchen (`nc_max_attempts`) innerhalb von 30 Minuten weist es sie mit
+  HTTP 429 ab, auch für die Konten mit richtigem Passwort hinter dieser
+  Adresse. Eine Kalender- oder Kontakte-App mit altem Passwort hält so die
+  anderen Geräte ihres Netzes vom Synchronisieren ab, und eine erfolgreiche
+  Anmeldung löscht nur die Fehlversuche ihres eigenen Kontos. Die
+  Admin-Oberfläche listet die gezählten Adressen (Fehlversuche in 12 Stunden
+  und in 30 Minuten, die versuchten Konten der Box, die Verzögerung, ob sie
+  gesperrt sind) und setzt eine Adresse zurück
+  (`occ security:bruteforce:reset`). Die Drossel lässt sich abschalten
+  (`nc_protection`, nicht empfohlen: Dann begrenzt nur noch `miab-owncloud`
+  das Raten von Passwörtern bei Nextcloud), und `nc_allowlist` (anfangs aus)
+  setzt die Freigabeliste auch auf die Ausnahmeliste von Nextcloud (was sie
+  dort einträgt, wird unter `nextcloud_bypass` in settings.yaml vermerkt
+  und wieder entfernt, wenn es die Freigabeliste verlässt;
+  `127.0.0.1/32`, B121, und in Nextcloud gesetzte Einträge bleiben). Nur für
+  eigene Netze: Eine Adresse, die man mit anderen teilt (Mobilfunk, Satellit
+  und anderes Carrier-Grade-NAT), wäre auch für diese ausgenommen. Setup und
+  Admin-Oberfläche schreiben `auth.bruteforce.protection.enabled` und
+  `auth.bruteforce.max-attempts` in die `config.php` von Nextcloud (nur, wenn
+  sie vom Standard von Nextcloud abweichen), mit
+  `tools/nextcloud-bruteforce-config.php` als www-data, weil
+  `occ config:system:set` die Datei ablehnt, sobald das Setup sie
+  schreibgeschützt hat (`management/nextcloud_throttle.py --setup`,
+  `--status`, `--reset <ip>`).
 
 Die Einstellungen stehen in `$STORAGE_ROOT/settings.yaml` unter `fail2ban`,
 nur die Werte, die vom Standard abweichen. Sie überstehen so Setup-Läufe, den
@@ -1193,8 +1294,10 @@ kürzer wird. Das Setup schreibt daraus
 `/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf`
 (`management/fail2ban_admin.py --setup`). Ein langsames Jail, dessen Logdatei
 noch fehlt, wird ausgelassen. Sind `adaptive`, `slow_jails` und
-`slow_web_jails` aus und ist die Freigabeliste leer, gibt es keine der beiden Dateien, also genau die
-Konfiguration von upstream. Nach einer Änderung von settings.yaml von Hand
+`slow_web_jails` aus, ist die Freigabeliste leer und sind keine Schwellen
+geändert (`jails`), gibt es keine der beiden Dateien, also genau die
+Konfiguration von upstream. Die Einstellungen `nc_*` gehen nicht in diese
+Dateien. Nach einer Änderung von settings.yaml von Hand
 `sudo management/fail2ban_admin.py --apply` aufrufen: Es prüft die ganze
 Konfiguration mit `fail2ban-client -t`, stellt bei einer Ablehnung die alten
 Dateien wieder her und lädt fail2ban nur neu, wenn sich eine Datei geändert
@@ -1203,21 +1306,26 @@ hat. `--print` zeigt die Dateien, `--allow 192.0.2.0/24` fügt ein Netz hinzu,
 
 In der Admin-Oberfläche zeigt **System > Intrusion Protection**, ob fail2ban
 läuft, die gesperrten Adressen (je Adresse die Jails mit Restdauer, Länge und
-Beginn jeder Sperre; mit Filter), die Jails mit ihren Zählern und den Bericht
-über Fehlanmeldungen (Konten mit Fehlversuchen von vielen Adressen, Adressen,
-die immer wieder scheitern, mit ihrem Sperrstatus). Dort lässt sich eine
-Adresse in allen Jails oder in einem Jail freigeben, ein ganzes Jail nach
-Rückfrage leeren und alles einstellen: mitwachsende Sperren und beide Arten
-langsamer Jails an/aus (das Ausschalten fragt nach), die Schwellen (Dauern auch als `30m`,
-`6h`, `2d`, `1w`), die Freigabeliste (eine Adresse oder ein Netz pro Zeile)
-und „Restore defaults“. Die Seite zeigt außerdem die Adresse, von der aus sie
+Beginn jeder Sperre und ihrem Grund samt Logzeilen; mit Filter), die Adressen,
+die die eigene Drossel von Nextcloud zählt (mit Knopf „Reset“ und einem
+Hinweis bei einer gesperrten Adresse, die auch Nextcloud drosselt), die Jails
+mit ihren Zählern und den Bericht über Fehlanmeldungen (Konten mit
+Fehlversuchen von vielen Adressen, Adressen, die immer wieder scheitern, mit
+ihrem Sperrstatus). Dort lässt sich eine Adresse in allen Jails oder in einem
+Jail freigeben, ein ganzes Jail nach Rückfrage leeren und alles einstellen:
+mitwachsende Sperren und beide Arten langsamer Jails an/aus (das Ausschalten
+fragt nach), die Schwellen der langsamen Jails und der Jails von
+Mail-in-a-Box (Dauern auch als `30m`, `6h`, `2d`, `1w`), die Freigabeliste
+(eine Adresse oder ein Netz pro Zeile), die Drossel von Nextcloud (an/aus mit
+Rückfrage, Fehlversuche bis zur Sperre, Freigabeliste auf ihrer
+Ausnahmeliste) und „Restore defaults“. Die Seite zeigt außerdem die Adresse, von der aus sie
 benutzt wird, und bietet an, sie in die Freigabeliste aufzunehmen (bei IPv6
 ihr /64, weil sich die Adresse des Browsers ändert) oder, falls gesperrt,
 freizugeben (die langsamen Mail-Jails sperren nur die Mail-Ports, die
 Oberfläche bleibt also erreichbar). Ungespeicherte Änderungen im
 Einstellungsformular bleiben bei einer Freigabe erhalten. Sie nutzt die oben beschriebene API
-unter `/admin/system/fail2ban` (nur für Administratoren, Änderungen per POST
-mit Formularfeldern).
+unter `/admin/system/fail2ban` und `/admin/system/nextcloud-throttle` (nur
+für Administratoren, Änderungen per POST mit Formularfeldern).
 
 Eine Freigabe ohne Jail ruft `fail2ban-client unban <ip>` auf: Die Adresse
 wird in allen Jails freigegeben, recidive eingeschlossen, und ihre
