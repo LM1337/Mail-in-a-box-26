@@ -88,6 +88,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `admin-nextcloud-throttle-settings`; the opt-in group fail2ban checks the
   reason of its real ban. Every change of the settings writes a line to the
   management daemon's log, as an unban and a reset do.
+* Tests: `tests/fork/log-audit-allow.txt` accepts these audit lines of the
+  control panel (settings saved or reset, unbans, resets of Nextcloud's
+  throttle), the failed Nextcloud logins of the new throttle checks, and
+  two lines that bind and Postfix log once right after the management
+  daemon has flushed bind's cache for a DNS change (as upstream); the
+  update test logged them as unknown.
 
 ### Fixed
 
