@@ -1,0 +1,11 @@
+# Expected changes of an update to v78-r2604.4, for tools/update-check.sh
+# after: what this release changes in the recorded state, compared with
+# v78-r2604.3 ("after" uses the lists of all releases after the version
+# before the update, up to the version after it, and any.txt). The format is
+# in any.txt.
+#
+# None: the update to calendar 6.6.6 (B176) is not in the record
+# (nextcloud.txt is "occ status", Nextcloud's own version), the new
+# settings of the intrusion protection change no jail and no file while
+# they keep their defaults (fail2ban.txt lists the jails), and the nginx
+# security update shows only in packages.txt, which is not compared.

@@ -9,7 +9,8 @@ The fork's first release is v78-r2604.0; v78-r2604.1 is a bug-fix release
 of the control panel's login, tested without the full set of scenarios
 (see "v78-r2604.1"); v78-r2604.2 is a bug-fix release tested with T1, T1n,
 T2, T4 and T5b, the last three from upstream's v78 or the previous release
-(see "v78-r2604.2"). The tests below are a small, fixed set of scenarios
+(see "v78-r2604.2"); v78-r2604.3 and v78-r2604.4 are small releases tested
+with T1 and T5b (see there). The tests below are a small, fixed set of scenarios
 on test machines, not a test of every setup that exists.
 Make a backup and try a release on a copy before you run it on the box that
 holds your mail.
@@ -374,6 +375,7 @@ the in-place tool reports it.
 | v78-r2604.1 | 2026-10-27 | not run ⁵ | not run | not run | not run | not run ⁵ |
 | v78-r2604.2 | 2026-11-15 | 70/70 twice ⁶ | 81/81 (from v78) ⁶ | not run | 81/81 (from v78) ⁶ | 80/81 (T5b from v78-r2604.1) ⁶ |
 | v78-r2604.3 | 2026-11-16 | 71/71, 72/72 ⁷ | not run | not run | not run | 81/82, 82/83 (T5b from v78-r2604.2) ⁷ |
+| v78-r2604.4 | 2026-11-19 | 84/84 twice ⁸ | not run | not run | not run | 94/94, 95/95 (T5b from v78-r2604.3) ⁸ |
 
 ¹ Certification run at `33f056b`, before the last fixes of rc6 (B80-B85);
 not repeated on the code of the release (see "rc6 certification" below).
@@ -428,6 +430,13 @@ the same way on the snapshot before any update (see the counter-check).
 After `2a4024d` only the clean-up of two admin checks of the smoke test
 after a failure, the version strings, `tools/expected-changes/` and the
 documentation changed.
+
+⁸ Runs of the branch before the release commit, from the lab's mirror (see
+"v78-r2604.4" below): T1 at `d80a036` (install and a second setup run),
+T5b at `e3df071` and again, from the same snapshot, at `f6e7f8b`. After
+`f6e7f8b` only the log audit's list (`d80a036`), the version strings,
+`tools/expected-changes/` and the documentation changed; T5b's log audit
+was repeated with the list of `d80a036`.
 
 Every FAIL in this table is one of the known differences below, except one
 Nextcloud lock in rc4 T5 (see there), the first runs of rc6 T3 and T5b,
@@ -1131,6 +1140,48 @@ so its list of changes does not show the post-quantum change (see Planned
 in CHANGELOG-fork.md); and the release commit itself, which after
 `7c00f91` changes only the version strings, `tools/expected-changes/` and
 the documentation.
+
+### v78-r2604.4 (2026-11-19)
+
+A small release: the reasons of bans, Nextcloud's throttle and the jails'
+thresholds in the control panel, B176 (the pinned Nextcloud apps on an
+existing box, calendar 6.6.6) and B177 (the backup copies of Nextcloud
+root-only). The runs installed or updated the branch `fix/r2604.4` from
+the lab's mirror of the repository, on one hypervisor; the commits are in
+the table and in note ⁸ of the results. T2, T3, T4 and T6 did not run: the
+release changes the control panel, Nextcloud's part of setup and the smoke
+test, not the migration or in-place tools. The peer for port 25, the probe
+address of `mailcheck` and the rsync target of `backup` was the second
+test box.
+
+The lab's names stopped resolving on the Internet during the runs (they
+had relied on a public wildcard record that was removed); Postfix then
+refused the lab's mail with "Sender address rejected: Domain not found".
+Each test box and the peer got forward zones for the other boxes' names in
+their local resolver (bind, with `validate-except` for these zones, which
+the boxes sign without a DS record above them), set after each rollback
+and kept by setup. A first `mailcheck` of T5b at `e3df071` failed that way
+before the change, and the same `mailcheck` failed the same way on the
+snapshot before any update; after the change it passed on the snapshot and
+after the update.
+
+| Run | Result |
+|---|---|
+| T1 (fresh 26.04, `08d7ff3`) | stopped with exit 100 in `apt-get install` of OpenDKIM: the Ubuntu archive did not answer at that time (from the test box, the hypervisor and another machine alike); not a result of the release. |
+| T1 repeated (fresh 26.04, `d80a036`, with setup's network checks) | install exit 0 in 1108 s with "Your Mail-in-a-Box is running."; post-quantum key exchange in Postfix as in v78-r2604.3; calendar 6.6.6 and the other pinned versions; `owncloud-backup` 0700 root; smoke 84/84, among them all new checks (`admin-fail2ban-jail-values`, `admin-fail2ban-ban-reason`, `admin-ban-reasons-masking` with its 34 cases, `admin-nextcloud-throttle`, `-throttle-settings`, `-bypass-allowlist`, `-protection-off`, `-hand-set`, `-setup-no-drift`, `-app-versions`, `-backup-private`, `-throttle-unit`); log audit 0 unknown classes. A second setup run exit 0 in 94 s changed no Nextcloud app, made no backup, left the brute-force settings, fail2ban and Postfix alone; smoke again 84/84, log audit 0 unknown. (A smoke run in between used the smoke test of an older release by a mistake in the test script and does not count.) |
+| T5b (the copy of the production box at v78-r2604.3, updated to `e3df071`) | `update-check.sh before` and `backup` exit 0; the update non-interactive, exit 0 in 189 s; `after`: 7 expected changes and 1 unexpected, the lab's origin in the version line; smoke 94/94. Setup updated calendar 6.6.5 to 6.6.6 (files, Nextcloud's app list, no upgrade pending), set `owncloud-backup` from 0755 to 0700 and made a backup whose database copy passed `PRAGMA integrity_check` and held the state before the upgrade; Nextcloud's brute-force settings, its bypass list, fail2ban's settings and all jails unchanged; second runs of the settings' setup steps changed nothing. The log audit found the new audit lines of the control panel and the failed logins of the new throttle checks without a rule in its list (fixed in `d80a036`); `mailcheck` failed because of the lab's names (see above). |
+| T5b repeated (the same snapshot, updated to `f6e7f8b`) | after the resolver change: `mailcheck` on the snapshot OK; the update exit 0 in 85 s, without dialogs; `after`: 7 expected, 1 unexpected (the lab's origin); `mailcheck` OK; smoke 95/95; the same checks of the release as above passed; the TLS matrix and Postfix's TLS as a client the same before and after. Log audit with the list of `f6e7f8b`: the 5 classes above, with the list of `d80a036`: 0 unknown. |
+
+Not tested in this release: T2, T3, T4 and T6; the opt-in smoke group
+fail2ban (its new check of the reason of a real ban); the database copy of
+the app update with a large Nextcloud database (only with the small
+databases of the test boxes); the failure paths of the app update (a failed download, a failed
+`occ upgrade`, a symbolic link in place of `owncloud-backup`) only on a
+test box during development, not in these runs; the control panel's page
+only in a headless browser at an earlier commit of the branch, and through
+the API in the runs; and the release commit itself, which after `d80a036`
+changes only the version strings, `tools/expected-changes/` and the
+documentation.
 
 ### Production use
 
