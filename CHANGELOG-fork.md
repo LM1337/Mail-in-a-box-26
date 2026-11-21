@@ -306,7 +306,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   terminal with control characters replaced by "?", as it does for the
   other text of the old box since B154; before, an error message of the old
   box could send escape sequences to the terminal. The progress filter of
-  the main copy does the same for rsync's output.
+  the main copy does the same for rsync's output. The carriage return at
+  the end of ssh's own messages is dropped rather than shown as "?" (a
+  first version printed "... to the list of known hosts.?"). New offline
+  test `tests/fork/old-side-filter.py`.
 * **Right in-place upgrade messages after a failed --redo-from (B161)**\
   When a `--redo-from` of the in-place upgrade fails, the exit message
   names the redo and when it started, and says that cron jobs, update

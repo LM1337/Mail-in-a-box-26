@@ -150,8 +150,10 @@ section() {
 }
 # Text from the old box, or from processes of other accounts here, for the
 # terminal and the reports: control characters other than tab become "?", so
-# that it cannot send escape sequences to the terminal (B154).
-printable() { sed 's/[^[:print:][:blank:]]/?/g'; }
+# that it cannot send escape sequences to the terminal (B154). The carriage
+# return of a line that ends in CR LF (ssh's own messages) is dropped, not
+# shown as "?".
+printable() { sed 's/\r$//; s/[^[:print:][:blank:]]/?/g'; }
 # Run a command whose standard error comes from the old box (ssh and the
 # remote command's messages, rsync with its remote side) with that error
 # output passed through printable, line by line (B154). Standard input and
@@ -160,7 +162,7 @@ printable() { sed 's/[^[:print:][:blank:]]/?/g'; }
 # connection, which outlives it, keeps no copy of its standard error).
 old_side() { # COMMAND...
 	local rc=0
-	{ "$@" 2>&1 1>&3 3>&- | sed -u 's/[^[:print:][:blank:]]/?/g' >&2; } 3>&1 || rc=$?
+	{ "$@" 2>&1 1>&3 3>&- | sed -u 's/\r$//; s/[^[:print:][:blank:]]/?/g' >&2; } 3>&1 || rc=$?
 	return "$rc"
 }
 human() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "${1:-0} bytes"; }
