@@ -134,11 +134,12 @@
                 <li><a href="#tls">TLS (SSL) Certificates</a></li>
                 <li><a href="#system_backup">Backup Status</a></li>
                 <li><a href="#fail2ban">Intrusion Protection</a></li>
+                <li><a href="#notifications">Notifications</a></li>
                 <li class="divider"></li>
                 <li class="dropdown-header">Advanced Pages</li>
                 <li><a href="#custom_dns">Custom DNS</a></li>
                 <li><a href="#external_dns">External DNS</a></li>
-                <li><a href="#munin">Munin Monitoring</a></li>
+                <li><a href="#" onclick="event.preventDefault(); munin_open_direct();">Munin Monitoring</a></li>
               </ul>
             </li>
             <li><a href="#mail-guide" class="if-logged-in-not-admin">Mail</a></li>
@@ -218,6 +219,10 @@
 
       <div id="panel_tls" class="admin_panel">
       {% include "ssl.html" %}
+      </div>
+
+      <div id="panel_notifications" class="admin_panel">
+      {% include "system-notifications.html" %}
       </div>
 
       <div id="panel_munin" class="admin_panel">

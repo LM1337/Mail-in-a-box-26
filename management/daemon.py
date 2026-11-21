@@ -892,6 +892,47 @@ def nextcloud_throttle_reset():
 	result["status"] = "ok"
 	return json_response(result)
 
+# The administrator's mail (System > Notifications, see admin_mail.py): the
+# recipient of the box's reports, where administrator@ leads, the last
+# deliveries, a test mail.
+
+@app.route('/system/notifications', methods=["GET"])
+@authorized_personnel_only
+def notifications_get():
+	from admin_mail import status
+	return json_response(status(env))
+
+@app.route('/system/notifications', methods=["POST"])
+@authorized_personnel_only
+def notifications_set():
+	# Form fields recipient (admin, custom) and address (for custom); fields
+	# that are not sent keep their value.
+	from admin_mail import update_settings, status, AdminMailError
+	values = { k: request.form[k] for k in ("recipient", "address") if k in request.form }
+	try:
+		result = update_settings(env, values)
+	except AdminMailError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	if result["changed"]:
+		app.logger.warning("notifications: %s set the report recipient to %s", request.user_email,
+			result["settings"]["address"] or "the standard address")
+	ret = status(env)
+	ret.update({ "status": "ok", "changed": result["changed"] })
+	return json_response(ret)
+
+@app.route('/system/notifications/test', methods=["POST"])
+@authorized_personnel_only
+def notifications_test():
+	# One test mail to the report recipient, sent as the reports are.
+	from admin_mail import send_test, AdminMailError
+	try:
+		to, message_id = send_test(env)
+	except AdminMailError as e:
+		return (str(e), 400)
+	return json_response({ "status": "ok", "to": to, "message_id": message_id })
+
 # Munin's alerts (recipient and level of munin-limits' mails, see munin_admin.py)
 
 @app.route('/system/munin/alerts', methods=["GET"])

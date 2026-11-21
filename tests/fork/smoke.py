@@ -3995,6 +3995,7 @@ API_READ_ONLY = [
     ("GET", "/system/fail2ban/report", "application/json"),
     ("GET", "/system/nextcloud-throttle", "application/json"),
     ("GET", "/system/munin/alerts", "application/json"),
+    ("GET", "/system/notifications", "application/json"),
     ("GET", "/ssl/status", "application/json"),
     ("POST", "/ssl/csr/{domain}", "text/html"),
     ("GET", "/dns/zones", "application/json"),
@@ -4034,6 +4035,8 @@ API_WRITES = [
     ("POST", "/system/privacy"),
     ("POST", "/system/munin/alerts"),
     ("POST", "/system/munin/alerts/test"),
+    ("POST", "/system/notifications"),
+    ("POST", "/system/notifications/test"),
 ]
 
 # Not called: (method, documented path, reason).
@@ -4202,9 +4205,21 @@ def api_shape(ctx, path, r):
     if path == "/system/munin/alerts":
         _need(j.get("recipient") in ("admin", "custom", "off") and j.get("level") in ("warning", "critical")
               and isinstance(j.get("address"), str) and isinstance(j.get("warnings"), list), "munin alerts: keys missing")
-        _need(j.get("default_address") == "administrator@" + ctx.hostname, "munin alerts: default_address %s" % j.get("default_address"))
+        # The standard recipient is the one of the box's reports (System > Notifications).
+        reports = admin_api(ctx, "GET", "system/notifications").json().get("to")
+        _need(j.get("default_address") == reports, "munin alerts: default_address %s, reports go to %s" % (j.get("default_address"), reports))
         _need(j.get("config_current") is True, "munin alerts: munin.conf does not match the setting")
         return "%s/%s" % (j["recipient"], j["level"])
+    if path == "/system/notifications":
+        _need(j.get("recipient") in ("admin", "custom") and isinstance(j.get("address"), str)
+              and isinstance(j.get("targets"), list) and isinstance(j.get("warnings"), list)
+              and isinstance(j.get("admin_alias"), dict) and isinstance(j.get("mails"), list)
+              and isinstance(j.get("deliveries"), list), "notifications: keys missing")
+        _need(j.get("admin_address") == "administrator@" + ctx.hostname, "notifications: admin_address %s" % j.get("admin_address"))
+        _need(j["recipient"] != "admin" or j.get("to") == j["admin_address"], "notifications: standard recipient goes to %s" % j.get("to"))
+        _need(j["targets"] and j["admin_alias"].get("targets"), "notifications: no target (%s)" % "; ".join(j["warnings"])[:200])
+        _need({m.get("to") for m in j["mails"]} == {"reports", "munin", "alias"}, "notifications: list of mails")
+        return "%s -> %s" % (j["recipient"], ", ".join(t["address"] for t in j["targets"]))
     if path == "/ssl/status":
         _need(_is_str_list(j.get("can_provision")) and isinstance(j.get("status"), list)
               and all({"domain", "status", "text"} <= set(e) for e in j["status"]), "ssl status: keys missing")
@@ -4530,6 +4545,96 @@ def c_api_munin_alerts(ctx):
     return "; ".join(notes)
 
 
+def notif_set(ctx, form, what):
+    r = admin_api(ctx, "POST", "system/notifications", form=form)
+    api_expect(r, 200, "application/json", what)
+    j = r.json()
+    _need(j.get("status") == "ok", "%s: %s" % (what, r.text()[:150]))
+    return j
+
+
+def c_api_notifications(ctx):
+    # System > Notifications: invalid input refused, the reports to a test
+    # mailbox (alice, with TEST_USER_PW) with Munin's standard recipient
+    # following (munin.conf with --ssh), the test mail in that INBOX and in
+    # the list of deliveries, and the old setting and munin.conf restored.
+    r = admin_api(ctx, "GET", "system/notifications")
+    api_expect(r, 200, "application/json", "GET notifications")
+    orig = r.json()
+    keep = {"recipient": orig["recipient"], "address": orig["address"]}
+    conf0 = munin_conf_contact(ctx) if ctx.remote.available() else None
+    munin0 = admin_api(ctx, "GET", "system/munin/alerts").json()
+    notes = []
+    try:
+        for bad in ({"recipient": "custom", "address": "a@b.example\nBcc: x@example.com"},
+                    {"recipient": "custom", "address": "-oQ/tmp/x@example.com"},
+                    {"recipient": "custom", "address": "a b@example.com"},
+                    {"recipient": "custom", "address": "$(id)@example.com"},
+                    {"recipient": "custom", "address": ""},
+                    {"recipient": "everyone"}):
+            r = admin_api(ctx, "POST", "system/notifications", form=bad)
+            _need(r.status == 400, "invalid %r accepted: HTTP %d" % (bad, r.status))
+        now = admin_api(ctx, "GET", "system/notifications").json()
+        _need({k: now[k] for k in keep} == keep, "a refused value changed the setting")
+        notes.append("6 invalid values refused")
+
+        users = admin_api(ctx, "GET", "mail/users").text().split("\n")
+        if not (ctx.user_pw and ctx.alice in users):
+            raise Skip("needs the test mailbox %s (TEST_USER_PW)" % ctx.alice)
+        target = ctx.alice
+        j = notif_set(ctx, {"recipient": "custom", "address": target}, "set custom")
+        _need(j["to"] == target and [t["address"] for t in j["targets"]] == [target], "custom: to=%s targets=%s" % (j["to"], j["targets"]))
+        m = admin_api(ctx, "GET", "system/munin/alerts").json()
+        if munin0.get("recipient") == "admin":
+            _need(m.get("to") == target and m.get("default_address") == target, "munin does not follow: %s" % m.get("to"))
+            if conf0:
+                contact, _, _ = munin_conf_contact(ctx)
+                _need("contact.admin.command %s --to %s" % (MUNIN_NOTIFY, target) in contact, "munin.conf: %s" % contact[:1])
+            notes.append("Munin's standard recipient follows")
+        M = imap_login(ctx, target)
+        try:
+            uidnext = folder_status(M, "INBOX")["uidnext"]
+        finally:
+            M.logout()
+        r = admin_api(ctx, "POST", "system/notifications/test")
+        api_expect(r, 200, "application/json", "test mail")
+        _need(r.json().get("to") == target, "test mail to %s" % r.json().get("to"))
+        deadline = time.time() + 90
+        while True:
+            M = imap_login(ctx, target)
+            try:
+                uids = uid_search(M, "INBOX", "UID", "%d:*" % uidnext, "SUBJECT", '"Test of the administrator mail"',
+                                  "HEADER", TEST_HEADER, "1", readonly=False)
+                uids = [u for u in uids if int(u) >= uidnext]
+                if uids:
+                    typ, data = M.uid("FETCH", uids[-1].decode(), "(BODY.PEEK[HEADER])")
+                    msg = parse_mail(data[0][1])
+                    M.uid("STORE", b",".join(uids).decode(), "+FLAGS.SILENT", "(\\Deleted)")
+                    M.expunge()
+                    break
+            finally:
+                M.logout()
+            if time.time() > deadline:
+                raise Fail("no test mail in %s's INBOX after 90 s" % target)
+            time.sleep(5)
+        _need(len(uids) == 1, "%d test mails arrived" % len(uids))
+        _need("administrator@" + ctx.hostname in msg.get("From", ""), "test mail From: %s" % msg.get("From"))
+        _need(msg.get("Auto-Submitted") == "auto-generated", "test mail without Auto-Submitted")
+        d = admin_api(ctx, "GET", "system/notifications").json()["deliveries"]
+        _need(any(x["to"] == target and x["status"] == "sent" for x in d), "test mail not in the deliveries")
+        notes.append("test mail arrived in %s's INBOX (deleted) and is listed" % target.split("@")[0])
+    finally:
+        r = admin_api(ctx, "POST", "system/notifications", form=keep)
+    api_expect(r, 200, "application/json", "restore")
+    after = admin_api(ctx, "GET", "system/notifications").json()
+    if {k: after[k] for k in keep} != keep:
+        raise Fail("setting not restored")
+    if conf0 and munin_conf_contact(ctx)[2] != conf0[2]:
+        raise Fail("munin.conf not restored byte for byte")
+    notes.append("setting%s restored" % (" and munin.conf" if conf0 else ""))
+    return "; ".join(notes)
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -4695,6 +4800,9 @@ def main():
         run_check("admin-nextcloud-hand-set", c_nc_hand_set, ctx)
         run_check("admin-ban-reasons-masking", c_local_test, ctx, "ban-reasons.py")
         run_check("admin-nextcloud-throttle-unit", c_local_test, ctx, "nextcloud-throttle.py")
+        run_check("admin-notifications-unit", c_local_test, ctx, "admin-mail.py")
+        run_check("admin-status-changes-unit", c_local_test, ctx, "status-changes.py")
+        run_check("admin-panel-fragments", c_local_test, ctx, "panel-fragments.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):
@@ -4703,6 +4811,7 @@ def main():
         run_check("api-read-only", c_api_read_only, ctx)
         run_check("api-write-roundtrip", c_api_write_roundtrip, ctx)
         run_check("api-munin-alerts", c_api_munin_alerts, ctx)
+        run_check("api-notifications", c_api_notifications, ctx)
     if want("admin") or want("api"):
         run_check("admin-journal-no-hash", c_admin_journal_no_hash, ctx)
     if want("dns"):

@@ -294,8 +294,9 @@ Right after the update:
 * **Munin mails the administrator.** From rc6 on, Munin's alerts work:
   each change of state of a watched value (warning, critical, back to ok)
   is mailed to administrator@ of the box's name. Make sure that address
-  reaches someone. From rc7 on, System > Munin Monitoring sets another
-  address, critical only, or off (see [Munin alerts](#munin-alerts--warnungen-von-munin)).
+  reaches someone. From rc7 on, the control panel sets another
+  address, critical only, or off (see [Munin alerts](#munin-alerts--warnungen-von-munin);
+  since v78-r2604.5 under System > Notifications).
 * **fail2ban after the log rotation.** From rc6 on, Dovecot logs through
   syslog, and rsyslog writes its lines to `mail.log` (B85):
   `doveconf -h log_path` must say `syslog`. fail2ban's Dovecot jails then
@@ -525,8 +526,9 @@ Gleich nach dem Update:
   von Munin: Jeder Zustandswechsel eines überwachten Werts (Warnung,
   kritisch, wieder in Ordnung) geht per Mail an administrator@ des
   Box-Namens. Sicherstellen, dass diese Adresse jemanden erreicht. Ab rc7
-  stellt System > Munin Monitoring eine andere Adresse, nur kritisch oder
-  aus ein (siehe [Warnungen von Munin](#munin-alerts--warnungen-von-munin)).
+  stellt das Control Panel eine andere Adresse, nur kritisch oder aus ein
+  (siehe [Warnungen von Munin](#munin-alerts--warnungen-von-munin); ab
+  v78-r2604.5 unter System > Notifications).
 * **fail2ban nach der Log-Rotation.** Ab rc6 protokolliert Dovecot über
   syslog, und rsyslog schreibt seine Zeilen in `mail.log` (B85):
   `doveconf -h log_path` muss `syslog` sagen. Die Dovecot-Jails von
@@ -858,6 +860,99 @@ es noch das des Forks ist). Das Control Panel und `/favicon.ico` der
 Webdomains betrifft das nicht.
 
 
+Notifications / Benachrichtigungen
+----------------------------------
+
+### English
+
+The box mails its administrator: the daily status check changes, the
+backup status, the results of TLS certificate requests, the weekly usage
+report, Munin's alerts, and the mail of root, of cron jobs and to
+postmaster@, abuse@, admin@ and hostmaster@ of its domains. The control
+panel shows and sets where these mails go, under System > Notifications:
+
+* **Send reports to**: Standard (administrator@ of the box's name) or a
+  custom address, also of another provider (a plain address: ASCII letters,
+  digits and `_ + - .` before the @). It is the recipient of the status
+  check changes, backup status, TLS results and usage report, and of
+  Munin's alerts while they are set to "Same as the reports". The mails
+  come from administrator@ of the box's name. **Send test mail** sends one
+  mail to it the way the reports are sent (subject "Test of the
+  administrator mail", header `X-Miab-Test: 1`).
+* **Munin alerts**: the settings that were on the Munin page in rc7 to
+  v78-r2604.4 (see [Munin alerts](#munin-alerts--warnungen-von-munin)). The
+  menu entry System > Munin Monitoring opens Munin directly again.
+* **administrator@ and the addresses of the domains**: the alias
+  administrator@ itself is not changed by this setting. It is an address
+  of domain control validation (certificate authorities send their
+  confirmation mails there), so its destinations may only be
+  administrators of the box (Mail & Users > Aliases). It also gets the
+  mail to abuse@, postmaster@, hostmaster@ and admin@ of all domains
+  (unless such an address is set by hand) and of root and cron jobs. The
+  page shows where it leads, followed through the aliases as Postfix does,
+  and warns when it cannot work (a loop of aliases, an address of the box
+  that does not exist). If nobody reads that mailbox, complaints about
+  spam from your domains, for example, go unnoticed: look at it regularly,
+  or set up a forwarding filter in its webmail (Settings > Filters).
+* **What the box mails** and **Last deliveries**: each kind of mail with
+  where it goes, and the last deliveries to administrator@ or the report
+  recipient from the mail log (sent, deferred, bounced).
+
+The setting is stored as `admin_mail` in `$STORAGE_ROOT/settings.yaml`;
+without it the reports go to administrator@ as before. The same through
+the API: `/system/notifications` (see `api/mailinabox.yml`), or on the box:
+
+	sudo /root/mailinabox/management/admin_mail.py --status   # where the mails go
+	sudo /root/mailinabox/management/admin_mail.py --test     # a test mail
+
+### Deutsch
+
+Die Box schreibt ihrem Administrator: die täglichen Änderungen der
+Statusprüfungen, den Backup-Status, die Ergebnisse der TLS-Zertifikate, den
+wöchentlichen Nutzungsbericht, die Warnungen von Munin sowie die Mails von
+root, von cron-Jobs und an postmaster@, abuse@, admin@ und hostmaster@
+ihrer Domains. Wohin diese Mails gehen, zeigt und stellt das Control Panel
+unter System > Notifications ein:
+
+* **Send reports to**: Standard (administrator@ des Box-Namens) oder eine
+  eigene Adresse, auch bei einem anderen Anbieter (eine einfache Adresse:
+  ASCII-Buchstaben, Ziffern und `_ + - .` vor dem @). Sie ist der Empfänger
+  der Änderungen der Statusprüfungen, des Backup-Status, der TLS-Ergebnisse
+  und des Nutzungsberichts sowie der Munin-Warnungen, solange diese auf
+  „Same as the reports“ stehen. Absender ist administrator@ des
+  Box-Namens. **Send test mail** schickt eine Mail auf demselben Weg wie die
+  Berichte (Betreff „Test of the administrator mail“, Kopfzeile
+  `X-Miab-Test: 1`).
+* **Munin alerts**: die Einstellungen, die in rc7 bis v78-r2604.4 auf der
+  Munin-Seite standen (siehe [Warnungen von Munin](#munin-alerts--warnungen-von-munin)).
+  Der Menüpunkt System > Munin Monitoring öffnet Munin wieder direkt.
+* **administrator@ und die Adressen der Domains**: Der Alias
+  administrator@ selbst ändert sich durch diese Einstellung nicht. Er ist
+  eine Adresse der Domain-Validierung (Zertifizierungsstellen schicken ihre
+  Bestätigungen dorthin), deshalb darf er nur zu Administratoren der Box
+  führen (Mail & Users > Aliases). Er bekommt auch die Mails an abuse@,
+  postmaster@, hostmaster@ und admin@ aller Domains (außer eine solche
+  Adresse ist von Hand gesetzt) sowie von root und cron-Jobs. Die Seite
+  zeigt, wohin er führt, so aufgelöst wie Postfix es tut, und warnt, wenn
+  das nicht funktionieren kann (eine Alias-Schleife, eine Adresse der Box,
+  die es nicht gibt). Liest niemand dieses Postfach, bleiben zum Beispiel
+  Spam-Beschwerden über die eigenen Domains unbemerkt: regelmäßig
+  hineinschauen oder im Webmail einen Weiterleitungsfilter einrichten
+  (Einstellungen > Filter).
+* **What the box mails** und **Last deliveries**: jede Art von Mail mit
+  ihrem Ziel und die letzten Zustellungen an administrator@ oder den
+  Berichtsempfänger aus dem Mail-Log (zugestellt, verzögert,
+  zurückgewiesen).
+
+Die Einstellung steht als `admin_mail` in `$STORAGE_ROOT/settings.yaml`;
+ohne sie gehen die Berichte wie bisher an administrator@. Dasselbe über
+die API: `/system/notifications` (siehe `api/mailinabox.yml`), oder auf der
+Box:
+
+	sudo /root/mailinabox/management/admin_mail.py --status   # wohin die Mails gehen
+	sudo /root/mailinabox/management/admin_mail.py --test     # eine Testmail
+
+
 Munin alerts / Warnungen von Munin
 ----------------------------------
 
@@ -869,11 +964,12 @@ watched value reaches its warning or critical limit, or is back to normal,
 all changes of that run. A value that stays in warning or critical is not
 mailed again; `/var/lib/munin/limits` lists the current states.
 
-The admin panel sets who gets these mails, under System > Munin Monitoring
-(from rc7):
+The admin panel sets who gets these mails, under System > Notifications
+(rc7 to v78-r2604.4: on the page System > Munin Monitoring):
 
-* **Send alerts to**: Standard (administrator@ of the box's name, an alias
-  of the first administrator by default), a custom address, or Off. A
+* **Send alerts to**: Same as the reports (the report recipient of
+  [Notifications](#notifications--benachrichtigungen), administrator@ of
+  the box's name by default), a custom address, or Off. A
   custom address must be a plain address: ASCII letters, digits and
   `_ + - .` before the @, no name, quotes or spaces. The mails come from
   administrator@ of the box's name in every case.
@@ -904,11 +1000,13 @@ Lauf (alle 5 Minuten) mit allen Änderungen dieses Laufs. Ein Wert, der in
 Warnung oder kritisch bleibt, wird nicht noch einmal gemeldet;
 `/var/lib/munin/limits` listet die aktuellen Zustände.
 
-Wer diese Mails bekommt, stellt das Control Panel unter System > Munin
-Monitoring ein (ab rc7):
+Wer diese Mails bekommt, stellt das Control Panel unter System >
+Notifications ein (rc7 bis v78-r2604.4: auf der Seite System > Munin
+Monitoring):
 
-* **Send alerts to**: Standard (administrator@ des Box-Namens, standardmäßig
-  ein Alias des ersten Administrators), eine eigene Adresse oder Off. Eine
+* **Send alerts to**: Same as the reports (der Berichtsempfänger von
+  [Benachrichtigungen](#notifications--benachrichtigungen), standardmäßig
+  administrator@ des Box-Namens), eine eigene Adresse oder Off. Eine
   eigene Adresse muss eine einfache Adresse sein: ASCII-Buchstaben, Ziffern
   und `_ + - .` vor dem @, kein Name, keine Anführungszeichen, keine
   Leerzeichen. Absender ist in jedem Fall administrator@ des Box-Namens.

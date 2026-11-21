@@ -11,6 +11,29 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### New
+
+* **New page System > Notifications: where reports and alerts go**\
+  The control panel has a new page System > Notifications. It sets the
+  recipient of the box's reports (status check changes, backup status, TLS
+  results, usage report): administrator@ of the box's name as before, or
+  a custom address, also of another provider, with a test mail. Munin's
+  alert settings moved there from the Munin page; their standard
+  recipient ("Same as the reports") follows the report recipient. The page
+  shows where the alias administrator@ leads, followed through the
+  aliases as Postfix does, warns about a loop or an address of the box
+  that does not exist, and says that the mail to abuse@, postmaster@,
+  hostmaster@, admin@ and of root and cron jobs still goes there (the alias
+  is an address of domain control validation and is not changed). It
+  lists what the box mails and the last deliveries from the mail log. API
+  `/system/notifications`, command line `management/admin_mail.py`; new
+  offline test `tests/fork/admin-mail.py` and smoke checks
+  `api-notifications`, `admin-notifications-unit`.
+* **System > Munin Monitoring opens Munin directly again**\
+  The menu entry opens Munin in a new tab without leaving the page shown
+  (the tab is opened in the click, so pop-up blockers let it through). The
+  old address `#munin` still works.
+
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\

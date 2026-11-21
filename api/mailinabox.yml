@@ -12,7 +12,7 @@ info:
 
     Requests without valid administrator credentials get `401 Unauthorized`, or `403 Forbidden` when they are sent with `X-Requested-With: XMLHttpRequest` as the control panel does. Each request with wrong credentials counts as a failed login for fail2ban.
 
-    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
+    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`), the notifications (`/system/notifications...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
   contact:
     name: Mail-in-a-Box support
     url: https://mailinabox.email/
@@ -2430,6 +2430,144 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         403:
           $ref: '#/components/responses/Forbidden'
+  /system/notifications:
+    get:
+      tags:
+        - System
+      summary: Get where the box's reports and alerts go
+      description: |
+        Returns the recipient of the box's reports (`recipient`: `admin` for
+        administrator@ of the box's name, `custom` for `address`) and the
+        resulting address `to`, where that address leads (`targets`: the
+        mailboxes of the box and the outside addresses, followed through the
+        aliases as Postfix does), where the alias administrator@ itself leads
+        (`admin_alias`; it also gets the mail to root, of cron jobs and to
+        postmaster@, abuse@, admin@ and hostmaster@ of the domains), what the
+        box mails (`mails`), Munin's recipient (`munin`) and the last
+        deliveries of such mail from the mail log (`deliveries`, oldest
+        first). `warnings` names what cannot work, such as a loop of aliases.
+      operationId: getNotifications
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/notifications" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationsResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - System
+      summary: Change the recipient of the box's reports
+      description: |
+        Form fields `recipient` (`admin`, `custom`) and `address` (for
+        `custom`: a plain address, also outside the box: ASCII letters,
+        digits and `_ + - .` before the @, no name or quotes); fields that
+        are not sent keep their value, except `address`: it is cleared unless
+        `recipient` is `custom`. The status check changes, backup status, TLS
+        results and usage report go to this address, and Munin's alerts with
+        their standard recipient (`/etc/munin/munin.conf` is written again).
+        The alias administrator@ is not changed.
+      operationId: setNotifications
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationsUpdateRequest'
+            examples:
+              custom:
+                summary: Reports to another address
+                value:
+                  recipient: custom
+                  address: ops@example.com
+              admin:
+                summary: Reports to administrator@ again
+                value:
+                  recipient: admin
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/notifications" \
+              -d "recipient=custom" \
+              -d "address=<email>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation (the new state, with `status` and `changed`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationsResponse'
+        400:
+          description: Invalid value (nothing was changed)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: munin.conf could not be written (the previous setting was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/notifications/test:
+    post:
+      tags:
+        - System
+      summary: Send a test mail to the report recipient
+      description: |
+        Sends one test mail to the report recipient as the box's reports are
+        sent (SMTP to Postfix on 127.0.0.1, from administrator@). Its subject
+        is "[<box>] Test of the administrator mail" and it has the headers
+        `X-Miab-Test: 1` and `Auto-Submitted: auto-generated`.
+      operationId: testNotifications
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/notifications/test" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: The mail was handed to Postfix
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - to
+                  - message_id
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  to:
+                    $ref: '#/components/schemas/Email'
+                  message_id:
+                    type: string
+        400:
+          description: The recipient reaches no mailbox and no outside address, or Postfix did not take the mail
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
   /munin/:
     get:
       tags:
@@ -3881,6 +4019,135 @@ components:
             type: object
         seconds:
           type: number
+    NotificationsRecipient:
+      type: string
+      enum:
+        - admin
+        - custom
+      description: |
+        `admin`: administrator@ of the box's name (the default), `custom`: the
+        address in `address`.
+    NotificationsTarget:
+      type: object
+      required:
+        - address
+        - kind
+        - via
+      properties:
+        address:
+          $ref: '#/components/schemas/Email'
+        kind:
+          type: string
+          enum:
+            - mailbox
+            - external
+        via:
+          type: array
+          items:
+            type: string
+          description: The aliases on the way.
+    NotificationsResponse:
+      type: object
+      required:
+        - recipient
+        - address
+        - admin_address
+        - to
+        - targets
+        - warnings
+        - admin_alias
+        - mails
+        - deliveries
+      properties:
+        recipient:
+          $ref: '#/components/schemas/NotificationsRecipient'
+        address:
+          type: string
+          description: The custom address, empty unless `recipient` is `custom`.
+        admin_address:
+          $ref: '#/components/schemas/Email'
+        to:
+          $ref: '#/components/schemas/Email'
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationsTarget'
+        warnings:
+          type: array
+          items:
+            type: string
+        admin_alias:
+          type: object
+          properties:
+            forwards_to:
+              type: array
+              items:
+                type: string
+            is_mailbox:
+              type: boolean
+            targets:
+              type: array
+              items:
+                $ref: '#/components/schemas/NotificationsTarget'
+            warnings:
+              type: array
+              items:
+                type: string
+        mails:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              when:
+                type: string
+              to:
+                type: string
+                enum:
+                  - reports
+                  - munin
+                  - alias
+        munin:
+          type: object
+          nullable: true
+          properties:
+            recipient:
+              $ref: '#/components/schemas/MuninAlertsRecipient'
+            to:
+              type: string
+              nullable: true
+        deliveries:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: string
+              to:
+                type: string
+              status:
+                type: string
+                example: sent
+              text:
+                type: string
+              queue_id:
+                type: string
+        status:
+          type: string
+          description: Only in the answer to a change.
+        changed:
+          type: boolean
+          description: Only in the answer to a change.
+    NotificationsUpdateRequest:
+      type: object
+      properties:
+        recipient:
+          $ref: '#/components/schemas/NotificationsRecipient'
+        address:
+          type: string
     MuninAlertsRecipient:
       type: string
       enum:
@@ -3888,8 +4155,9 @@ components:
         - custom
         - 'off'
       description: |
-        `admin`: administrator@ of the box's name (the default), `custom`: the
-        address in `address`, `off`: no alerts.
+        `admin`: the recipient of the box's reports (the default;
+        administrator@ of the box's name unless `/system/notifications` names
+        another address), `custom`: the address in `address`, `off`: no alerts.
     MuninAlertsLevel:
       type: string
       enum:

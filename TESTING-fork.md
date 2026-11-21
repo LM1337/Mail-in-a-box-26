@@ -268,6 +268,11 @@ report. The groups:
   HTML fragment of the control panel's templates has a self-closing tag of
   a non-void element followed by more markup, which jQuery 3 reads as an
   opening tag.
+  `tests/fork/admin-mail.py` (System > Notifications; no box needed)
+  checks how administrator@ is followed through the aliases (mailbox,
+  outside address, loop, unknown address of the box, catch-all, domain
+  alias), the report recipient and its invalid values, that Munin's
+  standard recipient follows, the list of deliveries and the test mail.
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
