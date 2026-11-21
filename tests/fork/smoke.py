@@ -4328,6 +4328,16 @@ def api_shape(ctx, path, r):
         _need(j["targets"] and j["admin_alias"].get("targets"), "notifications: no target (%s)" % "; ".join(j["warnings"])[:200])
         _need({m.get("to") for m in j["mails"]} == {"reports", "munin", "alias"}, "notifications: list of mails")
         return "%s -> %s" % (j["recipient"], ", ".join(t["address"] for t in j["targets"]))
+    if path == "/system/auth-guard":
+        # Dovecot's limit of failed logins from the box itself (B126).
+        _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("limit"), int) and isinstance(j[k].get("window"), int)
+                  for k in ("settings", "defaults", "applied")), "auth-guard: settings missing")
+        _need(j["defaults"] == {"limit": 30, "window": 30}, "auth-guard: defaults %s" % j["defaults"])
+        _need(isinstance(j.get("ranges"), dict) and isinstance(j.get("warnings"), list) and isinstance(j.get("names"), list)
+              and isinstance(j.get("more"), int), "auth-guard: keys missing")
+        _need(all({"key", "name", "failures", "last", "refused", "account"} <= set(n) for n in j["names"]), "auth-guard: names")
+        _need(not j["warnings"], "auth-guard: %s" % "; ".join(j["warnings"])[:200])
+        return "limit %d in %d min, %d names" % (j["applied"]["limit"], j["applied"]["window"], len(j["names"]))
     if path == "/ssl/status":
         _need(_is_str_list(j.get("can_provision")) and isinstance(j.get("status"), list)
               and all({"domain", "status", "text"} <= set(e) for e in j["status"]), "ssl status: keys missing")
