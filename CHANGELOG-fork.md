@@ -327,6 +327,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   the end of ssh's own messages is dropped rather than shown as "?" (a
   first version printed "... to the list of known hosts.?"). New offline
   test `tests/fork/old-side-filter.py`.
+* **In-place upgrade: no package run while mail goes offline (B190)**\
+  When the in-place upgrade stopped mail, its mask of `apt-daily.timer`
+  reloaded systemd, and `apt-daily-upgrade.timer` started a missed run of
+  unattended-upgrade at once, which installed packages after the system
+  archive and the package lists had been taken (so `--rollback` would
+  restore another package state). The services of both timers are now
+  masked first, in one call, and stay masked as long as the timers; the
+  tool waits for the dpkg lock after stopping the units. New offline test
+  `tests/fork/quiesce-order.py`.
 * **Right in-place upgrade messages after a failed --redo-from (B161)**\
   When a `--redo-from` of the in-place upgrade fails, the exit message
   names the redo and when it started, and says that cron jobs, update

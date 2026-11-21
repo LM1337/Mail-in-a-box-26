@@ -3097,7 +3097,9 @@ the settings from before the upgrade are in backup/custom.yaml.upgrade-saved (if
 # in the order in which they are stopped. Unlike LOCAL_UNITS in
 # tools/migrate-to-2604.sh, the PHP-FPM units are found, not named.
 quiesce_units() {
-	local u cand=(apt-daily.timer apt-daily-upgrade.timer cron.service mailinabox.service nginx.service)
+	# The services of the apt timers too, before the timers (B190, see mask_units).
+	local u cand=(apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer
+		cron.service mailinabox.service nginx.service)
 	mapfile -t -O ${#cand[@]} cand < <(systemctl list-unit-files --type=service --no-legend --plain 'php*-fpm.service' 2> /dev/null | awk '{print $1}' || true)
 	cand+=(postfix.service postfix@-.service spampd.service postgrey.service opendkim.service opendmarc.service
 		dovecot.socket dovecot.service munin.service munin-node.service)
@@ -3122,6 +3124,16 @@ mask_units() {
 	done
 	# Recorded first: an interruption must not leave masks nobody removes.
 	state_add MASKED_UNITS "$@"
+	# The services of the apt timers first, in one call: every mask reloads
+	# systemd, and at the reload after the mask of one timer the other
+	# (Persistent=true) started its missed run, unattended-upgrade, which
+	# installed packages while mail went offline and after the system archive
+	# was made (B190). A masked service is not started by its timer.
+	local apt_units=()
+	for u in "$@"; do
+		case "$u" in apt-daily.service | apt-daily-upgrade.service) apt_units+=("$u") ;; esac
+	done
+	if [ ${#apt_units[@]} -gt 0 ]; then systemctl mask --quiet "${apt_units[@]}" 2> /dev/null || true; fi
 	for u in "$@"; do
 		systemctl mask --quiet "$u" 2> /dev/null || true
 		st=$(systemctl is-enabled "$u" 2> /dev/null || true)
@@ -3262,6 +3274,8 @@ and run the command again. Nothing was stopped yet."
 	say "Stopping and masking: ${units[*]}"
 	mask_units "${units[@]}"
 	systemctl stop "${units[@]}" 2> /dev/null || warn "Not all services stopped: ${units[*]}"
+	# A package run that started before the masks ends first (B190).
+	wait_apt_locks
 	wait_quiet
 }
 
@@ -4708,7 +4722,7 @@ phase_setup() {
 		state_set SETUP_STARTED_AT "$(date -u +%FT%TZ)"
 		# Setup starts what it needs; cron (backups, Nextcloud jobs) and the
 		# update timers stay off until it has finished.
-		unquiesce cron.service apt-daily.timer apt-daily-upgrade.timer
+		unquiesce cron.service apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service
 	fi
 	# Nothing goes offline before (no quiesce): the before stage runs here.
 	if [ "$(state_get MODE)" = rerun ]; then run_hooks before "$HOOK_BEFORE_DIR"; fi
@@ -4723,7 +4737,7 @@ Fix the cause and run this command again; it continues with setup."
 	state_set SETUP_END_EPOCH "$(date +%s)"
 	if grep -qsF "$MOTD_BEGIN" "$MOTD_FILE"; then motd_hint after-setup; fi
 	if [ "$(state_get MODE)" != rerun ]; then
-		unquiesce apt-daily.timer apt-daily-upgrade.timer
+		unquiesce apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service
 		say "Mail is back online (setup has started the services)."
 	fi
 	# Setup does not start cron.
