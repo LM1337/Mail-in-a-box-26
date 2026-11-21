@@ -557,9 +557,9 @@ function update_check_hint {
 	fi
 	echo
 	if [ -n "$newest" ] && [ -f "$newest/before/time.txt" ] && [ ! -e "$newest/after" ]; then
-		echo "tools/update-check.sh recorded the state of this box before an update"
-		echo "($newest), but not yet after it. To compare the state and"
-		echo "to test the mail round trip now:"
+		echo "tools/update-check.sh recorded the state of this box before an update,"
+		echo "but not yet after it ($newest)."
+		echo "To compare the state and to test the mail round trip now:"
 		echo
 		echo "  sudo $tool after --dir ${newest##*/}"
 		echo "  sudo $tool mailcheck --dir ${newest##*/}"
