@@ -24,9 +24,11 @@ source /etc/mailinabox.conf # load global vars
 # not by Ubuntu.
 
 echo "Installing Dovecot (IMAP server)..."
+# dovecot-auth-lua: the limit of failed logins per account for the logins
+# from the box itself (setup/mail-users.sh, conf/dovecot-auth-guard/).
 apt_install \
 	dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite sqlite3 \
-	dovecot-sieve dovecot-managesieved
+	dovecot-sieve dovecot-managesieved dovecot-auth-lua
 
 # The `dovecot-imapd`, `dovecot-pop3d`, and `dovecot-lmtpd` packages automatically
 # enable IMAP, POP and LMTP protocols.

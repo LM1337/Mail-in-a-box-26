@@ -51,6 +51,7 @@ MAILS = [
 	{ "id": "tls", "title": "TLS Certificate Provisioning Result", "when": "daily, when certificates were requested or renewed", "to": "reports" },
 	{ "id": "usage", "title": "Mail-in-a-Box Usage Report", "when": "weekly, on Mondays", "to": "reports" },
 	{ "id": "munin", "title": "Munin alerts", "when": "on each change of state of a watched value", "to": "munin" },
+	{ "id": "auth-guard", "title": "Logins refused after failed logins from the box itself", "when": "when an account has had 100 failed logins through ActiveSync, webmail or Nextcloud in 30 minutes (at most one mail an hour)", "to": "reports" },
 	{ "id": "root", "title": "Mail to root and of cron jobs", "when": "when a program or a cron job mails root", "to": "alias" },
 	{ "id": "role", "title": "Mail to postmaster@, abuse@, admin@ and hostmaster@", "when": "of every mail domain, unless the address is set by hand under Aliases", "to": "alias" },
 ]

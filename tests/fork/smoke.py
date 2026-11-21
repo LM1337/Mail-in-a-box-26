@@ -4598,6 +4598,103 @@ def c_api_self_password(ctx):
     return "; ".join(steps) + "; user removed, " + mailbox
 
 
+AUTH_GUARD_SNIPPET = r'''
+import imaplib, json, ssl, sys, time
+spec = json.loads(sys.stdin.readline())
+# The box to itself on 127.0.0.1: its certificate names the host name (and
+# is self-signed in the lab); this tests the login, not the certificate.
+tls = ssl.create_default_context(); tls.check_hostname = False; tls.verify_mode = ssl.CERT_NONE
+def login(user, pw):
+    t = time.time()
+    try:
+        M = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=tls, timeout=60)
+    except Exception as e:
+        return "connect: %s" % e, time.time() - t
+    try:
+        M.login(user, pw)
+        M.logout()
+        return "ok", time.time() - t
+    except imaplib.IMAP4.error as e:
+        return str(e), time.time() - t
+    finally:
+        try: M.shutdown()
+        except Exception: pass
+out = {}
+if spec.get("wrong"):
+    t = time.time(); fails = 0
+    for i in range(spec["wrong"]):
+        r, _ = login(spec["user"], "wrong-%s-%d" % (spec["tok"], i))
+        fails += r != "ok"
+    out["wrong"] = [fails, round(time.time() - t, 2)]
+for name, user, pw in spec.get("right", []):
+    r, d = login(user, pw)
+    out[name] = [r[:120], round(d, 2)]
+print(json.dumps(out))
+'''
+
+
+def auth_guard_on_box(ctx, spec):
+    # Logins from 127.0.0.1 on the box (the passwords go through stdin, not
+    # the command line).
+    argv = ["bash", "-c", "python3 -c %s" % shlex.quote(AUTH_GUARD_SNIPPET)] if ctx.remote.spec == "local" else \
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", ctx.remote.spec, "python3 -c %s" % shlex.quote(AUTH_GUARD_SNIPPET)]
+    p = subprocess.run(argv, input=json.dumps(spec) + "\n", capture_output=True, text=True, timeout=600)
+    if p.returncode != 0:
+        raise Fail("logins on the box: %s" % p.stderr.strip()[-300:])
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def c_login_auth_guard(ctx):
+    # The limit of failed logins from the box itself (B126, setup/mail-users.sh,
+    # conf/dovecot-auth-guard/): 100 wrong passwords of one account over IMAP
+    # from 127.0.0.1 are answered at once (no 2 s delay each); then that
+    # account is refused from 127.0.0.1 even with its right password, while
+    # another account logs in from there at once (no penalty of 127.0.0.1)
+    # and the refused account still logs in from outside; auth_guard.py
+    # --status names it, --unlock ends the lock.
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    if not ctx.user_pw or not ctx.admin_auth:
+        raise Skip("TEST_USER_PW or the admin session missing")
+    rc, miab, _err = ctx.remote.run("awk '$1 == \"cd\" { print $2; exit }' /usr/local/bin/mailinabox")
+    miab = miab.strip()
+    _need(rc == 0 and miab.startswith("/"), "the box's checkout not found")
+    tool = shlex.quote(miab + "/management/auth_guard.py")
+    victim = "smokeguard-%s@%s" % (ctx.tok, ctx.domain)
+    other = "smokeguardb-%s@%s" % (ctx.tok, ctx.domain)
+    steps = []
+    for u in (victim, other):
+        api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": u, "password": ctx.user_pw}), 200, "text/html", "users/add")
+    try:
+        r = auth_guard_on_box(ctx, {"user": victim, "tok": ctx.tok, "wrong": 100})
+        fails, secs = r["wrong"]
+        _need(fails == 100, "%d of 100 wrong logins failed" % fails)
+        _need(secs < 60, "100 wrong logins from 127.0.0.1 took %.1f s (Dovecot's delay of 2 s each?)" % secs)
+        steps.append("100 wrong from 127.0.0.1 in %.1f s" % secs)
+        r = auth_guard_on_box(ctx, {"right": [["victim", victim, ctx.user_pw], ["other", other, ctx.user_pw]]})
+        _need(r["victim"][0] != "ok" and "Too many failed logins" in r["victim"][0], "the account after 100 failures, right password: %s" % r["victim"][0])
+        _need(r["other"][0] == "ok" and r["other"][1] < 3, "another account from 127.0.0.1: %s in %.1f s" % tuple(r["other"]))
+        steps.append("refused with its right password, another account in %.2f s" % r["other"][1])
+        _need(imap_works(ctx, victim, ctx.user_pw), "the refused account from outside: IMAP login failed")
+        steps.append("from outside ok")
+        rc, out, err = ctx.remote.run(tool + " --status", sudo=True, timeout=120)
+        _need(rc == 0 and re.search(r"\b100\s+" + re.escape(victim) + r"\s+REFUSED", out), "--status: %s" % (out or err).strip()[:300])
+        rc, out, err = ctx.remote.run(tool + " --unlock " + shlex.quote(victim), sudo=True, timeout=120)
+        _need(rc == 0, "--unlock: %s" % (out or err).strip()[:200])
+        r = auth_guard_on_box(ctx, {"right": [["victim", victim, ctx.user_pw]]})
+        _need(r["victim"][0] == "ok", "after --unlock: %s" % r["victim"][0])
+        steps.append("--status names it, --unlock ends the lock")
+    finally:
+        for u in (victim, other):
+            ctx.remote.run(tool + " --unlock " + shlex.quote(u), sudo=True, timeout=120)
+            admin_api(ctx, "POST", "mail/users/remove", form={"email": u})
+            try:
+                remove_test_mailbox(ctx, u)
+            except Exception:
+                pass
+    return "; ".join(steps) + "; users removed"
+
+
 def munin_conf_contact(ctx):
     # (contact lines before the host tree, "contacts" of the host tree)
     rc, out, err = ctx.remote.run("cat /etc/munin/munin.conf", sudo=True, timeout=60)
@@ -4945,6 +5042,7 @@ def main():
         run_check("tls-key-exchange", c_tls_key_exchange, ctx)
         run_check("mail-log-logins", c_mail_log_logins, ctx)
         run_check("services-enabled", c_services_enabled, ctx)
+        run_check("login-auth-guard", c_login_auth_guard, ctx)
     if want("migrated"):
         print("== migrated (manifest comparison, before new mail)")
         run_check("mig-users-aliases", c_mig_users_aliases, ctx)
@@ -4986,6 +5084,7 @@ def main():
         run_check("admin-self-password-unit", c_local_test, ctx, "self-password.py")
         run_check("admin-migration-record-unit", c_local_test, ctx, "migration-record.py")
         run_check("admin-storage-dirs-unit", c_local_test, ctx, "storage-dirs.py")
+        run_check("admin-auth-guard-unit", c_local_test, ctx, "auth-guard.py")
         run_check("admin-panel-assets", c_panel_assets, ctx)
         run_check("admin-panel-assets-unit", c_local_test, ctx, "panel-assets.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)

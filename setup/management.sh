@@ -161,6 +161,15 @@ cat > /etc/cron.d/mailinabox-nightly << EOF;
 $minute 1 * * *	root	(cd $PWD && management/daily_tasks.sh)
 EOF
 
+# Mail the accounts that Dovecot refuses for logins from the box itself after
+# too many failed logins, and remove the counts of names without failures
+# (management/auth_guard.py, setup/mail-users.sh).
+tools/write_conf.py /etc/cron.d/mailinabox-auth-guard << EOF;
+# Mail-in-a-Box --- Do not edit / will be overwritten on update.
+# Dovecot's limit of failed logins from the box itself: mail new locks.
+*/10 * * * *	root	(cd $PWD && management/auth_guard.py --notify)
+EOF
+
 # Start the management server, or restart it when its code, its start script
 # and unit, /etc/mailinabox.conf (read when it starts) or the packages of its
 # virtualenv changed (restart_on_change; its own replaced library files are

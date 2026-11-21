@@ -314,6 +314,23 @@ report. The groups:
   current password, the change and the change back, IMAP takes only the
   new password). The user, its archived mailbox
   and (with `--ssh`) its Roundcube record are removed.
+  `tests/fork/auth-guard.py` (B126; no box needed) checks
+  `management/auth_guard.py`, the reporter of Dovecot's limit of failed
+  logins from the box itself: the values it reads from
+  `conf/dovecot-auth-guard/guard.lua`, the file names of account names
+  (the same as the Lua code's: only A-Z lowered, other bytes as %XX), the
+  scan of the state directory (counts within the window, files of names
+  without failures and old temporary files removed, a symbolic link left
+  alone, a directory of another mode refused, events read once, also a
+  leftover), `--unlock`, and the mail of new locks (at once, then at most
+  hourly, a name without an account marked, the pending events capped).
+  The smoke check `login-auth-guard` (needs `--ssh`) makes 100 wrong IMAP
+  logins of a test account from 127.0.0.1 on the box (answered at once),
+  then expects that account refused from there with its right password,
+  another test account logging in from there in under 3 s, the refused
+  account logging in from outside, `--status` naming it and `--unlock`
+  ending the lock. The Lua code itself was checked with Dovecot 2.4.2 of
+  Ubuntu 26.04 in a container (BUGS-fork.md, B126).
   `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
   logic with stand-ins for the login check and the password change: HTTP
   Basic credentials in UTF-8 and Latin-1, only the caller's password

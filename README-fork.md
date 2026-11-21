@@ -853,21 +853,32 @@ fixed)" lists a few more.
   transaction that read first and then wants to write after another
   connection wrote meanwhile, which SQLite refuses at once, whatever the
   timeout. Setup supports only SQLite for Nextcloud.
-* **No delay for failed logins from the box itself (B126).** Dovecot
-  answers a failed login from 127.0.0.1 or ::1 at once and does not slow
-  down later logins from there: those logins come from Z-Push, Roundcube
-  and Nextcloud, which fail2ban protects with the client's own address, and
-  the delay made a wrong ActiveSync password take up to 50 s and slowed
-  down every other user. The other side: a process on the box (any local
-  account, or code running as www-data after a hole in PHP or a web app)
-  can try the password of any account as fast as Dovecot answers, over
-  IMAP, POP3, ManageSieve or SMTP submission (Postfix asks Dovecot) on
-  127.0.0.1, and fail2ban does not ban 127.0.0.1; the limit of webmail's
-  password change (`POST /me/password`) does not cover these. Logins from
-  other addresses keep Dovecot's delay. The same holds for guesses through
+* **Failed logins from the box itself (B126).** Dovecot answers a failed
+  login from 127.0.0.1 or ::1 at once and does not slow down later logins
+  from there: those logins come from Z-Push, Roundcube and Nextcloud, which
+  fail2ban protects with the client's own address, and the delay made a
+  wrong ActiveSync password take up to 50 s and slowed down every other
+  user. Instead Dovecot counts these failures per account: an account with
+  100 failed logins from the box within 30 minutes is refused for logins
+  from the box (ActiveSync, Autodiscover, webmail, Nextcloud, and IMAP,
+  POP3, ManageSieve or SMTP submission on 127.0.0.1) until it has fewer,
+  even with its right password. The other accounts are not slowed down,
+  and the account's own mail programs that log in from outside are not
+  refused. So a process on the box (any local account, or code running as
+  www-data after a hole in PHP or a web app) can try at most 100 passwords
+  of each account per 30 minutes. The other side: someone who tries the
+  passwords of one account through ActiveSync, webmail or Nextcloud from
+  addresses that fail2ban does not ban (fewer than 20 failures within
+  30 to 120 s each) locks that account's phones, webmail and Nextcloud out
+  while they keep trying. The box mails each new lock to the report
+  recipient (System > Notifications, at most one mail an hour); `sudo
+  management/auth_guard.py --status` shows the counts and `--unlock
+  ADDRESS` ends a lock. If Dovecot cannot write its counts
+  (`/run/miab-auth-guard`), failed logins from the box get Dovecot's delay
+  again. Logins from other addresses keep Dovecot's delay. Guesses through
   Microsoft's servers once they are on the allowlist (System > Intrusion
-  Protection): fail2ban no longer bans them, and Z-Push's IMAP logins from
-  127.0.0.1 are not delayed.
+  Protection): fail2ban no longer bans them, and only this limit per
+  account remains.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
   answers NXDOMAIN, also for its own test entries. That looks like "not
@@ -926,23 +937,35 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   Transaktion, die zuerst gelesen hat und dann schreiben will, nachdem eine
   andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
   unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
-* **Keine Verzögerung fehlgeschlagener Anmeldungen von der Box selbst
-  (B126).** Dovecot beantwortet eine fehlgeschlagene Anmeldung von
-  127.0.0.1 oder ::1 sofort und bremst spätere Anmeldungen von dort nicht:
-  Diese Anmeldungen kommen von Z-Push, Roundcube und Nextcloud, die fail2ban
-  mit der eigenen Adresse des Clients schützt, und die Verzögerung ließ ein
-  falsches ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen
-  Benutzer. Die Kehrseite: Ein Prozess auf der Box (jedes lokale Konto oder
-  Code, der nach einer Lücke in PHP oder einer Web-Anwendung als www-data
-  läuft) kann das Passwort jedes Kontos so schnell durchprobieren, wie
-  Dovecot antwortet, über IMAP, POP3, ManageSieve oder den SMTP-Versand
-  (Postfix fragt Dovecot) auf 127.0.0.1, und fail2ban sperrt 127.0.0.1
-  nicht; die Grenze der Passwortänderung im Webmail (`POST /me/password`)
-  gilt dafür nicht. Anmeldungen von anderen Adressen behalten die
-  Verzögerung von Dovecot. Dasselbe gilt für Versuche über die Server von
-  Microsoft, sobald sie in der Freigabeliste stehen (System > Intrusion
-  Protection): fail2ban sperrt sie nicht mehr, und die IMAP-Anmeldungen von
-  Z-Push von 127.0.0.1 aus werden nicht verzögert.
+* **Fehlgeschlagene Anmeldungen von der Box selbst (B126).** Dovecot
+  beantwortet eine fehlgeschlagene Anmeldung von 127.0.0.1 oder ::1 sofort
+  und bremst spätere Anmeldungen von dort nicht: Diese Anmeldungen kommen
+  von Z-Push, Roundcube und Nextcloud, die fail2ban mit der eigenen Adresse
+  des Clients schützt, und die Verzögerung ließ ein falsches
+  ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen Benutzer.
+  Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 100
+  fehlgeschlagenen Anmeldungen von der Box innerhalb von 30 Minuten wird
+  für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
+  Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand auf 127.0.0.1)
+  abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Die
+  anderen Konten werden nicht gebremst, und die eigenen Mailprogramme des
+  Kontos, die sich von außen anmelden, werden nicht abgewiesen. Ein Prozess
+  auf der Box (jedes lokale Konto oder Code, der nach einer Lücke in PHP
+  oder einer Web-Anwendung als www-data läuft) kann also höchstens 100
+  Passwörter pro Konto und 30 Minuten durchprobieren. Die Kehrseite: Wer
+  die Passwörter eines Kontos über ActiveSync, Webmail oder Nextcloud von
+  Adressen aus durchprobiert, die fail2ban nicht sperrt (je weniger als 20
+  Fehlversuche in 30 bis 120 s), sperrt die Handys, das Webmail und
+  Nextcloud dieses Kontos aus, solange er weitermacht. Die Box schickt jede
+  neue Sperre an den Empfänger der Berichte (System > Notifications,
+  höchstens eine Mail pro Stunde); `sudo management/auth_guard.py --status`
+  zeigt die Zähler, `--unlock ADRESSE` beendet eine Sperre. Kann Dovecot
+  seine Zähler nicht schreiben (`/run/miab-auth-guard`), bekommen
+  fehlgeschlagene Anmeldungen von der Box wieder die Verzögerung von
+  Dovecot. Anmeldungen von anderen Adressen behalten die Verzögerung von
+  Dovecot. Versuche über die Server von Microsoft, sobald sie in der
+  Freigabeliste stehen (System > Intrusion Protection): fail2ban sperrt sie
+  nicht mehr, und es bleibt nur diese Grenze pro Konto.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
   Resolver (B136).** Über manche öffentliche Resolver (in den Tests
   8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen
@@ -977,7 +1000,9 @@ among them `php8.5-fpm`, which runs all PHP code of the box, and some of
 the modules setup installs (such as `php8.5-intl`); others, such as
 `php8.5-cli`, are in "main". Other packages of the box are in universe
 too: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`, `fail2ban`,
-`munin` and `certbot`. Canonical guarantees security updates during the
+`munin`, `certbot` and `dovecot-auth-lua` (the limit of failed logins from
+the box itself; it comes from the source package `dovecot`, whose other
+packages are in main). Canonical guarantees security updates during the
 standard support of an LTS release only for "main" (and "restricted"); for
 "universe" they are guaranteed only with Ubuntu Pro, service `esm-apps`
 (Expanded Security Maintenance for Applications). Without it, an update
@@ -1015,7 +1040,9 @@ darunter `php8.5-fpm`, das den gesamten PHP-Code der Box ausführt, und
 einige der Module, die setup installiert (etwa `php8.5-intl`); andere wie
 `php8.5-cli` liegen in „main“. Auch weitere Pakete der Box liegen in
 universe: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`,
-`fail2ban`, `munin` und `certbot`. Canonical garantiert
+`fail2ban`, `munin`, `certbot` und `dovecot-auth-lua` (die Grenze für
+fehlgeschlagene Anmeldungen von der Box selbst; es stammt aus dem
+Quellpaket `dovecot`, dessen andere Pakete in main liegen). Canonical garantiert
 Sicherheitsupdates während der Standardunterstützung eines LTS-Releases
 nur für „main“ (und „restricted“); für „universe“ sind sie nur mit Ubuntu
 Pro garantiert, Dienst `esm-apps` (Expanded Security Maintenance for
@@ -1580,9 +1607,9 @@ the following, on by default:
   downloads nothing), shows a hint and offers a button that puts the
   network on the allowlist after a question; nothing is put there on its
   own. On the allowlist, password guesses through these servers are no
-  longer banned, and nothing slows them down either: Z-Push checks each
-  password with an IMAP login from 127.0.0.1, which Dovecot answers at
-  once (B126, "Known issues"). The
+  longer banned: Z-Push checks each password with an IMAP login from
+  127.0.0.1, which Dovecot answers at once and limits only per account
+  (100 failures in 30 minutes, B126, "Known issues"). The
   address's reverse DNS name is shown only as extra information, and only
   when it resolves back to the address: the owner of an address sets its
   PTR record. Other apps that sync through their provider's servers are
@@ -1825,9 +1852,10 @@ eingeschaltet:
   herunter), zeigt einen Hinweis und bietet eine Schaltfläche an, die das
   Netz nach einer Rückfrage in die Freigabeliste setzt; von selbst kommt
   nichts hinein. In der Freigabeliste werden Passwortversuche über diese
-  Server nicht mehr gesperrt, und nichts bremst sie mehr: Z-Push prüft
-  jedes Passwort mit einer IMAP-Anmeldung von 127.0.0.1 aus, die Dovecot
-  sofort beantwortet (B126, „Bekannte Einschränkungen“). Den Namen aus
+  Server nicht mehr gesperrt: Z-Push prüft jedes Passwort mit einer
+  IMAP-Anmeldung von 127.0.0.1 aus, die Dovecot sofort beantwortet und nur
+  pro Konto begrenzt (100 Fehlversuche in 30 Minuten, B126, „Bekannte
+  Einschränkungen“). Den Namen aus
   dem Reverse-DNS zeigt die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
   Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
   Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie

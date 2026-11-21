@@ -412,19 +412,43 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   penalty of 127.0.0.1 that delayed all later logins from there, of every
   user, by up to 15 s; Roundcube's and Nextcloud's IMAP logins come from
   127.0.0.1 too. Dovecot now answers failed logins from 127.0.0.1 and ::1
-  at once and raises no penalty for them (the passdb field `nodelay` in a
-  `remote` filter, and a static passdb without a password after the SQL
-  one, so that unknown users are covered too; it can accept no
-  password). These logins all come from services that fail2ban protects
-  with the client's own address (`miab-zpush`, `miab-roundcube`,
+  at once and raises no penalty for them, and limits them per account
+  instead (see "Security": "Failed logins from the box itself are limited
+  per account"). These logins all come from services that fail2ban
+  protects with the client's own address (`miab-zpush`, `miab-roundcube`,
   `miab-owncloud` and Nextcloud's throttle); logins from other addresses
-  keep Dovecot's delay and penalty. The remaining risk, a local process
-  that tries passwords on 127.0.0.1 without delay (over IMAP, POP3,
-  ManageSieve and SMTP submission, which all ask Dovecot), and guesses
-  through Microsoft's servers once they are on the allowlist, is in
-  README-fork.md, "Known issues".
+  keep Dovecot's delay and penalty. Guesses through Microsoft's servers
+  once they are on the allowlist are in README-fork.md, "Known issues".
 
 ### Security
+
+* **Failed logins from the box itself are limited per account (B126)**\
+  Without Dovecot's delay for 127.0.0.1 (B126 above), a process on the box
+  that runs as one of its services, for example code run as www-data
+  through a hole in PHP or in Roundcube, could try the passwords of every
+  account as fast as Dovecot checks them (about 1000 a second on a test
+  machine, against 5 to 30 a second with the delay); fail2ban does not ban
+  127.0.0.1. Dovecot now counts the failed logins from 127.0.0.1 and ::1
+  per account name, with two small Lua passdbs around the SQL one
+  (package `dovecot-auth-lua`, `conf/dovecot-auth-guard/`): an account
+  with 100 failed logins from the box within 30 minutes is refused for
+  logins from the box until it has fewer, at once and before its password
+  is checked, so further guesses tell nothing, not even a right one. Only
+  the failures of the name itself count: made-up names do not lower the
+  limit of a real account, and a flood of them does not flush a lock (the
+  names with the fewest failures are forgotten first). The other accounts
+  are not slowed down (no penalty of 127.0.0.1), and the account's own
+  mail programs that log in from outside are not refused. The price:
+  someone who tries the passwords of one account through ActiveSync,
+  webmail or Nextcloud from addresses fail2ban does not ban locks that
+  account's phones, webmail and Nextcloud out while they keep trying.
+  New locks are mailed to the report recipient (System > Notifications),
+  at most one mail an hour (`management/auth_guard.py`, every 10
+  minutes); `sudo management/auth_guard.py --status` shows the counts and
+  `--unlock ADDRESS` ends a lock. If Dovecot cannot write its counts in
+  `/run/miab-auth-guard`, failed logins from the box get Dovecot's delay
+  again, never no limit. Setup now also reloads Dovecot when only these
+  Lua files change (they are part of the configuration's checksum).
 
 * **Webmail can no longer rewrite the user database (B210)**\
   `users.sqlite`, the database of all mail accounts, their password hashes,

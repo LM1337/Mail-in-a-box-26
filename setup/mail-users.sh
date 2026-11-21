@@ -109,50 +109,77 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # Written atomically (tools/write_conf.py): a Dovecot config process that
 # started while this file was truncated ran without a passdb (B120).
 #
-# No delay for failed logins from the box itself (B126). Dovecot answers a
-# failed login only after auth_failure_delay (2 s), and each one raises a
-# penalty of the client's address that delays its next logins, failed or
-# not, by up to 15 s. Every IMAP login from 127.0.0.1 or ::1 comes from a
-# service of the box that checks a client's password with it: Z-Push
-# (ActiveSync, Autodiscover; up to three tries per request), Roundcube and
-# Nextcloud's IMAP login. So a wrong password took Z-Push 10 to 50 s, and a
-# few failed logins of one client below the ban thresholds slowed the logins
-# of all other users of these services down to 15 s. These services are
-# protected by fail2ban with the real client's address (miab-zpush,
-# miab-roundcube, miab-owncloud and Nextcloud's own throttle); Dovecot's
-# delay of 127.0.0.1 only slowed them all down together. The extra field
-# "nodelay" (passdb_fields, in a remote filter: auth settings such as
-# auth_failure_delay are not allowed there in Dovecot 2.4) answers a failed
-# login from these addresses at once, and a failure answered at once does
-# not raise the penalty either. passdb_fields apply only when a passdb finds
-# the user, so a second passdb follows sql: a static one without a password,
-# which finds every user and can never accept one ("No password returned"
-# is a failed login), so that a login of an unknown user from these
-# addresses is answered at once as well. A login that sql accepts never
-# reaches it. Logins from other addresses keep the delay and the penalty.
-# The remaining risk: a local process can try passwords on 127.0.0.1 without
-# delay, over every protocol that asks Dovecot (IMAP, POP3, ManageSieve, and
-# SMTP submission through Postfix; README-fork.md, "Known issues").
+# Failed logins from the box itself (B126). Dovecot answers a failed login
+# only after auth_failure_delay (2 s), and each one raises a penalty of the
+# client's address that delays its next logins, failed or not, by up to
+# 15 s. Every login from 127.0.0.1 or ::1 comes from a service of the box
+# that checks a client's password with it: Z-Push (ActiveSync, Autodiscover;
+# up to three tries per request), Roundcube and Nextcloud's IMAP login. So a
+# wrong password took Z-Push 10 to 50 s, and a few failed logins of one
+# client below the ban thresholds slowed the logins of all other users of
+# these services down to 15 s. fail2ban protects these services with the
+# real client's address (miab-zpush, miab-roundcube, miab-owncloud and
+# Nextcloud's own throttle), but it ignores 127.0.0.1; and without any limit
+# a process on the box that runs as one of these services (a hole in PHP or
+# in Roundcube) could try the passwords of every account as fast as Dovecot
+# checks them (about 1000 a second on a test machine).
+#
+# So two Lua passdbs around the SQL one (conf/dovecot-auth-guard/, installed
+# in /usr/local/lib/mailinabox/dovecot-auth-guard/, root's, readable by the
+# auth process: setup gives /etc/dovecot to the group mail, which the auth
+# process, the account dovecot, is not in; their state is in
+# /run/miab-auth-guard, tmpfs, 0700 dovecot):
+#  * miab-auth-guard-count, the last one, is reached only when no passdb
+#    before it accepted the login. For a login from the box it records the
+#    failure for the account name and answers at once ("nodelay"), which
+#    raises no penalty of 127.0.0.1 either. It returns no password, so it
+#    can accept none. Logins from other addresses keep Dovecot's delay and
+#    penalty.
+#  * miab-auth-guard-check, the first one (deny = yes), refuses an account
+#    name with 100 failed logins from the box within 30 minutes for logins
+#    from the box, at once and before the password is checked, until it has
+#    fewer. Only the failures of the name itself count, so made-up names
+#    cannot lower the limit of a real account, and the other accounts are
+#    not slowed down. Logins from other addresses (the IMAP and SMTP logins
+#    of the user's own mail programs) are not refused. The price: while
+#    someone tries the passwords of one account through ActiveSync, webmail
+#    or Nextcloud from addresses fail2ban does not ban, that account's own
+#    phones, webmail and Nextcloud are refused too (README-fork.md, "Known
+#    issues").
+# If the state cannot be written, failed logins from the box get Dovecot's
+# delay and penalty again (as before B126), never no limit.
+# management/auth_guard.py (cron, every 10 minutes) mails new locks to the
+# report recipient (System > Notifications) and removes the files of names
+# without failures in the window.
+tools/write_conf.py /etc/tmpfiles.d/miab-auth-guard.conf << EOF;
+# Mail-in-a-Box: the state of Dovecot's limit of failed logins from the box
+# itself (setup/mail-users.sh). Do not edit.
+d /run/miab-auth-guard 0700 dovecot dovecot -
+EOF
+hide_output systemd-tmpfiles --create /etc/tmpfiles.d/miab-auth-guard.conf
+install -d -o root -g root -m 0755 /usr/local/lib/mailinabox/dovecot-auth-guard
+for f in guard check count; do
+	tools/write_conf.py "/usr/local/lib/mailinabox/dovecot-auth-guard/$f.lua" < "conf/dovecot-auth-guard/$f.lua"
+done
+
 tools/write_conf.py /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
 
+passdb miab-auth-guard-check {
+  driver = lua
+  lua_file = /usr/local/lib/mailinabox/dovecot-auth-guard/check.lua
+  use_worker = no
+  deny = yes
+}
 passdb sql {
   query = SELECT email as user, password FROM users WHERE email='%{user}';
   default_password_scheme = SHA512-CRYPT
 }
-passdb miab-nodelay {
-  driver = static
-}
-remote 127.0.0.1 {
-  passdb_fields {
-    nodelay = yes
-  }
-}
-remote ::1 {
-  passdb_fields {
-    nodelay = yes
-  }
+passdb miab-auth-guard-count {
+  driver = lua
+  lua_file = /usr/local/lib/mailinabox/dovecot-auth-guard/count.lua
+  use_worker = no
 }
 userdb sql {
   query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, quota AS quota_storage_size, (CASE WHEN substr(quota, -1) = 'G' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 107374182 WHEN substr(quota, -1) = 'M' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 104857 ELSE CAST(quota AS INTEGER) / 10 END) || 'B' AS quota_storage_grace FROM users WHERE email='%{user}';

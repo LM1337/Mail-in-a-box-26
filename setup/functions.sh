@@ -574,6 +574,10 @@ function load_dovecot {
 		sed -nE 's/^ *(ssl_server_)?(cert|key|dh)_file = //p' <<< "$conf" | while read -r f; do
 			stat -L -c '%n %i %s %Y' -- "$f" 2> /dev/null || echo "$f missing"
 		done
+		# The Lua scripts of the auth process (the limit of failed logins
+		# from the box itself, setup/mail-users.sh) are read when it starts:
+		# their content (lua_file, and the library they load).
+		sha256sum /usr/local/lib/mailinabox/dovecot-auth-guard/*.lua 2> /dev/null || true
 	} | sha256sum | cut -d' ' -f1)
 	enable_service dovecot
 	if service_runs_current_package dovecot.service dovecot-core && doveadm process status > /dev/null 2>&1; then
