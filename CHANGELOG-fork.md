@@ -45,6 +45,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (B122, B121, B137); and a race in the migration of Roundcube's CardDAV
   plugin when two sessions log in at once after its upgrade (to be
   reported to the plugin project).
+* **Setup's comment on Spamhaus and public resolvers corrected (B136)**\
+  The comment in setup/network-checks.sh no longer names 8.8.8.8 among the
+  resolvers whose queries Spamhaus refuses with 127.255.255.254: through
+  8.8.8.8 Spamhaus answers NXDOMAIN, also for its own test entries, so
+  setup's checks can neither see a listing there nor say that they could
+  not check. This stays a known issue (README-fork.md, "Known issues").
 
 ### Fixed
 
@@ -181,12 +187,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
   locked") while its `cron.php` holds the database (seen once in T1); the
   client writes again later.
-* **Spamhaus gives no answer through some public resolvers (B136)**\
-  Through some public resolvers (8.8.8.8 in the test of B136) Spamhaus
-  gives no answer at all, also for its own test entries, so setup's checks
-  can neither see a listing nor say that they could not check; the comment
-  in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
-  127.255.255.254.
 * **In-place upgrade --check prints the GitHub URL for other sources**\
   `upgrade-in-place-to-2604.sh --check` prints the start command with the
   GitHub URL also when `SOURCE` and `TAG` name another source.

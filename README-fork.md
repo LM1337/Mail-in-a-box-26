@@ -626,6 +626,13 @@ fixed)" lists a few more.
   logins fails once. After an update from rc7 or earlier,
   `update-check.sh after` accepts the last form. To be reported to the
   plugin project.
+* **Spamhaus checks of a fresh install through some public resolvers
+  (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
+  answers NXDOMAIN, also for its own test entries. That looks like "not
+  listed", so setup's network checks of a fresh install can neither see a
+  listing nor say that they could not check. Check the hostname and the
+  address on https://check.spamhaus.org/; once the box runs, its status
+  checks ask through its own resolver.
 
 ### Deutsch
 
@@ -654,6 +661,14 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   carddav_migrations.filename“, und eine der Anmeldungen scheitert einmal.
   Nach einem Update von rc7 oder älter akzeptiert `update-check.sh after`
   die letzte Form. Eine Meldung an das Plugin-Projekt steht noch aus.
+* **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
+  Resolver (B136).** Über manche öffentliche Resolver (in den Tests
+  8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen
+  Testeinträge. Das sieht aus wie „nicht gelistet“; die Netzwerkprüfungen
+  von setup bei einer Neuinstallation können dort also weder einen Eintrag
+  sehen noch melden, dass sie nicht prüfen konnten. Hostname und Adresse
+  auf https://check.spamhaus.org/ selbst prüfen; sobald die Box läuft,
+  fragen ihre Statusprüfungen über ihren eigenen Resolver.
 
 Greylisting exceptions / Ausnahmen vom Greylisting
 --------------------------------------------------

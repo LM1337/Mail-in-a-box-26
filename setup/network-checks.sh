@@ -6,14 +6,17 @@ apt_get_quiet install bind9-host sed netcat-openbsd
 # Spamhaus answers a query for a listed name or address with an address in
 # 127.0.0.0/8 that says which list it is on, and a query it did not answer
 # with one in 127.255.255.0/24: 127.255.255.254 for a query that came through
-# a public resolver (1.1.1.1, 8.8.8.8, the default resolvers of many hosting
-# providers), which it refuses, 127.255.255.255 for too many queries. Setup
-# used to stop on any answer, so a fresh install on such a machine stopped,
-# saying the hostname was listed (B136). Only a listing stops setup now; an
-# answer that is no listing is shown, and setup goes on (the status checks
-# look again later, through the box's own resolver). The trailing dot keeps
-# the resolver's search domains out: with a wildcard record there, "not
-# listed" would come back as an address.
+# a public resolver it refuses (1.1.1.1 and the default resolvers of many
+# hosting providers), 127.255.255.255 for too many queries. Setup used to
+# stop on any answer, so a fresh install on such a machine stopped, saying
+# the hostname was listed (B136). Only a listing stops setup now; an answer
+# that is no listing is shown, and setup goes on (the status checks look
+# again later, through the box's own resolver). Through some other public
+# resolvers (8.8.8.8 in the test of B136 and again later) Spamhaus' answer is
+# NXDOMAIN, also for its own test entries: that looks like "not listed", so
+# these checks can neither see a listing nor say that they could not
+# check. The trailing dot keeps the resolver's search domains out: with a
+# wildcard record there, "not listed" would come back as an address.
 #
 # spamhaus_answer prints the address of the answer, "none" when the name does
 # not exist (NXDOMAIN, the answer for a name or address that is not listed) or
