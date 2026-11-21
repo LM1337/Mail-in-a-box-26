@@ -43,6 +43,26 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   a first install, and not when the in-place upgrade or the migration tool
   runs setup (they have their own reports and now set `MIAB_SETUP_TOOL`
   for their setup run). New offline test `tests/fork/update-check-hint.py`.
+* **Intrusion Protection recognises banned Microsoft servers (B126)**\
+  System > Intrusion Protection shows a hint at a banned address of the
+  servers through which Outlook for iOS and Android syncs Exchange
+  ActiveSync accounts: 20 wrong passwords there within two minutes get all
+  users of the app banned, and anyone can cause it on purpose (B126;
+  `miab-zpush` still counts for recidive). The hint offers a
+  button "Put <network> on the allowlist", which asks first and says what
+  it costs (guesses through these servers are no longer banned); nothing is
+  put on the allowlist on its own. The addresses are recognised by
+  Microsoft's published IP ranges of Exchange Online (Microsoft 365 IP
+  Address and URL web service, service area Exchange) and of its
+  AutoDetect service, which Microsoft names for an ActiveSync server that
+  Outlook for iOS and Android reaches, shipped as
+  `conf/fail2ban/microsoft-relays.txt` with its source, version, date and
+  SHA256 sums; `tools/update-microsoft-relays.py` refreshes it, the box
+  downloads nothing, and a list changed by hand is not used. Reverse DNS
+  decides nothing: the address's PTR name is shown only when it resolves
+  back to the address. API: `/system/fail2ban` has `relays` and
+  `relays_source`. New offline test `tests/fork/cloud-relays.py` and smoke
+  check `admin-cloud-relays-unit`.
 
 ### Changed
 
@@ -56,6 +76,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   snapshot, also before any update (T5b of v78-r2604.3). A snapshot
   prepared with the new script works with the original manifest
   (TESTING-fork.md, "Test environment").
+* **Checks that the control panel's icons and scripts are installed**\
+  The planned item "Control panel asks for a favicon.ico that is not
+  installed" (an nginx 404 for `/admin/assets/branding/favicon.ico`, noted
+  in rc7) is closed without a change of setup: setup/management.sh copies
+  the file since the fork's icons were added, and T1 of v78-r2604.0 found
+  the panel's icons served. A possible source of the 404 is an update of
+  rc7 or earlier, where setup emptied the assets directory before it
+  filled it again (B157, fixed in v78-r2604.2). New offline check
+  `tests/fork/panel-assets.py` (every file that a template names under
+  `/admin/assets/` is one that setup installs, and the icons that setup
+  copies are in the repository) and smoke check `admin-panel-assets`
+  (each of them is served, the icons are the files of `branding/`).
 * **Setup restarts OpenDKIM, spampd and others only on a change**\
   Setup restarted OpenDKIM and OpenDMARC, spampd, postgrey, named,
   systemd-resolved, munin-node and the management daemon on every run,
@@ -145,6 +177,29 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   DNSSEC messages say that the DS records are listed below the message,
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
+* **The control panel sends the HSTS header of the box (B180)**\
+  nginx answers `/admin/` (the control panel, its API and Munin's pages)
+  with the same HSTS header (`Strict-Transport-Security`) as the other
+  pages of the box's name, or with none when HSTS is off for it in
+  `$STORAGE_ROOT/www/custom.yaml`: the location's own headers had replaced
+  the server's (B180, upstream). New offline test
+  `tests/fork/nginx-hsts.py` and smoke check `web-hsts-admin`.
+* **Status checks no longer crash on overlong domain names (B181)**\
+  The status checks end no longer with a traceback when a lookup cannot be
+  made: a mail domain whose name is too long with `.dbl.spamhaus.org`
+  appended (more than about 237 characters) gets the warning that it is
+  too long to be looked up in the Spamhaus DBL, and a lookup that a DNAME
+  makes too long (YXDOMAIN) counts as a failed lookup (B181, upstream).
+  New offline test `tests/fork/status-dns.py` and smoke check
+  `admin-status-dns-unit`.
+* **Failed DS lookup: "could not check", not "DS record is not set" (B182)**\
+  When the lookup of a zone's DS record times out or fails, System Status
+  and the daily status change notice say "Could not check this domain's
+  DNSSEC DS record: the DNS lookup timed out/failed" instead of "This
+  domain's DNSSEC DS record is not set" with the DS records to set (B182,
+  upstream; B150 had left the DS lookups as they were). A zone's checks
+  look its DS records up once instead of three times. New cases in
+  `tests/fork/status-dns.py`.
 * **In-place upgrade and migration name local Roundcube changes (B200)**\
   The in-place upgrade (tools/upgrade-in-place-to-2604.sh) and the
   migration (tools/migrate-to-2604.sh) no longer lose local changes to
@@ -405,7 +460,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
-v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open findings in TESTING-fork.md):
+v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add their open findings in TESTING-fork.md):
 
 * **The in-place and migration tools trust a local tag of the release name**\
   `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
@@ -415,25 +470,15 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   name on another commit keeps the old code. The same comparison with the
   commit of the tag at the source (`git ls-remote`) would find it (seen in
   the work on B202).
-* **`miab-zpush` can ban all users behind shared cloud servers (B126)**\
-  `miab-zpush` counts failures per address, like the other jails, and is
-  always on: behind the shared servers of a mail app that syncs through its
-  provider's cloud (Outlook for iOS and Android with an ActiveSync
-  account), one person with a wrong password, or anyone on purpose, can get
-  all users of that app banned, and repeated bans reach recidive's week on
-  all ports (B126). The README, the upgrade note and the allowlist help say
-  to put such networks on the allowlist; nothing finds them on its own.
-  Leaving `miab-zpush` out of recidive would let an attacker guess 20
-  passwords every few minutes for good, so it still counts there.
-* **nginx sends no HSTS header on /admin/**\
-  nginx sets no HSTS header on `/admin/`: the headers of that location
-  replace the server's (upstream). Browsers that visited another page of
-  the box have the header already.
 * **Munin critical-only alerts never mail the return to normal**\
-  Critical only (Munin's alerts) never mails the return to normal.
-* **Control panel asks for a favicon.ico that is not installed**\
-  The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
-  not installed (nginx 404).
+  Critical only (Munin's alerts) never mails the return to normal. Not
+  possible with Munin's text template, which `contact.admin.text` sets:
+  munin-limits (Munin 2.0) gives it the values that are critical, warning
+  or unknown now and those back to normal in this run (`fofields`), not
+  the state a value had before, so a template cannot tell a value back
+  from critical from one back from warning, nor see one that drops from
+  critical to warning. README-fork.md (Munin alerts) says so. A fix would
+  need munin-notify to keep the critical values of the last run itself.
 * **www-data is still in the group dovecot**\
   Setup adds www-data to the group dovecot, as upstream did "so PHP can use
   doveadm, for the password changing plugin". No version of this fork uses
@@ -441,18 +486,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   daemon changes the password). The group gives access to some of Dovecot's
   sockets (for example its statistics); taking www-data out of it needs a
   check of what else relies on it (seen in the work on B210).
-* **Status checks query_dns() crashes on overlong domain names**\
-  The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
-  nor `NameTooLong`: a mail domain whose name is too long with
-  `.dbl.spamhaus.org` appended raises out of its checks and ends the
-  status check run with a traceback (from reading the code). Its guard for
-  the `at` argument tests `'[Not set]'`, which no lookup returns (the value
-  is `'[Not Set]'`, and now `'[error]'` too); the callers exclude both
-  before, so the guard is dead code.
-* **Failed DS lookup is reported as "DS record is not set" (B150)**\
-  When the lookup of a domain's DS record fails, the status checks still
-  say "This domain's DNSSEC DS record is not set" (a failed lookup counts
-  as no DS record, as before B150); "could not check" would be right.
 
 ## v78-r2604.4 (2026-11-19)
 

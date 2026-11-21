@@ -285,6 +285,20 @@ report. The groups:
   outside address, loop, unknown address of the box, catch-all, domain
   alias), the report recipient and its invalid values, that Munin's
   standard recipient follows, the list of deliveries and the test mail.
+  `tests/fork/nginx-hsts.py` (B180; no box needed) builds the nginx
+  configuration of the box's name and of another domain with
+  `management/web_update.py` for each HSTS setting of `custom.yaml`
+  (`yes`, the default, `preload`, off) and checks that every block of the
+  HTTPS server with `add_header` lines of its own has the server's HSTS
+  line (nginx inherits a server's `add_header` only into blocks that have
+  none), and none when HSTS is off.
+  `tests/fork/panel-assets.py` (no box needed) checks that every file the
+  control panel's templates name under `/admin/assets/` is one that
+  `setup/management.sh` installs (its downloads, Bootstrap 3.4.1's archive,
+  its copy of `branding/`), that the icons it copies are in the repository
+  and that nginx serves `/admin/assets` from that directory;
+  `admin-panel-assets` fetches each of them from the box (HTTP 200, the
+  icons the same as the files of `branding/`).
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
@@ -362,6 +376,30 @@ report. The groups:
   when the reload brings no "ready to handle connections", when
   `php-fpm8.5 -t` refuses the configuration, or when PHP-FPM does not run
   before or after the reload.
+  `tests/fork/status-dns.py` (B181; no box needed) runs the status
+  checks' `query_dns()` against a stand-in for dnspython: records,
+  NXDOMAIN and NoAnswer, a failed lookup, a timeout, YXDOMAIN and a name
+  too long for DNS (no exception, `[error]`), a nameserver of its own;
+  and the Spamhaus DBL check of a mail domain (not listed, listed, a
+  failed lookup, a name too long with `.dbl.spamhaus.org`); and the
+  DNSSEC DS check (B182): a DS lookup that timed out or failed gives
+  "Could not check" without the DS records to set, no, a correct and a
+  wrong DS record give the messages as before, a zone's checks look its
+  DS records up once and suggest DNSSEC only when none is set, and the
+  box's name checks its zone's DS records only when they are set. Group
+  admin runs it (`admin-status-dns-unit`).
+  `tests/fork/cloud-relays.py` (B126; no box needed) checks how System >
+  Intrusion Protection recognises Microsoft's servers: the shipped list
+  `conf/fail2ban/microsoft-relays.txt` (header, IPv4 and IPv6, the
+  AutoDetect ranges, every network accepted by the allowlist; a list
+  changed by hand is refused), addresses inside and just outside the
+  ranges, forward-confirmed reverse DNS with stand-in lookups (a spoofed
+  PTR name without a forward match, also one naming Microsoft, gives no
+  name; an address outside the ranges gets no hint), the limit of lookups
+  per request, and that `tools/update-microsoft-relays.py` takes only the
+  service area Exchange of Microsoft's answer. Group admin runs it
+  (`admin-cloud-relays-unit`); `admin-fail2ban-status` checks that the box
+  reads the list and gives hints only for banned addresses.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
@@ -389,7 +427,10 @@ report. The groups:
   (after rc7): Roundcube's `/mail/config/` still answers 403, while a
   missing static page under `/<name>/mail/config/` answers 404 and a
   Nextcloud file below a folder `mail/config` is read through
-  `/cloud/remote.php` and `/webdav` (B134).
+  `/cloud/remote.php` and `/webdav` (B134); `web-hsts-admin`: the control
+  panel (`/admin/`) and its assets send the same HSTS header as `/` of the
+  box's name, or none when HSTS is off for it (B180), and
+  `web-nginx-hsts-unit` runs `tests/fork/nginx-hsts.py` (described under **admin**).
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed

@@ -8,7 +8,7 @@ import sys, os, os.path, re, datetime, multiprocessing.pool
 import asyncio
 import dateutil.parser, dateutil.relativedelta, dateutil.tz
 
-import dns.reversename, dns.resolver
+import dns.exception, dns.name, dns.reversename, dns.resolver
 import idna
 import psutil
 import postfix_mta_sts_resolver.resolver
@@ -442,8 +442,12 @@ def run_domain_checks_on_domain(domain, rounded_time, env, dns_domains, dns_zone
 	if domain == env["PRIMARY_HOSTNAME"]:
 		check_primary_hostname_dns(domain, env, output, dns_domains, dns_zonefiles)
 
+	# The zone's DS records, looked up once for its checks, so that they all
+	# see the same answer (B182).
+	ds = query_ds(domain) if domain in dns_domains else None
+
 	if domain in dns_domains:
-		check_dns_zone(domain, env, output, dns_zonefiles)
+		check_dns_zone(domain, env, output, dns_zonefiles, ds=ds)
 
 	if domain in mail_domains:
 		check_mail_domain(domain, env, output)
@@ -452,7 +456,7 @@ def run_domain_checks_on_domain(domain, rounded_time, env, dns_domains, dns_zone
 		check_web_domain(domain, rounded_time, ssl_certificates, env, output)
 
 	if domain in dns_domains:
-		check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_a_records)
+		check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_a_records, ds=ds)
 
 	# Check auto-configured subdomains. See run_domain_checks.
 	# Skip mta-sts because we check the policy directly.
@@ -480,11 +484,14 @@ def check_primary_hostname_dns(domain, env, output, dns_domains, dns_zonefiles):
 	# If a DS record is set on the zone containing this domain, check DNSSEC now.
 	has_dnssec = False
 	for zone in dns_domains:
-		# A failed DS lookup ("[error]") counts as no DS record, as it did
-		# before query_dns told it apart (B150).
-		if (zone == domain or domain.endswith("." + zone)) and query_dns(zone, "DS", nxdomain=None) not in {None, "[error]"}:
-			has_dnssec = True
-			check_dnssec(zone, env, output, dns_zonefiles, is_checking_primary=True)
+		if zone == domain or domain.endswith("." + zone):
+			ds = query_ds(zone)
+			# A failed lookup ("[timeout]", "[error]") is reported in the
+			# checks of the zone itself, not here again; it does not count
+			# as DNSSEC (B182).
+			if isinstance(ds, list) and ds:
+				has_dnssec = True
+				check_dnssec(zone, env, output, dns_zonefiles, is_checking_primary=True, ds=ds)
 
 	ip = query_dns(domain, "A")
 	ns_ips = query_dns("ns1." + domain, "A") + '/' + query_dns("ns2." + domain, "A")
@@ -564,12 +571,14 @@ def check_alias_exists(alias_name, alias, env, output):
 	else:
 		output.print_error(f"""You must add a mail alias for {alias} which directs email to you or another administrator.""")
 
-def check_dns_zone(domain, env, output, dns_zonefiles):
+def check_dns_zone(domain, env, output, dns_zonefiles, ds=None):
 	# If a DS record is set at the registrar, check DNSSEC first because it will affect the NS query.
-	# If it is not set, we suggest it last. A failed lookup ("[error]")
-	# counts as not set, as it did before query_dns told it apart (B150).
-	if query_dns(domain, "DS", nxdomain=None) not in {None, "[error]"}:
-		check_dnssec(domain, env, output, dns_zonefiles)
+	# If it is not set, we suggest it last. A failed lookup (B182) is
+	# reported here too: DNSSEC may be on, and nothing can be suggested.
+	if ds is None:
+		ds = query_ds(domain)
+	if ds != []:
+		check_dnssec(domain, env, output, dns_zonefiles, ds=ds)
 
 	# We provide a DNS zone for the domain. It should have NS records set up
 	# at the domain name's registrar pointing to this box. The secondary DNS
@@ -657,7 +666,7 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 					output.print_error(f"""Secondary nameserver {ns} has inconsistent SOA record (primary: {SOARecord} versus secondary: {SOASecondary}).
 					Check that synchronization between secondary and primary DNS servers is properly set-up.""")
 
-def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_a_records):
+def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_a_records, ds=None):
 	# Warn if a custom DNS record is preventing this or the automatic www redirect from
 	# being served.
 	if domain in domains_with_a_records:
@@ -666,10 +675,11 @@ def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_
 		output.print_warning(f"""A redirect from 'www.{domain}' has been disabled for this domain because you have set a custom DNS record on the www subdomain.""")
 
 	# Since DNSSEC is optional, if a DS record is NOT set at the registrar suggest it.
-	# (If it was set, we did the check earlier.) A failed lookup counts as
-	# not set, as in check_dns_zone (B150).
-	if query_dns(domain, "DS", nxdomain=None) in {None, "[error]"}:
-		check_dnssec(domain, env, output, dns_zonefiles)
+	# (If it was set, or the lookup failed, check_dns_zone did the check.)
+	if ds is None:
+		ds = query_ds(domain)
+	if ds == []:
+		check_dnssec(domain, env, output, dns_zonefiles, ds=ds)
 
 
 # Where the DS records to set at the registrar are: in the lines that
@@ -677,7 +687,18 @@ def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_
 # away under "show more" (B179).
 DS_INSTRUCTIONS_WHERE = 'The DS records to set at your domain name registrar are listed below this message (in the control panel: click "show more").'
 
-def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
+def query_ds(domain):
+	# The DS records of the domain at its registrar (its parent zone): a list,
+	# empty when there is none, or "[timeout]" or "[error]" when the lookup
+	# failed, which says nothing about whether one is set (B182).
+	ds = query_dns(domain, "DS", nxdomain=None, as_list=True)
+	if ds is None:
+		return []
+	if isinstance(ds, str):
+		return ds
+	return list(ds)
+
+def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False, ds=None):
 	# See if the domain has a DS record set at the registrar. The DS record must
 	# match one of the keys that we've used to sign the zone. It may use one of
 	# several hashing algorithms. We've pre-generated all possible valid DS
@@ -713,9 +734,16 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 				"pubkey": dnsssec_pubkey,
 			}
 
-	# Query public DNS for the DS record at the registrar.
-	ds = query_dns(domain, "DS", nxdomain=None, as_list=True)
-	if ds is None or isinstance(ds, str): ds = []
+	# Query public DNS for the DS record at the registrar, unless the caller
+	# did. A lookup that timed out or failed is no answer: it does not mean
+	# that no DS record is set, and the DS records to set are no help then
+	# (they are shown again when the lookup works, B182).
+	if ds is None:
+		ds = query_ds(domain)
+	if isinstance(ds, str):
+		output.print_warning(f"""Could not check this domain's DNSSEC DS record: the DNS lookup {"timed out" if ds == "[timeout]" else "failed"}.
+			Please try again later. If this persists, see the other issues listed here for this domain.""")
+		return
 
 	# There may be more that one record, so we get the result as a list.
 	# Filter out records that don't look valid, just in case, and split
@@ -856,13 +884,32 @@ def check_mail_domain(domain, env, output):
 	# The user might have chosen a domain that was previously in use by a spammer
 	# and will not be able to reliably send mail.
 	
+	check_domain_dbl(domain, output)
+
+def dns_name_too_long(qname):
+	# Whether qname is longer than a DNS name may be (255 octets), so that
+	# no lookup of it can be made (query_dns gives "[error]", B181).
+	try:
+		dns.name.from_text(qname)
+	except dns.name.NameTooLong:
+		return True
+	except dns.exception.DNSException:
+		pass
+	return False
+
+def check_domain_dbl(domain, output):
 	# See https://www.spamhaus.org/news/article/807/using-our-public-mirrors-check-your-return-codes-now. for
 	# information on spamhaus return codes
-	dbl = query_dns(domain+'.dbl.spamhaus.org', "A", nxdomain=None)
+	dbl_qname = domain + '.dbl.spamhaus.org'
+	dbl = query_dns(dbl_qname, "A", nxdomain=None)
 	if dbl is None:
 		output.print_ok("Domain is not blacklisted by dbl.spamhaus.org.")
 	elif dbl == "[timeout]":
 		output.print_warning(f"Connection to dbl.spamhaus.org timed out. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
+	elif dbl == "[error]" and dns_name_too_long(dbl_qname):
+		# A domain of more than about 237 characters: with the suffix the
+		# name is too long for DNS, so it cannot be looked up (B181).
+		output.print_warning(f"Could not determine whether the domain {domain} is blacklisted by dbl.spamhaus.org: its name is too long to be looked up there.")
 	elif dbl == "[error]":
 		# The lookup failed, which is no answer (B150).
 		output.print_warning(f"Could not connect to dbl.spamhaus.org. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
@@ -917,8 +964,10 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 	# as the nameserver.
 	resolver = dns.resolver.get_default_resolver()
 
-	# Make sure at is not a string that cannot be used as a nameserver
-	if at and at not in {'[Not set]', '[timeout]'}:
+	# Ask the nameserver at the address 'at' instead. The callers pass the
+	# box's own address or the result of a successful lookup, never a
+	# sentinel such as '[Not Set]', '[timeout]' or '[error]'.
+	if at:
 		resolver = dns.resolver.Resolver()
 		resolver.nameservers = [at]
 
@@ -939,6 +988,12 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 		# No server gave an answer: each one answered SERVFAIL, REFUSED or
 		# another error, or could not be reached. That is not "no such
 		# record", so it has a value of its own, like a timeout (B150).
+		return "[error]"
+	except (dns.name.NameTooLong, dns.resolver.YXDOMAIN):
+		# The name cannot be asked: it is longer than DNS allows (a long
+		# domain with ".dbl.spamhaus.org" appended), or a DNAME would make
+		# it so. No answer either, and no traceback that ends the whole
+		# status check run (B181).
 		return "[error]"
 	except dns.exception.Timeout:
 		return "[timeout]"

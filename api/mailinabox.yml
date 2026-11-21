@@ -2011,8 +2011,14 @@ paths:
         fail2ban kept for it (user names that are no account of the box
         replaced), the accounts of the box they name, and `manual` for a ban
         without lines. `jail_info` gives each jail's thresholds and what it
-        watches. With fail2ban not running, `running` is false and `error` says
-        why.
+        watches. `relays` names the banned addresses that are in Microsoft's
+        published IP ranges of Exchange Online, through which Outlook for iOS
+        and Android syncs Exchange ActiveSync accounts (the list shipped in
+        `conf/fail2ban/microsoft-relays.txt`; `relays_source` says its version
+        and date), with the network that the control panel offers for the
+        allowlist and the address's PTR name only when it resolves back to the
+        address (nothing is put on the allowlist by this call). With fail2ban
+        not running, `running` is false and `error` says why.
       operationId: getFail2banStatus
       x-codeSamples:
         - lang: curl
@@ -3975,6 +3981,40 @@ components:
             network:
               type: string
               nullable: true
+        relays:
+          type: object
+          description: The banned addresses in Microsoft's published ranges, by address.
+          additionalProperties:
+            type: object
+            properties:
+              provider:
+                type: string
+                example: Microsoft
+              service:
+                type: string
+              network:
+                type: string
+                description: The published network that contains the address.
+                example: 52.96.0.0/14
+              name:
+                type: string
+                nullable: true
+                description: The PTR name of the address, only when it resolves back to the address.
+        relays_source:
+          type: object
+          nullable: true
+          properties:
+            version:
+              type: string
+              description: The version of Microsoft's web service that the list was made from.
+            retrieved:
+              type: string
+              description: The date the list was made.
+            networks:
+              type: integer
+        relays_error:
+          type: string
+          description: Why the list of Microsoft's ranges could not be used (only then).
     Fail2banSettingsResponse:
       type: object
       required:

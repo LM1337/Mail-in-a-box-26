@@ -1363,6 +1363,14 @@ The admin panel sets who gets these mails, under System > Notifications
 * **Level**: warning and critical (the default), or critical only. Critical
   only mails the changes of plugins that have a critical value and lists
   only those values; warnings and the return to normal are not mailed.
+  Munin's text template can name the values that are critical, warning or
+  unknown now and those that are back to normal in this run, but not the
+  state a value had before. So critical only cannot mail the end of a
+  critical state alone (it would have to mail every return to normal, also
+  of values that were only in warning, which this level leaves out), and a
+  value that drops from critical to warning is not mailed either. To be
+  told when a value is back to normal, choose warning and critical;
+  `/var/lib/munin/limits` shows the current state of each value.
 * **Send test mail** sends one notification to the saved recipient through
   the same command as the alerts (subject "Munin test notification", header
   `X-Miab-Test: 1`).
@@ -1400,7 +1408,16 @@ Monitoring):
 * **Level**: Warnung und kritisch (Standard) oder nur kritisch. Nur kritisch
   meldet die Änderungen der Plugins mit einem kritischen Wert und listet nur
   diese Werte; Warnungen und die Rückkehr zum Normalzustand werden nicht
-  gemeldet.
+  gemeldet. Munins Textvorlage kann die Werte nennen, die jetzt kritisch,
+  in Warnung oder unbekannt sind, und die Werte, die in diesem Lauf wieder
+  normal sind, aber nicht den Zustand, den ein Wert vorher hatte. Deshalb
+  kann „nur kritisch“ das Ende eines kritischen Zustands nicht allein
+  melden (es müsste jede Rückkehr zum Normalzustand melden, auch die von
+  Werten, die nur in Warnung waren, die diese Stufe auslässt), und ein
+  Wert, der von kritisch auf Warnung sinkt, wird auch nicht gemeldet. Wer
+  erfahren will, wann ein Wert wieder normal ist, wählt Warnung und
+  kritisch; `/var/lib/munin/limits` zeigt den aktuellen Zustand jedes
+  Werts.
 * **Send test mail** schickt eine Benachrichtigung an den gespeicherten
   Empfänger, über denselben Befehl wie die Warnungen (Betreff „Munin test
   notification“, Kopfzeile `X-Miab-Test: 1`).
@@ -1494,7 +1511,19 @@ the following, on by default:
   addresses banned for all of them. Anyone can do that on purpose: an
   account name and a wrong password entered in the app are enough. Repeated,
   such bans lead to recidive's one-week ban of these addresses on all ports.
-  If your users sync that way, put those networks on the allowlist. `/var/log/z-push` belongs to root (group
+  If your users sync that way, put those networks on the allowlist.
+  System > Intrusion Protection recognises a banned address of these
+  servers by Microsoft's published IP ranges of Exchange Online and of its
+  AutoDetect service (shipped in `conf/fail2ban/microsoft-relays.txt`,
+  refreshed with `tools/update-microsoft-relays.py` for a release; the box
+  downloads nothing), shows a hint and offers a button that puts the
+  network on the allowlist after a question; nothing is put there on its
+  own. On the allowlist, password guesses through these servers are no
+  longer banned, only Dovecot's delay of each failed login remains. The
+  address's reverse DNS name is shown only as extra information, and only
+  when it resolves back to the address: the owner of an address sets its
+  PTR record. Other apps that sync through their provider's servers are
+  not recognised. `/var/log/z-push` belongs to root (group
   www-data, which may write the four log files but not replace them), so
   that fail2ban never opens a link or a FIFO there; setup and logrotate
   create the log files.
@@ -1725,7 +1754,20 @@ eingeschaltet:
   Ein Kontoname und ein falsches Passwort in der App genügen. Wiederholt
   führen solche Sperren zur einwöchigen recidive-Sperre dieser Adressen auf
   allen Ports. Wenn die Nutzer so synchronisieren, diese Netze in die
-  Freigabeliste setzen.
+  Freigabeliste setzen. System > Intrusion Protection erkennt eine
+  gesperrte Adresse dieser Server an Microsofts veröffentlichten
+  IP-Bereichen von Exchange Online und seines AutoDetect-Dienstes
+  (mitgeliefert in `conf/fail2ban/microsoft-relays.txt`, für ein Release
+  erneuert mit `tools/update-microsoft-relays.py`; die Box lädt nichts
+  herunter), zeigt einen Hinweis und bietet eine Schaltfläche an, die das
+  Netz nach einer Rückfrage in die Freigabeliste setzt; von selbst kommt
+  nichts hinein. In der Freigabeliste werden Passwortversuche über diese
+  Server nicht mehr gesperrt, nur Dovecots Verzögerung jeder
+  fehlgeschlagenen Anmeldung bleibt. Den Namen aus dem Reverse-DNS zeigt
+  die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
+  Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
+  Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie
+  nicht.
   `/var/log/z-push` gehört root (Gruppe www-data, die die vier Logdateien
   beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
   oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.
