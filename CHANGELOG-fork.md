@@ -283,6 +283,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   recorded (not judged)" of `changes.txt` and counted in the RESULT line,
   not as an unexpected change. New offline test
   `tests/fork/update-check-compare.py`.
+* **update-check after an in-place upgrade uses the old box's allowlist (B187)**\
+  After an in-place upgrade, the log audit of `tools/update-check.sh after`
+  starts while the old release still ran. It now adds
+  `tests/fork/log-audit-allow-old-box.txt` by itself when the Ubuntu
+  release changed, so lines such as SpamAssassin's daily restart of spamd
+  on 24.04 before the upgrade are no longer new message classes ("RESULT:
+  look at the new log message classes", exit code 1). New cases in
+  `tests/fork/update-check-compare.py`.
 * **bootstrap.sh is no longer fooled by a local tag of the release name (B202)**\
   bootstrap.sh fetched nothing when `git describe` printed the name of the
   release to install, so a local tag of that name on another commit (an

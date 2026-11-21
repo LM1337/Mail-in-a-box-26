@@ -2192,7 +2192,9 @@ run on the old box before the upgrade, through `curl ... | sudo bash -s --
 STEP`; they find its checkout in `/mailinabox`. After the upgrade `after`
 lists the changes without judging them ("RESULT: NOT JUDGED", exit code 3),
 since a release upgrade changes almost everything, and still runs the log
-audit against the baseline (a new message class: exit code 1); `mailcheck` works as after an update.
+audit against the baseline (a new message class: exit code 1), with
+`tests/fork/log-audit-allow-old-box.txt` for what the old release logged
+before the upgrade stopped mail; `mailcheck` works as after an update.
 
 Full-text search with fts_xapian is part of the fork (on by default, `FTS=off`
 in `/etc/mailinabox.conf` turns it off). Boxes that added fts_xapian by hand
@@ -2451,8 +2453,9 @@ laufen auch auf der alten Box vor dem Upgrade, über `curl ... | sudo bash
 führt `after` die Änderungen auf, ohne sie zu bewerten („RESULT: NOT
 JUDGED“, Exit-Code 3), weil ein Release-Upgrade fast alles ändert, und
 lässt das Log-Audit trotzdem gegen die Vergleichsbasis laufen (eine neue
-Meldungsklasse: Exit-Code 1); `mailcheck`
-geht wie nach einem Update.
+Meldungsklasse: Exit-Code 1), mit `tests/fork/log-audit-allow-old-box.txt`
+für das, was das alte Release vor dem Anhalten der Mail protokolliert hat;
+`mailcheck` geht wie nach einem Update.
 
 Die Volltextsuche mit fts_xapian gehört zum Fork (standardmäßig an, `FTS=off`
 in `/etc/mailinabox.conf` schaltet sie ab). Auf Boxen, die fts_xapian von Hand

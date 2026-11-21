@@ -20,7 +20,9 @@ rules of tools/expected-changes/. This test runs its Python part
   * every systemd drop-in that setup writes (a literal path in setup/*.sh
     that is not only removed there) is accepted as new by a "dropins.txt +"
     rule of tools/expected-changes/ (T5b of v78-r2604.5: the drop-in of
-    spampd's restart record was missing, so "after" ended "CHANGED").
+    spampd's restart record was missing, so "after" ended "CHANGED");
+  * after a change of the Ubuntu release, the log audit of "after" adds
+    tests/fork/log-audit-allow-old-box.txt (B187).
 
   tests/fork/update-check-compare.py
 
@@ -118,6 +120,17 @@ def main():
 	write(a, "postconf.txt", pc_after_new)
 	rc, out, err = run(code, b, a)
 	check("nothing changed: RESULT line unchanged", rc == 0 and "RESULT: OK - 0 unexpected, 0 expected changes\n" in out, out)
+
+	# 6. B187: after a change of the Ubuntu release (the in-place upgrade),
+	# the log audit of "after" adds log-audit-allow-old-box.txt.
+	m3 = re.search(r"\nrun_log_audit\(\) \{.*?\n\}\n", src, re.S)
+	body = m3.group(0) if m3 else ""
+	check("run_log_audit adds log-audit-allow-old-box.txt when UC_RELEASE_CHANGED is set (B187)",
+		'log-audit-allow-old-box.txt' in body and 'UC_RELEASE_CHANGED' in body)
+	m4 = re.search(r'if \[ "\$ub_before" != "\$ub_after" \]; then\n(.*?)\n\telif', src, re.S)
+	check("after sets UC_RELEASE_CHANGED when the Ubuntu release changed (B187)", bool(m4) and "UC_RELEASE_CHANGED=1" in m4.group(1))
+	m5 = re.search(r"\nlog_audit_path\(\) \{.*?\n\}\n", src, re.S)
+	check("a downloaded log audit gets log-audit-allow-old-box.txt too (B187)", bool(m5) and "log-audit-allow-old-box.txt" in m5.group(0))
 
 	# 5. Every drop-in that setup writes is in a list of expected changes.
 	root = os.path.join(HERE, "..", "..")

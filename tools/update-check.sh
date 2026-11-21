@@ -633,6 +633,7 @@ log_audit_path() {
 		fork_file "tests/fork/$f" > /dev/null || return 1
 	done
 	fork_file tests/fork/log-audit-allow-from-rc7.txt > /dev/null 2>&1 || true
+	fork_file tests/fork/log-audit-allow-old-box.txt > /dev/null 2>&1 || true
 	echo "$RUN_DIR/fetched/tests/fork/log-audit.sh"
 }
 
@@ -646,6 +647,15 @@ run_log_audit() { # OUT_PREFIX SINCE [--baseline FILE]
 	f=$(dirname "$la")/log-audit-allow-from-rc7.txt
 	if [ -n "${UC_FROM_UNMARKED_ZPUSH:-}" ] && [ -f "$f" ]; then
 		say "The Z-Push before the update had no mark of the fork's changes (rc7 or earlier): also $f."
+		extra+=(--allow-extra "$f")
+	fi
+	# An update that changed the Ubuntu release (the in-place upgrade): its
+	# log audit starts at "before", while the old release still ran, before
+	# the tool stopped mail; that is what log-audit-allow-old-box.txt is for
+	# (B187).
+	f=$(dirname "$la")/log-audit-allow-old-box.txt
+	if [ -n "${UC_RELEASE_CHANGED:-}" ] && [ -f "$f" ]; then
+		say "The Ubuntu release changed: also $f (the old release before the upgrade stopped mail)."
 		extra+=(--allow-extra "$f")
 	fi
 	for f in "${OPT_ALLOW_EXTRA[@]+"${OPT_ALLOW_EXTRA[@]}"}"; do extra+=(--allow-extra "$f"); done
@@ -854,6 +864,7 @@ do_after() {
 	ub_after=$(sed -n 's/^ubuntu //p' "$RUN_DIR/after/version.txt")
 	if [ "$ub_before" != "$ub_after" ]; then
 		not_judged="the update changed the Ubuntu release ($ub_before to $ub_after)"
+		UC_RELEASE_CHANGED=1
 	elif [ -n "$from" ] && [[ $from != v78-r2604.* ]]; then
 		not_judged="the update came from $from (upstream Mail-in-a-Box, not a release of this fork)"
 	fi
