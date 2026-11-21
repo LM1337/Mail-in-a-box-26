@@ -268,6 +268,11 @@ def check_free_memory(rounded_values, env, output):
 def check_backup(rounded_values, env, output):
 	# Check backups
 	backup_config = get_backup_config(env, for_ui=True)
+
+	# The backup directory or its custom.yaml cannot be trusted (B212).
+	if backup_config.get("dir_error"):
+		output.print_error("Backups are not made: " + backup_config["dir_error"])
+		return
 	
 	# Is the backup enabled?
 	if backup_config.get("target", "off") == "off":
@@ -573,7 +578,12 @@ def check_dns_zone(domain, env, output, dns_zonefiles):
 	# this query being answered by the box, which would mean the test is only
 	# half working.)
 
-	custom_dns_records = list(get_custom_dns_config(env)) # generator => list so we can reuse it
+	try:
+		custom_dns_records = list(get_custom_dns_config(env)) # generator => list so we can reuse it
+	except ValueError as e:
+		# dns/ or its custom.yaml cannot be trusted (B212), or it is broken.
+		output.print_error(f"The custom DNS records cannot be read: {e}")
+		custom_dns_records = []
 	correct_ip = "; ".join(sorted(get_custom_dns_records(custom_dns_records, domain, "A"))) or env['PUBLIC_IP']
 	custom_secondary_ns = get_secondary_dns(custom_dns_records, mode="NS")
 	secondary_ns = custom_secondary_ns or ["ns2." + env['PRIMARY_HOSTNAME']]

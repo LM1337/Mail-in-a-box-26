@@ -297,6 +297,15 @@ report. The groups:
   higher one, a missing file (taken from the record), the record of another
   `STORAGE_ROOT`, a record that is a link, writable by others or broken, and
   a failed migration; group admin runs it (`admin-migration-record-unit`).
+  `tests/fork/storage-dirs.py` (B212; no box needed) checks the reads and
+  writes of `backup/` and `dns/` below `STORAGE_ROOT` through a checked
+  directory (management/utils.py): the helpers (a link, a group-writable
+  directory, another owner, a FIFO, the size limit, a link at the name
+  replaced without touching its target), backup.py and dns_update.py with
+  the directory replaced by a link or a group-writable copy with another
+  account's settings (not used, nothing written there, the nightly backup
+  stops with the reason) and with `custom.yaml` a link; group admin runs it
+  (`admin-storage-dirs-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

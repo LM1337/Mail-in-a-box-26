@@ -596,6 +596,16 @@ backup of `$STORAGE_ROOT` on the same box, setup stops with that message:
 remove `/var/lib/mailinabox/storage-migration` and run setup again, so that
 the backup's migrations run. A restore on a new box needs nothing.
 
+**Backup and DNS settings only from root's directories (B212).** The backup
+target and passphrase (`backup/custom.yaml`, `backup/secret_key.txt`) and the
+custom DNS records (`dns/custom.yaml`) are read, and the two `custom.yaml`
+written, only through a checked directory of root's own: the storage user
+could otherwise replace `backup/` or `dns/` in its home and send the backups
+to a server of its own, encrypted with a passphrase it knows, or add DNS
+records. If one of the two directories is not root's own (owner root, mode
+755), backups or DNS updates stop with the reason, shown in the nightly mail
+and the status checks.
+
 ### Deutsch
 
 **Die Benutzerdatenbank gehört root (B210).**
@@ -652,6 +662,18 @@ Zurückspielen einer älteren Sicherung von `$STORAGE_ROOT` auf derselben Box
 bricht setup mit dieser Meldung ab: `/var/lib/mailinabox/storage-migration`
 löschen und setup erneut starten, damit die Migrationen der Sicherung laufen.
 Auf einer neuen Box ist dafür nichts zu tun.
+
+**Einstellungen von Sicherung und DNS nur aus Verzeichnissen von root (B212).**
+Ziel und Passphrase der Sicherung (`backup/custom.yaml`,
+`backup/secret_key.txt`) und die eigenen DNS-Einträge (`dns/custom.yaml`)
+werden nur über ein geprüftes Verzeichnis gelesen, das root gehört, und die
+beiden `custom.yaml` nur so geschrieben: Sonst könnte der Speicherbenutzer
+`backup/` oder `dns/` in seinem Heimatverzeichnis ersetzen und die Sicherungen
+an einen eigenen Server schicken, verschlüsselt mit einer Passphrase, die er
+kennt, oder DNS-Einträge hinzufügen. Gehört eines der beiden Verzeichnisse
+nicht root (Besitzer root, Modus 755), halten Sicherungen bzw.
+DNS-Aktualisierungen mit dem Grund an, zu sehen in der nächtlichen Mail und in
+den Statusprüfungen.
 
 
 Setup output / Ausgaben von setup

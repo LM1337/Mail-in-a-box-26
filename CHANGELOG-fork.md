@@ -104,6 +104,23 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   still goes into backups and to a new box. New offline test
   `tests/fork/migration-record.py`.
 
+* **Backup and DNS settings only from directories of root's own (B212)**\
+  The nightly backup, the control panel and the DNS update read
+  `backup/custom.yaml`, `backup/secret_key.txt` and `dns/custom.yaml`
+  below `$STORAGE_ROOT`, and write the two `custom.yaml`, only through the
+  checked directory (a directory of root's own, not a symbolic link, not
+  writable by group or others, opened once), as the fork's tools do since
+  B117 and as `settings.yaml` is written since B87. Upstream read them by
+  path and wrote `custom.yaml` with `open(..., "w")` as root: the storage
+  user, which owns `$STORAGE_ROOT`, could replace `backup/` and have the
+  backups of `$STORAGE_ROOT` go to a server of its own with a passphrase it
+  knows, or put records of its own into the DNS zones. When such a
+  directory or file cannot be trusted, no backup is made and the DNS zones
+  are not rebuilt (the old ones stay), with the reason (for the backup in
+  the nightly mail, for both in the status checks). `backup/custom.yaml` is
+  now written with mode 0600 (it can hold the target's credentials). New
+  offline test `tests/fork/storage-dirs.py`.
+
 ### Upgrade note
 
 * **User database root's only; webmail password changes via the daemon (B210)**\
@@ -123,6 +140,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `plugins/password/drivers/mailinabox.php` stays, unused). An older backup
   restored on this version gets the new owner and modes at the next setup
   run.
+
+* **Backups stop if backup/ is not root's own (B212)**\
+  If `$STORAGE_ROOT/backup` or `$STORAGE_ROOT/dns` is not a directory of
+  root's own (owner root, mode 755 as setup makes them), or `custom.yaml`
+  or `secret_key.txt` in it is not a regular file of root's, backups (and
+  DNS updates) stop with the reason. Put them right with `chown root:root`
+  and `chmod 755` (and check the files in them).
 
 * **Restoring an older backup on the same box: remove the migration record (B211)**\
   The first setup run of this version records the box's migration number
@@ -282,16 +306,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   not installed (nginx 404).
 * **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
   `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
-* **Upstream code still writes custom.yaml in user-owned storage (B87, B117)**\
-  Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
-  `management/backup.py` and `management/dns_update.py` still write
-  `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the nightly backup reads its target and
-  `secret_key.txt` there by path. An account that can replace `backup/`
-  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
-  its own with a passphrase it knows. The fork's tools read them, and write
-  the paused `custom.yaml`, only through a checked `backup/` of root's own
-  (B117).
 * **www-data is still in the group dovecot**\
   Setup adds www-data to the group dovecot, as upstream did "so PHP can use
   doveadm, for the password changing plugin". No version of this fork uses

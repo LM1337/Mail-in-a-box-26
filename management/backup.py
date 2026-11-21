@@ -14,7 +14,7 @@ from datetime import date
 import rtyaml
 from exclusiveprocess import Lock
 
-from utils import load_environment, shell, wait_for_service
+from utils import load_environment, shell, wait_for_service, open_root_dir, read_root_file, write_root_file
 import operator
 
 # Options for every ssh connection to an rsync target (B125). Without them, ssh
@@ -222,16 +222,41 @@ def should_force_full(config, env):
 	# If we got here there are no (full) backups, so make one.
 	return True
 
+class BackupDirError(Exception):
+	# $STORAGE_ROOT/backup cannot be trusted (B212).
+	pass
+
+def open_backup_dir(env):
+	# $STORAGE_ROOT/backup as a checked descriptor (utils.open_root_dir): a
+	# directory of root's own, not a symbolic link. The storage user owns
+	# $STORAGE_ROOT and could rename backup/ and put its own in its place,
+	# with a target and a passphrase of its choice: the nightly backup of
+	# $STORAGE_ROOT would then go to a server of its choosing, encrypted
+	# with a passphrase it knows. Upstream read custom.yaml and secret_key.txt
+	# and wrote custom.yaml as root by path. FileNotFoundError when it is
+	# missing, BackupDirError when it is not one of root's own.
+	path = os.path.join(env["STORAGE_ROOT"], 'backup')
+	try:
+		return open_root_dir(path)
+	except FileNotFoundError:
+		raise
+	except OSError as e:
+		raise BackupDirError(f"{e}. Backups are not made, and their target, passphrase and settings are not read, until it is a directory of root's own again (chown root:root, chmod 755; check custom.yaml and secret_key.txt in it).") from e
+
 def get_passphrase(env):
 	# Get the encryption passphrase. secret_key.txt is 2048 random
 	# bits base64-encoded and with line breaks every 65 characters.
 	# gpg will only take the first line of text, so sanity check that
 	# that line is long enough to be a reasonable passphrase. It
 	# only needs to be 43 base64-characters to match AES256's key
-	# length of 32 bytes.
-	backup_root = os.path.join(env["STORAGE_ROOT"], 'backup')
-	with open(os.path.join(backup_root, 'secret_key.txt'), encoding="utf-8") as f:
-		passphrase = f.readline().strip()
+	# length of 32 bytes. Only through the checked backup directory, and only
+	# a regular file of root's (B212).
+	dfd = open_backup_dir(env)
+	try:
+		text = read_root_file(dfd, 'secret_key.txt', limit=65536).decode("utf-8")
+	finally:
+		os.close(dfd)
+	passphrase = (text.splitlines() or [""])[0].strip()
 	if len(passphrase) < 43: raise Exception("secret_key.txt's first line is too short!")
 
 	return passphrase
@@ -627,6 +652,12 @@ def perform_backup(full_backup):
 	backup_cache_dir = os.path.join(backup_root, 'cache')
 	backup_dir = os.path.join(backup_root, 'encrypted')
 
+	# The backup directory or custom.yaml cannot be trusted (B212): no backup,
+	# and the reason in the nightly mail.
+	if config.get("dir_error"):
+		print("No backup was made:", config["dir_error"])
+		sys.exit(1)
+
 	# Are backups disabled?
 	if config["target"] == "off":
 		return
@@ -954,7 +985,10 @@ def backup_set_custom(env, target, target_user, target_pass, min_age):
 	except ValueError as e:
 		return str(e)
 
-	write_backup_config(env, config)
+	try:
+		write_backup_config(env, config)
+	except (BackupDirError, OSError) as e:
+		return str(e)
 
 	return "OK"
 
@@ -967,14 +1001,36 @@ def get_backup_config(env, for_save=False, for_ui=False):
 		"target": "local",
 	}
 
-	# Merge in anything written to custom.yaml.
+	# Merge in anything written to custom.yaml, read only through the checked
+	# backup directory, and only a regular file of root's (B212). When the
+	# directory or the file cannot be trusted, the defaults stay, and
+	# "dir_error" says why: the backup run, the queries of the target (the
+	# passphrase is read the same way) and saving the settings then fail with
+	# that reason, instead of using the target in it.
+	custom_text = None
 	try:
-		with open(os.path.join(backup_root, 'custom.yaml'), encoding="utf-8") as f:
-			custom_config = rtyaml.load(f)
-		if not isinstance(custom_config, dict): raise ValueError # caught below
-		config.update(custom_config)
-	except:
-		pass
+		dfd = open_backup_dir(env)
+	except FileNotFoundError:
+		dfd = None
+	except BackupDirError as e:
+		dfd = None
+		config["dir_error"] = str(e)
+	if dfd is not None:
+		try:
+			custom_text = read_root_file(dfd, 'custom.yaml').decode("utf-8", "replace")
+		except FileNotFoundError:
+			pass
+		except OSError as e:
+			config["dir_error"] = f"{backup_root}/{e}. The backup settings in it are not used until it is a regular file of root's again."
+		finally:
+			os.close(dfd)
+	if custom_text is not None:
+		try:
+			custom_config = rtyaml.load(custom_text)
+			if not isinstance(custom_config, dict): raise ValueError # caught below
+			config.update(custom_config)
+		except:
+			pass
 
 	# When updating config.yaml, don't do any further processing on what we find.
 	if for_save:
@@ -1000,9 +1056,20 @@ def get_backup_config(env, for_save=False, for_ui=False):
 	return config
 
 def write_backup_config(env, newconfig):
-	backup_root = os.path.join(env["STORAGE_ROOT"], 'backup')
-	with open(os.path.join(backup_root, 'custom.yaml'), "w", encoding="utf-8") as f:
-		f.write(rtyaml.dump(newconfig))
+	# Through the checked backup directory (B212): a new file of root's, mode
+	# 0600 (it can hold the credentials of the target), renamed over the old
+	# one; upstream wrote it as root by path with open("w"). Raises
+	# BackupDirError when the directory cannot be trusted.
+	newconfig = {k: v for k, v in newconfig.items() if k != "dir_error"}
+	try:
+		dfd = open_backup_dir(env)
+	except FileNotFoundError:
+		os.mkdir(os.path.join(env["STORAGE_ROOT"], 'backup'), 0o755)
+		dfd = open_backup_dir(env)
+	try:
+		write_root_file(dfd, 'custom.yaml', rtyaml.dump(newconfig).encode("utf-8"), 0o600)
+	finally:
+		os.close(dfd)
 
 if __name__ == "__main__":
 	if sys.argv[-1] == "--verify":
