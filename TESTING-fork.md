@@ -1229,6 +1229,33 @@ the API in the runs; and the release commit itself, which after `d80a036`
 changes only the version strings, `tools/expected-changes/` and the
 documentation.
 
+### After v78-r2604.4: B210 to B213 (2026-11-21)
+
+The hardening of the user database (B210), of the migration number
+(B211), of the backup and DNS settings (B212) and of Nextcloud's forwarded
+address (B213), on the branch `fix/r5-harden`. Only T5b ran: the copy of a
+production box at v78-r2604.3, updated non-interactively with
+`bootstrap.sh` and `TAG=<commit>` from the lab's mirror, with the second
+test box as the peer for port 25 and the backup target. During every setup
+run the peer sent a marked test mail (`X-Miab-Test: 1`) every 3 s over
+port 25 to a mailbox of the box.
+
+| Run | Result |
+|---|---|
+| T5b, `a985eb9` | setup stopped in web.sh: `nginx -t` refused the map with the proxy's secret ("could not build map_hash"); fixed in `0c41779`. Up to that point the user database was already root:root 0600, and all 48 test mails of the run were accepted. |
+| T5b repeated, `0c41779` | exit 0 in 198 s, a second run exit 0; smoke 95 of 104: every request of the `/caldav`, `/carddav` and `/webdav` proxy got HTTP 500 ("fastcgi request length mismatch": the map's regular expression replaced the captures of the PHP location), so Z-Push's ActiveSync answered 503; fixed in `2c1c054` (an update of the same box to it: the groups web and activesync 16/16). |
+| T5b final, `7b2b03d` (from the snapshot again) | the nightly backup on v78-r2604.3 first (exit 0). The update exit 0 in 207 s: `$STORAGE_ROOT/mail` root:root 755, `users.sqlite` root:root 0600 and still in the rollback journal mode, Roundcube's driver `mailinabox`, the migration record "15", `/etc/nginx/miab-nextcloud-proxy.conf` root:root 0600, `nginx -t` fine. 68 test mails, all accepted at once; 2 of them deferred for a few seconds inside the box (4.4.x, spampd restarting, as on every setup run before) and delivered on the next try. A second setup run exit 0 in 77 s changed no file's content (only the times of the files setup writes on every run), and the secret stayed. Smoke 104/104, among them `api-self-password` (the endpoint and Roundcube's Settings > Password), `nextcloud-forwarded-for` and `-local`, `zpush-sync`, `zpush-ping`, CalDAV, CardDAV and the backup checks. A failed CalDAV and CardDAV login from the peer was logged by Nextcloud under the peer's address. |
+| B211 and B212 on that box | the storage user wrote "11" into `mailinabox.version`: setup stopped before any migration with the message, the DKIM key untouched; with the file removed by the storage user, setup took 15 from the record and wrote it back. The storage user replaced `backup/` with a directory of its own (another target and passphrase): the nightly backup stopped with the reason and wrote nothing to the other target, saving the settings in the control panel was refused, the status checks showed it; after the directory was put back, a backup exit 0. The same with `dns/`: the DNS update failed with the reason and the zones stayed unchanged. |
+| Backup and restore | duplicity restored `mail/users.sqlite` from the backup after the update (root:root 0600, `integrity_check` ok) and `mail/` from the backup before it (root:www-data 775 and 0664, as v78-r2604.3 had them). The box with those older modes set back by hand and `mailinabox.version` removed by the storage user, updated to `cc934a9`: exit 0, the modes root's again, the version file written back as the storage user's; smoke 104/104. |
+| Downgrade and back | bootstrap with `TAG=v78-r2604.4`: exit 0; the directory and the database root:www-data again, Roundcube's sql driver, the nginx file unused; a password change in Roundcube worked. Then back to `cc934a9`: exit 0, root's again, a password change in Roundcube through the new driver worked. Test mails of both runs all delivered. |
+
+Log audit of the final run (since its first update): one unknown class,
+the bounce of an automatic reply to the test mails' sender, which does not
+exist on the peer (a lab artifact). Not tested: T1, T2, T3, T4, T6 (a
+fresh install creates the database with mode 0600 and the record through
+setup/start.sh; not run), the opt-in smoke group fail2ban, a user with
+two-factor authentication in Roundcube (offline only).
+
 ### Production use
 
 rc3 was used to upgrade a production box in place: Ubuntu 24.04 (release-
