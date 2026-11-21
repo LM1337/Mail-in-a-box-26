@@ -289,7 +289,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   and phase verify names a local plugin that the web server cannot read:
   a first version made the copies root's only, and a plugin brought back
   with `cp -a` as proposed was not loaded by Roundcube, which logged an
-  error on every request (B186, found in the test runs of this release).
+  error on every request (B186, found in the test runs of this release; a
+  first version of the check read the list of plugin directories, which
+  the tools pass as a pipe, twice and so never named a plugin, found in
+  the review of this release).
 * **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
   tools/update-check.sh now records `tls_eecdh_auto_curves` and
   `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such
@@ -331,8 +334,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   with "Remote branch ... not found", although `--check` proposes the start
   command with it (B203). A full commit id (40 hex digits) is now fetched
   by its id; a short one fails with a hint. When the download fails, the
-  in-place tool's advice names the given `SOURCE` instead of GitHub. New
-  offline test `tests/fork/clone-ref.py`.
+  in-place tool's advice names the given `SOURCE` instead of GitHub, and
+  `setup/bootstrap.sh` says so (with the same hint for a short commit id)
+  instead of ending without a message. New offline test
+  `tests/fork/clone-ref.py`.
 * **Migration tool filters the old box's error messages too (B154)**\
   `tools/migrate-to-2604.sh` passes the standard error of every command
   that talks to the old box (its scripts through ssh, the login checks, the
@@ -537,6 +542,24 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   checks go on. New cases in `tests/fork/storage-dirs.py` and
   `tests/fork/status-dns.py`.
 
+* **Zone signing reads the DNSSEC keys only through a checked dns/ (B191)**\
+  The DNS update (and its daily run that signs the zones again) read the
+  `.conf` files in `dns/dnssec/` and the key files they name by path, as
+  root, and wrote the patched copies to its temporary directory under the
+  names from the `.conf` without checking them. The storage user could put
+  a `dns/` of its own in place of the box's (B212), even while the update
+  ran, whose `.conf` names a key with `../` in its name: root then copied
+  a file of the storage user's to a place of its choice outside the
+  temporary directory (for example a configuration directory that a root
+  job reads), and signed the zones with its keys. The `.conf` files and
+  the keys are now read only through the checked `dns/` and `dnssec/`
+  (root's own, not writable by others, regular files of root's), a key
+  name must be a plain file name (`K` and letters, digits, `._+-`), and
+  the copies are new files created in the temporary directory only. When
+  that fails the DNS update stops with the reason and the zones stay as
+  they are. The keys' hash in the zone files is unchanged, so no zone is
+  signed again for this update. New cases in `tests/fork/storage-dirs.py`.
+
 * **Nextcloud takes X-Forwarded-For only from nginx's own proxy (B213)**\
   Nextcloud takes the client's address from `X-Forwarded-For` on every
   connection from 127.0.0.1 (`trusted_proxies`, B121), so any local account
@@ -666,8 +689,19 @@ v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add 
   `ignoreip` in `[DEFAULT]` is read after `jail.d/mailinabox_adaptive.conf`
   and replaces the `ignoreip` that the allowlist of System > Intrusion
   Protection writes there: the panel lists an address as allowlisted, and
-  no jail ignores it. The page does not warn about it (seen on the copy of
-  a production box in the test runs of this release).
+  no jail ignores it. The page does not warn about it (seen in the test
+  runs of this release).
+* **A package run started just before mail goes offline is not in the snapshot**\
+  The in-place tool takes the package lists and the system archive while
+  mail still runs, checks for running package updates, and then masks and
+  stops the units. A package run that starts after that check and before
+  the masks (`apt-daily-upgrade.service` has `KillMode=process`, so
+  stopping it leaves unattended-upgrade running) ends while `stop_mail`
+  waits for the dpkg lock (B190), but its changes are not in the package
+  lists and the archive that `--rollback` uses. Comparing
+  `/var/log/apt/history.log` or the mtime of `/var/lib/dpkg/status` with
+  the moment of the archive after that wait would find it (seen in the
+  review of this release, from the code; not seen in a test run).
 * **No log line for a successful webmail password change**\
   `POST /me/password` (webmail's password change through the management
   daemon, B210) logs failures (for fail2ban) but not a successful change

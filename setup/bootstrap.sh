@@ -108,12 +108,16 @@ if [ ! -d "$HOME/mailinabox" ]; then
 			echo "Could not download the commit $TAG from $SOURCE."
 			exit 1
 		fi
-	else
-		git clone \
+	elif ! git clone \
 			-b "$TAG" --depth 1 \
 			"$SOURCE" \
 			"$HOME/mailinabox" \
-			< /dev/null 2> /dev/null
+			< /dev/null 2> /dev/null; then
+		echo "Could not download Mail-in-a-Box $TAG from $SOURCE."
+		if [[ $TAG =~ ^[0-9a-f]{7,39}$ ]]; then
+			echo "TAG=$TAG looks like a short commit id; give a tag, a branch or the full commit id (40 hex digits)."
+		fi
+		exit 1
 	fi
 
 	echo

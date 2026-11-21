@@ -1674,10 +1674,13 @@ def main(argv):
 		items = compare(read_config(argv[1]), read_names(argv[2]))
 	elif len(argv) in (5, 9) and argv[0] == "verify":
 		new = read_config(argv[3]) or {"settings": {}, "plugins": [], "other": [], "error": "is missing"}
-		items = compare(read_config(argv[1]), read_names(argv[2]), new, read_names(argv[4]))
+		# Each names file is read once: the tools pass NEW_DIRS as a pipe
+		# (process substitution), which a second read finds empty (B186).
 		old_dirs = read_names(argv[2])
+		new_dirs = read_names(argv[4])
+		items = compare(read_config(argv[1]), old_dirs, new, new_dirs)
 		items += web_unreadable(os.path.dirname(os.path.dirname(os.path.abspath(argv[3]))),
-			[d for d in read_names(argv[4]) if d in old_dirs])
+			[d for d in new_dirs if d in old_dirs])
 		if len(argv) == 9 and argv[5] == "--json":
 			if items:
 				write_json(argv[6], argv[7], argv[8], items)

@@ -27,9 +27,10 @@ This test checks:
     local-changes.json (0600) with the open items and removes it when
     nothing is open;
   * "verify" names a local plugin of the new Roundcube that the web server
-    (www-data) cannot read completely, and the in-place tool keeps the
-    plugin copies with their modes, so that "cp -a" brings back a readable
-    plugin (B186);
+    (www-data) cannot read completely, also when the names of the new
+    plugin directories come through a pipe as the tools pass them, and
+    the in-place tool keeps the plugin copies with their modes, so that
+    "cp -a" brings back a readable plugin (B186);
   * the preflight reports of both tools run under "set -euo pipefail"
     before anything else of the tool (B185: no unbound variable);
   * System Status (management/status_checks.py) shows that file as a
@@ -276,6 +277,13 @@ def main():
 		out == ["plugin directory plugins/contextmenu: the web server (www-data) cannot read 2 of its files and directories (contextmenu, ...), so Roundcube does not load it",
 			"plugin directory plugins/twofactor_gauthenticator: the web server (www-data) cannot read 1 of its files and directories (twofactor_gauthenticator/lib/x.php), so Roundcube does not load it"]
 		and os.path.exists(j), str(out) + err)
+	# The tools pass NEW_DIRS as a pipe, <(roundcube_plugin_dirs ...), which
+	# can be read only once: the same case through bash's process substitution.
+	r = subprocess.run(["bash", "-c", 'exec "$0" -I -c "$1" verify "$2" "$3" "$4" <(cat "$3") --json "$5" x "/x --ack-local"',
+		sys.executable, run.code, old_cfg, names, os.path.join(rc, "config", "config.inc.php"), j], capture_output=True, text=True)
+	piped = [l for l in r.stdout.split("\n") if l]
+	check("B186: NEW_DIRS as a pipe (as the tools pass it): the same items",
+		r.returncode == 0 and len(piped) == 2 and all("cannot read" in x for x in piped), str(piped) + r.stderr)
 	for dp, dn, fn in os.walk(os.path.join(rc, "plugins")):
 		os.chmod(dp, 0o755)
 		for x in fn:

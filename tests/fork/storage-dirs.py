@@ -32,7 +32,11 @@ ssl_certificates and mailconfig are replaced by stand-ins (YAML as JSON).
     of a replaced dns/ and says why, instead of failing; the KSK's public
     key that the status checks show with the DS records is read only
     through a checked dns/ and dns/dnssec/, a replaced one or a link there
-    gives ValueError (B183);
+    gives ValueError (B183); the zone signing reads the .conf files and the
+    keys only through them (the keys' hash as before) and writes the
+    patched copies only into its temporary directory: a replaced dns/, a
+    key name with a path, a key file that is a link and a .conf without a
+    ZSK are refused, and nothing is written elsewhere (B191);
   * tools/write_conf.py --own-root-only (setup's owner of $STORAGE_ROOT/mail
     and users.sqlite) refuses a directory that root does not own already,
     where --own would take it over; --check-own-root-only (setup/start.sh's
@@ -278,6 +282,91 @@ os.symlink(os.path.join(OUTSIDE, "dnssec", "K_domain_.+013+33333.key"), os.path.
 check("dnssec key, the .key a link: refused", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
 write(os.path.join(k, "ECDSAP256SHA256.conf"), "KSK=../../outside/x\n", 0o644)
 check("dnssec key, a KSK name with a path: refused", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
+
+# Signing the zones (as root, the nightly job and every DNS update) reads the
+# .conf files and the keys only through the checked dns/ and dns/dnssec/, and
+# writes the patched copies only into its temporary directory (B191).
+import hashlib  # noqa: E402
+TMPBASE = os.path.join(tmp, "t")  # the parent of sign_zone's temporary directory
+
+def signing_keys():
+	dnssec_keys()
+	k = os.path.join(ROOT, "dns", "dnssec")
+	write(os.path.join(k, "K_domain_.+013+11111.private"), "Private-key-format: v1.3\nPrivateKey: KSKPRIV\n", 0o600)
+	write(os.path.join(k, "K_domain_.+013+22222.key"), "_domain_.\tIN\tDNSKEY\t256 3 13 ZSKPUB\n", 0o600)
+	write(os.path.join(k, "K_domain_.+013+22222.private"), "Private-key-format: v1.3\nPrivateKey: ZSKPRIV\n", 0o600)
+	write(os.path.join(k, "RSASHA256.conf"), "KSK=K_domain_.+008+33333\nZSK=K_domain_.+008+44444\nDOMAINS=none\n", 0o644)
+
+def sign(domain="example.com"):
+	# sign_zone with ldns-signzone and ldns-key2ds replaced: what it would
+	# have signed with, and the patched copies it wrote.
+	calls, seen = [], {}
+	def shell(method, cmd, **kw):
+		calls.append(cmd)
+		if cmd[0].endswith("ldns-signzone"):
+			for key in cmd[5:]:
+				for ext in (".key", ".private"):
+					st = os.lstat(key + ext)
+					seen[os.path.basename(key) + ext] = (open(key + ext).read(), oct(st.st_mode & 0o777), os.path.dirname(key))
+		return "DS\n" if method == "check_output" else 0
+	os.makedirs(TMPBASE, exist_ok=True)
+	dns_update.shell = shell
+	# The .ds file next to the zone goes to the test's directory.
+	dns_update.open = lambda p, *a, **k: open(os.path.join(tmp, "zone.ds") if p.startswith("/etc/nsd/") else p, *a, **k)
+	saved_tempdir, tempfile.tempdir = tempfile.tempdir, TMPBASE
+	try:
+		dns_update.sign_zone(domain, "example.com.txt", ENV)
+	finally:
+		del dns_update.open
+		dns_update.shell = utils.shell
+		tempfile.tempdir = saved_tempdir
+	return calls, seen
+
+fresh()
+signing_keys()
+want = hashlib.sha1("".join(["KSK", "K_domain_.+013+11111", "Private-key-format: v1.3\nPrivateKey: KSKPRIV\n",
+	"ZSK", "K_domain_.+013+22222", "Private-key-format: v1.3\nPrivateKey: ZSKPRIV\n"]).encode("utf8")).hexdigest()
+check("dnssec signing: the keys' hash as before (no zone is signed again for it)", dns_update.hash_dnssec_keys("example.com", ENV), want)
+calls, seen = sign()
+check("dnssec signing: signed with the KSK and the ZSK of the enabled algorithm",
+	sorted(seen), ["Kexample.com.+013+11111.key", "Kexample.com.+013+11111.private", "Kexample.com.+013+22222.key", "Kexample.com.+013+22222.private"])
+check("dnssec signing: the copies patched, 0600, in one temporary directory outside STORAGE_ROOT",
+	(seen.get("Kexample.com.+013+11111.key", ("",))[0], {v[1] for v in seen.values()}, len({v[2] for v in seen.values()}),
+	any(v[2].startswith(ROOT) for v in seen.values())),
+	("example.com.\tIN\tDNSKEY\t257 3 13 GOODKEY\n", {"0o600"}, 1, False))
+check("dnssec signing: the temporary directory is gone", any(os.path.exists(v[2]) for v in seen.values()), False)
+check("dnssec signing: the DS records from the KSK only", [c[-1] for c in calls if c[0].endswith("ldns-key2ds")],
+	[os.path.join(next(iter(seen.values()))[2], "Kexample.com.+013+11111.key")] * 3 if seen else None)
+# The case of the review: the .conf names a key outside dnssec/. From
+# dnssec/ the path reaches the storage user's files in STORAGE_ROOT, from the
+# temporary directory a directory of root's elsewhere (here tmp/etc/logrotate.d).
+evil = "KSK=../../etc/logrotate.d/x\nZSK=K_domain_.+013+22222\n"
+for how in ("dns/ replaced (group-writable)", "dnssec/ of root's, the KSK with a path"):
+	fresh()
+	if how.startswith("dns/ replaced"):
+		swap("dns", "group-writable")
+	signing_keys()
+	write(os.path.join(ROOT, "dns", "dnssec", "ECDSAP256SHA256.conf"), evil, 0o644)
+	write(os.path.join(ROOT, "etc", "logrotate.d", "x.private"), "/var/log/x { postrotate\n id\n endscript }\n", 0o644)
+	write(os.path.join(ROOT, "etc", "logrotate.d", "x.key"), "x\n", 0o644)
+	os.makedirs(os.path.join(tmp, "etc", "logrotate.d"))
+	check("dnssec signing, %s: the hash refused (ValueError)" % how, raises(dns_update.hash_dnssec_keys, "example.com", ENV), "ValueError")
+	check("dnssec signing, %s: signing refused (ValueError)" % how, raises(sign), "ValueError")
+	check("dnssec signing, %s: nothing written outside the temporary directory" % how,
+		os.listdir(os.path.join(tmp, "etc", "logrotate.d")), [])
+fresh()
+signing_keys()
+k = os.path.join(ROOT, "dns", "dnssec")
+os.unlink(os.path.join(k, "K_domain_.+013+22222.private"))
+write(os.path.join(OUTSIDE, "zsk.private"), "PrivateKey: OTHER\n", 0o600)
+os.symlink(os.path.join(OUTSIDE, "zsk.private"), os.path.join(k, "K_domain_.+013+22222.private"))
+check("dnssec signing, a key file a link: refused", (raises(dns_update.hash_dnssec_keys, "example.com", ENV), raises(sign)), ("ValueError", "ValueError"))
+os.unlink(os.path.join(k, "K_domain_.+013+22222.private"))
+write(os.path.join(k, "K_domain_.+013+22222.private"), "PrivateKey: ZSKPRIV\n", 0o600)
+write(os.path.join(k, "ECDSAP256SHA256.conf"), "KSK=K_domain_.+013+11111\n", 0o644)
+check("dnssec signing, a .conf without a ZSK: refused", raises(sign), "ValueError")
+shutil.rmtree(os.path.join(ROOT, "dns"))
+check("dnssec signing, no dns/: an error as before (no keys, no zone)", raises(sign), "ValueError")
 
 # tools/write_conf.py --own-root-only ($STORAGE_ROOT/mail and users.sqlite):
 # only what root owns already is taken, not a directory or database that the
