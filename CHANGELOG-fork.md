@@ -99,6 +99,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   recorded (not judged)" of `changes.txt` and counted in the RESULT line,
   not as an unexpected change. New offline test
   `tests/fork/update-check-compare.py`.
+* **bootstrap.sh is no longer fooled by a local tag of the release name (B202)**\
+  bootstrap.sh fetched nothing when `git describe` printed the name of the
+  release to install, so a local tag of that name on another commit (an
+  old pre-release, a mirror's tag) kept the old code, and setup ran on it
+  and ended with exit code 0. It now also asks the source for the commit
+  of the tag (`git ls-remote`) and fetches the release when that is not the
+  checkout's commit; after the checkout, it stops if the commit is still
+  another one. When the source cannot be asked, it says so and uses the
+  checkout as before. README-fork.md ("Updating the fork") is updated.
 
 ### Planned
 
@@ -121,14 +130,14 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   `after` and `mailcheck` with that record; otherwise that `before` and
   `backup` can be run before the next update and `after` and `mailcheck`
   after it, optionally (README-fork.md, "Updating the fork").
-* **`bootstrap.sh` is fooled by a local tag of the release name**\
-  bootstrap.sh decides whether to fetch by the name that `git describe`
-  prints for the checkout, so a local tag of the release's name on another
-  commit keeps the old code (see "Updating the fork" in README-fork.md).
-  Comparing the commit of the tag at the source (`git ls-remote`) with
-  `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
-  as every update goes through that code and that release had no test
-  run of it.
+* **The in-place and migration tools trust a local tag of the release name**\
+  `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
+  `update_fork_dir`) and `tools/migrate-to-2604.sh` (`resolve_miab_dir`)
+  still decide by the name that `git describe` prints whether to fetch the
+  release, as bootstrap.sh did before B202: a local tag of the release's
+  name on another commit keeps the old code. The same comparison with the
+  commit of the tag at the source (`git ls-remote`) would find it (seen in
+  the work on B202).
 * **Setup restarts PHP-FPM, ending ActiveSync long polls (B122)**\
   Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.

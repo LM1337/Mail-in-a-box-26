@@ -132,8 +132,25 @@ if [ "${ORIGIN_CMP,,}" != "${SOURCE_CMP,,}" ]; then
 	exit 1
 fi
 
-# Update it.
+# Update it. A checkout whose commit carries a local tag of the release's
+# name, but not the release's commit (an old pre-release, a mirror's tag of
+# that name), makes git describe print the release name: ask the source for
+# the commit of the tag and compare it with HEAD.
+UPDATE=
 if [ "$TAG" != "$(git describe --always)" ]; then
+	UPDATE=1
+else
+	# The commit an annotated tag points to (^{}), or the one of a lightweight tag.
+	TAG_COMMIT=$(GIT_TERMINAL_PROMPT=0 git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" < /dev/null 2> /dev/null \
+		| awk -v t="refs/tags/$TAG" '$2 == t "^{}" {p = $1} $2 == t {d = $1} END {print (p != "" ? p : d)}')
+	if [ -z "$TAG_COMMIT" ]; then
+		echo "Could not ask $ORIGIN for the commit of $TAG; using the checkout as it is."
+	elif [ "$TAG_COMMIT" != "$(git rev-parse HEAD)" ]; then
+		echo "$HOME/mailinabox is at a local tag $TAG, but $ORIGIN has $TAG on another commit."
+		UPDATE=1
+	fi
+fi
+if [ -n "$UPDATE" ]; then
 	echo "Updating Mail-in-a-Box to $TAG . . ."
 	# A release tag, or a branch (TAG=main, for testing): a branch is not a
 	# tag, and a local branch of that name may be old or missing.
@@ -147,6 +164,10 @@ if [ "$TAG" != "$(git describe --always)" ]; then
 	fi
 	if ! git checkout -q "$REF"; then
 		echo "Update failed. Did you modify something in $PWD?"
+		exit 1
+	fi
+	if [ -n "${TAG_COMMIT:-}" ] && [ "$TAG_COMMIT" != "$(git rev-parse HEAD)" ]; then
+		echo "Update failed: $PWD is not at the commit of $TAG in $ORIGIN."
 		exit 1
 	fi
 	echo
