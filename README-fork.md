@@ -650,6 +650,15 @@ fixed)" lists a few more.
   logins fails once. After an update from rc7 or earlier,
   `update-check.sh after` accepts the last form. To be reported to the
   plugin project.
+* **Nextcloud on SQLite answers a CardDAV write with HTTP 500 now and
+  then while its cron job runs.** Nextcloud logs "database is locked",
+  and the client writes again later (seen once in the tests). Nextcloud
+  already keeps its SQLite database in WAL mode (its default), and PHP
+  waits up to 60 s for a lock (pdo_sqlite's default timeout), so no
+  setting of Nextcloud or SQLite helps here: the likely cause is a
+  transaction that read first and then wants to write after another
+  connection wrote meanwhile, which SQLite refuses at once, whatever the
+  timeout. Setup supports only SQLite for Nextcloud.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
   answers NXDOMAIN, also for its own test entries. That looks like "not
@@ -685,6 +694,16 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   carddav_migrations.filename“, und eine der Anmeldungen scheitert einmal.
   Nach einem Update von rc7 oder älter akzeptiert `update-check.sh after`
   die letzte Form. Eine Meldung an das Plugin-Projekt steht noch aus.
+* **Nextcloud mit SQLite beantwortet gelegentlich einen CardDAV-Schreibzugriff
+  mit HTTP 500, während sein Cron-Job läuft.** Nextcloud protokolliert
+  „database is locked“, und der Client schreibt später erneut (einmal in den
+  Tests gesehen). Nextcloud führt seine SQLite-Datenbank bereits im
+  WAL-Modus (seine Voreinstellung), und PHP wartet bis zu 60 s auf eine
+  Sperre (die Voreinstellung von pdo_sqlite); keine Einstellung von
+  Nextcloud oder SQLite hilft hier also: Die wahrscheinliche Ursache ist eine
+  Transaktion, die zuerst gelesen hat und dann schreiben will, nachdem eine
+  andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
+  unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
   Resolver (B136).** Über manche öffentliche Resolver (in den Tests
   8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen

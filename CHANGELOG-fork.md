@@ -109,6 +109,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   from the in-place upgrade, while the release upgrade installs Postfix
   3.10 and `main.cf` of the old box still sets it, before setup runs.
   README-fork.md lists the line under "Setup output".
+* **README: Nextcloud on SQLite and HTTP 500 during cron, a known issue**\
+  The planned item "Nextcloud on SQLite answers CardDAV writes with HTTP
+  500 during cron" moves to README-fork.md, "Known issues": Nextcloud's
+  SQLite database is in WAL mode already (Nextcloud's default
+  `sqlite.journal_mode`) and PHP waits up to 60 s for a lock (pdo_sqlite's
+  default), checked on a test box; the immediate "database is locked" of a
+  transaction that read first and then writes after another connection
+  wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -226,10 +234,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   nginx sets no HSTS header on `/admin/`: the headers of that location
   replace the server's (upstream). Browsers that visited another page of
   the box have the header already.
-* **Nextcloud on SQLite answers CardDAV writes with HTTP 500 during cron**\
-  Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
-  locked") while its `cron.php` holds the database (seen once in T1); the
-  client writes again later.
 * **In-place upgrade --check prints the GitHub URL for other sources**\
   `upgrade-in-place-to-2604.sh --check` prints the start command with the
   GitHub URL also when `SOURCE` and `TAG` name another source.
