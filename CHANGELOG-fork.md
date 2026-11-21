@@ -665,8 +665,19 @@ v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add 
   `ignoreip` in `[DEFAULT]` is read after `jail.d/mailinabox_adaptive.conf`
   and replaces the `ignoreip` that the allowlist of System > Intrusion
   Protection writes there: the panel lists an address as allowlisted, and
-  no jail ignores it. The page does not warn about it (seen on the copy of
-  a production box in the test runs of this release).
+  no jail ignores it. The page does not warn about it (seen in the test
+  runs of this release).
+* **A package run started just before mail goes offline is not in the snapshot**\
+  The in-place tool takes the package lists and the system archive while
+  mail still runs, checks for running package updates, and then masks and
+  stops the units. A package run that starts after that check and before
+  the masks (`apt-daily-upgrade.service` has `KillMode=process`, so
+  stopping it leaves unattended-upgrade running) ends while `stop_mail`
+  waits for the dpkg lock (B190), but its changes are not in the package
+  lists and the archive that `--rollback` uses. Comparing
+  `/var/log/apt/history.log` or the mtime of `/var/lib/dpkg/status` with
+  the moment of the archive after that wait would find it (seen in the
+  review of this release, from the code; not seen in a test run).
 * **No log line for a successful webmail password change**\
   `POST /me/password` (webmail's password change through the management
   daemon, B210) logs failures (for fail2ban) but not a successful change
