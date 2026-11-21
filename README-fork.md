@@ -646,7 +646,12 @@ with a secret from `/etc/nginx/miab-nextcloud-proxy.conf` (root's
 only, made once by setup), so another process on the box can no longer
 have a failed login logged and banned under an address of its choice. A
 proxy of your own in `www/custom.yaml` to the box's own `/cloud` is seen as
-127.0.0.1.
+127.0.0.1, and so loses all protection against password guessing:
+Nextcloud does not throttle 127.0.0.1, fail2ban does not ban it, and
+Dovecot answers the IMAP logins with which Nextcloud checks the passwords
+at once (B126). Do not use such a proxy on a box reachable from the
+Internet; the box's own paths (`/cloud`, `/caldav`, `/carddav`,
+`/webdav`) are not affected.
 
 ### Deutsch
 
@@ -729,7 +734,12 @@ Proxy an Nextcloud weiter; der Proxy weist sich mit einem Geheimnis aus
 setup einmal erzeugt). Ein anderer Prozess auf der Box kann so keine
 fehlgeschlagene Anmeldung mehr unter einer Adresse seiner Wahl protokollieren
 und sperren lassen. Ein eigener Proxy in `www/custom.yaml` auf das `/cloud`
-der Box selbst erscheint als 127.0.0.1.
+der Box selbst erscheint als 127.0.0.1 und verliert damit jeden Schutz gegen
+das Erraten von Passwörtern: Nextcloud bremst 127.0.0.1 nicht, fail2ban
+sperrt es nicht, und Dovecot beantwortet die IMAP-Anmeldungen, mit denen
+Nextcloud die Passwörter prüft, sofort (B126). Einen solchen Proxy auf einer
+Box, die aus dem Internet erreichbar ist, nicht verwenden; die eigenen Pfade
+der Box (`/cloud`, `/caldav`, `/carddav`, `/webdav`) sind nicht betroffen.
 
 
 Setup output / Ausgaben von setup

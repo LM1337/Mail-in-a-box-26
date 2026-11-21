@@ -811,8 +811,10 @@ hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config
 #   PHP only from that proxy (B213): a client on the Internet keeps its own
 #   address there, the throttle and the miab-owncloud jail. A proxy of an
 #   administrator's own (www/custom.yaml) to the box's own /cloud is seen as
-#   127.0.0.1 since B213; one that runs on another host and connects to the
-#   box's public address is not 127.0.0.1 at all.
+#   127.0.0.1 since B213, and so is neither throttled nor banned, and
+#   Dovecot answers its IMAP logins at once (B126; README-fork.md); one that
+#   runs on another host and connects to the box's public address is not
+#   127.0.0.1 at all.
 # * Z-Push checks each password against Dovecot (IMAP) before it calls
 #   Nextcloud, so Nextcloud's throttle of 127.0.0.1 never slowed down a
 #   password guesser there; it only stopped the sync of everyone. A local

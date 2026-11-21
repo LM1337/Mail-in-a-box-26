@@ -458,7 +458,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (`https://127.0.0.1/cloud/...`) no longer passes the client's address to
   Nextcloud: Nextcloud sees 127.0.0.1, which is on its brute-force bypass
   list, so its clients skip Nextcloud's throttle and the `miab-owncloud`
-  jail. The box's own paths (`/caldav`, `/carddav`, `/webdav`, `/cloud`)
+  jail, and Dovecot answers the IMAP logins with which Nextcloud checks
+  their passwords at once (B126): nothing slows down password guesses
+  through such a proxy. Do not use one on a box reachable from the
+  Internet. The box's own paths (`/caldav`, `/carddav`, `/webdav`, `/cloud`)
   are not affected.
 
 * **Restoring an older backup on the same box: remove the migration record (B211)**\
