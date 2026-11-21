@@ -32,7 +32,9 @@ ssl_certificates and mailconfig are replaced by stand-ins (YAML as JSON).
     of a replaced dns/ and says why, instead of failing;
   * tools/write_conf.py --own-root-only (setup's owner of $STORAGE_ROOT/mail
     and users.sqlite) refuses a directory that root does not own already,
-    where --own would take it over.
+    where --own would take it over; --check-own-root-only (setup/start.sh's
+    check before setup changes anything) names such a directory or
+    database, and setup/start.sh runs it for both.
 
   tests/fork/storage-dirs.py
 
@@ -44,6 +46,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -253,6 +256,35 @@ write_conf.ROOT_UID = me
 os.chmod(d, 0o775)
 write_conf.own(d, me, mygid, 0o755, True)
 check("--own-root-only: root's own directory taken", oct(os.stat(d).st_mode & 0o777), "0o755")
+
+# --check-own-root-only: setup/start.sh's check before setup changes anything.
+db = os.path.join(d, "users.sqlite")
+with open(db, "w") as f:
+	f.write("db")
+write_conf.ROOT_UID = me + 1
+check("--check-own: another owner's directory is fine", write_conf.check_own(d), None)
+check("--check-own-root-only: another owner's directory named",
+	"belongs to uid %d, not to root" % me in (write_conf.check_own(d, True) or ""), True)
+check("--check-own-root-only: another owner's database named",
+	"users.sqlite belongs to uid %d" % me in (write_conf.check_own(db, True) or ""), True)
+check("--check-own-root-only: a missing path is fine", write_conf.check_own(os.path.join(d, "none"), True), None)
+os.symlink(db, os.path.join(d, "link"))
+check("--check-own-root-only: a link is named as a link",
+	"is a symbolic link" in (write_conf.check_own(os.path.join(d, "link"), True) or ""), True)
+write_conf.ROOT_UID = me
+check("--check-own-root-only: root's own is fine", (write_conf.check_own(d, True), write_conf.check_own(db, True)), (None, None))
+if me != 0:
+	p = subprocess.run([sys.executable, "-I", os.path.join(MGMT, "..", "tools", "write_conf.py"), "--check-own-root-only", d, db],
+		capture_output=True, text=True)
+	check("--check-own-root-only (command): exit 1, both named",
+		(p.returncode, p.stdout.count("not to root")), (1, 2))
+	p = subprocess.run([sys.executable, "-I", os.path.join(MGMT, "..", "tools", "write_conf.py"), "--check-own-root-only", os.path.join(d, "none")],
+		capture_output=True, text=True)
+	check("--check-own-root-only (command): a missing path, exit 0", (p.returncode, p.stdout), (0, ""))
+start_sh = open(os.path.join(MGMT, "..", "setup", "start.sh"), encoding="utf-8").read()
+check("setup/start.sh checks the owner of mail/ and users.sqlite before setup changes anything",
+	'tools/write_conf.py --check-own-root-only "$pf_root/mail" "$pf_root/mail/users.sqlite"' in start_sh
+	and start_sh.index("--check-own-root-only") < start_sh.index("source setup/system.sh"), True)
 
 shutil.rmtree(tmp)
 if failures:

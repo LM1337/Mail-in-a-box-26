@@ -16,23 +16,28 @@ source setup/preflight.sh
 # user) could have put it there (B147). Checked here first, with the same
 # rules (tools/write_conf.py --check-own), so that such a box stops before
 # setup has changed anything, not in the middle of the run; the checks at
-# those places stay. STORAGE_ROOT as questions.sh takes it below (the
+# those places stay. $STORAGE_ROOT/mail and users.sqlite must also belong to
+# root already (--check-own-root-only, as setup/mail-users.sh takes them only
+# then, B210). STORAGE_ROOT as questions.sh takes it below (the
 # environment, /etc/mailinabox.conf, /home/user-data).
 pf_conf() { { sed -n "s/^$1=//p" /etc/mailinabox.conf 2> /dev/null || true; } | tail -n 1; }
 pf_root=${STORAGE_ROOT:-$(pf_conf STORAGE_ROOT)}
 pf_user=${STORAGE_USER:-$(pf_conf STORAGE_USER)}
 pf_root=${pf_root:-/home/${pf_user:-user-data}}
-pf_problems=$(tools/write_conf.py --check-own "$pf_root/mail" "$pf_root/mail/users.sqlite" \
-	"$pf_root/mail/roundcube/roundcube.sqlite" "$pf_root/mail/postgrey" "$pf_root/mail/postgrey/db" \
-	"$pf_root/mail/dkim" "$pf_root/mail/spamassassin" 2>&1 || true)
+pf_problems=$( {
+	tools/write_conf.py --check-own-root-only "$pf_root/mail" "$pf_root/mail/users.sqlite" || true
+	tools/write_conf.py --check-own "$pf_root/mail/roundcube/roundcube.sqlite" "$pf_root/mail/postgrey" \
+		"$pf_root/mail/postgrey/db" "$pf_root/mail/dkim" "$pf_root/mail/spamassassin" || true
+} 2>&1 | awk '!seen[$0]++')
 if [ -L "$pf_root/mailinabox.version" ] || { [ -e "$pf_root/mailinabox.version" ] && [ ! -f "$pf_root/mailinabox.version" ]; }; then
 	pf_problems+="${pf_problems:+$'\n'}$pf_root/mailinabox.version is not a regular file"
 fi
 if [ -n "$pf_problems" ]; then
 	echo
 	echo "Setup stopped before it changed anything. It no longer follows a symbolic"
-	echo "link, or changes a database with a second hard link, in these places, as"
-	echo "another account could have put them there (B147):"
+	echo "link, changes a database with a second hard link, or takes over a mail/ or"
+	echo "users.sqlite of another owner, in these places, as another account could"
+	echo "have put them there (B147, B210):"
 	echo
 	echo "  ${pf_problems//$'\n'/$'\n'  }"
 	echo
@@ -41,6 +46,9 @@ if [ -n "$pf_problems" ]; then
 	echo "* A second hard link of users.sqlite or roundcube.sqlite: find its other name with"
 	echo "  \"find / -xdev -samefile FILE\" and remove that name, unless you made it on"
 	echo "  purpose (the account www-data can make such a link)."
+	echo "* $pf_root/mail or users.sqlite of another owner than root, e.g. a copy that did"
+	echo "  not keep the owner: check it (the storage user could have put it there), and"
+	echo "  give it to root with \"chown root:root PATH\" if it is the box's own."
 	echo "* mailinabox.version must be a regular file with the number of the last migration."
 	echo
 	echo "Then run setup again."

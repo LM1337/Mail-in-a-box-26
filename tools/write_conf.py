@@ -56,6 +56,10 @@
 #   (a missing PATH is fine) and exits 1 if there is one. setup/start.sh runs
 #   it before setup changes anything (B147).
 #
+# tools/write_conf.py --check-own-root-only PATH...
+#   the same for --own-root-only: also a PATH that does not belong to root
+#   (B210).
+#
 # Exit code 0 (also when nothing changed), 1 on an error.
 
 import grp
@@ -224,8 +228,15 @@ def _own_refuses(path, st):
 	return None
 
 
-def check_own(path):
-	"""See --check-own in the header: why --own would refuse PATH, or None."""
+def _not_root_refusal(path, uid):
+	return ("%s belongs to uid %d, not to root, and is not taken over: another "
+		"account may have put it there. Check it, and give it to root (chown root:root) "
+		"if it is the box's own" % (path, uid))
+
+
+def check_own(path, root_only=False):
+	"""See --check-own and --check-own-root-only in the header: why --own
+	(--own-root-only) would refuse PATH, or None."""
 	directory, name = os.path.split(os.path.abspath(path))
 	try:
 		dfd = open_dir(directory)
@@ -238,7 +249,10 @@ def check_own(path):
 			st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
 		except FileNotFoundError:
 			return None
-		return _own_refuses(path, st)
+		why = _own_refuses(path, st)
+		if why is None and root_only and st.st_uid != ROOT_UID:
+			why = _not_root_refusal(path, st.st_uid)
+		return why
 	finally:
 		os.close(dfd)
 
@@ -261,9 +275,7 @@ def own(path, uid, gid, mode, root_only=False):
 		if stat.S_ISREG(fst.st_mode) and fst.st_nlink > 1:
 			raise OSError("%s has %d hard links" % (path, fst.st_nlink))
 		if root_only and fst.st_uid != ROOT_UID:
-			raise OSError("%s belongs to uid %d, not to root, and is not taken over: another "
-				"account may have put it there. Check it, and give it to root (chown root:root) "
-				"if it is the box's own" % (path, fst.st_uid))
+			raise OSError(_not_root_refusal(path, fst.st_uid))
 		os.fchown(fd, uid, gid)
 		os.fchmod(fd, mode)
 	finally:
@@ -277,8 +289,9 @@ if __name__ == "__main__":
 			own_tree(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid,
 				file_mode=modes[0], dir_mode=modes[1])
 			sys.exit(0)
-		if len(sys.argv) >= 3 and sys.argv[1] == "--check-own":
-			problems = list(dict.fromkeys(p for p in map(check_own, sys.argv[2:]) if p))
+		if len(sys.argv) >= 3 and sys.argv[1] in ("--check-own", "--check-own-root-only"):
+			root_only = sys.argv[1] == "--check-own-root-only"
+			problems = list(dict.fromkeys(p for p in (check_own(a, root_only) for a in sys.argv[2:]) if p))
 			for p in problems:
 				print(p)
 			sys.exit(1 if problems else 0)
@@ -291,7 +304,8 @@ if __name__ == "__main__":
 				"       tools/write_conf.py --own-tree DIR USER GROUP [FILEMODE DIRMODE]\n"
 				"       tools/write_conf.py --own PATH USER GROUP MODE\n"
 				"       tools/write_conf.py --own-root-only PATH USER GROUP MODE\n"
-				"       tools/write_conf.py --check-own PATH...", file=sys.stderr)
+				"       tools/write_conf.py --check-own PATH...\n"
+				"       tools/write_conf.py --check-own-root-only PATH...", file=sys.stderr)
 			sys.exit(1)
 		mode = int(sys.argv[2], 8) if len(sys.argv) == 3 else 0o644
 		write_if_changed(sys.argv[1], sys.stdin.buffer.read(), mode)

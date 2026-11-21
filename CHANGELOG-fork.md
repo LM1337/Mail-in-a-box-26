@@ -447,7 +447,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 * **User database root's only; webmail password changes via the daemon (B210)**\
   Setup gives `$STORAGE_ROOT/mail` to root:root 755 and `users.sqlite` to
   root:root 0600 (through descriptors, and only when root owns them
-  already: setup stops with "not taken over" otherwise; check such a
+  already: otherwise setup stops before it changes anything, naming
+  them with "not taken over"; check such a
   directory and give it to root with `chown root:root`), and switches
   Roundcube's password
   plugin to the fork's driver. Mail is not interrupted: Dovecot and Postfix

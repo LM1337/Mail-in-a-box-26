@@ -340,7 +340,9 @@ report. The groups:
   without the records of a replaced `dns/`, and
   `tools/write_conf.py --own-root-only` (setup's owner of
   `$STORAGE_ROOT/mail` and `users.sqlite`) refusing a directory that root
-  does not own already; group admin runs it
+  does not own already, and `--check-own-root-only` naming such a
+  directory or database (also as a command, exit code 1), which
+  setup/start.sh runs before setup changes anything; group admin runs it
   (`admin-storage-dirs-unit`).
   `tests/fork/update-check-compare.py` (B201; no box needed) runs the
   comparison of `tools/update-check.sh after` on states in a temporary
