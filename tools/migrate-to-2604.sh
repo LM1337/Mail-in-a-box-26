@@ -300,7 +300,22 @@ state_set() {
 }
 
 phase_is_done() { [ "$(state_get "PHASE_$1")" = "done" ]; }
-phase_mark_done() { state_set "PHASE_$1" "done"; }
+phase_mark_done() {
+	state_set "PHASE_$1" "done"
+	private_state
+}
+
+# The files and directories in STATE_DIR are root's only (0600, 0700), among
+# them the copies of the old box's backup key and passwd: the directory is
+# 0700, and this takes away what group and others have of what is in it
+# (also of files left by an older version of this tool). Run at the start,
+# after each phase and at the end; the writers of the copies of the old box
+# use umask 077 themselves. STATE_DIR is root's (0700), so no other account
+# can put a link there.
+private_state() {
+	[ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] && [ "$(id -u)" = 0 ] || return 0
+	find "$STATE_DIR" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -perm /077 -exec chmod go= {} + 2> /dev/null || true
+}
 
 # Forget PHASE and all phases after it.
 phases_reset_from() {
@@ -331,6 +346,7 @@ on_exit() {
 	local rc=$?
 	ssh_close
 	if [ -n "$CHECK_TMP" ]; then rm -rf "$CHECK_TMP"; fi
+	if [ -z "$CHECK_ONLY" ]; then private_state; fi
 	[ "$rc" != 0 ] || return 0
 	[ -z "$CHECK_ONLY" ] || return 0
 	{
@@ -2476,7 +2492,9 @@ check_space() {
 # on the first run and again in sync-final (old box stopped, latest state).
 snapshot_old_etc() {
 	say "Saving a copy of the old box's /etc, 'postconf -n' and root's crontab in $STATE_DIR..."
-	local rc=0
+	local rc=0 um
+	um=$(umask)
+	umask 077
 	# shellcheck disable=SC2029
 	old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C / --numeric-owner -czf - etc 2> /dev/null" \
 		< /dev/null > "$STATE_DIR/old-etc.tar.gz.new" || rc=$?
@@ -2489,16 +2507,21 @@ snapshot_old_etc() {
 		|| die "Could not unpack $STATE_DIR/old-etc.tar.gz."
 	remote "postconf -n" > "$STATE_DIR/old-postconf.txt" 2> /dev/null || true
 	remote "crontab -l -u root" > "$STATE_DIR/old-root-crontab.txt" 2> /dev/null || true
+	umask "$um"
 	state_set ETC_SAVED_AT "$(date -u +%FT%TZ)"
 }
 
 save_old_users() {
+	local um
+	um=$(umask)
+	umask 077
 	if ! remote "getent passwd" > "$STATE_DIR/old-passwd.new" || ! remote "getent group" > "$STATE_DIR/old-group.new" \
 		|| [ ! -s "$STATE_DIR/old-passwd.new" ] || [ ! -s "$STATE_DIR/old-group.new" ]; then
 		die "Could not read the users and groups of the old box."
 	fi
 	mv "$STATE_DIR/old-passwd.new" "$STATE_DIR/old-passwd"
 	mv "$STATE_DIR/old-group.new" "$STATE_DIR/old-group"
+	umask "$um"
 }
 
 # Copies of things outside $STORAGE_ROOT, for reference and for later phases.
@@ -2506,11 +2529,15 @@ save_reference() {
 	if [ "$(state_get REFERENCE_SAVED)" = 1 ]; then return 0; fi
 	snapshot_old_etc
 	save_old_users
+	local um
+	um=$(umask)
+	umask 077
 	remote "dpkg-query -W -f '\${binary:Package} \${Version}\n'" > "$STATE_DIR/old-packages.txt" 2> /dev/null || true
 	if [ "${OLD[HAS_BACKUP_SSH_KEY]:-0}" = 1 ]; then
 		remote "cat /root/.ssh/id_rsa_miab" > "$STATE_DIR/old-id_rsa_miab" || die "Could not read /root/.ssh/id_rsa_miab on the old box."
 		remote "cat /root/.ssh/id_rsa_miab.pub" > "$STATE_DIR/old-id_rsa_miab.pub" || true
 	fi
+	umask "$um"
 	save_old_roundcube
 	state_set REFERENCE_SAVED 1
 }
@@ -4245,8 +4272,10 @@ on this machine (also on later runs). To have no IPv6, remove it from the machin
 		fi
 		(umask 077 && mkdir -p "$STATE_DIR")
 		chmod 700 "$STATE_DIR"
+		private_state
 		# From the real file (after the clone); --check-old changes nothing.
 		if [ "$COMMAND" != check_old ]; then run_in_multiplexer "${orig_args[@]}"; fi
+		(umask 077 && : >> "$LOG_FILE")
 		exec > >(tee -a "$LOG_FILE") 2>&1
 		LOG_READY=1
 		echo

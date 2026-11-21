@@ -134,6 +134,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   downtime up to the end of the first setup and a line "Redo:" with the
   time setup ran again (or so far), instead of counting "Mail offline ...
   so far" from the start of the original downtime.
+* **Migration tool's files in /root/migration are root's only (B204)**\
+  The files of `tools/migrate-to-2604.sh` in `/root/migration` are 0600
+  (directories 0700), among them the copies of the old box's backup key
+  `old-id_rsa_miab`, of its `passwd` and `group` and of its `/etc`; they
+  were 0644 in a directory of root's only (0700), so nothing was exposed.
+  The copies of the old box are written with umask 077, and the tool takes
+  group and other access away from everything in the directory at its
+  start, after each phase and at its end, also from the files of a
+  migration that an older version of the tool started.
 
 ### Planned
 
@@ -288,11 +297,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   When the lookup of a domain's DS record fails, the status checks still
   say "This domain's DNSSEC DS record is not set" (a failed lookup counts
   as no DS record, as before B150); "could not check" would be right.
-* **Migration tool's files in /root/migration are 0644, not 0600**\
-  The migration tool's directory `/root/migration` is root's only (0700),
-  but the files in it are 0644, among them the copies of the old box's
-  key `old-id_rsa_miab` and of its `passwd`; they could be 0600 (seen in
-  T2 of v78-r2604.2, nothing exposed).
 
 ## v78-r2604.4 (2026-11-19)
 
