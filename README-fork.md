@@ -1124,7 +1124,19 @@ the following, on by default:
   addresses banned for all of them. Anyone can do that on purpose: an
   account name and a wrong password entered in the app are enough. Repeated,
   such bans lead to recidive's one-week ban of these addresses on all ports.
-  If your users sync that way, put those networks on the allowlist. `/var/log/z-push` belongs to root (group
+  If your users sync that way, put those networks on the allowlist.
+  System > Intrusion Protection recognises a banned address of these
+  servers by Microsoft's published IP ranges of Exchange Online and of its
+  AutoDetect service (shipped in `conf/fail2ban/microsoft-relays.txt`,
+  refreshed with `tools/update-microsoft-relays.py` for a release; the box
+  downloads nothing), shows a hint and offers a button that puts the
+  network on the allowlist after a question; nothing is put there on its
+  own. On the allowlist, password guesses through these servers are no
+  longer banned, only Dovecot's delay of each failed login remains. The
+  address's reverse DNS name is shown only as extra information, and only
+  when it resolves back to the address: the owner of an address sets its
+  PTR record. Other apps that sync through their provider's servers are
+  not recognised. `/var/log/z-push` belongs to root (group
   www-data, which may write the four log files but not replace them), so
   that fail2ban never opens a link or a FIFO there; setup and logrotate
   create the log files.
@@ -1355,7 +1367,20 @@ eingeschaltet:
   Ein Kontoname und ein falsches Passwort in der App genügen. Wiederholt
   führen solche Sperren zur einwöchigen recidive-Sperre dieser Adressen auf
   allen Ports. Wenn die Nutzer so synchronisieren, diese Netze in die
-  Freigabeliste setzen.
+  Freigabeliste setzen. System > Intrusion Protection erkennt eine
+  gesperrte Adresse dieser Server an Microsofts veröffentlichten
+  IP-Bereichen von Exchange Online und seines AutoDetect-Dienstes
+  (mitgeliefert in `conf/fail2ban/microsoft-relays.txt`, für ein Release
+  erneuert mit `tools/update-microsoft-relays.py`; die Box lädt nichts
+  herunter), zeigt einen Hinweis und bietet eine Schaltfläche an, die das
+  Netz nach einer Rückfrage in die Freigabeliste setzt; von selbst kommt
+  nichts hinein. In der Freigabeliste werden Passwortversuche über diese
+  Server nicht mehr gesperrt, nur Dovecots Verzögerung jeder
+  fehlgeschlagenen Anmeldung bleibt. Den Namen aus dem Reverse-DNS zeigt
+  die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
+  Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
+  Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie
+  nicht.
   `/var/log/z-push` gehört root (Gruppe www-data, die die vier Logdateien
   beschreiben, aber nicht ersetzen darf), damit fail2ban dort nie einen Link
   oder eine FIFO öffnet; Setup und logrotate legen die Logdateien an.

@@ -758,6 +758,8 @@ def get_status(env):
 		"jail_defaults": jail_defaults(),
 		"jail_limits": { k: { "min": lo, "max": hi } for k, (lo, hi) in JAIL_LIMITS.items() },
 		"jail_info": {},
+		"relays": {},
+		"relays_source": None,
 	}
 	rules = jail_rules(settings)
 	for name in set(rules) | set(JAIL_INFO):
@@ -796,6 +798,15 @@ def get_status(env):
 			b["reason"] = reasons.get((j["name"], b["ip"]))
 	ret["banned_entries"] = sum(len(j["banned"]) for j in ret["jails"])
 	ret["banned_ips"] = len({ b["ip"] for j in ret["jails"] for b in j["banned"] })
+	# Banned addresses of the servers that relay the ActiveSync logins of
+	# Outlook for iOS and Android (Microsoft's published ranges,
+	# cloud_relays.py, B126): the control panel shows a hint and offers to
+	# put the network on the allowlist; nothing is allowlisted on its own.
+	try:
+		import cloud_relays
+		ret["relays"], ret["relays_source"] = cloud_relays.relay_hints(b["ip"] for j in ret["jails"] for b in j["banned"])
+	except Exception as e:
+		ret["relays_error"] = f"The list of Microsoft's servers (conf/fail2ban/microsoft-relays.txt) could not be read: {e}"
 	return ret
 
 def normalize_ip(value):

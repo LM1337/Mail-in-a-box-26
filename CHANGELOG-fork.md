@@ -33,6 +33,26 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   The menu entry opens Munin in a new tab without leaving the page shown
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
+* **Intrusion Protection recognises banned Microsoft servers (B126)**\
+  System > Intrusion Protection shows a hint at a banned address of the
+  servers through which Outlook for iOS and Android syncs Exchange
+  ActiveSync accounts: 20 wrong passwords there within two minutes get all
+  users of the app banned, and anyone can cause it on purpose (B126;
+  `miab-zpush` still counts for recidive). The hint offers a
+  button "Put <network> on the allowlist", which asks first and says what
+  it costs (guesses through these servers are no longer banned); nothing is
+  put on the allowlist on its own. The addresses are recognised by
+  Microsoft's published IP ranges of Exchange Online (Microsoft 365 IP
+  Address and URL web service, service area Exchange) and of its
+  AutoDetect service, which Microsoft names for an ActiveSync server that
+  Outlook for iOS and Android reaches, shipped as
+  `conf/fail2ban/microsoft-relays.txt` with its source, version, date and
+  SHA256 sums; `tools/update-microsoft-relays.py` refreshes it, the box
+  downloads nothing, and a list changed by hand is not used. Reverse DNS
+  decides nothing: the address's PTR name is shown only when it resolves
+  back to the address. API: `/system/fail2ban` has `relays` and
+  `relays_source`. New offline test `tests/fork/cloud-relays.py` and smoke
+  check `admin-cloud-relays-unit`.
 
 ### Changed
 
@@ -170,16 +190,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
   `miab-zpush` threshold slows down the ActiveSync logins of other users
   is not measured.
-* **`miab-zpush` can ban all users behind shared cloud servers (B126)**\
-  `miab-zpush` counts failures per address, like the other jails, and is
-  always on: behind the shared servers of a mail app that syncs through its
-  provider's cloud (Outlook for iOS and Android with an ActiveSync
-  account), one person with a wrong password, or anyone on purpose, can get
-  all users of that app banned, and repeated bans reach recidive's week on
-  all ports (B126). The README, the upgrade note and the allowlist help say
-  to put such networks on the allowlist; nothing finds them on its own.
-  Leaving `miab-zpush` out of recidive would let an attacker guess 20
-  passwords every few minutes for good, so it still counts there.
 * **Nextcloud trusts X-Forwarded-For on every local connection (B121)**\
   Nextcloud takes the client's address from `X-Forwarded-For` on every
   connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those

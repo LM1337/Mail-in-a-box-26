@@ -1,0 +1,53 @@
+# The servers through which Outlook for iOS and Android syncs Exchange
+# ActiveSync accounts (Microsoft's published IP ranges), for the hint of
+# System > Intrusion Protection at a banned address (management/cloud_relays.py).
+# Made by tools/update-microsoft-relays.py; do not edit by hand: a file whose
+# networks do not match networks-sha256 is not used.
+#
+# Microsoft lists for an on-premises ActiveSync endpoint all Exchange Online
+# ranges and the AutoDetect ranges (learn.microsoft.com, "Using Basic
+# authentication with Outlook for iOS and Android", Connectivity Requirements).
+#
+# source: https://endpoints.office.com/endpoints/Worldwide?ServiceAreas=Exchange&clientrequestid=<GUID> (service area Exchange, all IDs)
+# source-version: 2026103000
+# source-sha256: c4dd64b4d1f838ccc60ab416e3515fe172e4819bdf07c8dd46cf6845c7d03de5
+# extra-source: https://learn.microsoft.com/en-us/microsoft-365/enterprise/additional-office365-ip-addresses-and-urls (row 10, AutoDetect, as of 2026-10-30)
+# extra-networks: 52.125.128.0/20 52.127.96.0/23
+# retrieved: 2026-11-21
+# networks-sha256: ba9838efd89b83eb028850d1f4cd486f2dd97a87541a15595d453bf01f4471d5
+13.107.6.152/31
+13.107.18.10/31
+13.107.128.0/22
+23.103.160.0/20
+40.92.0.0/15
+40.96.0.0/13
+40.104.0.0/15
+40.107.0.0/16
+52.96.0.0/14
+52.100.0.0/14
+52.125.128.0/20
+52.127.96.0/23
+52.238.78.88/32
+104.47.0.0/17
+131.253.33.215/32
+132.245.0.0/16
+150.171.32.0/22
+204.79.197.215/32
+2603:1006::/40
+2603:1016::/36
+2603:1026::/36
+2603:1036::/36
+2603:1046::/36
+2603:1056::/36
+2620:1ec:4::152/128
+2620:1ec:4::153/128
+2620:1ec:c::10/128
+2620:1ec:c::11/128
+2620:1ec:d::10/128
+2620:1ec:d::11/128
+2620:1ec:8f0::/46
+2620:1ec:900::/46
+2620:1ec:a92::152/128
+2620:1ec:a92::153/128
+2a01:111:f400::/48
+2a01:111:f403::/48

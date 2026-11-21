@@ -302,6 +302,18 @@ report. The groups:
   DS records up once and suggest DNSSEC only when none is set, and the
   box's name checks its zone's DS records only when they are set. Group
   admin runs it (`admin-status-dns-unit`).
+  `tests/fork/cloud-relays.py` (B126; no box needed) checks how System >
+  Intrusion Protection recognises Microsoft's servers: the shipped list
+  `conf/fail2ban/microsoft-relays.txt` (header, IPv4 and IPv6, the
+  AutoDetect ranges, every network accepted by the allowlist; a list
+  changed by hand is refused), addresses inside and just outside the
+  ranges, forward-confirmed reverse DNS with stand-in lookups (a spoofed
+  PTR name without a forward match, also one naming Microsoft, gives no
+  name; an address outside the ranges gets no hint), the limit of lookups
+  per request, and that `tools/update-microsoft-relays.py` takes only the
+  service area Exchange of Microsoft's answer. Group admin runs it
+  (`admin-cloud-relays-unit`); `admin-fail2ban-status` checks that the box
+  reads the list and gives hints only for banned addresses.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
