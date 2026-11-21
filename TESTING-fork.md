@@ -359,7 +359,8 @@ report. The groups:
   (which ignores a link and files that another account can write).
   `tests/fork/owncloud-backup-prune.py` (no box needed) checks the removal
   of old Nextcloud backup copies in a temporary `STORAGE_ROOT`: the three
-  newest copies stay, older ones go with everything in them, other names
+  newest copies and those of the last 14 days stay (also after three
+  failed upgrade runs), older ones go with everything in them, other names
   and a file or link with a copy's name stay, a symbolic link in the place
   of `owncloud-backup` or inside an old copy is not followed, a directory
   that others may write is left alone, and bad arguments are refused.

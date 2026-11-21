@@ -542,7 +542,9 @@ fi
 # $STORAGE_ROOT/owncloud-backup (the database, config.php and the replaced
 # code, up to a few hundred MB each), and nothing removed them; the directory
 # is not in the box's backup. Keep the three newest (the one of this run, if
-# any, among them) and remove the older ones, through a descriptor of the
+# any, among them) and all of the last 14 days (the copy before an upgrade
+# that failed and was tried again), and remove the older ones, through a
+# descriptor of the
 # directory and without following a symbolic link (the storage user owns
 # $STORAGE_ROOT). A problem is reported, and setup goes on.
 tools/owncloud_backup_prune.py "$STORAGE_ROOT" 3 \

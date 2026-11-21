@@ -18,7 +18,10 @@ STORAGE_ROOT:
   * a symbolic link inside an old copy is removed, not followed (its target
     stays);
   * no owncloud-backup: nothing to do, no problem; KEEP 1 keeps only the
-    newest; the command line refuses a bad KEEP.
+    newest; the command line refuses a bad KEEP;
+  * copies of the last 14 days stay beyond KEEP (an upgrade that failed and
+    was run again three times keeps the copy from before it), and a name
+    that is not a valid time stays.
 
 The owner check (root in setup) is given the test's own uid.
 
@@ -32,6 +35,7 @@ import io
 import os
 import sys
 import tempfile
+import time
 from contextlib import redirect_stderr, redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +105,23 @@ with tempfile.TemporaryDirectory() as t:
 	# KEEP 1.
 	removed, problems = mod.prune(sr, 1, owner=uid)
 	check("KEEP 1 keeps only the newest", removed == STAMPS[2:4] and os.path.isdir(os.path.join(ob, STAMPS[-1])), repr(removed))
+
+	# Copies of the last 14 days stay beyond KEEP: a failed upgrade (A), two
+	# more failed runs (B, C) and a success with an app update (D, E) on the
+	# same days; A stays until it is 14 days old.
+	sr7 = os.path.join(t, "sr7")
+	ob7 = os.path.join(sr7, "owncloud-backup")
+	os.makedirs(ob7, mode=0o700)
+	RECENT = ["2026-11-20-10:00:00", "2026-11-20-10:30:00", "2026-11-20-11:00:00", "2026-11-21-09:00:00", "2026-11-21-09:05:00"]
+	for s in RECENT + ["2026-02-30-00:00:00"]:
+		make_copy(ob7, s)
+	day = 86400
+	now = time.mktime(time.strptime("2026-11-21-12:00:00", "%Y-%m-%d-%H:%M:%S"))
+	removed, problems = mod.prune(sr7, 3, owner=uid, now=now)
+	check("copies of the last 14 days stay beyond KEEP", removed == [] and problems == [], repr((removed, problems)))
+	removed, problems = mod.prune(sr7, 3, owner=uid, now=now + 15 * day)
+	check("after 14 days only the newest KEEP stay", removed == RECENT[:2] and problems == [], repr((removed, problems)))
+	check("a name that is not a valid time stays", os.path.isdir(os.path.join(ob7, "2026-02-30-00:00:00")))
 
 	# 2. owncloud-backup is a symbolic link to a directory with copies.
 	sr2 = os.path.join(t, "sr2")

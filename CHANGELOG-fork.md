@@ -125,8 +125,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   replaced code, nothing removed them (one box had 2.5 GB there), and the
   directory is not in the box's backup. setup/nextcloud.sh now keeps the
   three newest copies (named by setup's date and time, the one of the run
-  among them) and removes the older ones; other names in the directory
-  stay. It works through one descriptor of the directory, which must be
+  among them) and all of the last 14 days, and removes the older ones;
+  other names in the directory stay. The 14 days keep the copy from
+  before an upgrade that failed: every later run makes another copy, of
+  the half-upgraded state. It works through one descriptor of the directory, which must be
   root's own and not writable by others (B177), and does not follow a
   symbolic link (the storage user owns `$STORAGE_ROOT`); a problem is
   reported and setup goes on. New tool `tools/owncloud_backup_prune.py`,
@@ -483,7 +485,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * **The update removes all but the three newest Nextcloud backup copies**\
   The first setup run of this release removes every copy in
-  `$STORAGE_ROOT/owncloud-backup` but the three newest. To keep an older
+  `$STORAGE_ROOT/owncloud-backup` but the three newest and those of the
+  last 14 days. To keep an older
   one, move it out of that directory before the update (to a name that is
   not a date and time, or elsewhere).
 * **The update reloads Dovecot and PHP-FPM once and restarts a few services**\
