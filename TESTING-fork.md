@@ -268,6 +268,9 @@ report. The groups:
   HTML fragment of the control panel's templates has a self-closing tag of
   a non-void element followed by more markup, which jQuery 3 reads as an
   opening tag.
+  `tests/fork/status-changes.py` (B179; no box needed) checks that the
+  daily status change notice shows a changed check with all of its lines
+  and leaves unchanged checks out.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

@@ -661,6 +661,11 @@ def check_dns_zone_suggestions(domain, env, output, dns_zonefiles, domains_with_
 		check_dnssec(domain, env, output, dns_zonefiles)
 
 
+# Where the DS records to set at the registrar are: in the lines that
+# check_dnssec prints after its message, which the control panel folds
+# away under "show more" (B179).
+DS_INSTRUCTIONS_WHERE = 'The DS records to set at your domain name registrar are listed below this message (in the control panel: click "show more").'
+
 def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 	# See if the domain has a DS record set at the registrar. The DS record must
 	# match one of the keys that we've used to sign the zone. It may use one of
@@ -707,7 +712,7 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 	ds = [tuple(str(rr).split(" ")) for rr in ds if len(str(rr).split(" ")) == 4]
 
 	if len(ds) == 0:
-		output.print_warning("""This domain's DNSSEC DS record is not set. The DS record is optional. The DS record activates DNSSEC. See below for instructions.""")
+		output.print_warning(f"""This domain's DNSSEC DS record is not set. The DS record is optional. The DS record activates DNSSEC. {DS_INSTRUCTIONS_WHERE}""")
 	else:
 		matched_ds = set(ds) & set(expected_ds_records)
 		if matched_ds:
@@ -723,16 +728,16 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False):
 				output.print_ok("DNSSEC 'DS' record is set correctly at registrar. (Records using algorithm other than ECDSAP256SHA256 and digest types other than SHA-256/384 should be removed.)")
 				return
 			# no record uses alg 13
-			output.print_warning("""DNSSEC 'DS' record set at registrar is valid but should be updated to ECDSAP256SHA256 and SHA-256 (see below).
+			output.print_warning(f"""DNSSEC 'DS' record set at registrar is valid but should be updated to ECDSAP256SHA256 and SHA-256. {DS_INSTRUCTIONS_WHERE}
 				IMPORTANT: Do not delete existing DNSSEC 'DS' records for this domain until confirmation that the new DNSSEC 'DS' record
 				for this domain is valid.""")
 		else:
 			if is_checking_primary:
-				output.print_error(f"""The DNSSEC 'DS' record for {domain} is incorrect. See further details below.""")
+				output.print_error(f"""The DNSSEC 'DS' record for {domain} is incorrect. The details and the DS records to set are in the checks of {domain} below.""")
 				return
-			output.print_error("""This domain's DNSSEC DS record is incorrect. The chain of trust is broken between the public DNS system
+			output.print_error(f"""This domain's DNSSEC DS record is incorrect. The chain of trust is broken between the public DNS system
 				and this machine's DNS server. It may take several hours for public DNS to update after a change. If you did not recently
-				make a change, you must resolve this immediately (see below).""")
+				make a change, you must resolve this immediately. {DS_INSTRUCTIONS_WHERE}""")
 
 	output.print_line("""Follow the instructions provided by your domain name registrar to set a DS record.
 		Registrars support different sorts of DS records. Use the first option that works:""")
@@ -1069,9 +1074,89 @@ def check_miab_version(env, output):
 		else:
 			output.print_error(f"A new version of this fork (Mail-in-a-Box for Ubuntu 26.04) is available. You are running version {this_ver}. The latest version is {latest_ver}. For upgrade instructions, see {FORK_REPO_URL}. ")
 
+def status_changes(prev, cur):
+	# The changes between two recorded runs of the status checks (lists of
+	# BufferedOutput calls), as BufferedOutput calls to play back: per
+	# category (heading) what was added, removed or changed.
+	#
+	# A check is compared as a whole: its message (print_ok, print_error,
+	# print_warning, print_block) together with the print_line lines that
+	# follow it, its instructions and details. A changed message comes with
+	# all of its lines, also when those stayed the same (so a "See below"
+	# is never sent without what it refers to), and a changed line comes
+	# with its message. Before, lines were compared one by one (B179).
+	import json
+	from collections import OrderedDict
+	from difflib import SequenceMatcher
+
+	def group_by_heading(lines):
+		ret = OrderedDict()
+		k = []
+		ret["No Category"] = k
+		for line_type, line_args, line_kwargs in lines:
+			if line_type == "add_heading":
+				k = []
+				ret[line_args[0]] = k
+			else:
+				k.append((line_type, line_args, line_kwargs))
+		return ret
+
+	def group_by_check(lines):
+		# A message and the print_line lines after it; print_line lines
+		# before the first message of a category form a check of their own.
+		checks = []
+		for line in lines:
+			if line[0] == "print_line" and checks:
+				checks[-1].append(line)
+			else:
+				checks.append([line])
+		return checks
+
+	ret = []
+	def play(checks):
+		for check in checks:
+			ret.extend(check)
+
+	prev_status = group_by_heading(prev)
+	cur_status = group_by_heading(cur)
+
+	# Compare the previous to the current status checks
+	# category by category.
+	for category, cur_lines in cur_status.items():
+		cur_checks = group_by_check(cur_lines)
+		if category not in prev_status:
+			if cur_checks:
+				ret.append(("add_heading", (category + " -- Added",), {}))
+				play(cur_checks)
+			continue
+		prev_checks = group_by_check(prev_status[category])
+		def stringify(checks):
+			return [json.dumps(check) for check in checks]
+		diff = SequenceMatcher(None, stringify(prev_checks), stringify(cur_checks), autojunk=False).get_opcodes()
+		for op, i1, i2, j1, j2 in diff:
+			if op == "replace":
+				ret.append(("add_heading", (category + " -- Previously:",), {}))
+			elif op == "delete":
+				ret.append(("add_heading", (category + " -- Removed",), {}))
+			if op in {"replace", "delete"}:
+				play(prev_checks[i1:i2])
+
+			if op == "replace":
+				ret.append(("add_heading", (category + " -- Currently:",), {}))
+			elif op == "insert":
+				ret.append(("add_heading", (category + " -- Added",), {}))
+			if op in {"replace", "insert"}:
+				play(cur_checks[j1:j2])
+
+	for category in prev_status:
+		if category not in cur_status:
+			ret.append(("add_heading", (category,), {}))
+			ret.append(("print_warning", ("This section was removed.",), {}))
+
+	return ret
+
 def run_and_output_changes(env, pool):
 	import json
-	from difflib import SequenceMatcher
 
 	out = ConsoleOutput()
 
@@ -1088,53 +1173,7 @@ def run_and_output_changes(env, pool):
 			except json.JSONDecodeError:
 				prev = []
 
-		# Group the serial output into categories by the headings.
-		def group_by_heading(lines):
-			from collections import OrderedDict
-			ret = OrderedDict()
-			k = []
-			ret["No Category"] = k
-			for line_type, line_args, line_kwargs in lines:
-				if line_type == "add_heading":
-					k = []
-					ret[line_args[0]] = k
-				else:
-					k.append((line_type, line_args, line_kwargs))
-			return ret
-		prev_status = group_by_heading(prev)
-		cur_status = group_by_heading(cur.buf)
-
-		# Compare the previous to the current status checks
-		# category by category.
-		for category, cur_lines in cur_status.items():
-			if category not in prev_status:
-				out.add_heading(category + " -- Added")
-				BufferedOutput(with_lines=cur_lines).playback(out)
-			else:
-				# Actual comparison starts here...
-				prev_lines = prev_status[category]
-				def stringify(lines):
-					return [json.dumps(line) for line in lines]
-				diff = SequenceMatcher(None, stringify(prev_lines), stringify(cur_lines)).get_opcodes()
-				for op, i1, i2, j1, j2 in diff:
-					if op == "replace":
-						out.add_heading(category + " -- Previously:")
-					elif op == "delete":
-						out.add_heading(category + " -- Removed")
-					if op in {"replace", "delete"}:
-						BufferedOutput(with_lines=prev_lines[i1:i2]).playback(out)
-
-					if op == "replace":
-						out.add_heading(category + " -- Currently:")
-					elif op == "insert":
-						out.add_heading(category + " -- Added")
-					if op in {"replace", "insert"}:
-						BufferedOutput(with_lines=cur_lines[j1:j2]).playback(out)
-
-		for category, prev_lines in prev_status.items():
-			if category not in cur_status:
-				out.add_heading(category)
-				out.print_warning("This section was removed.")
+		BufferedOutput(with_lines=status_changes(prev, cur.buf)).playback(out)
 
 	# Store the current status checks output for next time.
 	os.makedirs(os.path.dirname(cache_fn), exist_ok=True)

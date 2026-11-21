@@ -22,6 +22,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   installed." or the error). Both came from the update of the control
   panel's jQuery to 3.x, which reads `<div/>` as an opening tag (B178). New
   static check `tests/fork/panel-fragments.py`.
+* **Status change mail shows changed checks whole; DNSSEC messages say where (B179)**\
+  The daily "Status Checks Change Notice" shows a changed check with all of
+  its lines: a DNSSEC warning now comes with the DS records to set, also
+  when only the message changed (it said "See below for instructions."
+  with nothing below), and a changed line comes with its message. The
+  DNSSEC messages say that the DS records are listed below the message,
+  in the control panel under "show more", instead of "see below". New
+  offline test `tests/fork/status-changes.py`.
 
 ### Planned
 
