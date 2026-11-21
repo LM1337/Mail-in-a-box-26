@@ -30,6 +30,15 @@ configuration, when PHP-FPM does not run afterwards or did not run
 before, and a reload when it runs another invocation than the record
 names.
 
+refresh_record, through the hook that record_hook writes (spampd's
+sa-update hook spampd-record), with a stand-in for systemctl: after a
+restart by something else it records the new invocation when the record
+names the checksum of the files now (also a record of the earlier
+format), and restart_on_change then does not restart; nothing with other
+files (a downgrade's), without a record or when the unit does not run;
+the hook always exits with 0. setup/spamassassin.sh installs it after
+spampd's own hook and passes the same files to restart_on_change.
+
 service_runs_current_package with stand-ins for systemctl and dpkg-query:
 the unit's own package and the library packages after it (an update of
 SpamAssassin's Perl modules counts for spampd; a library package that is
@@ -260,6 +269,76 @@ load_php_fpm
 	check("PHP-FPM, another invocation (started by something else or at boot): a reload", rc == 0 and c == ["reload"], repr((rc, c, out)))
 	rc, c, out = fpm(INV="fedcba9876543210fedcba9876543210")
 	check("PHP-FPM, then the same invocation: nothing", rc == 0 and c == [], repr((rc, c, out)))
+
+# refresh_record through the generated hook: the record directory and
+# PATH are replaced, systemctl is a stand-in script.
+with tempfile.TemporaryDirectory() as t:
+	conf = os.path.join(t, "etc", "svc.conf")
+	write(conf, "a = 1\n")
+	write(os.path.join(t, "etc", "svc.d", "10-x.conf"), "x\n")
+	args = [conf, "tree:" + os.path.join(t, "etc", "svc.d")]
+	rec = os.path.join(t, "state")
+	recfile = os.path.join(rec, "svc-config.sha256")
+	bindir = os.path.join(t, "bin")
+	write(os.path.join(bindir, "systemctl"), """#!/bin/bash
+case "$*" in
+"is-active --quiet svc.service") [ "$ACTIVE" = yes ] ;;
+"show -P InvocationID svc.service") echo "$INV" ;;
+esac
+""")
+	os.chmod(os.path.join(bindir, "systemctl"), 0o755)
+	rc, hook_text, err = bash("record_hook svc " + " ".join(shlex.quote(a) for a in args))
+	check("record_hook prints a script", rc == 0 and hook_text.startswith("#!/bin/bash\n") and "refresh_record svc " in hook_text, err)
+	hook = os.path.join(t, "hook")
+	write(hook, hook_text.replace("/var/lib/mailinabox", rec)
+		.replace("PATH=/usr/sbin:/usr/bin:/sbin:/bin", "PATH=%s:/usr/bin:/bin" % bindir) + "\n")
+	os.chmod(hook, 0o755)
+	cur = checksum(*args)
+	old_inv, new_inv = "0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210"
+
+	def run_hook(record, **env):
+		if record is None:
+			if os.path.exists(recfile):
+				os.unlink(recfile)
+		else:
+			write(recfile, record)
+		e = {"PATH": "/usr/bin:/bin", "ACTIVE": "yes", "INV": new_inv}
+		e.update(env)
+		p = subprocess.run([hook], env=e, capture_output=True, text=True, timeout=60)
+		try:
+			with open(recfile, encoding="utf-8") as f:
+				got = f.read()
+		except FileNotFoundError:
+			got = None
+		return p.returncode, got
+
+	check("hook: the files of the record, a new invocation: recorded",
+		run_hook("%s %s\n" % (cur, old_inv)) == (0, "%s %s\n" % (cur, new_inv)))
+	check("hook: a record of the earlier format: recorded",
+		run_hook("%s\n" % cur) == (0, "%s %s\n" % (cur, new_inv)))
+	check("hook: other files (a downgrade's): the record stays",
+		run_hook("%s %s\n" % ("0" * 64, old_inv)) == (0, "%s %s\n" % ("0" * 64, old_inv)))
+	check("hook: no record: none written", run_hook(None) == (0, None))
+	check("hook: the unit does not run: the record stays",
+		run_hook("%s %s\n" % (cur, old_inv), ACTIVE="no") == (0, "%s %s\n" % (cur, old_inv)))
+	run_hook("%s %s\n" % (cur, old_inv))
+	log = os.path.join(t, "service.log")
+	stub = """
+enable_service() { :; }
+service_runs_current_package() { return 0; }
+service() { echo "$*" >> {log}; }
+eval "$(declare -f restart_on_change | sed 's|/var/lib/mailinabox|{rec}|g')"
+restart_on_change svc svc-pkg {args}
+""".replace("{log}", shlex.quote(log)).replace("{rec}", rec).replace("{args}", " ".join(shlex.quote(a) for a in args))
+	rc, out, err = bash(stub, {"PATH": bindir + ":/usr/bin:/bin", "ACTIVE": "yes", "INV": new_inv})
+	check("after the hook recorded the restart: setup does not restart", rc == 0 and not os.path.exists(log), err)
+
+src = open(os.path.join(REPO, "setup", "spamassassin.sh"), encoding="utf-8").read()
+check("setup/spamassassin.sh: the hook spampd-record runs after spampd's, with restart_on_change's files",
+	"sa-update-hooks.d/spampd-record" in src and sorted(["spampd-record", "spampd"]) == ["spampd", "spampd-record"]
+	and 'record_hook spampd "${spampd_files[@]}"' in src
+	and 'restart_on_change spampd "spampd spamassassin libnet-server-perl" "${spampd_files[@]}"' in src
+	and "ReadWritePaths=-/var/lib/mailinabox/spampd-config.sha256" in src)
 
 # service_runs_current_package with stand-ins: the unit started at 1000,
 # dpkg-query answers the Last-Modified time of each package from PKGTIMES

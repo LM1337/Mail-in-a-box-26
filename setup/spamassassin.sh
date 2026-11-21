@@ -226,16 +226,42 @@ tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
 sudo -u spampd /usr/bin/sa-learn --sync 2>/dev/null
 tools/write_conf.py --own-tree "$STORAGE_ROOT/mail/spamassassin" spampd spampd 660 770
 
+# A new rule set from sa-update restarts spampd: spamassassin-maint (from
+# spamassassin-maintenance.timer, nearly every day, and at the end of this
+# script) runs the package's hook /etc/spamassassin/sa-update-hooks.d/spampd.
+# That run of spampd is not setup's, and restart_on_change would restart
+# spampd once more at the next setup run (record_matches). The hook
+# spampd-record, which run-parts runs right after spampd's, records it
+# when spampd's files are still those that setup recorded (refresh_record).
+# The maintenance service sees the system read-only (ProtectSystem=strict in
+# its unit); a drop-in lets it write spampd's record and nothing else.
+spampd_files=(/etc/spampd.cfg /etc/default/spampd tree:/etc/spamassassin tree:/etc/systemd/system/spampd.service.d)
+SPAMPD_HOOK=/etc/spamassassin/sa-update-hooks.d/spampd-record
+SPAMPD_HOOK_TEXT=$(record_hook spampd "${spampd_files[@]}")
+if [ "$(cat "$SPAMPD_HOOK" 2> /dev/null)" != "$SPAMPD_HOOK_TEXT" ]; then
+	mkdir -p "$(dirname "$SPAMPD_HOOK")"
+	echo "$SPAMPD_HOOK_TEXT" > "$SPAMPD_HOOK"
+fi
+chmod 755 "$SPAMPD_HOOK"
+SA_MAINT_DROPIN=/etc/systemd/system/spamassassin-maintenance.service.d/mailinabox-spampd-record.conf
+SA_MAINT_DROPIN_TEXT="[Service]
+ReadWritePaths=-/var/lib/mailinabox/spampd-config.sha256"
+if [ "$(cat "$SA_MAINT_DROPIN" 2> /dev/null)" != "$SA_MAINT_DROPIN_TEXT" ]; then
+	mkdir -p "$(dirname "$SA_MAINT_DROPIN")"
+	echo "$SA_MAINT_DROPIN_TEXT" > "$SA_MAINT_DROPIN"
+	systemctl daemon-reload
+fi
+
 # Kick services. spampd restarts only when its configuration or
-# SpamAssassin's in /etc changed (a new rule set from sa-update restarts it
-# through /etc/spamassassin/sa-update-hooks.d), see restart_on_change; mail
-# waits for it while it restarts. Dovecot reloads only if the settings above
+# SpamAssassin's in /etc changed, see restart_on_change, or when something
+# else started it since setup's last restart (a reboot, an administrator;
+# not sa-update's hook, see above); mail waits for it while it restarts.
+# Dovecot reloads only if the settings above
 # changed its configuration (mail_access_groups on the first run), see
 # load_dovecot (B122).
 # SpamAssassin's Perl modules (package spamassassin) and Net::Server are read,
 # not mapped: their updates count too (service_runs_current_package).
-restart_on_change spampd "spampd spamassassin libnet-server-perl" /etc/spampd.cfg /etc/default/spampd tree:/etc/spamassassin \
-	tree:/etc/systemd/system/spampd.service.d
+restart_on_change spampd "spampd spamassassin libnet-server-perl" "${spampd_files[@]}"
 rm -rf /run/spampd
 load_dovecot
 

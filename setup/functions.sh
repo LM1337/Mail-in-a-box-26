@@ -297,7 +297,7 @@ function record_matches {
 	# old version would have kept running. The start time of the unit cannot
 	# tell these apart from a plain reboot. The price: one more restart (or
 	# reload) at the first setup run after a reboot or after a restart by
-	# something else.
+	# something else, unless that restart recorded itself (refresh_record).
 	local inv
 	inv=$(unit_invocation "$1")
 	[ -n "$inv" ] && [ "$(cat "$2" 2> /dev/null || true)" = "$3 $inv" ]
@@ -308,6 +308,40 @@ function write_record {
 	# Records SUM with the run of UNIT that is active now (record_matches).
 	mkdir -p "$(dirname "$2")"
 	echo "$3 $(unit_invocation "$1")" > "$2"
+}
+
+function refresh_record {
+	# refresh_record UNIT ARG...
+	# For a restart of UNIT by something of the box's own, such as spampd's
+	# sa-update hook: when UNIT's record names the checksum of what it reads
+	# now (ARG..., as for restart_on_change), the run of UNIT that is active
+	# now started with the files that setup recorded, and it is recorded
+	# (write_record), so that the next setup run does not restart it once
+	# more. Nothing otherwise (no record; other files, e.g. those of a
+	# downgrade; UNIT does not run): the next setup run restarts it then.
+	local unit=$1 sum record
+	shift
+	record=/var/lib/mailinabox/$unit-config.sha256
+	systemctl is-active --quiet "$unit.service" || return 0
+	sum=$(config_checksum "$@")
+	if [ "$(cut -d' ' -f1 "$record" 2> /dev/null || true)" = "$sum" ]; then
+		write_record "$unit.service" "$record" "$sum"
+	fi
+}
+
+function record_hook {
+	# record_hook UNIT ARG...
+	# Prints a bash script that runs refresh_record UNIT ARG..., with the
+	# functions it needs (from this file, so that it computes the checksum
+	# as setup does). It always exits with 0.
+	echo '#!/bin/bash'
+	echo "# Written by Mail-in-a-Box setup: records the run of $1 that a hook before this one started, see refresh_record in setup/functions.sh."
+	echo 'PATH=/usr/sbin:/usr/bin:/sbin:/bin'
+	declare -f config_checksum unit_invocation write_record refresh_record
+	printf 'refresh_record'
+	printf ' %q' "$@"
+	echo ' || true'
+	echo 'exit 0'
 }
 
 function config_checksum {

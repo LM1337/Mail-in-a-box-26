@@ -390,6 +390,11 @@ report. The groups:
   before or after the reload. The package check counts the unit's own
   package and the library packages after it (an update of SpamAssassin's
   Perl modules for spampd; one that is not installed does not count).
+  spampd's sa-update hook (`record_hook`, `refresh_record`) runs with a
+  stand-in for systemctl: it records the new invocation when the record
+  names the files of now (also a record of the earlier format), after
+  which setup does not restart, and leaves the record alone with other
+  files (a downgrade's), without a record or when the unit does not run.
   `tests/fork/status-dns.py` (B181; no box needed) runs the status
   checks' `query_dns()` against a stand-in for dnspython: records,
   NXDOMAIN and NoAnswer, a failed lookup, a timeout, YXDOMAIN and a name

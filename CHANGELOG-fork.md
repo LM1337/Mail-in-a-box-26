@@ -121,7 +121,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   time and trusted every start at boot, which missed the reboot (found in
   the review). The price: the first setup run after a reboot, or after a
   restart by an administrator or a package, restarts each of them once
-  more. The same holds for
+  more. Not after sa-update's restart of spampd for new rules (nearly
+  daily): a hook after the package's (`sa-update-hooks.d/spampd-record`)
+  records that run when spampd's files are those of the record, and a
+  drop-in lets `spamassassin-maintenance.service` write that one record
+  (found in the review). The management daemon's restart of OpenDKIM for
+  new DKIM tables and the postgrey whitelist update (every 28 days) still
+  cost one more restart at the next run. The same holds for
   PHP-FPM (B122, a reload then). The first run of
   this release restarts each of them once more. New offline test
   `tests/fork/restart-on-change.py`.
