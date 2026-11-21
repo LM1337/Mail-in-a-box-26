@@ -156,24 +156,30 @@ the tag it installs, with `--force`). To clean up, delete the old tags:
 `git fetch --tags` for this: the checkout is shallow, and it would download
 the history behind every upstream tag of the repository.
 
-One case does affect an update: a checkout whose current commit carries a
-local tag with the name of the release being installed, but another commit
-than on GitHub (an old pre-release or a mirror's tag of that name).
-bootstrap.sh compares the release name with `git describe` and, when they
-match, fetches nothing: setup then runs on the old code and still ends with
-exit code 0. After an update, check that the checkout is the release and
-its commit is GitHub's (here for v78-r2604.1; use the name of the release
-you install):
+One case did affect an update up to v78-r2604.4: a checkout whose current
+commit carries a local tag with the name of the release being installed, but
+another commit than on GitHub (an old pre-release or a mirror's tag of that
+name). bootstrap.sh compared the release name with `git describe` and, when
+they matched, fetched nothing: setup then ran on the old code and still
+ended with exit code 0. From v78-r2604.5 on, bootstrap.sh also asks the
+source for the commit of the tag (`git ls-remote`) and fetches the release
+when it is not the checkout's commit ("... is at a local tag ..., but ... has
+... on another commit"); if the source cannot be asked, it says so and uses
+the checkout as it is. The bootstrap command loads bootstrap.sh from the
+branch main, so every update with it does this check from the release of
+v78-r2604.5 on. To check by hand that the checkout is the release and its
+commit is GitHub's (here for v78-r2604.5; use the name of the release you
+install):
 
 	sudo git -C /root/mailinabox describe --always
 	sudo git -C /root/mailinabox rev-parse HEAD
-	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.1^{}'
+	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.5^{}'
 
 `describe` must print the release name, and the two commit ids must be
 the same. If they are not, delete the local tag and run the bootstrap
 command again:
 
-	sudo git -C /root/mailinabox tag -d v78-r2604.1
+	sudo git -C /root/mailinabox tag -d v78-r2604.5
 	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 **Checks around the update** (rc7 and later, `tools/update-check.sh`, as
@@ -188,7 +194,10 @@ and the Docker stacks you name (`--docker-dir`, `--docker-volume`,
 checksum) or in `/root/update-check`. After the update, `after` records the
 state again and lists each change as EXPECTED (announced by the releases in
 between, `tools/expected-changes/`; for an update to a branch or commit
-after the newest release also `unreleased.txt` there) or UNEXPECTED, and runs the log audit
+after the newest release also `unreleased.txt` there) or UNEXPECTED (a
+Postfix or Dovecot setting that only the newer record has, because a newer
+version of the tool records it, is listed as "newly recorded (not judged)"
+and counted in the RESULT line), and runs the log audit
 against the baseline: only new message classes count (`--internet` accepts
 the usual noise of a public box). The lists cover updates of this fork on
 one Ubuntu release: after an in-place upgrade or a migration from upstream
@@ -378,25 +387,31 @@ Zum Aufräumen die alten Tags löschen:
 `git fetch --tags` dafür nehmen: Der Checkout ist flach (shallow) und würde
 die Historie hinter jedem Upstream-Tag des Repositorys herunterladen.
 
-Ein Fall wirkt sich doch auf ein Update aus: ein Checkout, dessen aktueller
-Commit einen lokalen Tag mit dem Namen des zu installierenden Release trägt,
-aber auf einen anderen Commit als auf GitHub (ein altes Vorab-Release oder
-der Tag eines Spiegels mit diesem Namen). bootstrap.sh vergleicht den
-Release-Namen mit `git describe` und holt bei Gleichheit nichts: Setup läuft
-dann mit dem alten Code und endet trotzdem mit Exit-Code 0. Nach einem
-Update prüfen, dass der Checkout das Release ist und sein Commit der von
-GitHub (hier für v78-r2604.1; den Namen des installierten Release
-einsetzen):
+Ein Fall wirkte sich bis v78-r2604.4 doch auf ein Update aus: ein Checkout,
+dessen aktueller Commit einen lokalen Tag mit dem Namen des zu
+installierenden Release trägt, aber auf einen anderen Commit als auf GitHub
+(ein altes Vorab-Release oder der Tag eines Spiegels mit diesem Namen).
+bootstrap.sh verglich den Release-Namen mit `git describe` und holte bei
+Gleichheit nichts: Setup lief dann mit dem alten Code und endete trotzdem
+mit Exit-Code 0. Ab v78-r2604.5 fragt bootstrap.sh zusätzlich die Quelle
+nach dem Commit des Tags (`git ls-remote`) und holt das Release, wenn es
+nicht der Commit des Checkouts ist („... is at a local tag ..., but ... has
+... on another commit“); ist die Quelle nicht erreichbar, sagt es das und
+nimmt den Checkout, wie er ist. Der Bootstrap-Befehl lädt bootstrap.sh
+aus dem Zweig main, also macht jedes Update damit diese Prüfung, sobald
+v78-r2604.5 veröffentlicht ist. Von Hand prüfen, dass der Checkout das
+Release ist und sein Commit der von GitHub (hier für v78-r2604.5; den Namen
+des installierten Release einsetzen):
 
 	sudo git -C /root/mailinabox describe --always
 	sudo git -C /root/mailinabox rev-parse HEAD
-	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.1^{}'
+	git ls-remote https://github.com/LM1337/Mail-in-a-box-26 'refs/tags/v78-r2604.5^{}'
 
 `describe` muss den Release-Namen ausgeben, und die beiden Commit-IDs
 müssen gleich sein. Sonst den lokalen Tag löschen und den
 Bootstrap-Befehl noch einmal ausführen:
 
-	sudo git -C /root/mailinabox tag -d v78-r2604.1
+	sudo git -C /root/mailinabox tag -d v78-r2604.5
 	sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
 **Prüfungen rund um das Update** (ab rc7, `tools/update-check.sh`, als
@@ -412,7 +427,10 @@ Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
 `/root/update-check`. Nach dem Update hält `after` den Zustand erneut fest,
 führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
 `tools/expected-changes/`; bei einem Update auf einen Zweig oder Commit nach
-dem neuesten Release auch `unreleased.txt` dort) oder UNEXPECTED auf und lässt das Log-Audit gegen
+dem neuesten Release auch `unreleased.txt` dort) oder UNEXPECTED auf (eine
+Postfix- oder Dovecot-Einstellung, die nur die neuere Aufzeichnung hat, weil
+eine neuere Version des Werkzeugs sie aufzeichnet, steht unter „newly
+recorded (not judged)“ und wird in der RESULT-Zeile mitgezählt) und lässt das Log-Audit gegen
 die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
 (`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin). Die
 Listen decken Updates dieses Forks auf einem Ubuntu-Release ab: Nach einem
@@ -1720,6 +1738,34 @@ again in finish. Write hooks so that they can run twice. For example:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
+**Local changes to Roundcube** (webmail) do not stop the upgrade: setup
+installs the new Roundcube as a new tree in `/usr/local/lib/roundcubemail`
+and writes its own `config/config.inc.php` (on every run, also on later
+updates). The preflight check (also `--check`) names plugin directories that
+setup does not install, plugins added to or left out of the plugin list, and
+other settings of `config.inc.php` that differ from what setup writes (of a
+setting that setup does not write only its name: its value may be a
+password). Before setup the tool keeps the old `config.inc.php` and those
+plugin directories in `/root/upgrade-2604/old-roundcube` (the system archive
+keeps the whole old tree). They are not copied back on their own: a plugin
+for the old Roundcube can break the new one. Phase verify lists what the new
+Roundcube does not have (also in `etc-report.txt`) and writes it to
+`/root/upgrade-2604/local-changes.json` (root's only); while that file exists,
+System Status shows a warning with the items under "show more", so the daily
+status mail names it too. Bring back what the new Roundcube supports with a
+hook, for example:
+
+    # /etc/mailinabox/upgrade-2604.d/50-roundcube.sh
+    RC=/usr/local/lib/roundcubemail
+    cp -a "$UPGRADE_STATE_DIR/old-roundcube/plugins/contextmenu" "$RC/plugins/"
+    grep -q "'contextmenu'" "$RC/config/config.inc.php" \
+      || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
+
+and run `--redo-from local-ext`, which checks again. When everything is dealt
+with (or not wanted), `upgrade-in-place-to-2604.sh --ack-local` (or removing
+the file) ends the warning. Setup writes `config.inc.php` again on the next
+update, so keep such a change in a script of your own.
+
 **How long an in-place upgrade takes.** Times of the in-place test runs
 (test VMs with 2 vCPUs and 4-6 GB RAM on one host with HDD storage):
 
@@ -1932,6 +1978,38 @@ noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
 
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
+
+**Lokale Änderungen an Roundcube** (Webmail) halten das Upgrade nicht an:
+Setup installiert das neue Roundcube als neuen Baum in
+`/usr/local/lib/roundcubemail` und schreibt seine eigene
+`config/config.inc.php` (bei jedem Lauf, auch bei späteren Updates). Die
+Vorabprüfung (auch `--check`) nennt Plugin-Verzeichnisse, die setup nicht
+installiert, Plugins, die der Plugin-Liste hinzugefügt oder aus ihr
+weggelassen wurden, und andere Einstellungen der `config.inc.php`, die von
+dem abweichen, was setup schreibt (bei einer Einstellung, die setup nicht
+schreibt, nur ihren Namen: ihr Wert kann ein Passwort sein). Vor setup
+bewahrt das Werkzeug die alte `config.inc.php` und diese
+Plugin-Verzeichnisse in `/root/upgrade-2604/old-roundcube` auf (das
+Systemarchiv enthält den ganzen alten Baum). Sie werden nicht von selbst
+zurückkopiert: Ein Plugin für das alte Roundcube kann das neue stören. Die
+Phase verify listet, was dem neuen Roundcube fehlt (auch in
+`etc-report.txt`), und schreibt es in `/root/upgrade-2604/local-changes.json`
+(nur für root lesbar); solange es diese Datei gibt, zeigt der Systemstatus
+eine Warnung mit den Punkten unter „show more“, die tägliche Statusmail
+nennt sie also auch. Was das neue Roundcube unterstützt, holt ein Hook
+zurück, zum Beispiel:
+
+    # /etc/mailinabox/upgrade-2604.d/50-roundcube.sh
+    RC=/usr/local/lib/roundcubemail
+    cp -a "$UPGRADE_STATE_DIR/old-roundcube/plugins/contextmenu" "$RC/plugins/"
+    grep -q "'contextmenu'" "$RC/config/config.inc.php" \
+      || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
+
+und danach `--redo-from local-ext`, das erneut prüft. Ist alles erledigt
+(oder nicht mehr gewünscht), beendet `upgrade-in-place-to-2604.sh
+--ack-local` (oder das Löschen der Datei) die Warnung. Setup schreibt
+`config.inc.php` beim nächsten Update wieder neu; eine solche Änderung also
+in einem eigenen Skript aufbewahren.
 
 **Wie lange ein Upgrade an Ort und Stelle dauert.** Zeiten der
 In-place-Testläufe (Test-VMs mit 2 vCPUs und 4-6 GB RAM auf einem Host mit
@@ -2327,6 +2405,22 @@ containers do not, the tool checks).
   mail to the new box later.
 * Logs (`/var/log`, so the usage reports start empty) and ACL entries with
   named users (none in a normal box).
+* Local changes to Roundcube (webmail; it is not part of the data, setup
+  installs its own and writes its own `config/config.inc.php`). The check
+  (also `--check`) names plugin directories of the old box that setup does
+  not install and changes of its `config.inc.php` (the plugin list, and other
+  settings; of a setting that setup does not write only its name). The tool
+  keeps the old `config.inc.php` and those plugin directories in
+  `/root/migration/old-roundcube`, but does not install them (a plugin for
+  the old Roundcube can break the new one). Phase verify lists what the new
+  Roundcube does not have (also in `etc-report.txt`) and writes it to
+  `/root/migration/local-changes.json` (root's only); while that file exists,
+  System Status shows a warning with the items under "show more", and so
+  does the daily status mail. Bring back what the new Roundcube supports
+  (copy the plugin directory to `/usr/local/lib/roundcubemail/plugins/` and
+  add it to `$config['plugins']`; setup writes the file again on every run),
+  then end the warning with `migrate-to-2604.sh --ack-local` (or remove the
+  file). Not with `--from-backup`: a backup has no Roundcube.
 
 #### After the migration
 
@@ -2732,6 +2826,25 @@ das, manche Container nicht; das Werkzeug prüft es).
   und zeigt, wie man sie später an die neue Box zustellt.
 * Protokolle (`/var/log`, die Nutzungsberichte beginnen leer) und
   ACL-Einträge mit benannten Benutzern (in einer normalen Box keine).
+* Lokale Änderungen an Roundcube (Webmail; es gehört nicht zu den Daten,
+  setup installiert sein eigenes und schreibt seine eigene
+  `config/config.inc.php`). Die Prüfung (auch `--check`) nennt
+  Plugin-Verzeichnisse der alten Box, die setup nicht installiert, und
+  Änderungen an ihrer `config.inc.php` (die Plugin-Liste und andere
+  Einstellungen; bei einer Einstellung, die setup nicht schreibt, nur den
+  Namen). Das Werkzeug bewahrt die alte `config.inc.php` und diese
+  Plugin-Verzeichnisse in `/root/migration/old-roundcube` auf, installiert sie
+  aber nicht (ein Plugin für das alte Roundcube kann das neue stören). Die
+  Phase verify listet, was dem neuen Roundcube fehlt (auch in
+  `etc-report.txt`), und schreibt es in `/root/migration/local-changes.json`
+  (nur für root lesbar); solange es diese Datei gibt, zeigt der Systemstatus
+  eine Warnung mit den Punkten unter „show more“, ebenso die tägliche
+  Statusmail. Was das neue Roundcube unterstützt, zurückholen (das
+  Plugin-Verzeichnis nach `/usr/local/lib/roundcubemail/plugins/` kopieren
+  und in `$config['plugins']` eintragen; setup schreibt die Datei bei jedem
+  Lauf neu), danach die Warnung mit `migrate-to-2604.sh --ack-local` beenden
+  (oder die Datei löschen). Nicht bei `--from-backup`: Eine Sicherung enthält
+  kein Roundcube.
 
 #### Nach dem Umzug
 

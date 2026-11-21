@@ -58,6 +58,18 @@ signature; a local backup. It writes a manifest (POP3 UIDLs, folder counts,
 Bayes counts, Sieve scripts, DKIM key, Nextcloud items) that the smoke test
 compares against after a migration or upgrade.
 
+A preparation that should leave the state of a box after its users trained
+the spam filter (sa-learn through IMAPSieve) uses `tests/fork/spam-move.py`:
+it appends a marked test mail (`X-Miab-Test: 1`, a Message-ID
+`@smoketest.invalid`) to a user's INBOX, moves that mail to Spam and back
+and deletes it, and checks that the other mails keep their UIDs. Moving a
+seeded mail instead gives it a new UID and so a new POP3 UIDL, which the
+manifest no longer matches: the start snapshot of T5b from v78-r2604.2 to
+v78-r2604.4 was prepared that way, so `mig-pop3-uidl-alice` failed on every
+run from it, and the lab used a corrected copy of the manifest for that VM.
+A start snapshot prepared with `spam-move.py` works with the original
+manifest.
+
 ## Scenarios
 
 | ID | Start state | Path | Tool / command | Smoke mode |
@@ -306,6 +318,24 @@ report. The groups:
   account's settings (not used, nothing written there, the nightly backup
   stops with the reason) and with `custom.yaml` a link; group admin runs it
   (`admin-storage-dirs-unit`).
+  `tests/fork/update-check-compare.py` (B201; no box needed) runs the
+  comparison of `tools/update-check.sh after` on states in a temporary
+  directory: Postfix and Dovecot settings that only the record after the
+  update has are "newly recorded (not judged)" and counted in the RESULT
+  line, a changed value of a setting in both records is still judged (with
+  and without a rule), a new line of another file is still unexpected.
+  `tests/fork/roundcube-local.py` (B200; no box needed) checks the report
+  of local Roundcube changes that the in-place and migration tools share
+  (the two copies must be the same): its idea of setup's settings against
+  the configuration that setup/webmail.sh writes, an unchanged
+  configuration of the fork and of upstream (nothing to report), extra
+  plugin directories, a changed plugin list (also `$config['plugins'][]`),
+  changed values of setup's settings, settings set by hand (named without
+  their values), comments and strings with `;` and `?>`, files it cannot
+  read completely, control characters in names, the comparison with the
+  Roundcube after setup and its file `local-changes.json` (0600, removed
+  when nothing is open), and System Status's warning from that file
+  (which ignores a link and files that another account can write).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

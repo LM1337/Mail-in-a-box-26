@@ -133,7 +133,9 @@ Steps:
                 own (otherwise it stops)
   after         record the state again (after/), compare it with before/:
                 each change is EXPECTED (announced by the releases in
-                between, tools/expected-changes/) or UNEXPECTED; then the log
+                between, tools/expected-changes/) or UNEXPECTED (a Postfix
+                or Dovecot setting that only after/ has, recorded by a newer
+                version of this tool, is "newly recorded", not judged); then the log
                 audit since "before" against the baseline (only new message
                 classes count). Exit code 1 if anything unexpected or new,
                 2 if nothing is but the log audit could not run, 3 if the
@@ -342,7 +344,8 @@ record_postconf() {
 		smtp_tls_security_level smtpd_tls_protocols smtpd_tls_mandatory_protocols smtpd_milters non_smtpd_milters \
 		milter_default_action smtpd_sender_restrictions smtpd_recipient_restrictions smtpd_relay_restrictions \
 		smtpd_helo_restrictions virtual_transport virtual_mailbox_domains virtual_mailbox_maps virtual_alias_maps \
-		message_size_limit mailbox_size_limit recipient_delimiter smtputf8_enable; do
+		message_size_limit mailbox_size_limit recipient_delimiter smtputf8_enable \
+		tls_eecdh_auto_curves tls_ffdhe_auto_groups; do
 		printf '%s = %s\n' "$k" "$(postconf -h "$k" 2> /dev/null || echo '(unknown)')"
 	done
 }
@@ -688,6 +691,11 @@ before, after, rule_files = sys.argv[1], sys.argv[2], sys.argv[3:]
 INFO = set(os.environ["UC_INFO_FILES"].split())
 UNFINISHED = os.environb[b"UC_STATUS_UNFINISHED"].decode("utf-8") # the files are read as UTF-8, whatever the locale
 SKIP = {"time.txt", "status-full.txt", "log-audit.json", "log-audit.txt", "changes.txt"}
+# Files of "key = value" lines for a list of keys that this tool chooses: a
+# key that only the record after the update has was added to the list by a
+# newer version of the tool (its value before is unknown), so it is shown as
+# newly recorded and not judged.
+KEYED = {"postconf.txt", "doveconf.txt"}
 
 rules = []
 for path in rule_files:
@@ -716,7 +724,7 @@ def lines(p):
         return None
 
 names = sorted(set(os.listdir(before)) | set(os.listdir(after)))
-expected, unexpected, info, missing = [], [], [], []
+expected, unexpected, info, missing, newly = [], [], [], [], []
 for name in names:
     if name in SKIP or not name.endswith(".txt"):
         continue
@@ -734,6 +742,11 @@ for name in names:
         unexpected.extend((name, sign, l, "") for sign, l in changes if not l.startswith(UNFINISHED))
         unexpected.extend((name, "+", l, "") for l in a if l.startswith(UNFINISHED))
         continue
+    if name in KEYED:
+        keys_before = {l.split(" = ", 1)[0] for l in b}
+        fresh = [(sign, l) for sign, l in changes if sign == "+" and l.split(" = ", 1)[0] not in keys_before]
+        newly.extend((name, sign, l, "") for sign, l in fresh)
+        changes = [c for c in changes if c not in fresh]
     for sign, l in changes:
         if name in INFO:
             info.append((name, sign, l, ""))
@@ -756,12 +769,14 @@ def show(title, items):
 show("UNEXPECTED changes", unexpected)
 show("EXPECTED changes", expected)
 show("Changes of values that change by themselves (not judged)", info)
+show("Newly recorded (not judged: the record before the update does not have these keys)", newly)
 if missing:
     w("Recorded only once (not compared): %s\n" % ", ".join(missing))
+fresh = ", %d newly recorded (not judged)" % len(newly) if newly else ""
 if os.environ.get("UC_NOT_JUDGED"):
-    w("Not judged: %d changes that no list names, %d expected changes\n" % (len(unexpected), len(expected)))
+    w("Not judged: %d changes that no list names, %d expected changes%s\n" % (len(unexpected), len(expected), fresh))
 else:
-    w("RESULT: %s - %d unexpected, %d expected changes\n" % ("OK" if not unexpected else "CHANGED", len(unexpected), len(expected)))
+    w("RESULT: %s - %d unexpected, %d expected changes%s\n" % ("OK" if not unexpected else "CHANGED", len(unexpected), len(expected), fresh))
 sys.exit(1 if unexpected else 0)
 PY
 }

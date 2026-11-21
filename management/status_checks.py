@@ -155,6 +155,7 @@ def run_system_checks(rounded_values, env, output):
 	check_ssh_password(env, output)
 	check_software_updates(env, output)
 	check_miab_version(env, output)
+	check_local_changes_after_upgrade(env, output)
 	check_system_aliases(env, output)
 	check_free_disk_space(rounded_values, env, output)
 	check_free_memory(rounded_values, env, output)
@@ -1083,6 +1084,76 @@ def check_miab_version(env, output):
 			output.print_error(f"Latest Mail-in-a-Box version could not be determined. You are running version {this_ver}.")
 		else:
 			output.print_error(f"A new version of this fork (Mail-in-a-Box for Ubuntu 26.04) is available. You are running version {this_ver}. The latest version is {latest_ver}. For upgrade instructions, see {FORK_REPO_URL}. ")
+
+# The local changes (Roundcube plugins and settings) that the in-place upgrade
+# or the migration to this fork found and did not carry over: written by
+# tools/upgrade-in-place-to-2604.sh and tools/migrate-to-2604.sh in their
+# root-only state directories, removed by their --ack-local.
+LOCAL_CHANGES_FILES = [
+	("/root/upgrade-2604", "The in-place upgrade to this fork", "/root/upgrade-2604/upgrade-in-place-to-2604.sh --ack-local"),
+	("/root/migration", "The migration to this fork", "tools/migrate-to-2604.sh --ack-local"),
+]
+LOCAL_CHANGES_NAME = "local-changes.json"
+LOCAL_CHANGES_OWNER = 0 # root (another uid only in tests/fork/roundcube-local.py)
+
+def read_local_changes(state_dir):
+	# The document in STATE_DIR/local-changes.json, or None. Opened through the
+	# directory without following links, and only from root's own directory
+	# and file that no other account can write (they are root's only, 0700 and
+	# 0600). Returns {"created": text, "ack": text or None, "items": [text]}.
+	import json, stat
+	try:
+		dfd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+	except OSError:
+		return None
+	try:
+		st = os.fstat(dfd)
+		if st.st_uid != LOCAL_CHANGES_OWNER or st.st_mode & 0o022:
+			return None
+		try:
+			fd = os.open(LOCAL_CHANGES_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+		except OSError:
+			return None
+		with os.fdopen(fd, "rb") as f:
+			st = os.fstat(f.fileno())
+			if not stat.S_ISREG(st.st_mode) or st.st_uid != LOCAL_CHANGES_OWNER or st.st_mode & 0o022:
+				return None
+			data = f.read(256 * 1024 + 1)
+	finally:
+		os.close(dfd)
+	def text(v, n):
+		# No control or format characters (they reach the panel and the
+		# status mail), at most n characters.
+		import unicodedata
+		v = "".join("?" if unicodedata.category(c)[0] == "C" else c for c in str(v))
+		return v if len(v) <= n else v[:n - 3] + "..."
+	try:
+		doc = json.loads(data.decode("utf-8")) if len(data) <= 256 * 1024 else None
+	except ValueError:
+		doc = None
+	if not isinstance(doc, dict) or not isinstance(doc.get("items"), list):
+		return {"created": None, "ack": None, "items": ["(the file could not be read)"]}
+	created = doc.get("created")
+	created = created if isinstance(created, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z", created) else None
+	ack = doc.get("ack")
+	ack = ack if isinstance(ack, str) and re.fullmatch(r"/[A-Za-z0-9._/-]+ --ack-local", ack) else None
+	items = [text(x, 300) for x in doc["items"][:101] if isinstance(x, str)]
+	return {"created": created, "ack": ack, "items": items}
+
+def check_local_changes_after_upgrade(env, output):
+	for state_dir, what, ack in LOCAL_CHANGES_FILES:
+		doc = read_local_changes(state_dir)
+		if doc is None:
+			continue
+		path = os.path.join(state_dir, LOCAL_CHANGES_NAME)
+		when = " (%s)" % doc['created'] if doc['created'] else ""
+		ack_command = doc['ack'] or ack
+		output.print_warning(f"""{what}{when} found local changes to Roundcube that it did not
+			carry over: setup installs its own plugins and writes its own configuration. The old files
+			are in {state_dir}/old-roundcube. Bring back what the new Roundcube supports (see
+			README-fork.md), then end this warning with "sudo {ack_command}" or by removing {path}.""")
+		for item in doc["items"]:
+			output.print_line(item)
 
 def status_changes(prev, cur):
 	# The changes between two recorded runs of the status checks (lists of

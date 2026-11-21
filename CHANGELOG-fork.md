@@ -34,6 +34,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
 
+### Changed
+
+* **Tests: the lab preparation leaves the seeded mails alone**\
+  New `tests/fork/spam-move.py` for test boxes: it moves a marked test mail
+  of its own into Spam and back, so that IMAPSieve runs sa-learn as for a
+  user's client, deletes it and checks that the other mails keep their
+  UIDs. The preparation of the update test's start snapshot (T5b) moved a
+  seeded INBOX mail instead, which gave it a new UID and so a new POP3 UIDL,
+  and the smoke check `mig-pop3-uidl-alice` failed on every run from that
+  snapshot, also before any update (T5b of v78-r2604.3). A snapshot
+  prepared with the new script works with the original manifest
+  (TESTING-fork.md, "Test environment").
+
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -53,6 +66,83 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   DNSSEC messages say that the DS records are listed below the message,
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
+* **In-place upgrade and migration name local Roundcube changes (B200)**\
+  The in-place upgrade (tools/upgrade-in-place-to-2604.sh) and the
+  migration (tools/migrate-to-2604.sh) no longer lose local changes to
+  Roundcube without a word. Setup installs the new Roundcube as a new tree
+  and writes its own `config/config.inc.php`, so plugins installed by hand
+  and changes to that file were gone afterwards, and neither the check nor
+  `etc-report.txt` named them. The preflight check (also `--check`) now
+  warns, without stopping the upgrade, and names the plugin directories
+  that setup does not install, plugins added to or left out of the plugin
+  list, and other settings that differ from what setup writes (a setting
+  that setup does not write by its name only, as its value may be a
+  password). Before setup the tools keep the old `config.inc.php` and
+  those plugin directories in `old-roundcube/` of their state directory
+  (the in-place upgrade's system archive now also holds the whole old
+  Roundcube). They are not copied back on their own, since a plugin for the
+  old Roundcube can break the new one. Phase verify lists what the new
+  Roundcube does not have, also in `etc-report.txt`, says how a hook in
+  `/etc/mailinabox/upgrade-2604.d/` brings it back, and writes the open
+  items into `local-changes.json` (root's only) in the state directory;
+  while that file exists, System Status shows a warning with the items
+  under "show more", and so the daily status change mail names it too. The
+  new option `--ack-local` of both tools, or removing the file, ends it.
+  New offline test `tests/fork/roundcube-local.py`.
+* **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
+  tools/update-check.sh now records `tls_eecdh_auto_curves` and
+  `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such
+  as the post-quantum one of v78-r2604.3) shows in its list of changes.
+  `after` judges only the settings that both records have: a setting that
+  only the record after the update has (recorded by a newer version of the
+  tool, so its value before is unknown) is listed in a section "Newly
+  recorded (not judged)" of `changes.txt` and counted in the RESULT line,
+  not as an unexpected change. New offline test
+  `tests/fork/update-check-compare.py`.
+* **bootstrap.sh is no longer fooled by a local tag of the release name (B202)**\
+  bootstrap.sh fetched nothing when `git describe` printed the name of the
+  release to install, so a local tag of that name on another commit (an
+  old pre-release, a mirror's tag) kept the old code, and setup ran on it
+  and ended with exit code 0. It now also asks the source for the commit
+  of the tag (`git ls-remote`) and fetches the release when that is not the
+  checkout's commit; after the checkout, it stops if the commit is still
+  another one. When the source cannot be asked, it says so and uses the
+  checkout as before. README-fork.md ("Updating the fork") is updated.
+* **In-place upgrade --check proposes the start command with SOURCE and TAG (B203)**\
+  The start command that `upgrade-in-place-to-2604.sh --check` proposes
+  (and repeats when blockers stop a run) now begins with `SOURCE=...` and
+  `TAG=...` when they are set, quoted for the shell, and through
+  `curl | bash` names the script of that source instead of the GitHub URL.
+  Whoever copied the line before ran the release from GitHub instead of
+  the source and tag that were checked.
+* **Migration tool filters the old box's error messages too (B154)**\
+  `tools/migrate-to-2604.sh` passes the standard error of every command
+  that talks to the old box (its scripts through ssh, the login checks, the
+  copies of `/etc` and of the zones, rsync's checks and copies) to the
+  terminal with control characters replaced by "?", as it does for the
+  other text of the old box since B154; before, an error message of the old
+  box could send escape sequences to the terminal. The progress filter of
+  the main copy does the same for rsync's output.
+* **Right in-place upgrade messages after a failed --redo-from (B161)**\
+  When a `--redo-from` of the in-place upgrade fails, the exit message
+  names the redo and when it started, and says that cron jobs, update
+  timers and backups run when the upgrade had finished before (the redo
+  does not pause them again; it said they "stay paused"), or stay paused
+  until it is finished. A failed redo of setup says that setup runs again
+  since then and mail may be offline until it has, instead of "Mail is
+  OFFLINE" since the start of the upgrade's downtime. `--status` shows the
+  downtime up to the end of the first setup and a line "Redo:" with the
+  time setup ran again (or so far), instead of counting "Mail offline ...
+  so far" from the start of the original downtime.
+* **Migration tool's files in /root/migration are root's only (B204)**\
+  The files of `tools/migrate-to-2604.sh` in `/root/migration` are 0600
+  (directories 0700), among them the copies of the old box's backup key
+  `old-id_rsa_miab`, of its `passwd` and `group` and of its `/etc`; they
+  were 0644 in a directory of root's only (0700), so nothing was exposed.
+  The copies of the old box are written with umask 077, and the tool takes
+  group and other access away from everything in the directory at its
+  start, after each phase and at its end, also from the files of a
+  migration that an older version of the tool started.
 
 ### Security
 
@@ -193,36 +283,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   copies (one box had 2.5 GB there; the directory is not in the box's
   backup). Setup could keep the newest few copies and remove older ones
   (seen in the review of v78-r2604.4).
-* **In-place upgrade does not warn about local Roundcube changes**\
-  The in-place upgrade (tools/upgrade-in-place-to-2604.sh) does not see
-  local changes to Roundcube: the upgrade moves Roundcube to a new version,
-  setup builds a new tree in `/usr/local/lib/roundcubemail` and writes its
-  own plugin list into `config/config.inc.php`, so extra plugins (and
-  changes to that file) are gone afterwards, and neither the preflight
-  check nor `etc-report.txt` names them (a question about local changes in
-  the in-place upgrade, after v78-r2604.4). Planned, without stopping the
-  upgrade: the preflight check warns and names the plugin directories that
-  setup does not install and the differences of the plugin list and of
-  other settings in `config.inc.php`, and the upgrade goes on; the system
-  archive keeps the old tree; the report of phase verify names what is
-  missing and how a hook in `/etc/mailinabox/upgrade-2604.d/` brings it
-  back. The old plugins are not copied back on their own (a plugin for the
-  old Roundcube can break the new one). The open items go into a
-  root-only file, and while it exists System Status shows a warning with
-  the details under "show more" (and so the daily mail of the status
-  checks names it); `--ack-local` or removing the file ends it. The
-  migration tool (tools/migrate-to-2604.sh) has the same gap and gets the
-  same report and warning.
-* **update-check.sh does not record two Postfix TLS parameters**\
-  tools/update-check.sh records 24 Postfix parameters, but not
-  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
-  change of v78-r2604.3 does not show in its list of changes (seen in T5b
-  of v78-r2604.3; the smoke check `tls-key-exchange` shows it). Planned:
-  record both, and `after` judges only keys that both records have: a key
-  that only the record after the update has (recorded by a newer version
-  of the tool) goes into a section "newly recorded (not judged)" of
-  `changes.txt` and is counted in its RESULT line, but is no unexpected
-  change. Output stays on the console and in `/root/update-check/`.
 * **Setup does not point to update-check.sh**\
   Setup does not mention tools/update-check.sh. Planned: at the end of a
   setup run on an existing box (not the first install, and not when the
@@ -232,23 +292,14 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   `after` and `mailcheck` with that record; otherwise that `before` and
   `backup` can be run before the next update and `after` and `mailcheck`
   after it, optionally (README-fork.md, "Updating the fork").
-* **Smoke check mig-pop3-uidl-alice fails on the T5b lab snapshot**\
-  The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
-  snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX
-  mail to Spam and back, which gave it a new UID and so a new POP3 UIDL
-  (UID 9 became 12). It fails the same way before any update. The lab
-  now has a corrected copy of the manifest for that VM and a new snapshot
-  of v78-r2604.2 as the start of T5b; the preparation still needs to
-  leave the seeded mails alone (T5b of v78-r2604.3).
-
-* **`bootstrap.sh` is fooled by a local tag of the release name**\
-  bootstrap.sh decides whether to fetch by the name that `git describe`
-  prints for the checkout, so a local tag of the release's name on another
-  commit keeps the old code (see "Updating the fork" in README-fork.md).
-  Comparing the commit of the tag at the source (`git ls-remote`) with
-  `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
-  as every update goes through that code and that release had no test
-  run of it.
+* **The in-place and migration tools trust a local tag of the release name**\
+  `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
+  `update_fork_dir`) and `tools/migrate-to-2604.sh` (`resolve_miab_dir`)
+  still decide by the name that `git describe` prints whether to fetch the
+  release, as bootstrap.sh did before B202: a local tag of the release's
+  name on another commit keeps the old code. The same comparison with the
+  commit of the tag at the source (`git ls-remote`) would find it (seen in
+  the work on B202).
 * **Setup restarts PHP-FPM, ending ActiveSync long polls (B122)**\
   Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
   polls; a reload with a `process_control_timeout` would keep them.
@@ -303,9 +354,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   can neither see a listing nor say that they could not check; the comment
   in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
   127.255.255.254.
-* **In-place upgrade --check prints the GitHub URL for other sources**\
-  `upgrade-in-place-to-2604.sh --check` prints the start command with the
-  GitHub URL also when `SOURCE` and `TAG` name another source.
 * **A Dovecot reload ends open IMAP sessions (B122)**\
   A Dovecot reload ends the open IMAP sessions (their clients log in
   again); setup reloads Dovecot only when its configuration changed (B122).
@@ -335,23 +383,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   When the lookup of a domain's DS record fails, the status checks still
   say "This domain's DNSSEC DS record is not set" (a failed lookup counts
   as no DS record, as before B150); "could not check" would be right.
-* **Migration tool passes the old box's stderr unfiltered (B154)**\
-  `tools/migrate-to-2604.sh` passes the old box's standard error (the
-  error messages of its remote scripts, through ssh) to the terminal
-  unfiltered; the other text of the old box gets "?" for control
-  characters (B154).
-* **Wrong in-place upgrade messages after a failed --redo-from (B161)**\
-  The in-place upgrade's messages after a `--redo-from` that fails: on an
-  upgrade that had finished, the exit message says that cron jobs, update
-  timers and backups "stay paused", although the redo does not pause them
-  again; and while a redo of setup is pending, `--status` counts "Mail
-  offline ... so far" from the start of the original downtime, not from
-  the redo. Cosmetic; found with B161.
-* **Migration tool's files in /root/migration are 0644, not 0600**\
-  The migration tool's directory `/root/migration` is root's only (0700),
-  but the files in it are 0644, among them the copies of the old box's
-  key `old-id_rsa_miab` and of its `passwd`; they could be 0600 (seen in
-  T2 of v78-r2604.2, nothing exposed).
 
 ## v78-r2604.4 (2026-11-19)
 
