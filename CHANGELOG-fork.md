@@ -289,7 +289,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   and phase verify names a local plugin that the web server cannot read:
   a first version made the copies root's only, and a plugin brought back
   with `cp -a` as proposed was not loaded by Roundcube, which logged an
-  error on every request (B186, found in the test runs of this release).
+  error on every request (B186, found in the test runs of this release; a
+  first version of the check read the list of plugin directories, which
+  the tools pass as a pipe, twice and so never named a plugin, found in
+  the review of this release).
 * **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
   tools/update-check.sh now records `tls_eecdh_auto_curves` and
   `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such
