@@ -4889,6 +4889,7 @@ def main():
         run_check("admin-status-changes-unit", c_local_test, ctx, "status-changes.py")
         run_check("admin-panel-fragments", c_local_test, ctx, "panel-fragments.py")
         run_check("admin-self-password-unit", c_local_test, ctx, "self-password.py")
+        run_check("admin-migration-record-unit", c_local_test, ctx, "migration-record.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):

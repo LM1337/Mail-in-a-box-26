@@ -585,6 +585,17 @@ Since this release:
 * Going back to v78-r2604.4 works: its setup gives the database and the
   directory back to www-data and Roundcube's plugin back to its SQL driver.
 
+**The migration number cannot be lowered (B211).** `$STORAGE_ROOT` is the
+home of the storage user, who owns `mailinabox.version` there, the number of
+the last data migration. A lower number made the next setup run run the
+migrations again as root, and some of them delete data when they run twice
+(the DKIM key, Roundcube's CardDAV tables). Setup now also keeps the number
+in `/var/lib/mailinabox/storage-migration` (root's own) and stops before any
+migration when `mailinabox.version` says less. After restoring an older
+backup of `$STORAGE_ROOT` on the same box, setup stops with that message:
+remove `/var/lib/mailinabox/storage-migration` and run setup again, so that
+the backup's migrations run. A restore on a new box needs nothing.
+
 ### Deutsch
 
 **Die Benutzerdatenbank gehört root (B210).**
@@ -628,6 +639,19 @@ Seit diesem Release:
 * Der Weg zurück zu v78-r2604.4 funktioniert: Dessen setup gibt Datenbank
   und Verzeichnis wieder www-data und das Plugin von Roundcube wieder seinem
   SQL-Treiber.
+
+**Die Migrationsnummer lässt sich nicht herabsetzen (B211).**
+`$STORAGE_ROOT` ist das Heimatverzeichnis des Speicherbenutzers, dem dort
+`mailinabox.version` gehört, die Nummer der letzten Datenmigration. Mit einer
+kleineren Nummer führte der nächste Lauf von setup die Migrationen erneut als
+root aus, und manche löschen Daten, wenn sie zweimal laufen (den DKIM-Schlüssel,
+die CardDAV-Tabellen von Roundcube). Setup hält die Nummer jetzt zusätzlich in
+`/var/lib/mailinabox/storage-migration` (gehört root) fest und bricht vor jeder
+Migration ab, wenn `mailinabox.version` weniger angibt. Nach dem
+Zurückspielen einer älteren Sicherung von `$STORAGE_ROOT` auf derselben Box
+bricht setup mit dieser Meldung ab: `/var/lib/mailinabox/storage-migration`
+löschen und setup erneut starten, damit die Migrationen der Sicherung laufen.
+Auf einer neuen Box ist dafür nichts zu tun.
 
 
 Setup output / Ausgaben von setup

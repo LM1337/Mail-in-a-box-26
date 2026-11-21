@@ -91,6 +91,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `tests/fork/self-password.py`, smoke check `api-self-password` (the
   endpoint and Roundcube's settings page).
 
+* **Setup no longer reruns data migrations for a lowered version (B211)**\
+  The storage user owns `$STORAGE_ROOT/mailinabox.version` and could write a
+  lower number into it, and the next setup run ran the data migrations from
+  there again as root (depending on the number deleting the DKIM key, moving
+  the Let's Encrypt account away, dropping Roundcube's CardDAV tables and
+  all webmail sessions). Setup now also records the number of the last
+  migration that ran in `/var/lib/mailinabox/storage-migration` (root's own,
+  with the path of the `$STORAGE_ROOT` it belongs to) and stops before any
+  migration when the file says less, with what to do; a missing file is
+  taken from the record. The file itself stays where and as it was, so it
+  still goes into backups and to a new box. New offline test
+  `tests/fork/migration-record.py`.
+
 ### Upgrade note
 
 * **User database root's only; webmail password changes via the daemon (B210)**\
@@ -110,6 +123,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `plugins/password/drivers/mailinabox.php` stays, unused). An older backup
   restored on this version gets the new owner and modes at the next setup
   run.
+
+* **Restoring an older backup on the same box: remove the migration record (B211)**\
+  The first setup run of this version records the box's migration number
+  in `/var/lib/mailinabox/storage-migration`. If you later restore a backup
+  of `$STORAGE_ROOT` made before a migration of a newer release, setup stops
+  ("... says #N, but this box has run the data migrations up to #M"):
+  remove that file and run setup again, so that the backup's migrations
+  run. A restore on a new box and the migration tool are not affected (a
+  new box has no record). A downgrade to v78-r2604.4 ignores the record
+  and leaves the number as it is, so the way back up works too.
 
 ### Planned
 
@@ -276,16 +299,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   daemon changes the password). The group gives access to some of Dovecot's
   sockets (for example its statistics); taking www-data out of it needs a
   check of what else relies on it (seen in the work on B210).
-* **Storage user can lower mailinabox.version and rerun migrations (B147)**\
-  The storage user owns `$STORAGE_ROOT/mailinabox.version` and its
-  directory, so it can write a lower number there, and the next setup run
-  runs the data migrations from there again as root. Each such run stops at
-  the first migration that cannot run twice, until the file is put right;
-  before that, depending on the number, migration 8 deletes the DKIM key,
-  11 moves the Let's Encrypt account away, 12 drops Roundcube's CardDAV
-  tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
-  (following a link) to 0600. It gives no root and needs code running as
-  the storage user, which no service of the box runs (B147).
 * **Status checks query_dns() crashes on overlong domain names**\
   The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
   nor `NameTooLong`: a mail domain whose name is too long with

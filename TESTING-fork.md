@@ -290,6 +290,13 @@ report. The groups:
   changed, the policy, two-factor authentication (no code: 403 and not
   counted; a wrong code: counted), the limits per account and per address
   and their expiry; group admin runs it (`admin-self-password-unit`).
+  `tests/fork/migration-record.py` (B211; no box needed) runs
+  setup/migrate.py with its migrations replaced by recorders against a
+  temporary `STORAGE_ROOT` and record: no record, the same number, a lower
+  number in `mailinabox.version` (setup stops before any migration), a
+  higher one, a missing file (taken from the record), the record of another
+  `STORAGE_ROOT`, a record that is a link, writable by others or broken, and
+  a failed migration; group admin runs it (`admin-migration-record-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
