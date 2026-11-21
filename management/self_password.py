@@ -35,8 +35,11 @@ MAX_FAILURES_ADDRESS = 10
 WINDOW = 600
 
 MSG_BAD_LOGIN = "Incorrect email address or password."
-MSG_MFA = ("This account uses two-factor authentication: change its password "
-	"in the control panel (System > Users).")
+# Only an administrator can change it there (Mail & Users > Users); the
+# control panel has no password form for other users.
+MSG_MFA = ("This account uses two-factor authentication, so its password "
+	"cannot be changed here. An administrator changes it in the control "
+	"panel (Mail & Users > Users).")
 MSG_LIMIT = "Too many failed attempts. Try again in a few minutes."
 
 

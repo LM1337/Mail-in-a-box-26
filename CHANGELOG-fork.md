@@ -422,9 +422,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   keep their open database, and new lookups open it as root. Between
   setup's Roundcube step and the restart of the management daemon a few
   minutes later, a password change in webmail fails with "Could not save
-  new password. Connection error." (try again after the update). A user
-  with two-factor authentication changes the password in the control panel
-  (System > Users) instead of webmail. Scripts of your own that read
+  new password. Connection error." (try again after the update). Webmail
+  cannot change the password of an account with two-factor authentication
+  (the daemon would need its code): an administrator changes it in the
+  control panel (Mail & Users > Users). A user who is not an administrator
+  and has turned on two-factor authentication can no longer change their
+  own password; the old SQL driver did not check it. Scripts of your own that read
   `users.sqlite` as another account than root no longer can. A backup of
   this version restored on an older version, or a downgrade to
   v78-r2604.4, works: its setup gives the directory and the database back

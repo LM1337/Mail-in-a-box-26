@@ -609,8 +609,10 @@ Since this release:
   the same password rules as the control panel and changes only that
   account's password. Failed attempts are logged for fail2ban
   (`miab-management`), and after 5 for an account or 10 for an address
-  within 10 minutes, more are refused for a while. An account with two-factor
-  authentication changes its password in the control panel.
+  within 10 minutes, more are refused for a while. Webmail cannot change the
+  password of an account with two-factor authentication: an administrator
+  changes it in the control panel (Mail & Users > Users), which has no
+  password form for other users.
 * Going back to v78-r2604.4 works: its setup gives the database and the
   directory back to www-data and Roundcube's plugin back to its SQL driver.
 
@@ -684,8 +686,10 @@ Seit diesem Release:
   dieselben Passwortregeln an wie das Control Panel und ändert nur das
   Passwort dieses Kontos. Fehlversuche werden für fail2ban protokolliert
   (`miab-management`); nach 5 für ein Konto oder 10 für eine Adresse innerhalb
-  von 10 Minuten werden weitere eine Zeit lang abgewiesen. Ein Konto mit
-  Zwei-Faktor-Anmeldung ändert sein Passwort im Control Panel.
+  von 10 Minuten werden weitere eine Zeit lang abgewiesen. Das Passwort eines
+  Kontos mit Zwei-Faktor-Anmeldung lässt sich im Webmail nicht ändern: Ein
+  Administrator ändert es im Control Panel (Mail & Users > Users), das für
+  andere Benutzer kein Passwortformular hat.
 * Der Weg zurück zu v78-r2604.4 funktioniert: Dessen setup gibt Datenbank
   und Verzeichnis wieder www-data und das Plugin von Roundcube wieder seinem
   SQL-Treiber.

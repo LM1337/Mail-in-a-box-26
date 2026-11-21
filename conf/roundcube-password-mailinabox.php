@@ -15,7 +15,8 @@
  *   200 "OK"      the password was changed
  *   400 message   the new password was refused (policy)
  *   403 message   the current password is wrong, or the account uses
- *                 two-factor authentication (change it in the control panel)
+ *                 two-factor authentication (an administrator changes it in
+ *                 the control panel)
  *   429 message   too many failed attempts
  * The client's address goes in X-Forwarded-For, so that a failed attempt is
  * logged for it (fail2ban's miab-management jail).
