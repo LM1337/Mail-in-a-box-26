@@ -634,6 +634,24 @@ v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add 
   a directory of root's outside `$STORAGE_ROOT` (or a bind mount), which
   changes the paths of the backups and the tools; README-fork.md, "Known
   issues" (seen in the review of B210 to B213).
+* **A local fail2ban file with ignoreip overrides the panel's allowlist**\
+  A `jail.local` or `jail.d/*.local` of the administrator that sets
+  `ignoreip` in `[DEFAULT]` is read after `jail.d/mailinabox_adaptive.conf`
+  and replaces the `ignoreip` that the allowlist of System > Intrusion
+  Protection writes there: the panel lists an address as allowlisted, and
+  no jail ignores it. The page does not warn about it (seen on the copy of
+  a production box in the test runs of this release).
+* **No log line for a successful webmail password change**\
+  `POST /me/password` (webmail's password change through the management
+  daemon, B210) logs failures (for fail2ban) but not a successful change
+  (seen in the test runs of this release).
+* **The journal may lose a whole file at a rotation**\
+  setup/system.sh sets journald's `MaxRetentionSec=10day` (upstream). On a
+  copy of a production box the system journal before a moment in an update
+  test was gone while syslog and mail.log were intact, which takes the
+  setup marks that the log audit needs; a likely cause, not confirmed, is
+  that journald removes a rotated file whole when its oldest entry is
+  older than the retention (seen in the test runs of this release).
 * **www-data is still in the group dovecot**\
   Setup adds www-data to the group dovecot, as upstream did "so PHP can use
   doveadm, for the password changing plugin". No version of this fork uses

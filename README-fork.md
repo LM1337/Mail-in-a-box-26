@@ -2700,7 +2700,7 @@ map a whole range to an offset). Instead:
 * Setup re-owns its own directories by name: `mail/mailboxes` and
   `mail/sieve` (mail), `mail/dkim` (opendkim), `mail/postgrey` (postgrey),
   `mail/spamassassin` (spampd), `mail/roundcube`, `owncloud` (www-data),
-  `mail/users.sqlite` (root:www-data), `www` (owner `user-data`).
+  `mail/users.sqlite` (root:root 0600, B210), `www` (owner `user-data`).
 * After setup, every parked owner is mapped by its old name (from the old
   `/etc/passwd` and `/etc/group`) to the new ID. An owner whose name does
   not exist on the new machine keeps its old number only if that number is
@@ -3120,7 +3120,7 @@ Stattdessen:
 * Das Setup setzt seine eigenen Verzeichnisse nach Namen: `mail/mailboxes` und
   `mail/sieve` (mail), `mail/dkim` (opendkim), `mail/postgrey` (postgrey),
   `mail/spamassassin` (spampd), `mail/roundcube`, `owncloud` (www-data),
-  `mail/users.sqlite` (root:www-data), `www` (Besitzer `user-data`).
+  `mail/users.sqlite` (root:root 0600, B210), `www` (Besitzer `user-data`).
 * Nach dem Setup wird jeder geparkte Besitzer über seinen alten Namen (aus
   `/etc/passwd` und `/etc/group` der alten Box) auf die neue Kennung gesetzt.
   Gibt es den Namen auf der neuen Maschine nicht, behält der Besitzer seine
