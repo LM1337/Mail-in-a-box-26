@@ -8,8 +8,9 @@
 # also an administrator's, give itself the admin privilege, or add an alias
 # that forwards a user's mail elsewhere; and every local account could read
 # all password hashes. Now the management daemon, which runs as root, is the
-# only writer, and Roundcube's driver (conf/roundcube-password-driver.php)
-# calls this endpoint on 127.0.0.1:10222.
+# only writer, and Roundcube's driver (conf/roundcube-password-mailinabox.php,
+# installed as plugins/password/drivers/mailinabox.php) calls this endpoint on
+# 127.0.0.1:10222.
 #
 # The caller proves who they are with their current password (HTTP Basic
 # authentication, "email:current password", as for /login) and, when the
