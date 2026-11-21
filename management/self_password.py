@@ -20,8 +20,9 @@
 # the account whose current password was given. The new password goes
 # through the daemon's own policy and hash (mailconfig.set_mail_password, as
 # POST /mail/users/password). Failed attempts are logged as failed logins,
-# so that fail2ban's miab-management jail bans the address (nginx's /admin/
-# proxy and Roundcube's driver pass the client's address in X-Forwarded-For),
+# so that fail2ban's miab-management jail bans the address (Roundcube's driver
+# passes the client's address in X-Forwarded-For; nginx answers
+# /admin/me/password with 404, so only local callers reach the endpoint),
 # and after a few failures for an account or an address, more attempts are
 # refused for a while, also from 127.0.0.1, which fail2ban does not ban.
 
@@ -95,8 +96,10 @@ class FailureLimiter:
 		times.append(self.clock())
 		self.failures[key] = times[-64:]
 		if len(self.failures) > self.max_keys:
-			# Drop the keys whose newest failure is oldest.
-			for k in sorted(self.failures, key=lambda k: self.failures[k][-1])[:len(self.failures) - self.max_keys]:
+			# Drop the keys whose newest failure is oldest, those of addresses
+			# first: a caller that forges new addresses must not flush the
+			# failures of an account.
+			for k in sorted(self.failures, key=lambda k: (k.startswith("account:"), self.failures[k][-1]))[:len(self.failures) - self.max_keys]:
 				del self.failures[k]
 
 	def reset(self, key):

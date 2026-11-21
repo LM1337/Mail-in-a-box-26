@@ -15,7 +15,9 @@ python3 stdlib only, no box needed.
     minutes refuse more attempts with 429, a right password does not get
     through then either; a success clears the account's count; old failures
     expire;
-  * the limiter keeps at most max_keys keys.
+  * the limiter keeps at most max_keys keys, and drops those of addresses
+    before those of accounts (forged addresses do not flush an account's
+    failures).
 
   tests/fork/self-password.py
 
@@ -169,6 +171,13 @@ for i in range(30):
 	clock.t += 1
 	lim.add("k%d" % i)
 check("limiter keeps max_keys", (len(lim.failures), "k29" in lim.failures, "k0" in lim.failures), (10, True, False))
+lim = sp.FailureLimiter(clock=clock, max_keys=10)
+clock.t += 1
+lim.add("account:victim@example.com")
+for i in range(30):
+	clock.t += 1
+	lim.add("address:192.0.2.%d" % i)
+check("new addresses do not flush an account's failures", ("account:victim@example.com" in lim.failures, len(lim.failures)), (True, 10))
 
 if failures:
 	print("\n%d case(s) failed: %s" % (len(failures), ", ".join(failures)))

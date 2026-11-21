@@ -4551,42 +4551,31 @@ def roundcube_password_save(ctx, cookie, cur, new):
 
 def c_api_self_password(ctx):
     # POST /me/password (B210): a user changes their own password with the
-    # current one, as Roundcube's password plugin now does (its driver calls
-    # the daemon on 127.0.0.1). A wrong current password (one failed login,
-    # far below the miab-management jail), a password that the policy refuses,
-    # the change and the change back, the old password no longer working; then
-    # the same through Roundcube's Settings > Password, with Roundcube's own
-    # message for a wrong current password.
+    # current one through Roundcube's Settings > Password (its driver calls
+    # the daemon on 127.0.0.1:10222): Roundcube's own message for a wrong
+    # current password, the change and the change back, the old password no
+    # longer working. nginx answers the endpoint from outside with 404 (its
+    # answers 403, 400 and 401 are in tests/fork/self-password.py).
     if not ctx.user_pw or not ctx.admin_auth:
         raise Skip("TEST_USER_PW or the admin session missing")
     user = "smokepw-%s@%s" % (ctx.tok, ctx.domain)
-    pw2 = "Smk-%s" % uuid.uuid4().hex
     pw3 = "Smk-%s" % uuid.uuid4().hex
-    SECRETS.update((pw2, pw3))
+    SECRETS.add(pw3)
     steps = []
     api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": user, "password": ctx.user_pw}), 200, "text/html", "users/add")
     try:
-        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, "wrong-%s" % ctx.tok), form={"password": pw2})
-        api_expect(r, 403, "text/plain", "wrong current password")
-        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, ctx.user_pw), form={"password": "short"})
-        api_expect(r, 400, "text/plain", "short new password")
-        r = http_req(ctx, "POST", "/admin/me/password", form={"password": pw2})
-        api_expect(r, 401, "text/plain", "no credentials")
-        steps.append("wrong current 403, short 400, none 401")
-        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, ctx.user_pw), form={"password": pw2})
-        api_expect(r, 200, "text/plain", "change")
-        _need(r.text().strip() == "OK", "change: %s" % r.text()[:80])
-        _need(imap_works(ctx, user, pw2) and not imap_works(ctx, user, ctx.user_pw), "IMAP after the change: new or old password wrong")
-        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, pw2), form={"password": ctx.user_pw})
-        api_expect(r, 200, "text/plain", "change back")
-        _need(imap_works(ctx, user, ctx.user_pw), "IMAP after the change back")
-        steps.append("changed and back (IMAP checked)")
+        # The right current password, so that nothing is counted if nginx
+        # passed it on after all.
+        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, ctx.user_pw), form={"password": pw3})
+        _need(r.status == 404, "from outside: HTTP %d, not 404" % r.status)
+        _need(imap_works(ctx, user, ctx.user_pw), "IMAP after the request from outside: the password changed")
+        steps.append("from outside 404")
         _jar, cookie = roundcube_login(ctx, user)
         msg = roundcube_password_save(ctx, cookie, "wrong-%s" % ctx.tok, pw3)
         _need(msg.startswith("error:") and "incorrect" in msg.lower(), "Roundcube, wrong current password: %s" % msg)
         msg = roundcube_password_save(ctx, cookie, ctx.user_pw, pw3)
         _need(msg.startswith("confirmation:"), "Roundcube, change: %s" % msg)
-        _need(imap_works(ctx, user, pw3), "IMAP after the change in Roundcube")
+        _need(imap_works(ctx, user, pw3) and not imap_works(ctx, user, ctx.user_pw), "IMAP after the change in Roundcube: new or old password wrong")
         msg = roundcube_password_save(ctx, cookie, pw3, ctx.user_pw)
         _need(msg.startswith("confirmation:"), "Roundcube, change back: %s" % msg)
         _need(imap_works(ctx, user, ctx.user_pw), "IMAP after the change back in Roundcube")
@@ -4606,7 +4595,7 @@ def c_api_self_password(ctx):
     api_expect(r, 200, "text/html", "users/remove")
     if isinstance(mailbox, Exception):
         raise mailbox
-    return "; ".join(steps) + "; user removed, " + mailbox + " (1 failed login)"
+    return "; ".join(steps) + "; user removed, " + mailbox
 
 
 def munin_conf_contact(ctx):

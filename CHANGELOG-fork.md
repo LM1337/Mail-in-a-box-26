@@ -353,7 +353,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Roundcube's Settings > Password now changes the password through the
   management daemon: the fork's password driver
   (`conf/roundcube-password-mailinabox.php`) calls the new endpoint
-  `POST /me/password` on 127.0.0.1, which checks the current password (and
+  `POST /me/password` on 127.0.0.1 (nginx does not pass it on from the
+  Internet), which checks the current password (and
   two-factor authentication) as the control panel's login does, applies the
   same password rules and hash as the control panel, changes only the
   caller's own password, logs failed attempts for fail2ban's
@@ -365,7 +366,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   database stays in SQLite's rollback journal mode, in which readers need no
   write access to the directory. New offline test
   `tests/fork/self-password.py`, smoke check `api-self-password` (the
-  endpoint and Roundcube's settings page).
+  endpoint closed from outside, and Roundcube's settings page).
 
 * **Setup no longer reruns data migrations for a lowered version (B211)**\
   The storage user owns `$STORAGE_ROOT/mailinabox.version` and could write a
