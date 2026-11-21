@@ -307,6 +307,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `curl | bash` names the script of that source instead of the GitHub URL.
   Whoever copied the line before ran the release from GitHub instead of
   the source and tag that were checked.
+* **TAG may be a full commit id, also for a fresh clone (B188)**\
+  The in-place upgrade and the migration through `curl | bash`, and a first
+  install with `setup/bootstrap.sh`, clone the fork with `git clone -b
+  $TAG`, which takes a tag or a branch only: `TAG=<commit id>` stopped
+  with "Remote branch ... not found", although `--check` proposes the start
+  command with it (B203). A full commit id (40 hex digits) is now fetched
+  by its id; a short one fails with a hint. When the download fails, the
+  in-place tool's advice names the given `SOURCE` instead of GitHub. New
+  offline test `tests/fork/clone-ref.py`.
 * **Migration tool filters the old box's error messages too (B154)**\
   `tools/migrate-to-2604.sh` passes the standard error of every command
   that talks to the old box (its scripts through ssh, the login checks, the

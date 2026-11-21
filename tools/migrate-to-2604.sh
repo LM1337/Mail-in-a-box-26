@@ -1988,6 +1988,26 @@ checkout_ref() { # DIR REF [--force]
 	fi
 }
 
+# A new shallow clone of REF from SOURCE in DIR: a tag or a branch, or a
+# full commit id (40 hex digits), which "git clone -b" does not take (B188);
+# GitHub and Gitea serve a commit of the repository by its full id. A short
+# commit id cannot be fetched: say so.
+clone_ref() { # SOURCE REF DIR
+	local src=$1 ref=$2 d=$3
+	if [[ $ref =~ ^[0-9a-f]{40}$ ]]; then
+		git -c init.defaultBranch=main init -q "$d" && git -C "$d" remote add origin "$src" \
+			&& git -C "$d" fetch -q --depth 1 origin "$ref" < /dev/null \
+			&& git -C "$d" -c advice.detachedHead=false checkout -q FETCH_HEAD && return 0
+		rm -rf "$d"
+		return 1
+	fi
+	git clone -q -b "$ref" --depth 1 "$src" "$d" < /dev/null && return 0
+	if [[ $ref =~ ^[0-9a-f]{7,39}$ ]]; then
+		warn "TAG=$ref looks like a short commit id; give a tag, a branch or the full commit id (40 hex digits)."
+	fi
+	return 1
+}
+
 # After a failed fetch or clone of the release tag: is the tag not published
 # in SOURCE (yes: the branch main may be used instead), or is it there (no:
 # the fetch failed for another reason)? Stops when SOURCE cannot be asked
@@ -2022,7 +2042,7 @@ resolve_miab_dir() {
 	if [ ! -d "$d" ]; then
 		command -v git > /dev/null || install_packages git
 		say "Downloading Mail-in-a-Box $tag from $source..."
-		if ! git clone -q -b "$tag" --depth 1 "$source" "$d" < /dev/null; then
+		if ! clone_ref "$source" "$tag" "$d"; then
 			# The branch main only when the tag is not published (B169).
 			if [ -n "${TAG:-}" ] || ! tag_unpublished "$source" "$tag"; then
 				die "Could not download $tag from $source. Set TAG and SOURCE like this:

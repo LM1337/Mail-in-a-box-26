@@ -97,11 +97,24 @@ if [ ! -d "$HOME/mailinabox" ]; then
 	fi
 
 	echo "Downloading Mail-in-a-Box $TAG. . ."
-	git clone \
-		-b "$TAG" --depth 1 \
-		"$SOURCE" \
-		"$HOME/mailinabox" \
-		< /dev/null 2> /dev/null
+	if [[ $TAG =~ ^[0-9a-f]{40}$ ]]; then
+		# A full commit id, which git clone -b does not take (B188); GitHub
+		# and Gitea serve a commit of the repository by its id.
+		if ! { git -c init.defaultBranch=main init -q "$HOME/mailinabox" \
+				&& git -C "$HOME/mailinabox" remote add origin "$SOURCE" \
+				&& git -C "$HOME/mailinabox" fetch -q --depth 1 origin "$TAG" < /dev/null 2> /dev/null \
+				&& git -C "$HOME/mailinabox" -c advice.detachedHead=false checkout -q FETCH_HEAD; }; then
+			rm -rf "$HOME/mailinabox"
+			echo "Could not download the commit $TAG from $SOURCE."
+			exit 1
+		fi
+	else
+		git clone \
+			-b "$TAG" --depth 1 \
+			"$SOURCE" \
+			"$HOME/mailinabox" \
+			< /dev/null 2> /dev/null
+	fi
 
 	echo
 fi

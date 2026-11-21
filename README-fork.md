@@ -63,7 +63,9 @@ The environment variables `SOURCE` and `TAG` choose another repository or
 tag. They must be given to `bash` after `sudo` (sudo does not pass on the
 environment, and `TAG=main curl ...` only sets it for curl). Without `TAG`,
 bootstrap.sh installs the current release tag. `TAG=main` installs the
-development state of the branch `main`, for testing only:
+development state of the branch `main`, for testing only (`TAG` may also be
+another branch or a full commit id of 40 hex digits, as for the in-place
+and migration tools):
 
 	sudo TAG=main bash -c "$(curl -fsSL https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main/setup/bootstrap.sh)"
 
@@ -83,7 +85,10 @@ wählen. Die Variablen gehören hinter `sudo` vor `bash` (sudo reicht die
 Umgebung nicht weiter, und `TAG=main curl ...` gilt nur für curl). Ohne `TAG`
 installiert bootstrap.sh den aktuellen Release-Tag; `TAG=main` holt den
 Entwicklungsstand des Zweigs `main`, nur zum Testen:
-`sudo TAG=main bash -c "$(curl -fsSL .../setup/bootstrap.sh)"`.
+`sudo TAG=main bash -c "$(curl -fsSL .../setup/bootstrap.sh)"` (`TAG` kann
+auch ein anderer Zweig oder eine vollständige Commit-Kennung aus 40
+Hex-Ziffern sein, wie bei den Werkzeugen für das Upgrade an Ort und Stelle
+und den Umzug).
 
 Die Upstream-Form `curl ... | sudo bash` taugt unter Ubuntu 26.04 nicht für
 ein Setup mit Rückfragen: Dessen sudo (sudo-rs) hält die Dialogfenster des
