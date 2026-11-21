@@ -442,7 +442,22 @@ on_exit() {
 			echo "The full output is in $LOG_FILE."
 			echo "Fix the cause and run the command again; it continues where it stopped."
 		fi
-		if downtime_active && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
+		if downtime_active && [ -n "$(state_get REDO_EPOCH)" ]; then
+			# A redo (--redo-from) that stopped (B161).
+			echo
+			if [ -n "$(state_get SETUP_END_EPOCH)" ]; then
+				echo "Mail runs (setup has finished), but the redo (--redo-from $(state_get REDO_PHASE), since $(state_get REDO_AT)) is not finished."
+			else
+				echo "Setup runs again (--redo-from $(state_get REDO_PHASE), since $(state_get REDO_AT)) and has not finished:"
+				echo "mail may be offline until it has."
+			fi
+			if [ "$(state_get REDO_AFTER_FINISH)" = 1 ]; then
+				echo "The upgrade had finished before: cron jobs, update timers and backups run (the redo does not pause them)."
+			else
+				echo "Cron jobs, update timers and backups stay paused until the upgrade is finished."
+			fi
+			echo "Continue with: $SELF$([ "$(state_get VERIFY_RAN)" != 1 ] || echo " (or --finish)")"
+		elif downtime_active && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
 			echo
 			echo "Mail runs again (setup has finished), but the upgrade is not finished: cron jobs,"
 			# --finish only accepts a final check that has run (B161).
@@ -5150,9 +5165,34 @@ print_summary() {
 	now=$(date +%s)
 	f=$(state_get FINISHED_EPOCH)
 	e=$(state_get SETUP_END_EPOCH)
-	say "Mail offline:    $(state_get QUIESCED_AT)$([ -n "$e" ] && echo " until the end of setup ($(fmt_dur $((e - q))))" || echo ", for $(fmt_dur $((now - q))) so far")"
-	if [ -n "$f" ]; then
-		say "Downtime:        $(state_get QUIESCED_AT) -> $(state_get FINISHED_AT) ($(fmt_dur $((f - q))))"
+	# After a --redo-from, the downtime of the upgrade is the one up to its
+	# first setup and finish; the redo has a line of its own (B161).
+	local r e1 f1 fa
+	r=$(state_get REDO_EPOCH)
+	e1=$(state_get FIRST_SETUP_END_EPOCH)
+	f1=$(state_get FIRST_FINISHED_EPOCH)
+	fa=$(state_get FINISHED_AT)
+	if [ -n "$f1" ]; then fa=$(state_get FIRST_FINISHED_AT); fi
+	if [ -n "$r" ] && [ -n "$e1" ]; then
+		say "Mail offline:    $(state_get QUIESCED_AT) until the end of setup ($(fmt_dur $((e1 - q))))"
+	else
+		say "Mail offline:    $(state_get QUIESCED_AT)$([ -n "$e" ] && echo " until the end of setup ($(fmt_dur $((e - q))))" || echo ", for $(fmt_dur $((now - q))) so far")"
+	fi
+	if [ -n "$f1" ] || [ -n "$f" ]; then
+		say "Downtime:        $(state_get QUIESCED_AT) -> $fa ($(fmt_dur $((${f1:-$f} - q))))"
+	fi
+	if [ -n "$r" ]; then
+		case "$(state_get REDO_PHASE)" in
+			cleanup-etc | setup)
+				if [ -n "$e" ] && [ "$e" -ge "$r" ]; then
+					say "Redo:            --redo-from $(state_get REDO_PHASE) at $(state_get REDO_AT), setup ran again for $(fmt_dur $((e - r)))"
+				else
+					say "Redo:            --redo-from $(state_get REDO_PHASE) at $(state_get REDO_AT), setup runs again ($(fmt_dur $((now - r))) so far)"
+				fi
+				;;
+			*) say "Redo:            --redo-from $(state_get REDO_PHASE) at $(state_get REDO_AT)" ;;
+		esac
+		if [ -n "$f1" ] && [ -n "$f" ]; then say "Finished again:  $(state_get FINISHED_AT)"; fi
 	fi
 	if [ -n "$(state_get REBOOTS)" ]; then say "Reboots:         $(state_get REBOOTS)"; fi
 }
@@ -5351,6 +5391,21 @@ look at $LOG_FILE, fix the cause and run $SELF by hand."
 			cleanup-etc | setup | local-ext | verify)
 				phase_is_done release_2604 || [ "$(state_get MODE)" = rerun ] \
 					|| die "--redo-from $REDO_FROM only works after the release upgrades."
+				# What the messages of a redo need (on_exit, print_summary, B161):
+				# whether the upgrade had finished (then cron, the timers and the
+				# backups run, the redo does not pause them again), when the redo
+				# started, and the end of the first setup and of the first finish.
+				if phase_is_done finish; then state_set REDO_AFTER_FINISH 1; else state_set REDO_AFTER_FINISH ""; fi
+				state_set REDO_PHASE "$REDO_FROM"
+				state_set REDO_AT "$(date -u +%FT%TZ)"
+				state_set REDO_EPOCH "$(date +%s)"
+				if [ -z "$(state_get FIRST_FINISHED_EPOCH)" ] && [ -n "$(state_get FINISHED_EPOCH)" ]; then
+					state_set FIRST_FINISHED_AT "$(state_get FINISHED_AT)"
+					state_set FIRST_FINISHED_EPOCH "$(state_get FINISHED_EPOCH)"
+				fi
+				if [ -z "$(state_get FIRST_SETUP_END_EPOCH)" ] && [ -n "$(state_get SETUP_END_EPOCH)" ]; then
+					state_set FIRST_SETUP_END_EPOCH "$(state_get SETUP_END_EPOCH)"
+				fi
 				phases_reset_from "${REDO_FROM//-/_}"
 				state_set FINISHED_AT ""
 				state_set FINISHED_EPOCH ""

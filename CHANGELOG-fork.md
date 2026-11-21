@@ -123,6 +123,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   other text of the old box since B154; before, an error message of the old
   box could send escape sequences to the terminal. The progress filter of
   the main copy does the same for rsync's output.
+* **Right in-place upgrade messages after a failed --redo-from (B161)**\
+  When a `--redo-from` of the in-place upgrade fails, the exit message
+  names the redo and when it started, and says that cron jobs, update
+  timers and backups run when the upgrade had finished before (the redo
+  does not pause them again; it said they "stay paused"), or stay paused
+  until it is finished. A failed redo of setup says that setup runs again
+  since then and mail may be offline until it has, instead of "Mail is
+  OFFLINE" since the start of the upgrade's downtime. `--status` shows the
+  downtime up to the end of the first setup and a line "Redo:" with the
+  time setup ran again (or so far), instead of counting "Mail offline ...
+  so far" from the start of the original downtime.
 
 ### Planned
 
@@ -277,13 +288,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   When the lookup of a domain's DS record fails, the status checks still
   say "This domain's DNSSEC DS record is not set" (a failed lookup counts
   as no DS record, as before B150); "could not check" would be right.
-* **Wrong in-place upgrade messages after a failed --redo-from (B161)**\
-  The in-place upgrade's messages after a `--redo-from` that fails: on an
-  upgrade that had finished, the exit message says that cron jobs, update
-  timers and backups "stay paused", although the redo does not pause them
-  again; and while a redo of setup is pending, `--status` counts "Mail
-  offline ... so far" from the start of the original downtime, not from
-  the redo. Cosmetic; found with B161.
 * **Migration tool's files in /root/migration are 0644, not 0600**\
   The migration tool's directory `/root/migration` is root's only (0700),
   but the files in it are 0644, among them the copies of the old box's
