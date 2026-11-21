@@ -7,7 +7,8 @@ needed (B126: the limit of failed logins from the box itself).
     limit 100, at most 10000 names);
   * an account name becomes the same file name as in guard.lua (lower case,
     %XX for other bytes), and back;
-  * scan(): names with failures in the window, files of names without any
+  * scan(): names with different wrong passwords in the window (a tag sent
+    again counts once), files of names without any
     are removed, old .tmp files too, a symbolic link and other names are
     left alone, a directory of another mode is refused; the events are read
     once (also a leftover events.read), broken lines are dropped; --unlock
@@ -61,13 +62,17 @@ with tempfile.TemporaryDirectory() as root:
 	os.mkdir(d, 0o700)
 
 	def put(name, lines, age=0):
+		# lines: times (each with a tag of its own) or (time, tag)
 		p = os.path.join(d, name)
 		with open(p, "w") as f:
-			f.write("".join(f"{t}\n" for t in lines))
+			for i, t in enumerate(lines):
+				t, tag = t if isinstance(t, tuple) else (t, "%04x" % i)
+				f.write(f"{t} {tag}\n")
 		os.utime(p, (NOW - age, NOW - age))
 
 	put("a-alice@example.com", [NOW - 10] * 120)                     # locked
 	put("a-bob@example.com", [NOW - W - 5] * 3 + [NOW - 100] * 2)   # 2 in the window
+	put("a-dave@example.com", [(NOW - 50, "beef")] * 30 + [(NOW - 40, "0001"), "junk"]) # an old password sent 30 times: 2 different
 	put("a-old@example.com", [NOW - W - 100] * 4, age=W + 50)       # none: removed
 	put("a-fresh@example.com", [NOW - W - 100], age=10)              # none, but just written: kept
 	put("x.tmp", [], age=120)                                        # old tmp: removed
@@ -80,8 +85,8 @@ with tempfile.TemporaryDirectory() as root:
 
 	res = ag.scan(d, W, now=NOW)
 	names = sorted((n["key"], n["failures"]) for n in res["names"])
-	check("scan names", names, [("a-alice@example.com", 120), ("a-bob@example.com", 2)])
-	check("scan removed", sorted(os.listdir(d)), ["a-alice@example.com", "a-bob@example.com", "a-fresh@example.com", "a-link@example.com", "a-y@example.com.tmp"])
+	check("scan names", names, [("a-alice@example.com", 120), ("a-bob@example.com", 2), ("a-dave@example.com", 2)])
+	check("scan removed", sorted(os.listdir(d)), ["a-alice@example.com", "a-bob@example.com", "a-dave@example.com", "a-fresh@example.com", "a-link@example.com", "a-y@example.com.tmp"])
 	check("scan events", [(e["kind"], e["key"]) for e in res["events"]], [("locked", "a-carol@example.com"), ("locked", "a-alice@example.com"), ("names", "-")])
 	check("events read once", ag.scan(d, W, now=NOW)["events"], [])
 	check("status keeps events", (open(os.path.join(d, "events"), "w").write(f"{NOW} locked 100 a-bob@example.com\n") > 0,
@@ -109,7 +114,7 @@ with tempfile.TemporaryDirectory() as root:
 	sent3 = ag.notify({}, cfg, now=NOW + 1200, scan_func=scan_with([]), send=mails.append, state_path=sp)
 	sent4 = ag.notify({}, cfg, now=NOW + 3700, scan_func=scan_with([]), send=mails.append, state_path=sp)
 	check("notify rate", (sent1, sent2, sent3, sent4, len(mails)), (True, False, False, True, 2))
-	check("mail 1", ("alice@example.com: 100 failed logins in 30 minutes" in mails[0], "no such account" in mails[0]), (True, False))
+	check("mail 1", ("alice@example.com: 100 different wrong passwords in 30 minutes" in mails[0], "no such account" in mails[0]), (True, False))
 	check("mail 2 marks unknown", "ghost@example.com (no such account)" in mails[1], True)
 	check("state after", ag.load_state(sp)["pending"], [])
 	many = [ev(NOW + 3800 + i, f"a-u{i}@example.com") for i in range(ag.MAX_PENDING + 5)]

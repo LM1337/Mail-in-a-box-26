@@ -6,9 +6,11 @@
 # mail-users.sh) count the failed logins that come from 127.0.0.1 and ::1
 # (Z-Push's ActiveSync and Autodiscover, Roundcube, Nextcloud's IMAP login,
 # and any process on the box) per account name, and refuse an account name
-# for these logins while it has LIMIT failures within WINDOW seconds. Their
-# state is in /run/miab-auth-guard (the account dovecot, 0700): a file per
-# name with one line per failure, and "events" with a line per new lock.
+# for these logins while it has LIMIT different wrong passwords within
+# WINDOW seconds (a password sent again counts once). Their state is in
+# /run/miab-auth-guard (the account dovecot, 0700): a file per name with a
+# line "<time> <tag>" per new wrong password (a 16-bit tag of a salted hash,
+# never the password), and "events" with a line per new lock.
 #
 #   auth_guard.py --notify     (cron, every 10 minutes) mails new locks to the
 #                              recipient of the box's reports (System >
@@ -79,13 +81,16 @@ def name_of(key):
 
 
 def _recent(text, now, window):
-	n = 0
+	# The different tags (wrong passwords) within the window, as guard.lua's
+	# M.recent(): lines "<time> <tag>".
+	tags = set()
 	for line in text.splitlines():
-		if line.isdigit():
-			t = int(line)
+		m = re.fullmatch(r"([0-9]{1,12}) ([0-9a-fA-F]{4})", line)
+		if m:
+			t = int(m.group(1))
 			if now - t < window and t <= now + 60:
-				n += 1
-	return n
+				tags.add(m.group(2))
+	return len(tags)
 
 
 def scan(state_dir, window, now=None, consume=True, remove=None):
@@ -207,20 +212,20 @@ def message(events, accounts, cfg, dropped=0):
 	for e in events:
 		when = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(e["time"]))
 		if e["kind"] == "locked":
-			lines.append(f"{when}  {describe(e['key'], accounts)}: {e['count']} failed logins in {minutes} minutes")
+			lines.append(f"{when}  {describe(e['key'], accounts)}: {e['count']} different wrong passwords in {minutes} minutes")
 		else:
 			lines.append(f"{when}  failed logins of more than {e['count']} account names in {minutes} minutes; the names with the fewest failures are no longer counted")
 	if dropped:
 		lines.append(f"... and {dropped} more")
 	return (
 		f"Dovecot refused the logins from the box itself (ActiveSync, Autodiscover, webmail, Nextcloud) for these accounts "
-		f"after {cfg['LIMIT']} failed logins in {minutes} minutes:\n\n" + "\n".join(lines) + "\n\n"
+		f"after {cfg['LIMIT']} different wrong passwords in {minutes} minutes (a password sent again counts once):\n\n" + "\n".join(lines) + "\n\n"
 		f"These logins come through services of the box, so fail2ban does not see the failures of one account from many "
 		f"addresses. It may be someone who tries the account's passwords through ActiveSync, webmail or Nextcloud from many "
-		f"addresses, a phone or another program with an old password, or a process on the box that tries passwords. While an "
+		f"addresses, or a process on the box that tries passwords (a phone with an old password sends the same one again and counts once). While an "
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
-		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} failed logins in the "
-		f"last {minutes} minutes.\n\n"
+		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
+		f"passwords in the last {minutes} minutes.\n\n"
 		f"The current state: sudo management/auth_guard.py --status\n"
 		f"To end a lock now: sudo management/auth_guard.py --unlock ADDRESS\n")
 
@@ -298,7 +303,7 @@ def main(argv):
 		print(f"{cfg['DIR']} does not exist (Dovecot's limit of failed logins from the box itself is not set up).")
 		return 1
 	accounts = known_accounts(env)
-	print(f"Failed logins from the box itself in the last {cfg['WINDOW'] // 60} minutes (refused at {cfg['LIMIT']}):")
+	print(f"Different wrong passwords from the box itself in the last {cfg['WINDOW'] // 60} minutes (refused at {cfg['LIMIT']}):")
 	if not res["names"]:
 		print("  none")
 	for n in sorted(res["names"], key=lambda n: -n["failures"]):

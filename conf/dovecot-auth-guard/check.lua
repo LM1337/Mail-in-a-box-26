@@ -1,7 +1,7 @@
 -- Mail-in-a-Box: the first passdb (deny = yes) of setup/mail-users.sh. It
 -- refuses every login from the box itself for an account name with too many
--- failed logins from the box (guard.lua), before the password is checked,
--- at once and without Dovecot's penalty. Do not edit: setup writes it again.
+-- different wrong passwords from the box (guard.lua), before the password is
+-- checked, at once and without Dovecot's penalty. Do not edit: setup writes it again.
 
 local G = dofile("/usr/local/lib/mailinabox/dovecot-auth-guard/guard.lua")
 

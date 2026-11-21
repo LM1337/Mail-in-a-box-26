@@ -859,10 +859,13 @@ fixed)" lists a few more.
   fail2ban protects with the client's own address, and the delay made a
   wrong ActiveSync password take up to 50 s and slowed down every other
   user. Instead Dovecot counts these failures per account: an account with
-  100 failed logins from the box within 30 minutes is refused for logins
-  from the box (ActiveSync, Autodiscover, webmail, Nextcloud, and IMAP,
-  POP3, ManageSieve or SMTP submission on 127.0.0.1) until it has fewer,
-  even with its right password. The other accounts are not slowed down,
+  100 different wrong passwords from the box within 30 minutes is refused
+  for logins from the box (ActiveSync, Autodiscover, webmail, Nextcloud,
+  and IMAP, POP3, ManageSieve or SMTP submission on 127.0.0.1) until it has
+  fewer, even with its right password. A password sent again counts once:
+  a phone that keeps sending an old password, or a repeated typo, does not
+  lock the account (Dovecot keeps only a 16-bit tag of a salted hash of
+  each wrong password, never the password). The other accounts are not slowed down,
   and the account's own mail programs that log in from outside are not
   refused. So a process on the box (any local account, or code running as
   www-data after a hole in PHP or a web app) can try at most 100 passwords
@@ -944,10 +947,14 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   des Clients schützt, und die Verzögerung ließ ein falsches
   ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen Benutzer.
   Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 100
-  fehlgeschlagenen Anmeldungen von der Box innerhalb von 30 Minuten wird
-  für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
+  verschiedenen falschen Passwörtern von der Box innerhalb von 30 Minuten
+  wird für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
   Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand auf 127.0.0.1)
-  abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Die
+  abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Ein
+  erneut gesendetes Passwort zählt nur einmal: Ein Handy, das immer wieder
+  ein altes Passwort schickt, oder ein wiederholter Tippfehler sperrt das
+  Konto nicht (Dovecot behält von jedem falschen Passwort nur ein
+  16-Bit-Kennzeichen eines Hashes mit Zufallswert, nie das Passwort). Die
   anderen Konten werden nicht gebremst, und die eigenen Mailprogramme des
   Kontos, die sich von außen anmelden, werden nicht abgewiesen. Ein Prozess
   auf der Box (jedes lokale Konto oder Code, der nach einer Lücke in PHP
@@ -1609,7 +1616,7 @@ the following, on by default:
   own. On the allowlist, password guesses through these servers are no
   longer banned: Z-Push checks each password with an IMAP login from
   127.0.0.1, which Dovecot answers at once and limits only per account
-  (100 failures in 30 minutes, B126, "Known issues"). The
+  (100 different wrong passwords in 30 minutes, B126, "Known issues"). The
   address's reverse DNS name is shown only as extra information, and only
   when it resolves back to the address: the owner of an address sets its
   PTR record. Other apps that sync through their provider's servers are
@@ -1854,8 +1861,8 @@ eingeschaltet:
   nichts hinein. In der Freigabeliste werden Passwortversuche über diese
   Server nicht mehr gesperrt: Z-Push prüft jedes Passwort mit einer
   IMAP-Anmeldung von 127.0.0.1 aus, die Dovecot sofort beantwortet und nur
-  pro Konto begrenzt (100 Fehlversuche in 30 Minuten, B126, „Bekannte
-  Einschränkungen“). Den Namen aus
+  pro Konto begrenzt (100 verschiedene falsche Passwörter in 30 Minuten,
+  B126, „Bekannte Einschränkungen“). Den Namen aus
   dem Reverse-DNS zeigt die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
   Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
   Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie

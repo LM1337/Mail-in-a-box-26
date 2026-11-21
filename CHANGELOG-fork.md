@@ -436,10 +436,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   127.0.0.1. Dovecot now counts the failed logins from 127.0.0.1 and ::1
   per account name, with two small Lua passdbs around the SQL one
   (package `dovecot-auth-lua`, `conf/dovecot-auth-guard/`): an account
-  with 100 failed logins from the box within 30 minutes is refused for
-  logins from the box until it has fewer, at once and before its password
-  is checked, so further guesses tell nothing, not even a right one. Only
-  the failures of the name itself count: made-up names do not lower the
+  with 100 different wrong passwords from the box within 30 minutes is
+  refused for logins from the box until it has fewer, at once and before
+  its password is checked, so further guesses tell nothing, not even a
+  right one. A password sent again counts once, as with Dovecot's own
+  penalty: a phone that keeps sending an old password (Z-Push tries up to
+  three times per request) or a repeated typo cannot lock the account,
+  while each guess counts; only a 16-bit tag of a hash of the password
+  with a random salt is kept, never the password. Only the failures of
+  the name itself count: made-up names do not lower the
   limit of a real account, and a flood of them does not flush a lock (the
   names with the fewest failures are forgotten first). The other accounts
   are not slowed down (no penalty of 127.0.0.1), and the account's own

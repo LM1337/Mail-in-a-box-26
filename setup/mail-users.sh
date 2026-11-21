@@ -132,13 +132,16 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 #  * miab-auth-guard-count, the last one, is reached only when no passdb
 #    before it accepted the login. For a login from the box it records the
 #    failure for the account name and answers at once ("nodelay"), which
-#    raises no penalty of 127.0.0.1 either. It returns no password, so it
-#    can accept none. Logins from other addresses keep Dovecot's delay and
-#    penalty.
+#    raises no penalty of 127.0.0.1 either. It records only a 16-bit tag of
+#    a salted hash of the wrong password, and a password sent again counts
+#    once: a phone that keeps sending an old password (Z-Push tries up to
+#    three times per request) or a repeated typo counts once, guesses count
+#    each. It returns no password, so it can accept none. Logins from other
+#    addresses keep Dovecot's delay and penalty.
 #  * miab-auth-guard-check, the first one (deny = yes), refuses an account
-#    name with 100 failed logins from the box within 30 minutes for logins
-#    from the box, at once and before the password is checked, until it has
-#    fewer. Only the failures of the name itself count, so made-up names
+#    name with 100 different wrong passwords from the box within 30 minutes
+#    for logins from the box, at once and before the password is checked,
+#    until it has fewer. Only the failures of the name itself count, so made-up names
 #    cannot lower the limit of a real account, and the other accounts are
 #    not slowed down. Logins from other addresses (the IMAP and SMTP logins
 #    of the user's own mail programs) are not refused. The price: while

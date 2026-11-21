@@ -319,13 +319,16 @@ report. The groups:
   logins from the box itself: the values it reads from
   `conf/dovecot-auth-guard/guard.lua`, the file names of account names
   (the same as the Lua code's: only A-Z lowered, other bytes as %XX), the
-  scan of the state directory (counts within the window, files of names
+  scan of the state directory (different tags of wrong passwords within
+  the window, a tag sent again counted once, files of names
   without failures and old temporary files removed, a symbolic link left
   alone, a directory of another mode refused, events read once, also a
   leftover), `--unlock`, and the mail of new locks (at once, then at most
   hourly, a name without an account marked, the pending events capped).
-  The smoke check `login-auth-guard` (needs `--ssh`) makes 100 wrong IMAP
-  logins of a test account from 127.0.0.1 on the box (answered at once),
+  The smoke check `login-auth-guard` (needs `--ssh`) makes 150 IMAP logins
+  of a test account with the same wrong password from 127.0.0.1 on the box
+  (it must not lock the account), then 100 logins of another test account
+  with different wrong passwords (answered at once),
   then expects that account refused from there with its right password,
   another test account logging in from there in under 3 s, the refused
   account logging in from outside, `--status` naming it and `--unlock`

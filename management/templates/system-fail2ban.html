@@ -495,7 +495,7 @@ function f2b_relay_allow(relay) {
     + (f2b_state.relays_source && f2b_state.relays_source.retrieved ? " (Microsoft's list as of " + f2b_state.relays_source.retrieved + ")" : "") + "."));
   q.append($("<p/>").text("Put it on the allowlist only if users of this box use that app with an Exchange account. Addresses on the allowlist are never banned by any jail:"
     + " wrong passwords that come through Microsoft's servers, also those of anyone who adds an account of this box to the app on purpose, are then no longer banned;"
-    + " what remains is Dovecot's limit for logins from the box itself (Z-Push checks each password with an IMAP login from there): 100 failed logins of one account within 30 minutes, then that account's ActiveSync, webmail and Nextcloud logins are refused for a while (B126). Its bans are lifted when you save."));
+    + " what remains is Dovecot's limit for logins from the box itself (Z-Push checks each password with an IMAP login from there): 100 different wrong passwords of one account within 30 minutes, then that account's ActiveSync, webmail and Nextcloud logins are refused for a while (B126). Its bans are lifted when you save."));
   show_modal_confirm("Intrusion Protection", q, "Put it on the allowlist", function() { f2b_allowlist_add(relay.network); });
 }
 

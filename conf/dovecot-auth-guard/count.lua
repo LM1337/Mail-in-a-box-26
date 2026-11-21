@@ -1,12 +1,14 @@
 -- Mail-in-a-Box: the last passdb of setup/mail-users.sh, reached only when
 -- the passdbs before it did not accept the login. For a login from the box
--- itself it records the failure for the account name (guard.lua) and
+-- itself it records the failure for the account name with the tag of the
+-- wrong password (guard.lua; a password sent again counts once) and
 -- answers it at once, without Dovecot's delay and penalty; it can accept no
 -- password (it returns none). Do not edit: setup writes it again on every
 -- run.
 
 local G = dofile("/usr/local/lib/mailinabox/dovecot-auth-guard/guard.lua")
 
+local SALT = G.salt() -- for the tags of the wrong passwords, never written
 local names, nnames = {}, 0 -- key -> { failures within the window, last time }
 local warned_state, warned_full = false, false
 
@@ -66,7 +68,7 @@ function auth_passdb_lookup(req)
 		names[key] = { 0, now }
 		nnames = nnames + 1
 	end
-	local n = G.add(G.path(key), now)
+	local n, new = G.add(G.path(key), now, G.tag(SALT, req.password))
 	if n == nil then
 		-- Without its state the limit cannot work: Dovecot's delay and
 		-- penalty, as before B126, never no limit.
@@ -78,9 +80,9 @@ function auth_passdb_lookup(req)
 	end
 	warned_state = false
 	names[key] = { n, now }
-	if n == G.LIMIT then
+	if new and n == G.LIMIT then
 		G.event(now, "locked", n, key)
-		req:log_warning(string.format("miab-auth-guard: %d failed logins of this account from the box itself in %d s; logins from the box itself are refused for it until they are fewer", n, G.WINDOW))
+		req:log_warning(string.format("miab-auth-guard: %d different wrong passwords of this account from the box itself in %d s; logins from the box itself are refused for it until they are fewer", n, G.WINDOW))
 	end
 	-- No password: the login fails, at once.
 	return dovecot.auth.PASSDB_RESULT_OK, { nodelay = "yes" }

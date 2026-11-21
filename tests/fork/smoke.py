@@ -4620,6 +4620,12 @@ def login(user, pw):
         try: M.shutdown()
         except Exception: pass
 out = {}
+if spec.get("same"):
+    fails = 0
+    for i in range(spec["same"]):
+        r, _ = login(spec["user"], "old-%s" % spec["tok"])
+        fails += r != "ok"
+    out["same"] = fails
 if spec.get("wrong"):
     t = time.time(); fails = 0
     for i in range(spec["wrong"]):
@@ -4646,8 +4652,10 @@ def auth_guard_on_box(ctx, spec):
 
 def c_login_auth_guard(ctx):
     # The limit of failed logins from the box itself (B126, setup/mail-users.sh,
-    # conf/dovecot-auth-guard/): 100 wrong passwords of one account over IMAP
-    # from 127.0.0.1 are answered at once (no 2 s delay each); then that
+    # conf/dovecot-auth-guard/): 150 logins of one account with the same wrong
+    # password (a phone with an old one) count once and do not lock it; 100
+    # different wrong passwords over IMAP from 127.0.0.1 are answered at once
+    # (no 2 s delay each); then that
     # account is refused from 127.0.0.1 even with its right password, while
     # another account logs in from there at once (no penalty of 127.0.0.1)
     # and the refused account still logs in from outside; auth_guard.py
@@ -4666,13 +4674,16 @@ def c_login_auth_guard(ctx):
     for u in (victim, other):
         api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": u, "password": ctx.user_pw}), 200, "text/html", "users/add")
     try:
+        r = auth_guard_on_box(ctx, {"user": other, "tok": ctx.tok, "same": 150, "right": [["other", other, ctx.user_pw]]})
+        _need(r["same"] == 150 and r["other"][0] == "ok", "150 times the same wrong password, then the right one: %s" % r)
+        steps.append("150 times the same wrong password: not locked")
         r = auth_guard_on_box(ctx, {"user": victim, "tok": ctx.tok, "wrong": 100})
         fails, secs = r["wrong"]
         _need(fails == 100, "%d of 100 wrong logins failed" % fails)
         _need(secs < 60, "100 wrong logins from 127.0.0.1 took %.1f s (Dovecot's delay of 2 s each?)" % secs)
         steps.append("100 wrong from 127.0.0.1 in %.1f s" % secs)
         r = auth_guard_on_box(ctx, {"right": [["victim", victim, ctx.user_pw], ["other", other, ctx.user_pw]]})
-        _need(r["victim"][0] != "ok" and "Too many failed logins" in r["victim"][0], "the account after 100 failures, right password: %s" % r["victim"][0])
+        _need(r["victim"][0] != "ok" and "Too many failed logins" in r["victim"][0], "the account after 100 different wrong passwords, right password: %s" % r["victim"][0])
         _need(r["other"][0] == "ok" and r["other"][1] < 3, "another account from 127.0.0.1: %s in %.1f s" % tuple(r["other"]))
         steps.append("refused with its right password, another account in %.2f s" % r["other"][1])
         _need(imap_works(ctx, victim, ctx.user_pw), "the refused account from outside: IMAP login failed")
