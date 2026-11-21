@@ -53,6 +53,29 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   DNSSEC messages say that the DS records are listed below the message,
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
+* **In-place upgrade and migration name local Roundcube changes (B200)**\
+  The in-place upgrade (tools/upgrade-in-place-to-2604.sh) and the
+  migration (tools/migrate-to-2604.sh) no longer lose local changes to
+  Roundcube without a word. Setup installs the new Roundcube as a new tree
+  and writes its own `config/config.inc.php`, so plugins installed by hand
+  and changes to that file were gone afterwards, and neither the check nor
+  `etc-report.txt` named them. The preflight check (also `--check`) now
+  warns, without stopping the upgrade, and names the plugin directories
+  that setup does not install, plugins added to or left out of the plugin
+  list, and other settings that differ from what setup writes (a setting
+  that setup does not write by its name only, as its value may be a
+  password). Before setup the tools keep the old `config.inc.php` and
+  those plugin directories in `old-roundcube/` of their state directory
+  (the in-place upgrade's system archive now also holds the whole old
+  Roundcube). They are not copied back on their own, since a plugin for the
+  old Roundcube can break the new one. Phase verify lists what the new
+  Roundcube does not have, also in `etc-report.txt`, says how a hook in
+  `/etc/mailinabox/upgrade-2604.d/` brings it back, and writes the open
+  items into `local-changes.json` (root's only) in the state directory;
+  while that file exists, System Status shows a warning with the items
+  under "show more", and so the daily status change mail names it too. The
+  new option `--ack-local` of both tools, or removing the file, ends it.
+  New offline test `tests/fork/roundcube-local.py`.
 
 ### Planned
 
@@ -66,26 +89,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   copies (one box had 2.5 GB there; the directory is not in the box's
   backup). Setup could keep the newest few copies and remove older ones
   (seen in the review of v78-r2604.4).
-* **In-place upgrade does not warn about local Roundcube changes**\
-  The in-place upgrade (tools/upgrade-in-place-to-2604.sh) does not see
-  local changes to Roundcube: the upgrade moves Roundcube to a new version,
-  setup builds a new tree in `/usr/local/lib/roundcubemail` and writes its
-  own plugin list into `config/config.inc.php`, so extra plugins (and
-  changes to that file) are gone afterwards, and neither the preflight
-  check nor `etc-report.txt` names them (a question about local changes in
-  the in-place upgrade, after v78-r2604.4). Planned, without stopping the
-  upgrade: the preflight check warns and names the plugin directories that
-  setup does not install and the differences of the plugin list and of
-  other settings in `config.inc.php`, and the upgrade goes on; the system
-  archive keeps the old tree; the report of phase verify names what is
-  missing and how a hook in `/etc/mailinabox/upgrade-2604.d/` brings it
-  back. The old plugins are not copied back on their own (a plugin for the
-  old Roundcube can break the new one). The open items go into a
-  root-only file, and while it exists System Status shows a warning with
-  the details under "show more" (and so the daily mail of the status
-  checks names it); `--ack-local` or removing the file ends it. The
-  migration tool (tools/migrate-to-2604.sh) has the same gap and gets the
-  same report and warning.
 * **update-check.sh does not record two Postfix TLS parameters**\
   tools/update-check.sh records 24 Postfix parameters, but not
   `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum

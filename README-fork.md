@@ -1565,6 +1565,34 @@ again in finish. Write hooks so that they can run twice. For example:
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
 
+**Local changes to Roundcube** (webmail) do not stop the upgrade: setup
+installs the new Roundcube as a new tree in `/usr/local/lib/roundcubemail`
+and writes its own `config/config.inc.php` (on every run, also on later
+updates). The preflight check (also `--check`) names plugin directories that
+setup does not install, plugins added to or left out of the plugin list, and
+other settings of `config.inc.php` that differ from what setup writes (of a
+setting that setup does not write only its name: its value may be a
+password). Before setup the tool keeps the old `config.inc.php` and those
+plugin directories in `/root/upgrade-2604/old-roundcube` (the system archive
+keeps the whole old tree). They are not copied back on their own: a plugin
+for the old Roundcube can break the new one. Phase verify lists what the new
+Roundcube does not have (also in `etc-report.txt`) and writes it to
+`/root/upgrade-2604/local-changes.json` (root's only); while that file exists,
+System Status shows a warning with the items under "show more", so the daily
+status mail names it too. Bring back what the new Roundcube supports with a
+hook, for example:
+
+    # /etc/mailinabox/upgrade-2604.d/50-roundcube.sh
+    RC=/usr/local/lib/roundcubemail
+    cp -a "$UPGRADE_STATE_DIR/old-roundcube/plugins/contextmenu" "$RC/plugins/"
+    grep -q "'contextmenu'" "$RC/config/config.inc.php" \
+      || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
+
+and run `--redo-from local-ext`, which checks again. When everything is dealt
+with (or not wanted), `upgrade-in-place-to-2604.sh --ack-local` (or removing
+the file) ends the warning. Setup writes `config.inc.php` again on the next
+update, so keep such a change in a script of your own.
+
 **How long an in-place upgrade takes.** Times of the in-place test runs
 (test VMs with 2 vCPUs and 4-6 GB RAM on one host with HDD storage):
 
@@ -1777,6 +1805,38 @@ noch einmal. Hooks so schreiben, dass sie zweimal laufen dürfen. Beispiel:
 
     # /etc/mailinabox/upgrade-2604.d/after/10-myapp.sh
     cd /opt/myapp && docker compose up -d
+
+**Lokale Änderungen an Roundcube** (Webmail) halten das Upgrade nicht an:
+Setup installiert das neue Roundcube als neuen Baum in
+`/usr/local/lib/roundcubemail` und schreibt seine eigene
+`config/config.inc.php` (bei jedem Lauf, auch bei späteren Updates). Die
+Vorabprüfung (auch `--check`) nennt Plugin-Verzeichnisse, die setup nicht
+installiert, Plugins, die der Plugin-Liste hinzugefügt oder aus ihr
+weggelassen wurden, und andere Einstellungen der `config.inc.php`, die von
+dem abweichen, was setup schreibt (bei einer Einstellung, die setup nicht
+schreibt, nur ihren Namen: ihr Wert kann ein Passwort sein). Vor setup
+bewahrt das Werkzeug die alte `config.inc.php` und diese
+Plugin-Verzeichnisse in `/root/upgrade-2604/old-roundcube` auf (das
+Systemarchiv enthält den ganzen alten Baum). Sie werden nicht von selbst
+zurückkopiert: Ein Plugin für das alte Roundcube kann das neue stören. Die
+Phase verify listet, was dem neuen Roundcube fehlt (auch in
+`etc-report.txt`), und schreibt es in `/root/upgrade-2604/local-changes.json`
+(nur für root lesbar); solange es diese Datei gibt, zeigt der Systemstatus
+eine Warnung mit den Punkten unter „show more“, die tägliche Statusmail
+nennt sie also auch. Was das neue Roundcube unterstützt, holt ein Hook
+zurück, zum Beispiel:
+
+    # /etc/mailinabox/upgrade-2604.d/50-roundcube.sh
+    RC=/usr/local/lib/roundcubemail
+    cp -a "$UPGRADE_STATE_DIR/old-roundcube/plugins/contextmenu" "$RC/plugins/"
+    grep -q "'contextmenu'" "$RC/config/config.inc.php" \
+      || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
+
+und danach `--redo-from local-ext`, das erneut prüft. Ist alles erledigt
+(oder nicht mehr gewünscht), beendet `upgrade-in-place-to-2604.sh
+--ack-local` (oder das Löschen der Datei) die Warnung. Setup schreibt
+`config.inc.php` beim nächsten Update wieder neu; eine solche Änderung also
+in einem eigenen Skript aufbewahren.
 
 **Wie lange ein Upgrade an Ort und Stelle dauert.** Zeiten der
 In-place-Testläufe (Test-VMs mit 2 vCPUs und 4-6 GB RAM auf einem Host mit
@@ -2172,6 +2232,22 @@ containers do not, the tool checks).
   mail to the new box later.
 * Logs (`/var/log`, so the usage reports start empty) and ACL entries with
   named users (none in a normal box).
+* Local changes to Roundcube (webmail; it is not part of the data, setup
+  installs its own and writes its own `config/config.inc.php`). The check
+  (also `--check`) names plugin directories of the old box that setup does
+  not install and changes of its `config.inc.php` (the plugin list, and other
+  settings; of a setting that setup does not write only its name). The tool
+  keeps the old `config.inc.php` and those plugin directories in
+  `/root/migration/old-roundcube`, but does not install them (a plugin for
+  the old Roundcube can break the new one). Phase verify lists what the new
+  Roundcube does not have (also in `etc-report.txt`) and writes it to
+  `/root/migration/local-changes.json` (root's only); while that file exists,
+  System Status shows a warning with the items under "show more", and so
+  does the daily status mail. Bring back what the new Roundcube supports
+  (copy the plugin directory to `/usr/local/lib/roundcubemail/plugins/` and
+  add it to `$config['plugins']`; setup writes the file again on every run),
+  then end the warning with `migrate-to-2604.sh --ack-local` (or remove the
+  file). Not with `--from-backup`: a backup has no Roundcube.
 
 #### After the migration
 
@@ -2577,6 +2653,25 @@ das, manche Container nicht; das Werkzeug prüft es).
   und zeigt, wie man sie später an die neue Box zustellt.
 * Protokolle (`/var/log`, die Nutzungsberichte beginnen leer) und
   ACL-Einträge mit benannten Benutzern (in einer normalen Box keine).
+* Lokale Änderungen an Roundcube (Webmail; es gehört nicht zu den Daten,
+  setup installiert sein eigenes und schreibt seine eigene
+  `config/config.inc.php`). Die Prüfung (auch `--check`) nennt
+  Plugin-Verzeichnisse der alten Box, die setup nicht installiert, und
+  Änderungen an ihrer `config.inc.php` (die Plugin-Liste und andere
+  Einstellungen; bei einer Einstellung, die setup nicht schreibt, nur den
+  Namen). Das Werkzeug bewahrt die alte `config.inc.php` und diese
+  Plugin-Verzeichnisse in `/root/migration/old-roundcube` auf, installiert sie
+  aber nicht (ein Plugin für das alte Roundcube kann das neue stören). Die
+  Phase verify listet, was dem neuen Roundcube fehlt (auch in
+  `etc-report.txt`), und schreibt es in `/root/migration/local-changes.json`
+  (nur für root lesbar); solange es diese Datei gibt, zeigt der Systemstatus
+  eine Warnung mit den Punkten unter „show more“, ebenso die tägliche
+  Statusmail. Was das neue Roundcube unterstützt, zurückholen (das
+  Plugin-Verzeichnis nach `/usr/local/lib/roundcubemail/plugins/` kopieren
+  und in `$config['plugins']` eintragen; setup schreibt die Datei bei jedem
+  Lauf neu), danach die Warnung mit `migrate-to-2604.sh --ack-local` beenden
+  (oder die Datei löschen). Nicht bei `--from-backup`: Eine Sicherung enthält
+  kein Roundcube.
 
 #### Nach dem Umzug
 

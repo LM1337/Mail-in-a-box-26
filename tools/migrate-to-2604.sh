@@ -70,6 +70,12 @@ DEFAULT_RAW=https://raw.githubusercontent.com/LM1337/Mail-in-a-box-26/main
 DEFAULT_TAG=v78-r2604.4 # keep in sync with setup/bootstrap.sh
 CLONE_DIR=/root/mailinabox
 PHP_VER=8.5 # keep in sync with setup/functions.sh
+# Roundcube (setup/webmail.sh) on the old box: what this tool keeps of it, and
+# the local changes that are still open after the final check (System Status
+# warns while the file exists, see management/status_checks.py).
+RC_DIR=/usr/local/lib/roundcubemail
+OLD_RC=$STATE_DIR/old-roundcube
+LOCAL_CHANGES=$STATE_DIR/local-changes.json
 QUIET_TIMEOUT=${MIGRATE_QUIET_TIMEOUT:-900}
 # How long to wait for a Mail-in-a-Box backup on the old box (wait_backup_done).
 BACKUP_WAIT=${MIGRATE_BACKUP_WAIT:-7200}
@@ -158,7 +164,7 @@ Usage: migrate-to-2604.sh --check --from [USER@]OLD_HOST [options]    (start her
        migrate-to-2604.sh --from [USER@]OLD_HOST [options]
        migrate-to-2604.sh --from-backup DIR|URL --backup-key FILE [options]
        migrate-to-2604.sh --status [--verbose] | --check-old | --rollback
-                          | --finish | --push-zones-to-old
+                          | --finish | --push-zones-to-old | --ack-local
 
 Moves a Mail-in-a-Box (official v68 or later on Ubuntu 22.04, or a box
 release-upgraded in place to Ubuntu 24.04) to THIS machine, a fresh Ubuntu
@@ -238,6 +244,10 @@ Control:
                           box's DNS zones (new IPs) until the glue records have
                           propagated. The one change to files on the old box;
                           --rollback undoes it.
+  --ack-local             after the migration: end System Status's warning
+                          about local Roundcube changes of the old box that
+                          were not carried over (removes
+                          /root/migration/local-changes.json)
   -h, --help              show this help
 
 Environment: SOURCE and TAG choose the repository and tag when the script
@@ -1263,6 +1273,352 @@ sys.exit(1 if errors else 0)
 EOF
 )
 
+# Local changes to Roundcube: plugin directories that setup does not install,
+# and the plugin list and other settings of config/config.inc.php that differ
+# from what setup writes ("check"), or that the Roundcube after setup does
+# not have ("verify", which also writes the file for System Status). Keep
+# in sync with the other tool (tests/fork/roundcube-local.py compares the
+# copies of tools/upgrade-in-place-to-2604.sh and tools/migrate-to-2604.sh).
+ROUNDCUBE_PY=$(cat <<'EOF'
+import json, os, re, sys, time, unicodedata
+
+# Roundcube's own plugins (1.6 and 1.7) and the three that setup adds.
+SETUP_PLUGIN_DIRS = set("""acl additional_message_headers archive attachment_reminder autologon autologout
+database_attachments debug_logger emoticons enigma example_addressbook filesystem_attachments help
+hide_blockquote http_authentication identicon identity_select jqueryui krb_authentication managesieve
+markasjunk markdown_editor new_user_dialog new_user_identity newmail_notifier password reconnect
+redundant_attachments show_additional_headers squirrelmail_usercopy subscriptions_option userinfo
+vcard_attachments virtuser_file virtuser_query zipdownload persistent_login html5_notifier carddav""".split())
+# The settings that setup writes into config/config.inc.php (setup/webmail.sh,
+# normalized as by norm()). None: the value is the box's own (its key, name,
+# paths, the support link of upstream or this fork).
+SETUP_SETTINGS = {
+	"log_dir": "'/var/log/roundcubemail/'",
+	"temp_dir": "'/var/tmp/roundcubemail/'",
+	"db_dsnw": None,
+	"imap_host": "'ssl://localhost:993'",
+	"imap_conn_options": "array('ssl'=>array('verify_peer'=>false,'verify_peer_name'=>false))",
+	"imap_timeout": "15",
+	"smtp_host": "'tls://127.0.0.1'",
+	"smtp_conn_options": "array('ssl'=>array('verify_peer'=>false,'verify_peer_name'=>false))",
+	"support_url": None,
+	"product_name": None,
+	"cipher_method": "'AES-256-CBC'",
+	"des_key": None,
+	"plugins": "array('html5_notifier','archive','zipdownload','password','managesieve','jqueryui','persistent_login','carddav')",
+	"skin": "'elastic'",
+	"login_autocomplete": "2",
+	"login_username_filter": "'email'",
+	"password_charset": "'UTF-8'",
+	"junk_mbox": "'Spam'",
+	"session_path": "'/mail/'",
+	"session_samesite": "'Strict'",
+	"quota_zero_as_unlimited": "true",
+	"skin_logo": None,
+}
+NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$")
+MAX_ITEMS = 100
+
+
+def shown(s, n=120):
+	# Text for the terminal, the report and System Status: control and format
+	# characters (escape sequences, bidi overrides) become "?".
+	s = "".join("?" if unicodedata.category(c)[0] == "C" else c for c in s)
+	return s if len(s) <= n else s[:n - 3] + "..."
+
+
+class Unreadable(Exception):
+	pass
+
+
+def statements(text):
+	# The PHP statements of the file, normalized: comments removed, white space
+	# only where two words meet, strings as written. Returns (line, text) pairs.
+	out, cur, line, start, depth, i, n = [], [], 1, None, 0, 0, len(text)
+	space = False
+
+	def add(tok):
+		nonlocal space, start
+		if start is None:
+			start = line
+		if space and cur and re.match(r"[\w$]", tok[0]) and re.match(r"[\w$]", cur[-1][-1]):
+			cur.append(" ")
+		space = False
+		cur.append(tok)
+
+	def flush():
+		nonlocal cur, start, space
+		s = "".join(cur)
+		s = re.sub(r",([)\]])", r"\1", s)
+		if s:
+			out.append((start, s))
+		cur, start, space = [], None, False
+
+	php = False
+	while i < n:
+		if not php:
+			j = text.find("<?php", i)
+			rest = text[i:] if j < 0 else text[i:j]
+			if rest.strip():
+				raise Unreadable("text outside of PHP (line %d)" % (line + rest[:len(rest) - len(rest.lstrip())].count("\n")))
+			line += rest.count("\n")
+			if j < 0:
+				break
+			i, php = j + 5, True
+			continue
+		c = text[i]
+		if text.startswith("?>", i):
+			flush()
+			i, php = i + 2, False
+			continue
+		if c == "\n":
+			line += 1
+			space = True
+			i += 1
+		elif c.isspace():
+			space = True
+			i += 1
+		elif c == "#" or text.startswith("//", i):
+			j = text.find("\n", i)
+			k = text.find("?>", i)
+			if k >= 0 and (j < 0 or k < j):
+				i = k
+			else:
+				i = n if j < 0 else j
+			space = True
+		elif text.startswith("/*", i):
+			j = text.find("*/", i + 2)
+			if j < 0:
+				raise Unreadable("a comment that does not end (line %d)" % line)
+			line += text.count("\n", i, j)
+			i, space = j + 2, True
+		elif text.startswith("<<<", i):
+			raise Unreadable("a heredoc string (line %d)" % line)
+		elif c in "'\"":
+			j = i + 1
+			while j < n and text[j] != c:
+				j += 2 if text[j] == "\\" else 1
+			if j >= n:
+				raise Unreadable("a string that does not end (line %d)" % line)
+			tok = text[i:j + 1]
+			add(tok)
+			line += tok.count("\n")
+			i = j + 1
+		elif c == ";" and depth == 0:
+			flush()
+			i += 1
+		else:
+			if c in "([{":
+				depth += 1
+			elif c in ")]}":
+				depth -= 1
+			m = re.match(r"[\w$]+", text[i:])
+			tok = m.group(0) if m else c
+			add(tok)
+			i += len(tok)
+	if depth != 0 or (cur and "".join(cur).strip()):
+		raise Unreadable("a statement without its end at the end of the file")
+	return out
+
+
+SETTING_RE = re.compile(r"^\$config\[(['\"])([A-Za-z0-9_]+)\1\]=(.+)$")
+APPEND_RE = re.compile(r"^\$config\[(['\"])plugins\1\]\[\]=(['\"])([^'\"\\]*)\2$")
+INIT_RE = re.compile(r"^\$config=(array\(\)|\[\])$")
+# $config['ldap_public']['name'] = ...: a part of the setting ldap_public.
+PART_RE = re.compile(r"^\$config\[(['\"])([A-Za-z0-9_]+)\1\]\[")
+
+
+def plugin_list(value):
+	# The names in "array('a', 'b')" or "['a', 'b']", or None for anything else.
+	m = re.match(r"^(?:array\((.*)\)|\[(.*)\])$", value)
+	if not m:
+		return None
+	inner = m.group(1) if m.group(1) is not None else m.group(2)
+	if inner == "":
+		return []
+	names = []
+	for part in inner.split(","):
+		pm = re.match(r"^(['\"])([^'\"\\]*)\1$", part)
+		if not pm:
+			return None
+		names.append(pm.group(2))
+	return names
+
+
+def read_config(path):
+	# {"settings": {key: value}, "plugins": [names] or None, "other": [lines],
+	# "error": text or None}; None when there is no file.
+	try:
+		fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+	except FileNotFoundError:
+		return None
+	except OSError as e:
+		return {"settings": {}, "plugins": None, "other": [], "error": "cannot be read (%s)" % e.strerror}
+	with os.fdopen(fd, "rb") as f:
+		data = f.read(1024 * 1024 + 1)
+	r = {"settings": {}, "plugins": None, "other": [], "error": None}
+	if len(data) > 1024 * 1024:
+		r["error"] = "is larger than 1 MB"
+		return r
+	try:
+		stmts = statements(data.decode("utf-8", "replace"))
+	except Unreadable as e:
+		r["error"] = "could not be read completely: %s" % e
+		return r
+	appended = []
+	for line, s in stmts:
+		m = SETTING_RE.match(s)
+		if m:
+			r["settings"][m.group(2)] = m.group(3)
+			if m.group(2) == "plugins":
+				appended = []
+			continue
+		m = APPEND_RE.match(s)
+		if m:
+			appended.append(m.group(3))
+			continue
+		if INIT_RE.match(s):
+			continue
+		m = PART_RE.match(s)
+		if m and m.group(2) != "plugins":
+			r["settings"][m.group(2)] = r["settings"].get(m.group(2), "") + "|" + s
+			continue
+		r["other"].append((line, s))
+	if "plugins" in r["settings"]:
+		r["plugins"] = plugin_list(r["settings"]["plugins"])
+		if r["plugins"] is not None:
+			r["plugins"] = r["plugins"] + appended
+	elif appended:
+		r["plugins"] = appended
+	return r
+
+
+def read_names(path):
+	try:
+		with open(path, encoding="utf-8", errors="replace") as f:
+			return sorted({l.rstrip("\n") for l in f if l.strip()})
+	except FileNotFoundError:
+		return []
+
+
+def name(s):
+	return s if NAME_RE.match(s) else shown(repr(s))
+
+
+def compare(old, old_dirs, new=None, new_dirs=None):
+	# The local changes of the old Roundcube that the new one does not have:
+	# against what setup installs and writes (new is None), or against the
+	# Roundcube after setup.
+	items = []
+	if new is None:
+		missing_dirs = [d for d in old_dirs if d not in SETUP_PLUGIN_DIRS]
+		items += ["plugin directory plugins/%s: setup does not install it" % name(d) for d in missing_dirs]
+	else:
+		items += ["plugin directory plugins/%s: missing now (only in the old Roundcube)" % name(d)
+			for d in old_dirs if d not in set(new_dirs)]
+	if old is None:
+		return items
+	cfg = "config/config.inc.php"
+	if old["error"]:
+		return items + ["%s %s" % (cfg, old["error"])]
+	if new is not None and new["error"]:
+		return items + ["the new %s %s" % (cfg, new["error"])]
+	if new is None:
+		ref_settings = {k: v for k, v in SETUP_SETTINGS.items()}
+		ref_plugins = plugin_list(SETUP_SETTINGS["plugins"])
+		ref_other = []
+	else:
+		ref_settings = new["settings"]
+		ref_plugins = new["plugins"]
+		ref_other = new["other"]
+	setup_plugins = plugin_list(SETUP_SETTINGS["plugins"])
+	now = "setup's list" if new is None else "the list now"
+	op = old["plugins"]
+	if op is None and "plugins" in old["settings"]:
+		items.append("plugin list: changed by hand in a form that this check does not read")
+	elif op is not None and ref_plugins is not None:
+		items += ["plugin list: %s (%s does not have it)" % (name(p), now) for p in op if p not in ref_plugins]
+		items += ["plugin list: %s is on again (the old list left it out)" % name(p)
+			for p in ref_plugins if p not in op and p in setup_plugins]
+	for k, v in sorted(old["settings"].items()):
+		if k == "plugins":
+			continue
+		if k not in SETUP_SETTINGS:
+			# Set by hand: only its name (the value may be a password).
+			if new is None:
+				items.append("setting %s: set by hand (setup does not write it)" % k)
+			elif k not in ref_settings:
+				items.append("setting %s: set by hand, missing now" % k)
+			elif ref_settings[k] != v:
+				items.append("setting %s: set by hand, has another value now" % k)
+			continue
+		# One of setup's settings, changed by hand (setup's values are no secrets).
+		if SETUP_SETTINGS[k] is None or v == SETUP_SETTINGS[k]:
+			continue
+		ref = SETUP_SETTINGS[k] if new is None else ref_settings.get(k)
+		if ref == v:
+			continue
+		if new is None:
+			items.append("setting %s: %s (setup writes %s)" % (k, shown(v, 80), shown(ref, 80)))
+		else:
+			items.append("setting %s: %s before, %s now" % (k, shown(v, 80), shown(ref, 80) if ref is not None else "not set"))
+	gone = [l for l, t in old["other"] if t not in {t2 for _, t2 in ref_other}]
+	if gone:
+		items.append("%d statement(s) that are not settings, %s (line %s of the old file)" % (
+			len(gone), "setup does not write them" if new is None else "missing now",
+			", ".join(str(l) for l in gone[:5]) + (", ..." if len(gone) > 5 else "")))
+	return items
+
+
+def write_json(path, tool, ack, items):
+	# Root's only, written next to it and renamed into place; the directory is
+	# root's own (0700).
+	d = os.path.dirname(path)
+	tmp = os.path.join(d, ".%s.%d" % (os.path.basename(path), os.getpid()))
+	doc = {"version": 1, "tool": tool, "ack": ack, "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+		"items": items[:MAX_ITEMS] + (["(%d more)" % (len(items) - MAX_ITEMS)] if len(items) > MAX_ITEMS else [])}
+	fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+	with os.fdopen(fd, "w", encoding="utf-8") as f:
+		json.dump(doc, f, indent=1, ensure_ascii=True)
+		f.write("\n")
+	os.rename(tmp, path)
+
+
+def main(argv):
+	# extra DIRS: the plugin directories that setup does not install (to keep a copy)
+	# check OLD_CONFIG OLD_DIRS
+	# verify OLD_CONFIG OLD_DIRS NEW_CONFIG NEW_DIRS [--json FILE TOOL ACK]
+	# (*_DIRS: files with the names of the plugin directories, one per line)
+	if len(argv) == 2 and argv[0] == "extra":
+		for d in read_names(argv[1]):
+			if d not in SETUP_PLUGIN_DIRS and NAME_RE.match(d) and d not in (".", ".."):
+				print(d)
+		return 0
+	if len(argv) == 3 and argv[0] == "check":
+		items = compare(read_config(argv[1]), read_names(argv[2]))
+	elif len(argv) in (5, 9) and argv[0] == "verify":
+		new = read_config(argv[3]) or {"settings": {}, "plugins": [], "other": [], "error": "is missing"}
+		items = compare(read_config(argv[1]), read_names(argv[2]), new, read_names(argv[4]))
+		if len(argv) == 9 and argv[5] == "--json":
+			if items:
+				write_json(argv[6], argv[7], argv[8], items)
+			else:
+				try:
+					os.unlink(argv[6])
+				except FileNotFoundError:
+					pass
+	else:
+		print("usage: extra DIRS | check OLD_CONFIG OLD_DIRS | verify OLD_CONFIG OLD_DIRS NEW_CONFIG NEW_DIRS [--json FILE TOOL ACK]", file=sys.stderr)
+		return 2
+	for x in items:
+		print(shown(x, 300))
+	return 0
+
+
+sys.exit(main(sys.argv[1:]))
+EOF
+)
+
 # Filters rsync's output: progress updates (ending in \r) go to the terminal
 # only, and every 5 minutes one of them goes to the log; all other lines go to
 # stdout (terminal and log) and to the stats file argv[1]. argv[2] is the log.
@@ -1934,6 +2290,107 @@ Their data stays in the database. Reinstall them afterwards if they support Next
 	else
 		say "Postfix queue:     empty"
 	fi
+	report_old_roundcube
+}
+
+# Local changes to Roundcube on the old box that the migration does not carry
+# over: Roundcube is not in $STORAGE_ROOT, setup installs its own here and
+# writes its own config.inc.php. They do not block: reported here, kept in
+# save_reference (save_old_roundcube) and compared again in phase verify
+# (verify_roundcube). Keep in sync with tools/upgrade-in-place-to-2604.sh.
+report_old_roundcube() {
+	section "Local changes to Roundcube on the old box"
+	local t items x
+	if [ "$(remote "test -d $RC_DIR && echo yes" 2> /dev/null || true)" != yes ]; then
+		say "Roundcube is not installed in $RC_DIR on the old box."
+		return 0
+	fi
+	t=$(mktemp -d)
+	remote "find $RC_DIR/plugins -mindepth 1 -maxdepth 1 -type d -printf '%f\\n'" > "$t/plugins.txt" 2> /dev/null || true
+	remote "head -c 1048577 $RC_DIR/config/config.inc.php" > "$t/config.inc.php" 2> /dev/null || rm -f "$t/config.inc.php"
+	items=$(python3 -I -c "$ROUNDCUBE_PY" check "$t/config.inc.php" "$t/plugins.txt") || items="(the comparison failed)"
+	rm -rf "$t"
+	if [ -z "$items" ]; then
+		say "None found (only what setup installs and writes)."
+		return 0
+	fi
+	warn "Local changes to Roundcube on the old box that the migration does not carry over (they do not stop it):"
+	while IFS= read -r x; do say "  $x"; done <<< "$items"
+	say "Roundcube is not part of $STORAGE_ROOT: setup installs its own here and writes its own"
+	say "config/config.inc.php. This tool keeps a copy of the old config.inc.php and of these plugin"
+	say "directories in $OLD_RC. The old plugins are not copied back on their own: a plugin"
+	say "for the old Roundcube can break the new one. Phase verify lists what is still missing, and"
+	say "System Status warns about it until '$SELF --ack-local' (see README-fork.md)."
+}
+
+# The old box's config.inc.php, the names of all its plugin directories and a
+# copy of those that setup does not install, in OLD_RC.
+save_old_roundcube() {
+	[ "$(remote "test -d $RC_DIR && echo yes" 2> /dev/null || true)" = yes ] || return 0
+	local extra=() d rc=0
+	rm -rf "$OLD_RC.new"
+	(umask 077 && mkdir "$OLD_RC.new")
+	remote "find $RC_DIR/plugins -mindepth 1 -maxdepth 1 -type d -printf '%f\\n'" 2> /dev/null \
+		| LC_ALL=C sort > "$OLD_RC.new/plugins.txt" || true
+	# The names are checked (letters, digits, "_", "." and "-", not first), so
+	# they can go into the command line on the old box.
+	while IFS= read -r d; do
+		if [ -n "$d" ]; then extra+=("plugins/$d"); fi
+	done < <(python3 -I -c "$ROUNDCUBE_PY" extra "$OLD_RC.new/plugins.txt")
+	# shellcheck disable=SC2029
+	ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C $RC_DIR -cf - config/config.inc.php ${extra[*]} 2> /dev/null" \
+		< /dev/null | tar -C "$OLD_RC.new" --no-same-owner -xf - || rc=$?
+	if [ "$rc" != 0 ]; then warn "Could not copy all of config.inc.php ${extra[*]} from the old box's Roundcube (exit code $rc)."; fi
+	if [ -f "$OLD_RC.new/config/config.inc.php" ]; then mv "$OLD_RC.new/config/config.inc.php" "$OLD_RC.new/config.inc.php"; fi
+	rm -rf "$OLD_RC.new/config"
+	chmod -R go= "$OLD_RC.new"
+	rm -rf "$OLD_RC"
+	mv -T "$OLD_RC.new" "$OLD_RC"
+	say "Kept the old box's Roundcube config.inc.php${extra[*]:+ and ${extra[*]}} in $OLD_RC."
+}
+
+# The names of the plugin directories of the Roundcube here, one per line.
+roundcube_plugin_dirs() { # DIR
+	[ -d "$1/plugins" ] || return 0
+	find "$1/plugins" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2> /dev/null | LC_ALL=C sort
+}
+
+# Phase verify: what of the old Roundcube's local changes the new one does
+# not have. The open items go to LOCAL_CHANGES (root's only), which System
+# Status shows until --ack-local removes it; none: the file is removed.
+# Sets RC_ITEMS for etc_report.
+RC_ITEMS=
+verify_roundcube() {
+	RC_ITEMS=
+	[ -f "$OLD_RC/plugins.txt" ] || return 0
+	local x
+	RC_ITEMS=$(python3 -I -c "$ROUNDCUBE_PY" verify "$OLD_RC/config.inc.php" "$OLD_RC/plugins.txt" \
+		"$RC_DIR/config/config.inc.php" <(roundcube_plugin_dirs "$RC_DIR") \
+		--json "$LOCAL_CHANGES" migrate-to-2604.sh "$SELF --ack-local") \
+		|| { warn "Could not compare the new Roundcube with the old one ($OLD_RC)."; RC_ITEMS=; return 0; }
+	if [ -z "$RC_ITEMS" ]; then
+		say "Roundcube: the local changes of the old box's are all here (or there were none)."
+		return 0
+	fi
+	warn "Local changes of the old box's Roundcube that the new one does not have:"
+	while IFS= read -r x; do say "  $x"; done <<< "$RC_ITEMS"
+	say "The old config.inc.php and plugin directories are in $OLD_RC. Bring back what the"
+	say "new Roundcube supports, for example:"
+	say "  cp -a $OLD_RC/plugins/NAME $RC_DIR/plugins/"
+	say "  and add 'NAME' to \$config['plugins'] in $RC_DIR/config/config.inc.php"
+	say "Setup writes config.inc.php again on every run (also on later updates)."
+	say "System Status warns about these until '$SELF --ack-local' (or removing $LOCAL_CHANGES)."
+}
+
+# --ack-local: the open local changes are dealt with (or wanted no longer).
+do_ack_local() {
+	if [ ! -e "$LOCAL_CHANGES" ] && [ ! -L "$LOCAL_CHANGES" ]; then
+		say "No open local changes ($LOCAL_CHANGES does not exist)."
+		return 0
+	fi
+	rm -f "$LOCAL_CHANGES"
+	say "Removed $LOCAL_CHANGES: System Status no longer warns about the local changes."
+	say "(A new final check, --redo-from verify, lists what is still missing again.)"
 }
 
 # --check: list $STORAGE_ROOT on the old box with rsync, with the same target,
@@ -2038,6 +2495,7 @@ save_reference() {
 		remote "cat /root/.ssh/id_rsa_miab" > "$STATE_DIR/old-id_rsa_miab" || die "Could not read /root/.ssh/id_rsa_miab on the old box."
 		remote "cat /root/.ssh/id_rsa_miab.pub" > "$STATE_DIR/old-id_rsa_miab.pub" || true
 	fi
+	save_old_roundcube
 	state_set REFERENCE_SAVED 1
 }
 
@@ -3137,6 +3595,9 @@ etc_report() {
 		echo
 		echo "== Crontab of root on the old box"
 		grep -vE '^[[:space:]]*(#|$)' "$STATE_DIR/old-root-crontab.txt" 2> /dev/null | sed 's/^/  /' || true
+		echo
+		echo "== Local changes of the old box's Roundcube that the new one does not have (the old files are in $OLD_RC)"
+		if [ -n "$RC_ITEMS" ]; then sed 's/^/  /' <<< "$RC_ITEMS"; fi
 	} | printable > "$out"
 	say "Customizations of the old /etc that were not migrated: $out"
 	sed -n '1,80p' "$out"
@@ -3351,6 +3812,10 @@ phase_verify() {
 		if [ "$same" != "$n" ]; then VERIFY_PROBLEMS+=("DS records changed for $((n - same)) of $n zones (would break DNSSEC)"); fi
 	fi
 
+	if [ "$(state_get SOURCE_MODE)" = ssh ]; then
+		say
+		verify_roundcube
+	fi
 	say
 	say "Running the status checks (DNS checks fail until DNS points to this box)..."
 	(cd "$MIAB_DIR" && management/status_checks.py) > "$STATE_DIR/status-checks.txt" 2>&1 || true
@@ -3705,6 +4170,7 @@ main() {
 			--check-old) COMMAND=check_old; shift ;;
 			--finish) COMMAND=finish; shift ;;
 			--push-zones-to-old) COMMAND=push_zones; shift ;;
+			--ack-local) COMMAND=ack_local; shift ;;
 			-h | --help) usage; exit 0 ;;
 			*) die "Unknown option $1. See --help." ;;
 		esac
@@ -3743,6 +4209,11 @@ on this machine (also on later runs). To have no IPv6, remove it from the machin
 	case "$COMMAND" in
 		status)
 			do_status
+			return 0
+			;;
+		ack_local)
+			[ "$(id -u)" = 0 ] || die "This must be run as root. Did you leave out sudo?"
+			do_ack_local
 			return 0
 			;;
 	esac

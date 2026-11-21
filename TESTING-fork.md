@@ -276,6 +276,18 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `tests/fork/roundcube-local.py` (B200; no box needed) checks the report
+  of local Roundcube changes that the in-place and migration tools share
+  (the two copies must be the same): its idea of setup's settings against
+  the configuration that setup/webmail.sh writes, an unchanged
+  configuration of the fork and of upstream (nothing to report), extra
+  plugin directories, a changed plugin list (also `$config['plugins'][]`),
+  changed values of setup's settings, settings set by hand (named without
+  their values), comments and strings with `;` and `?>`, files it cannot
+  read completely, control characters in names, the comparison with the
+  Roundcube after setup and its file `local-changes.json` (0600, removed
+  when nothing is open), and System Status's warning from that file
+  (which ignores a link and files that another account can write).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
