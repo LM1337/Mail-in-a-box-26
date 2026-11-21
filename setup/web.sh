@@ -113,6 +113,7 @@ fi
 # location ($1, $2, $3), which then gave "fastcgi request length mismatch"
 # and HTTP 500 (both found in the lab).
 nc_proxy_conf=/etc/nginx/miab-nextcloud-proxy.conf
+# shellcheck disable=SC2016 # the $ is nginx's, in the line that sed reads
 nc_proxy_secret=$(sed -n 's/^set \$miab_nc_proxy_secret "\([0-9a-f]\{64\}\)";$/\1/p' "$nc_proxy_conf" 2> /dev/null | head -n 1 || true)
 if [ -z "$nc_proxy_secret" ]; then
 	nc_proxy_secret=$(openssl rand -hex 32)
