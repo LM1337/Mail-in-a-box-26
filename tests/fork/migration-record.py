@@ -15,6 +15,10 @@ environment and the root check patched, STORAGE_ROOT and the record
     before any migration, the file and the record stay;
   * a higher number in the file (a run that ended after writing the file and
     before the record): taken, the record follows;
+  * a number above the newest migration (the storage user's, or a typo):
+    the record stays at the newest one, so the right number can be written
+    back and a later release's migrations still run; a record is never
+    lowered (a downgrade);
   * mailinabox.version missing: taken from the record, the migrations after
     it run (not skipped as on a new box);
   * the record of another STORAGE_ROOT does not count;
@@ -128,6 +132,21 @@ check("lower number: the message names both ways", ("remove " + RECORD in err, "
 
 state(version=14, record="13 %s\n" % ROOT)
 check("higher number than the record: taken", run()[:4], (None, [15], "15", "15 " + ROOT))
+
+state(version=999, record="15 %s\n" % ROOT)
+check("number above the newest: record stays at the newest", run()[:4], (None, [], "999", "15 " + ROOT))
+with open(VERSION, "w") as f:
+	f.write("15\n")
+check("then the right number written back is taken", run()[:4], (None, [], "15", "15 " + ROOT))
+state(version=999, record=None)
+check("number above the newest, no record: the newest recorded", run()[:4], (None, [], "999", "15 " + ROOT))
+setattr(migrate, "migration_16", recorder(16))
+state(version=15, record="15 %s\n" % ROOT)
+with open(VERSION, "w") as f:
+	f.write("999\n")
+run()
+delattr(migrate, "migration_16")
+check("a downgrade does not lower the record", run()[:4], (None, [], "999", "16 " + ROOT))
 
 state(version=None, record="12 %s\n" % ROOT)
 check("file missing: from the record", run()[:4], (None, [13, 14, 15], "15", "15 " + ROOT))

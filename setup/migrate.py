@@ -243,8 +243,8 @@ def write_migration_id(path, ver):
 # is, so that it goes with the data into backups and to a new box (where no
 # record exists, the file counts, as before). A higher number than the record
 # counts (the number written after a migration and before the record, a run
-# that ended in between); a missing mailinabox.version is taken from the
-# record.
+# that ended in between), but is recorded only up to the newest migration
+# here; a missing mailinabox.version is taken from the record.
 MIGRATION_RECORD = "/var/lib/mailinabox/storage-migration"
 RECORD_OWNER = 0 # root (tests/fork/migration-record.py runs as another user)
 
@@ -386,10 +386,18 @@ owns that file, and a migration that runs twice can delete data (B211).
 		# iterate and try next version...
 
 	# The record of a box that had none (the first run of this version), or
-	# after a higher number in the file.
-	if recorded != ourver:
+	# after a higher number in the file. Never above the newest migration of
+	# this version: the storage user (or a typo) could write any number into
+	# the file, and a record of that number would skip the migrations of later
+	# releases for good and refuse the right number when it is written back.
+	# Never lowered either (a downgrade keeps the record of the newer release).
+	newest = get_current_migration()
+	if ourver > newest:
+		print(f"{migration_id_file} says #{ourver}, more than the newest data migration of this version (#{newest}); recording #{newest}.")
+	new_record = min(ourver, newest)
+	if recorded is None or new_record > recorded:
 		try:
-			write_migration_record(env, ourver)
+			write_migration_record(env, new_record)
 		except OSError as e:
 			print(f"Cannot write {MIGRATION_RECORD}: {e}", file=sys.stderr)
 			sys.exit(1)
