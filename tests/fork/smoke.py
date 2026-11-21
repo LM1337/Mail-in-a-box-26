@@ -4100,6 +4100,7 @@ API_READ_ONLY = [
     ("GET", "/system/nextcloud-throttle", "application/json"),
     ("GET", "/system/munin/alerts", "application/json"),
     ("GET", "/system/notifications", "application/json"),
+    ("GET", "/system/auth-guard", "application/json"),
     ("GET", "/ssl/status", "application/json"),
     ("POST", "/ssl/csr/{domain}", "text/html"),
     ("GET", "/dns/zones", "application/json"),
@@ -4142,6 +4143,8 @@ API_WRITES = [
     ("POST", "/system/munin/alerts/test"),
     ("POST", "/system/notifications"),
     ("POST", "/system/notifications/test"),
+    ("POST", "/system/auth-guard"),
+    ("POST", "/system/auth-guard/unlock"),
 ]
 
 # Not called: (method, documented path, reason).
@@ -4651,15 +4654,17 @@ def auth_guard_on_box(ctx, spec):
 
 
 def c_login_auth_guard(ctx):
-    # The limit of failed logins from the box itself (B126, setup/mail-users.sh,
-    # conf/dovecot-auth-guard/): 150 logins of one account with the same wrong
-    # password (a phone with an old one) count once and do not lock it; 100
-    # different wrong passwords over IMAP from 127.0.0.1 are answered at once
-    # (no 2 s delay each); then that
-    # account is refused from 127.0.0.1 even with its right password, while
-    # another account logs in from there at once (no penalty of 127.0.0.1)
-    # and the refused account still logs in from outside; auth_guard.py
-    # --status names it, --unlock ends the lock.
+    # Dovecot's limit of failed logins from the box itself (B126,
+    # setup/mail-users.sh, conf/dovecot-auth-guard/, System > Intrusion
+    # Protection): 150 logins of one account with the same wrong password (a
+    # phone with an old one) count once and do not lock it. With the limit
+    # set to 5 through the API (it applies at once, no reload), 40 different
+    # wrong passwords of another account from 127.0.0.1 are answered at once
+    # (no 2 s delay each); that account is then refused from 127.0.0.1 even
+    # with its right password, while the first account logs in from there at
+    # once (no penalty of 127.0.0.1) and the refused one still logs in from
+    # outside; GET /system/auth-guard and auth_guard.py --status name it,
+    # POST /system/auth-guard/unlock ends the lock. The setting is restored.
     if not ctx.remote.available():
         raise Skip("needs --ssh")
     if not ctx.user_pw or not ctx.admin_auth:
@@ -4671,31 +4676,44 @@ def c_login_auth_guard(ctx):
     victim = "smokeguard-%s@%s" % (ctx.tok, ctx.domain)
     other = "smokeguardb-%s@%s" % (ctx.tok, ctx.domain)
     steps = []
+    r = admin_api(ctx, "GET", "system/auth-guard")
+    api_expect(r, 200, "application/json", "GET system/auth-guard")
+    before = r.json()["settings"]
     for u in (victim, other):
         api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": u, "password": ctx.user_pw}), 200, "text/html", "users/add")
     try:
         r = auth_guard_on_box(ctx, {"user": other, "tok": ctx.tok, "same": 150, "right": [["other", other, ctx.user_pw]]})
         _need(r["same"] == 150 and r["other"][0] == "ok", "150 times the same wrong password, then the right one: %s" % r)
         steps.append("150 times the same wrong password: not locked")
-        r = auth_guard_on_box(ctx, {"user": victim, "tok": ctx.tok, "wrong": 100})
+        r = admin_api(ctx, "POST", "system/auth-guard", form={"limit": "5", "window": "30"})
+        api_expect(r, 200, "application/json", "POST system/auth-guard")
+        _need(r.json()["settings"] == {"limit": 5, "window": 30}, "setting: %s" % r.text()[:200])
+        r = admin_api(ctx, "POST", "system/auth-guard", form={"limit": "2"})
+        _need(r.status == 400, "limit 2: HTTP %d, not 400" % r.status)
+        r = auth_guard_on_box(ctx, {"user": victim, "tok": ctx.tok, "wrong": 40})
         fails, secs = r["wrong"]
-        _need(fails == 100, "%d of 100 wrong logins failed" % fails)
-        _need(secs < 60, "100 wrong logins from 127.0.0.1 took %.1f s (Dovecot's delay of 2 s each?)" % secs)
-        steps.append("100 wrong from 127.0.0.1 in %.1f s" % secs)
+        _need(fails == 40, "%d of 40 wrong logins failed" % fails)
+        _need(secs < 30, "40 wrong logins from 127.0.0.1 took %.1f s (Dovecot's delay of 2 s each?)" % secs)
+        steps.append("limit 5 set; 40 different wrong from 127.0.0.1 in %.1f s" % secs)
         r = auth_guard_on_box(ctx, {"right": [["victim", victim, ctx.user_pw], ["other", other, ctx.user_pw]]})
-        _need(r["victim"][0] != "ok" and "Too many failed logins" in r["victim"][0], "the account after 100 different wrong passwords, right password: %s" % r["victim"][0])
+        _need(r["victim"][0] != "ok" and "Too many failed logins" in r["victim"][0], "the account after 5 different wrong passwords, right password: %s" % r["victim"][0])
         _need(r["other"][0] == "ok" and r["other"][1] < 3, "another account from 127.0.0.1: %s in %.1f s" % tuple(r["other"]))
         steps.append("refused with its right password, another account in %.2f s" % r["other"][1])
         _need(imap_works(ctx, victim, ctx.user_pw), "the refused account from outside: IMAP login failed")
         steps.append("from outside ok")
+        st = admin_api(ctx, "GET", "system/auth-guard").json()
+        entry = [n for n in st["names"] if n["name"] == victim]
+        _need(entry and entry[0]["refused"] and entry[0]["account"] is True and entry[0]["failures"] >= 5,
+              "GET system/auth-guard: %s" % entry)
         rc, out, err = ctx.remote.run(tool + " --status", sudo=True, timeout=120)
-        _need(rc == 0 and re.search(r"\b100\s+" + re.escape(victim) + r"\s+REFUSED", out), "--status: %s" % (out or err).strip()[:300])
-        rc, out, err = ctx.remote.run(tool + " --unlock " + shlex.quote(victim), sudo=True, timeout=120)
-        _need(rc == 0, "--unlock: %s" % (out or err).strip()[:200])
+        _need(rc == 0 and re.search(r"\b\d+\s+" + re.escape(victim) + r"\s+REFUSED", out), "--status: %s" % (out or err).strip()[:300])
+        r = admin_api(ctx, "POST", "system/auth-guard/unlock", form={"key": entry[0]["key"]})
+        api_expect(r, 200, "application/json", "POST system/auth-guard/unlock")
         r = auth_guard_on_box(ctx, {"right": [["victim", victim, ctx.user_pw]]})
-        _need(r["victim"][0] == "ok", "after --unlock: %s" % r["victim"][0])
-        steps.append("--status names it, --unlock ends the lock")
+        _need(r["victim"][0] == "ok", "after the unlock: %s" % r["victim"][0])
+        steps.append("the API and --status name it, the API's unlock ends the lock")
     finally:
+        admin_api(ctx, "POST", "system/auth-guard", form={"limit": str(before["limit"]), "window": str(before["window"])})
         for u in (victim, other):
             ctx.remote.run(tool + " --unlock " + shlex.quote(u), sudo=True, timeout=120)
             admin_api(ctx, "POST", "mail/users/remove", form={"email": u})
@@ -4703,7 +4721,9 @@ def c_login_auth_guard(ctx):
                 remove_test_mailbox(ctx, u)
             except Exception:
                 pass
-    return "; ".join(steps) + "; users removed"
+    now = admin_api(ctx, "GET", "system/auth-guard").json()["settings"]
+    _need(now == before, "setting not restored: %s, before %s" % (now, before))
+    return "; ".join(steps) + "; setting restored, users removed"
 
 
 def munin_conf_contact(ctx):

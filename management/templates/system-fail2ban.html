@@ -90,6 +90,44 @@
 
 <p class="small text-muted">Nextcloud counts an IPv6 address together with its network (<span class="f2b-nc-v6">/56</span> by default, <tt>security.ipv6_normalized_subnet_size</tt>). &ldquo;Reset&rdquo; deletes Nextcloud&rsquo;s failures of the address&rsquo;s network, so its next login is not delayed (also while the throttle is off or the address is on the bypass list, where Nextcloud&rsquo;s own reset does nothing). If a device keeps failing, fix its password: the failures come back.</p>
 
+<h3>Logins through the box&rsquo;s own services</h3>
+
+<p>ActiveSync and Autodiscover (Z-Push), webmail and Nextcloud check each password with a login to the mail server from the box itself (127.0.0.1). fail2ban bans their clients by their own addresses, but it cannot see a client that tries one account from many addresses, nor a program on the box that tries passwords. So the mail server counts, per account, the <em>different</em> wrong passwords of these logins: an account with <span class="ag-limit">30</span> of them within <span class="ag-window">30</span> minutes is refused for logins through these services until it has fewer, even with its right password. A password that is sent again counts once, so a phone that keeps trying an old password does not lock its account. Other accounts are not slowed down, and the account&rsquo;s mail programs that log in from outside (IMAP, SMTP) are not refused. A new lock is mailed to the recipient of the box&rsquo;s reports (System &gt; Notifications).</p>
+
+<form class="form-inline" role="form" onsubmit="ag_save(); return false;" style="margin-bottom: 1em">
+  <div class="form-group">
+    <label for="ag-limit">Refuse an account after</label>
+    <input type="number" class="form-control" id="ag-limit" min="3" max="1000" style="width: 6em">
+  </div>
+  <div class="form-group">
+    <label for="ag-window">different wrong passwords within</label>
+    <input type="number" class="form-control" id="ag-window" min="1" max="1440" style="width: 6em">
+    <span>minutes</span>
+  </div>
+  <button type="submit" class="btn btn-primary">Save</button>
+  <button type="button" class="btn btn-default" onclick="ag_reset()">Restore defaults</button>
+</form>
+<p id="ag-help" class="help-block small"></p>
+<div id="ag-warnings"></div>
+
+<p id="ag-summary" class="text-muted">Loading...</p>
+<div class="table-responsive">
+<table id="ag-names" class="table" style="width: auto; min-width: 50%; display: none">
+  <thead>
+    <tr>
+      <th scope="col">Account</th>
+      <th scope="col" class="num">Different wrong passwords</th>
+      <th scope="col">Last one</th>
+      <th scope="col">Status</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+</div>
+<p id="ag-more" class="small text-muted" style="display: none"></p>
+
 <h3>Jails</h3>
 
 <div class="table-responsive">
@@ -305,6 +343,77 @@ function show_fail2ban() {
   f2b_load_status();
   f2b_load_nc();
   f2b_load_report();
+  $('#ag-summary').text("Loading...").addClass("text-muted");
+  $('#ag-names').hide().find('tbody').html("");
+  ag_load();
+}
+
+// Dovecot's limit of failed logins from the box itself (/system/auth-guard,
+// management/auth_guard.py).
+var ag_state = null;
+
+function ag_load() {
+  api("/system/auth-guard", "GET", { },
+    function(r) { ag_state = r; ag_render(); },
+    function(text, xhr) {
+      if (xhr && xhr.status == 403) return;
+      $('#ag-summary').text("The limit could not be read: " + text).removeClass("text-muted");
+    });
+}
+
+function ag_render() {
+  var r = ag_state, s = r.settings;
+  $('.ag-limit').text(r.applied.limit);
+  $('.ag-window').text(r.applied.window);
+  $('#ag-limit').val(s.limit).attr('min', r.ranges.limit[0]).attr('max', r.ranges.limit[1]);
+  $('#ag-window').val(s.window).attr('min', r.ranges.window[0]).attr('max', r.ranges.window[1]);
+  $('#ag-help').text("Defaults: " + r.defaults.limit + " different wrong passwords within " + r.defaults.window
+    + " minutes. Allowed: " + r.ranges.limit[0] + " to " + r.ranges.limit[1] + ", within " + r.ranges.window[0] + " to " + r.ranges.window[1]
+    + " minutes. A lower number stops guessing sooner; it also lets someone who tries an account's passwords through these services lock that account out sooner. The change applies at once.");
+  var w = $('#ag-warnings').html("");
+  r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
+  var tbody = $('#ag-names tbody').html("");
+  var refused = r.names.filter(function(n) { return n.refused; }).length;
+  if (!r.names.length) {
+    $('#ag-summary').text("No account had a wrong password through these services in the last " + r.applied.window + " minutes.").addClass("text-muted");
+    $('#ag-names').hide();
+  } else {
+    $('#ag-summary').text(r.names.length + " account name" + (r.names.length == 1 ? "" : "s") + " with wrong passwords in the last " + r.applied.window + " minutes"
+      + (refused ? ", " + refused + " refused now." : ", none refused.")).toggleClass("text-muted", !refused);
+    r.names.forEach(function(n) {
+      var tr = $('<tr/>');
+      var td = $('<td/>').append($('<tt/>').text(n.name));
+      if (n.account === false) td.append($('<div class="small text-muted"/>').text("no such account"));
+      tr.append(td);
+      tr.append($('<td class="num"/>').text(n.failures));
+      tr.append($('<td/>').text(f2b_time(n.last)));
+      tr.append($('<td/>').append(n.refused ? $('<span class="text-danger"/>').text("refused") : $('<span class="text-muted"/>').text("counted")));
+      tr.append($('<td/>').append($('<button type="button" class="btn btn-default btn-xs"/>').text(n.refused ? "Unlock" : "Forget").click(function() { ag_unlock(n); })));
+      tbody.append(tr);
+    });
+    $('#ag-names').show();
+  }
+  $('#ag-more').toggle(r.more > 0).text("... and " + r.more + " more (made-up names, most likely).");
+}
+
+function ag_save() {
+  api("/system/auth-guard", "POST", { limit: $('#ag-limit').val(), window: $('#ag-window').val() },
+    function(r) { ag_load(); },
+    f2b_api_error("Logins through the box's own services"));
+}
+
+function ag_reset() {
+  api("/system/auth-guard", "POST", { reset: "1" },
+    function(r) { ag_load(); },
+    f2b_api_error("Logins through the box's own services"));
+}
+
+function ag_unlock(n) {
+  api("/system/auth-guard/unlock", "POST", { key: n.key },
+    function(r) {
+      show_modal_error("Logins through the box's own services", $("<p/>").text("The wrong passwords of " + r.name + " are forgotten; it can log in through these services again."), function() { ag_load(); });
+    },
+    f2b_api_error("Logins through the box's own services"));
 }
 
 function f2b_load_status() {
@@ -495,7 +604,7 @@ function f2b_relay_allow(relay) {
     + (f2b_state.relays_source && f2b_state.relays_source.retrieved ? " (Microsoft's list as of " + f2b_state.relays_source.retrieved + ")" : "") + "."));
   q.append($("<p/>").text("Put it on the allowlist only if users of this box use that app with an Exchange account. Addresses on the allowlist are never banned by any jail:"
     + " wrong passwords that come through Microsoft's servers, also those of anyone who adds an account of this box to the app on purpose, are then no longer banned;"
-    + " what remains is Dovecot's limit for logins from the box itself (Z-Push checks each password with an IMAP login from there): 100 different wrong passwords of one account within 30 minutes, then that account's ActiveSync, webmail and Nextcloud logins are refused for a while (B126). Its bans are lifted when you save."));
+    + " what remains is Dovecot's limit for logins from the box itself (Z-Push checks each password with an IMAP login from there): " + (ag_state ? ag_state.applied.limit + " different wrong passwords of one account within " + ag_state.applied.window + " minutes" : "a few different wrong passwords of one account") + ", then that account's ActiveSync, webmail and Nextcloud logins are refused for a while (B126). Its bans are lifted when you save."));
   show_modal_confirm("Intrusion Protection", q, "Put it on the allowlist", function() { f2b_allowlist_add(relay.network); });
 }
 

@@ -323,16 +323,22 @@ report. The groups:
   the window, a tag sent again counted once, files of names
   without failures and old temporary files removed, a symbolic link left
   alone, a directory of another mode refused, events read once, also a
-  leftover), `--unlock`, and the mail of new locks (at once, then at most
+  leftover), `--unlock`, the setting of the control panel (defaults 30 in
+  30 minutes, the ranges, invalid values refused, the settings file
+  written through its directory's descriptor and read back as the Lua code
+  reads it, values out of range ignored), the status and the unlock of the
+  API, and the mail of new locks (at once, then at most
   hourly, a name without an account marked, the pending events capped).
   The smoke check `login-auth-guard` (needs `--ssh`) makes 150 IMAP logins
   of a test account with the same wrong password from 127.0.0.1 on the box
-  (it must not lock the account), then 100 logins of another test account
-  with different wrong passwords (answered at once),
-  then expects that account refused from there with its right password,
-  another test account logging in from there in under 3 s, the refused
-  account logging in from outside, `--status` naming it and `--unlock`
-  ending the lock. The Lua code itself was checked with Dovecot 2.4.2 of
+  (it must not lock the account), sets the limit to 5 through
+  `POST /system/auth-guard` (a limit of 2 must be refused), makes 40
+  logins of another test account with different wrong passwords (answered
+  at once), then expects that account refused from there with its right
+  password, the first account logging in from there in under 3 s, the
+  refused account logging in from outside, `GET /system/auth-guard` and
+  `--status` naming it and `POST /system/auth-guard/unlock` ending the
+  lock; it restores the setting. The Lua code itself was checked with Dovecot 2.4.2 of
   Ubuntu 26.04 in a container (BUGS-fork.md, B126).
   `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
   logic with stand-ins for the login check and the password change: HTTP

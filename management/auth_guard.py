@@ -21,6 +21,12 @@
 #                              ones marked
 #   auth_guard.py --unlock ADDRESS
 #                              forgets the failures of ADDRESS (its lock ends)
+#   auth_guard.py --apply      (setup) writes the settings file that the Lua
+#                              code reads from settings.yaml
+#
+# The limit (30 different wrong passwords) and the window (30 minutes) are
+# set in the control panel (System > Intrusion Protection, the API
+# /system/auth-guard); the Lua code reads them on every login from the box.
 #
 # root does nothing by path in the state directory, which the account dovecot
 # can write: a child process that runs as dovecot reads and changes it
@@ -48,16 +54,167 @@ KEY_RE = re.compile(r"^(a-[a-z0-9@._+%-]{1,200}|h-[0-9a-f]{16}-[0-9]{1,4})$")
 EVENT_RE = re.compile(r"^([0-9]{1,12}) (locked|names) ([0-9]{1,9}) (\S{1,210})$")
 
 
-def settings(path=GUARD_LUA):
-	# The values of guard.lua (M.DIR, M.WINDOW, M.LIMIT, M.MAX_NAMES), so that
-	# both read the same ones.
-	values = { "DIR": "/run/miab-auth-guard", "WINDOW": 1800, "LIMIT": 100, "MAX_NAMES": 10000 }
+def lua_values(path=GUARD_LUA):
+	# The values of guard.lua (M.DIR, M.DEFAULT_LIMIT, ...), so that both read
+	# the same ones.
+	values = { "DIR": "/run/miab-auth-guard", "DEFAULT_LIMIT": 30, "DEFAULT_WINDOW": 1800, "MAX_NAMES": 10000,
+		"SETTINGS": "/usr/local/lib/mailinabox/dovecot-auth-guard/settings",
+		"LIMIT_MIN": 3, "LIMIT_MAX": 1000, "WINDOW_MIN": 60, "WINDOW_MAX": 86400 }
 	with open(path, encoding="utf-8") as f:
 		for line in f:
-			m = re.match(r'^M\.([A-Z_]+) = (?:"([^"]*)"|([0-9]+))', line)
-			if m and m.group(1) in values:
-				values[m.group(1)] = m.group(2) if m.group(2) is not None else int(m.group(3))
+			m = re.match(r'^M\.([A-Z_]+)(?:, M\.([A-Z_]+))? = (?:"([^"]*)"|([0-9]+)(?:, ([0-9]+))?)', line)
+			if not m:
+				continue
+			if m.group(3) is not None:
+				if m.group(1) in values:
+					values[m.group(1)] = m.group(3)
+				continue
+			for name, v in ((m.group(1), m.group(4)), (m.group(2), m.group(5))):
+				if name in values and v is not None:
+					values[name] = int(v)
 	return values
+
+
+def settings(path=GUARD_LUA, settings_file=None):
+	# guard.lua's values plus the limit and the window that apply (LIMIT,
+	# WINDOW in seconds): read from the settings file as M.load() reads it.
+	cfg = lua_values(path)
+	cfg["LIMIT"], cfg["WINDOW"] = cfg["DEFAULT_LIMIT"], cfg["DEFAULT_WINDOW"]
+	try:
+		with open(settings_file or cfg["SETTINGS"], encoding="ascii", errors="replace") as f:
+			text = f.read(4096)
+	except OSError:
+		text = ""
+	for line in text.splitlines():
+		m = re.fullmatch(r"([a-z]+) ([0-9]{1,9})", line)
+		if not m:
+			continue
+		v = int(m.group(2))
+		if m.group(1) == "limit" and cfg["LIMIT_MIN"] <= v <= cfg["LIMIT_MAX"]:
+			cfg["LIMIT"] = v
+		elif m.group(1) == "window" and cfg["WINDOW_MIN"] <= v <= cfg["WINDOW_MAX"]:
+			cfg["WINDOW"] = v
+	return cfg
+
+
+# The setting of the control panel (System > Intrusion Protection), in
+# $STORAGE_ROOT/settings.yaml as "auth_guard" (only values that differ from
+# the defaults): "limit" (different wrong passwords) and "window" (minutes).
+
+class AuthGuardError(ValueError):
+	pass
+
+
+def defaults(cfg=None):
+	cfg = cfg or lua_values()
+	return { "limit": cfg["DEFAULT_LIMIT"], "window": cfg["DEFAULT_WINDOW"] // 60 }
+
+
+def ranges(cfg=None):
+	cfg = cfg or lua_values()
+	return { "limit": [cfg["LIMIT_MIN"], cfg["LIMIT_MAX"]], "window": [cfg["WINDOW_MIN"] // 60, cfg["WINDOW_MAX"] // 60] }
+
+
+def validate_settings(values, strict=True, cfg=None):
+	# Returns (settings, warnings); strict raises AuthGuardError for a bad
+	# value, otherwise it takes the default and warns.
+	d, r = defaults(cfg), ranges(cfg)
+	out, warnings = dict(d), []
+	if not isinstance(values, dict):
+		values = {}
+	names = { "limit": "The number of different wrong passwords", "window": "The window in minutes" }
+	for k in ("limit", "window"):
+		if k not in values or values[k] in (None, ""):
+			continue
+		v = values[k]
+		try:
+			if isinstance(v, bool) or not re.fullmatch(r"[0-9]{1,6}", str(v).strip()):
+				raise ValueError
+			v = int(str(v).strip())
+			if not r[k][0] <= v <= r[k][1]:
+				raise ValueError
+		except ValueError:
+			msg = f"{names[k]} must be a whole number from {r[k][0]} to {r[k][1]}."
+			if strict:
+				raise AuthGuardError(msg)
+			warnings.append(f"auth_guard {k} in settings.yaml is not valid, the default {d[k]} applies. " + msg)
+			continue
+		out[k] = v
+	return out, warnings
+
+
+def get_settings(env):
+	import utils
+	return validate_settings(utils.load_settings(env).get("auth_guard") or {}, strict=False)
+
+
+def save_settings(env, values):
+	import utils
+	config = utils.load_settings(env)
+	diff = { k: v for k, v in values.items() if v != defaults()[k] }
+	if diff:
+		config["auth_guard"] = diff
+	else:
+		config.pop("auth_guard", None)
+	utils.write_settings(config, env)
+
+
+def render_settings_file(values):
+	return ("# Mail-in-a-Box: Dovecot's limit of failed logins from the box itself\n"
+		"# (System > Intrusion Protection; management/auth_guard.py). Do not edit.\n"
+		f"limit {values['limit']}\nwindow {values['window'] * 60}\n")
+
+
+def write_settings_file(text, path=None):
+	# Through the descriptor of its directory, which must be root's and not
+	# writable by others (setup/mail-users.sh creates it); a new file is
+	# renamed over the old one, so Dovecot reads the old or the new one.
+	path = path or lua_values()["SETTINGS"]
+	d, name = os.path.split(path)
+	dfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+	try:
+		st = os.fstat(dfd)
+		if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) & 0o022:
+			raise AuthGuardError(f"{d} is not a directory of this account that only it may write.")
+		try:
+			fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
+			try:
+				if os.read(fd, 65536).decode("utf-8", "replace") == text:
+					return False
+			finally:
+				os.close(fd)
+		except FileNotFoundError:
+			pass
+		tmp = f".{name}.{os.getpid()}.tmp"
+		fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dfd)
+		try:
+			os.fchmod(fd, 0o644)
+			os.write(fd, text.encode("utf-8"))
+			os.fsync(fd)
+		finally:
+			os.close(fd)
+		os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+		return True
+	finally:
+		os.close(dfd)
+
+
+def apply_config(env, values=None, path=None):
+	if values is None:
+		values, _ = get_settings(env)
+	return write_settings_file(render_settings_file(values), path)
+
+
+def update_settings(env, values, reset=False, path=None):
+	current, _ = get_settings(env)
+	new, _ = validate_settings({} if reset else { **current, **values }, strict=True)
+	save_settings(env, new)
+	try:
+		apply_config(env, new, path)
+	except Exception:
+		save_settings(env, current)
+		raise
+	return { "settings": new, "changed": new != current }
 
 
 def key_of(address):
@@ -226,8 +383,8 @@ def message(events, accounts, cfg, dropped=0):
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
 		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
 		f"passwords in the last {minutes} minutes.\n\n"
-		f"The current state: sudo management/auth_guard.py --status\n"
-		f"To end a lock now: sudo management/auth_guard.py --unlock ADDRESS\n")
+		f"The current state, the setting and a button to end a lock: the control panel, System > Intrusion Protection\n"
+		f"(or sudo management/auth_guard.py --status, and --unlock ADDRESS).\n")
 
 
 def load_state(path=NOTIFY_STATE):
@@ -276,17 +433,51 @@ def notify(env, cfg, now=None, scan_func=None, send=send_mail, state_path=NOTIFY
 	return sent
 
 
+def status(env, scan_func=None):
+	# For the control panel (GET /system/auth-guard): the setting, and the
+	# names with different wrong passwords from the box in the window.
+	cfg = settings()
+	values, warnings = get_settings(env)
+	if (cfg["LIMIT"], cfg["WINDOW"]) != (values["limit"], values["window"] * 60):
+		warnings.append("Dovecot does not use this setting yet (its settings file differs); save it again, or run setup.")
+	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False)))()
+	accounts = known_accounts(env)
+	names = []
+	for n in sorted(res["names"], key=lambda n: (-n["failures"], n["key"])):
+		names.append({ "key": n["key"], "name": name_of(n["key"]), "failures": n["failures"], "last": n["last"],
+			"refused": n["failures"] >= cfg["LIMIT"],
+			"account": None if accounts is None or not n["key"].startswith("a-") else name_of(n["key"]).lower() in accounts })
+	if res["missing"]:
+		warnings.append(f"{cfg['DIR']} does not exist: Dovecot cannot count, failed logins from the box itself get its delay (run setup).")
+	return { "settings": values, "defaults": defaults(cfg), "ranges": ranges(cfg), "warnings": warnings,
+		"applied": { "limit": cfg["LIMIT"], "window": cfg["WINDOW"] // 60 }, "names": names[:500], "more": max(0, len(names) - 500) }
+
+
+def unlock(key, scan_func=None):
+	if not isinstance(key, str) or not KEY_RE.match(key):
+		raise AuthGuardError("Not an account name of the list.")
+	cfg = settings()
+	(scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False, remove=key)))()
+	return { "key": key, "name": name_of(key) }
+
+
 def main(argv):
-	if len(argv) < 2 or argv[1] not in ("--notify", "--status", "--unlock") or (argv[1] == "--unlock") != (len(argv) == 3) or len(argv) > 3:
-		print("usage: auth_guard.py --notify | --status | --unlock ADDRESS", file=sys.stderr)
+	if len(argv) < 2 or argv[1] not in ("--notify", "--status", "--unlock", "--apply") or (argv[1] == "--unlock") != (len(argv) == 3) or len(argv) > 3:
+		print("usage: auth_guard.py --notify | --status | --unlock ADDRESS | --apply", file=sys.stderr)
 		return 2
 	if os.geteuid() != 0:
 		print("auth_guard.py: run it as root (sudo).", file=sys.stderr)
 		return 1
-	cfg = settings()
 	sys.path.insert(0, HERE)
 	from utils import load_environment
 	env = load_environment()
+	if argv[1] == "--apply":
+		values, warnings = get_settings(env)
+		for w in warnings:
+			print(w, file=sys.stderr)
+		apply_config(env, values)
+		return 0
+	cfg = settings()
 	if argv[1] == "--notify":
 		notify(env, cfg)
 		return 0
@@ -295,20 +486,18 @@ def main(argv):
 		if key is None or not KEY_RE.match(key):
 			print("auth_guard.py: not an account name.", file=sys.stderr)
 			return 1
-		as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False, remove=key)
-		print(f"The failed logins of {name_of(key)} are forgotten.")
+		unlock(key)
+		print(f"The wrong passwords of {name_of(key)} are forgotten; its lock, if any, has ended.")
 		return 0
-	res = as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False)
-	if res["missing"]:
-		print(f"{cfg['DIR']} does not exist (Dovecot's limit of failed logins from the box itself is not set up).")
-		return 1
-	accounts = known_accounts(env)
-	print(f"Different wrong passwords from the box itself in the last {cfg['WINDOW'] // 60} minutes (refused at {cfg['LIMIT']}):")
-	if not res["names"]:
+	st = status(env)
+	for w in st["warnings"]:
+		print(w)
+	print(f"Different wrong passwords from the box itself in the last {st['applied']['window']} minutes (refused at {st['applied']['limit']}):")
+	if not st["names"]:
 		print("  none")
-	for n in sorted(res["names"], key=lambda n: -n["failures"]):
-		mark = "  REFUSED" if n["failures"] >= cfg["LIMIT"] else ""
-		print(f"  {n['failures']:5d}  {describe(n['key'], accounts)}{mark}")
+	for n in st["names"]:
+		mark = "  REFUSED" if n["refused"] else ""
+		print(f"  {n['failures']:5d}  {n['name']}{' (no such account)' if n['account'] is False else ''}{mark}")
 	return 0
 
 

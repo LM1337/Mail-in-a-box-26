@@ -436,8 +436,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   127.0.0.1. Dovecot now counts the failed logins from 127.0.0.1 and ::1
   per account name, with two small Lua passdbs around the SQL one
   (package `dovecot-auth-lua`, `conf/dovecot-auth-guard/`): an account
-  with 100 different wrong passwords from the box within 30 minutes is
-  refused for logins from the box until it has fewer, at once and before
+  with 30 different wrong passwords from the box within 30 minutes (both
+  numbers can be changed under System > Intrusion Protection, which also
+  lists the counted and refused accounts with a button to end a lock; the
+  API `/system/auth-guard`) is refused for logins from the box until it
+  has fewer, at once and before
   its password is checked, so further guesses tell nothing, not even a
   right one. A password sent again counts once, as with Dovecot's own
   penalty: a phone that keeps sending an old password (Z-Push tries up to
@@ -455,7 +458,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   New locks are mailed to the report recipient (System > Notifications),
   at most one mail an hour (`management/auth_guard.py`, every 10
   minutes); `sudo management/auth_guard.py --status` shows the counts and
-  `--unlock ADDRESS` ends a lock. If Dovecot cannot write its counts in
+  `--unlock ADDRESS` ends a lock as well. Dovecot reads the setting on
+  every login from the box, so a change applies at once. If Dovecot cannot write its counts in
   `/run/miab-auth-guard`, failed logins from the box get Dovecot's delay
   again, never no limit. Setup now also reloads Dovecot when only these
   Lua files change (they are part of the configuration's checksum).

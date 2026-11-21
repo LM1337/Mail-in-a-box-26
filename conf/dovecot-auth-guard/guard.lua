@@ -12,7 +12,8 @@
 -- the logins of all users of these services), and records it for the
 -- account name. check.lua (the first passdb, deny = yes) refuses every
 -- login from the box for a name with LIMIT different wrong passwords
--- within WINDOW seconds, before the password is checked: guesses stop
+-- within WINDOW seconds (30 in 30 minutes unless the control panel sets
+-- others, see M.load), before the password is checked: guesses stop
 -- telling right from wrong, and nothing raises the penalty of 127.0.0.1,
 -- so the other accounts are not slowed down.
 --
@@ -42,10 +43,38 @@
 local M = {}
 
 M.DIR = "/run/miab-auth-guard"
-M.WINDOW = 1800      -- seconds
-M.LIMIT = 100        -- different wrong passwords of one name within WINDOW
-M.MAX_NAMES = 10000  -- names that count.lua tracks at once
-M.MAX_EVENTS = 1048576 -- bytes of the events file
+M.DEFAULT_LIMIT = 30    -- different wrong passwords of one name within the window
+M.DEFAULT_WINDOW = 1800 -- seconds
+M.MAX_NAMES = 10000     -- names that count.lua tracks at once
+M.MAX_EVENTS = 1048576  -- bytes of the events file
+
+-- The limit and the window that apply: System > Intrusion Protection in
+-- the control panel sets them (management/auth_guard.py writes SETTINGS,
+-- "limit N" and "window SECONDS"); read on every login from the box, so a
+-- change applies at once, without a reload of Dovecot. A missing file or a
+-- value out of range means the default.
+M.SETTINGS = "/usr/local/lib/mailinabox/dovecot-auth-guard/settings"
+M.LIMIT_MIN, M.LIMIT_MAX = 3, 1000
+M.WINDOW_MIN, M.WINDOW_MAX = 60, 86400
+M.LIMIT, M.WINDOW = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW
+
+function M.load()
+	local limit, window = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW
+	local f = io.open(M.SETTINGS, "r")
+	if f then
+		for line in f:lines() do
+			local k, v = line:match("^(%a+) (%d+)$")
+			v = tonumber(v)
+			if k == "limit" and v and v >= M.LIMIT_MIN and v <= M.LIMIT_MAX then
+				limit = v
+			elseif k == "window" and v and v >= M.WINDOW_MIN and v <= M.WINDOW_MAX then
+				window = v
+			end
+		end
+		f:close()
+	end
+	M.LIMIT, M.WINDOW = limit, window
+end
 
 function M.from_box(req)
 	local ip = req.remote_ip

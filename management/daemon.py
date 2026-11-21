@@ -879,6 +879,53 @@ def fail2ban_unban_all():
 	result["status"] = "ok"
 	return json_response(result)
 
+# Dovecot's limit of failed logins from the box itself (see auth_guard.py):
+# its setting (part of System > Intrusion Protection), the accounts it
+# counts or refuses, and the end of a lock.
+
+@app.route('/system/auth-guard', methods=["GET"])
+@authorized_personnel_only
+def auth_guard_get():
+	import auth_guard
+	try:
+		return json_response(auth_guard.status(env))
+	except Exception as e:
+		return (str(e), 500)
+
+@app.route('/system/auth-guard', methods=["POST"])
+@authorized_personnel_only
+def auth_guard_set():
+	# limit (different wrong passwords) and window (minutes); fields that are
+	# not sent keep their value. reset=1 restores the defaults.
+	import auth_guard
+	values = { k: request.form[k] for k in ("limit", "window") if k in request.form }
+	reset = request.form.get('reset') == '1'
+	try:
+		result = auth_guard.update_settings(env, values, reset=reset)
+	except auth_guard.AuthGuardError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	app.logger.warning("auth-guard: %s set the limit of failed logins from the box itself to %d in %d minutes",
+		request.user_email, result["settings"]["limit"], result["settings"]["window"])
+	result["status"] = "ok"
+	return json_response(result)
+
+@app.route('/system/auth-guard/unlock', methods=["POST"])
+@authorized_personnel_only
+def auth_guard_unlock():
+	# key: an entry of the list of GET /system/auth-guard.
+	import auth_guard
+	try:
+		result = auth_guard.unlock(request.form.get('key', ''))
+	except auth_guard.AuthGuardError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	app.logger.warning("auth-guard: %s ended the count of %s", request.user_email, result["name"])
+	result["status"] = "ok"
+	return json_response(result)
+
 @app.route('/system/fail2ban/report', methods=["GET"])
 @authorized_personnel_only
 def fail2ban_report():

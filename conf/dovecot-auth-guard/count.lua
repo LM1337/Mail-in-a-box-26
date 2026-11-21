@@ -49,6 +49,7 @@ function auth_passdb_lookup(req)
 	if not G.from_box(req) then
 		return dovecot.auth.PASSDB_RESULT_USER_UNKNOWN, "not from the box itself"
 	end
+	G.load()
 	local now = os.time()
 	local key = G.key(req.user)
 	if names[key] == nil then

@@ -12,7 +12,7 @@ info:
 
     Requests without valid administrator credentials get `401 Unauthorized`, or `403 Forbidden` when they are sent with `X-Requested-With: XMLHttpRequest` as the control panel does. Each request with wrong credentials counts as a failed login for fail2ban.
 
-    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`), the notifications (`/system/notifications...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
+    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`), the notifications (`/system/notifications...`), Dovecot's limit of failed logins from the box itself (`/system/auth-guard...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
   contact:
     name: Mail-in-a-Box support
     url: https://mailinabox.email/
@@ -2511,6 +2511,176 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         403:
           $ref: '#/components/responses/Forbidden'
+  /system/auth-guard:
+    get:
+      tags:
+        - System
+      summary: Get Dovecot's limit of failed logins from the box itself
+      description: |
+        Logins that come from the box itself (127.0.0.1 and ::1: ActiveSync
+        and Autodiscover through Z-Push, webmail, Nextcloud, and any process
+        on the box) are not delayed by Dovecot; instead an account name with
+        `limit` different wrong passwords within `window` minutes is refused
+        for these logins until it has fewer (a password sent again counts
+        once). Returns the setting (`settings`, only values that differ from
+        `defaults` are stored), the values Dovecot uses now (`applied`), the
+        allowed `ranges`, and the names with different wrong passwords in
+        the window (`names`, at most 500, most first; `more` counts the
+        rest; `account` is false for a name that is no account of the box).
+      operationId: getAuthGuard
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/auth-guard" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthGuardResponse'
+        500:
+          description: The state could not be read
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - System
+      summary: Change Dovecot's limit of failed logins from the box itself
+      description: |
+        Form fields `limit` (different wrong passwords, 3 to 1000) and
+        `window` (minutes, 1 to 1440); fields that are not sent keep their
+        value, `reset=1` restores the defaults (30 in 30 minutes). Dovecot
+        reads the setting on every login from the box: no reload.
+      operationId: setAuthGuard
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuthGuardUpdateRequest'
+            examples:
+              stricter:
+                summary: 20 different wrong passwords in 60 minutes
+                value:
+                  limit: 20
+                  window: 60
+              reset:
+                summary: Back to the defaults
+                value:
+                  reset: 1
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/auth-guard" \
+              -d "limit=20" \
+              -d "window=60" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - settings
+                  - changed
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  settings:
+                    $ref: '#/components/schemas/AuthGuardSettings'
+                  changed:
+                    type: boolean
+        400:
+          description: Invalid value (nothing was changed)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: The settings file could not be written (the previous setting was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/auth-guard/unlock:
+    post:
+      tags:
+        - System
+      summary: Forget the wrong passwords of a name (end its lock)
+      description: |
+        Form field `key`: the `key` of an entry of `names` of
+        `GET /system/auth-guard`. Its count starts again from zero, so a
+        refused account can log in from the box again at once.
+      operationId: unlockAuthGuard
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - key
+              properties:
+                key:
+                  type: string
+                  example: a-user@example.com
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/auth-guard/unlock" \
+              -d "key=a-user@example.com" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - key
+                  - name
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  key:
+                    type: string
+                  name:
+                    type: string
+        400:
+          description: Not a key of the list
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: The state could not be changed
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
   /system/notifications:
     get:
       tags:
@@ -4171,6 +4341,88 @@ components:
           items:
             type: string
           description: The aliases on the way.
+    AuthGuardSettings:
+      type: object
+      required:
+        - limit
+        - window
+      properties:
+        limit:
+          type: integer
+          description: Different wrong passwords of one account name from the box itself
+          example: 30
+        window:
+          type: integer
+          description: Within this many minutes
+          example: 30
+    AuthGuardUpdateRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 3
+          maximum: 1000
+        window:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        reset:
+          type: integer
+          enum: [1]
+    AuthGuardResponse:
+      type: object
+      required:
+        - settings
+        - defaults
+        - ranges
+        - applied
+        - warnings
+        - names
+        - more
+      properties:
+        settings:
+          $ref: '#/components/schemas/AuthGuardSettings'
+        defaults:
+          $ref: '#/components/schemas/AuthGuardSettings'
+        applied:
+          $ref: '#/components/schemas/AuthGuardSettings'
+        ranges:
+          type: object
+          properties:
+            limit:
+              type: array
+              items:
+                type: integer
+            window:
+              type: array
+              items:
+                type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        names:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              name:
+                type: string
+              failures:
+                type: integer
+                description: Different wrong passwords within the window
+              last:
+                type: integer
+                description: Time of the last one (Unix time)
+              refused:
+                type: boolean
+              account:
+                type: boolean
+                nullable: true
+        more:
+          type: integer
     NotificationsResponse:
       type: object
       required:

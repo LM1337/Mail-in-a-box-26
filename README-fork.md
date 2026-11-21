@@ -859,7 +859,8 @@ fixed)" lists a few more.
   fail2ban protects with the client's own address, and the delay made a
   wrong ActiveSync password take up to 50 s and slowed down every other
   user. Instead Dovecot counts these failures per account: an account with
-  100 different wrong passwords from the box within 30 minutes is refused
+  30 different wrong passwords from the box within 30 minutes (System >
+  Intrusion Protection changes both numbers) is refused
   for logins from the box (ActiveSync, Autodiscover, webmail, Nextcloud,
   and IMAP, POP3, ManageSieve or SMTP submission on 127.0.0.1) until it has
   fewer, even with its right password. A password sent again counts once:
@@ -868,15 +869,16 @@ fixed)" lists a few more.
   each wrong password, never the password). The other accounts are not slowed down,
   and the account's own mail programs that log in from outside are not
   refused. So a process on the box (any local account, or code running as
-  www-data after a hole in PHP or a web app) can try at most 100 passwords
+  www-data after a hole in PHP or a web app) can try at most 30 passwords
   of each account per 30 minutes. The other side: someone who tries the
   passwords of one account through ActiveSync, webmail or Nextcloud from
   addresses that fail2ban does not ban (fewer than 20 failures within
   30 to 120 s each) locks that account's phones, webmail and Nextcloud out
   while they keep trying. The box mails each new lock to the report
-  recipient (System > Notifications, at most one mail an hour); `sudo
-  management/auth_guard.py --status` shows the counts and `--unlock
-  ADDRESS` ends a lock. If Dovecot cannot write its counts
+  recipient (System > Notifications, at most one mail an hour); System >
+  Intrusion Protection lists the counted and refused accounts with a
+  button to end a lock (also `sudo management/auth_guard.py --status` and
+  `--unlock ADDRESS`). If Dovecot cannot write its counts
   (`/run/miab-auth-guard`), failed logins from the box get Dovecot's delay
   again. Logins from other addresses keep Dovecot's delay. Guesses through
   Microsoft's servers once they are on the allowlist (System > Intrusion
@@ -946,8 +948,9 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   von Z-Push, Roundcube und Nextcloud, die fail2ban mit der eigenen Adresse
   des Clients schützt, und die Verzögerung ließ ein falsches
   ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen Benutzer.
-  Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 100
+  Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 30
   verschiedenen falschen Passwörtern von der Box innerhalb von 30 Minuten
+  (beide Zahlen lassen sich unter System > Intrusion Protection ändern)
   wird für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
   Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand auf 127.0.0.1)
   abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Ein
@@ -958,15 +961,16 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   anderen Konten werden nicht gebremst, und die eigenen Mailprogramme des
   Kontos, die sich von außen anmelden, werden nicht abgewiesen. Ein Prozess
   auf der Box (jedes lokale Konto oder Code, der nach einer Lücke in PHP
-  oder einer Web-Anwendung als www-data läuft) kann also höchstens 100
+  oder einer Web-Anwendung als www-data läuft) kann also höchstens 30
   Passwörter pro Konto und 30 Minuten durchprobieren. Die Kehrseite: Wer
   die Passwörter eines Kontos über ActiveSync, Webmail oder Nextcloud von
   Adressen aus durchprobiert, die fail2ban nicht sperrt (je weniger als 20
   Fehlversuche in 30 bis 120 s), sperrt die Handys, das Webmail und
   Nextcloud dieses Kontos aus, solange er weitermacht. Die Box schickt jede
   neue Sperre an den Empfänger der Berichte (System > Notifications,
-  höchstens eine Mail pro Stunde); `sudo management/auth_guard.py --status`
-  zeigt die Zähler, `--unlock ADRESSE` beendet eine Sperre. Kann Dovecot
+  höchstens eine Mail pro Stunde); System > Intrusion Protection listet die
+  gezählten und abgewiesenen Konten mit einem Knopf, der eine Sperre beendet
+  (auch `sudo management/auth_guard.py --status` und `--unlock ADRESSE`). Kann Dovecot
   seine Zähler nicht schreiben (`/run/miab-auth-guard`), bekommen
   fehlgeschlagene Anmeldungen von der Box wieder die Verzögerung von
   Dovecot. Anmeldungen von anderen Adressen behalten die Verzögerung von
@@ -1616,7 +1620,8 @@ the following, on by default:
   own. On the allowlist, password guesses through these servers are no
   longer banned: Z-Push checks each password with an IMAP login from
   127.0.0.1, which Dovecot answers at once and limits only per account
-  (100 different wrong passwords in 30 minutes, B126, "Known issues"). The
+  (30 different wrong passwords in 30 minutes unless set otherwise, B126,
+  "Known issues"). The
   address's reverse DNS name is shown only as extra information, and only
   when it resolves back to the address: the owner of an address sets its
   PTR record. Other apps that sync through their provider's servers are
@@ -1861,8 +1866,8 @@ eingeschaltet:
   nichts hinein. In der Freigabeliste werden Passwortversuche über diese
   Server nicht mehr gesperrt: Z-Push prüft jedes Passwort mit einer
   IMAP-Anmeldung von 127.0.0.1 aus, die Dovecot sofort beantwortet und nur
-  pro Konto begrenzt (100 verschiedene falsche Passwörter in 30 Minuten,
-  B126, „Bekannte Einschränkungen“). Den Namen aus
+  pro Konto begrenzt (30 verschiedene falsche Passwörter in 30 Minuten,
+  sofern nicht anders eingestellt, B126, „Bekannte Einschränkungen“). Den Namen aus
   dem Reverse-DNS zeigt die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
   Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
   Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie

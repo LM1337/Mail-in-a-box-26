@@ -43,7 +43,24 @@ def check(name, got, want):
 
 
 cfg = ag.settings()
-check("settings of guard.lua", (cfg["DIR"], cfg["WINDOW"], cfg["LIMIT"], cfg["MAX_NAMES"]), ("/run/miab-auth-guard", 1800, 100, 10000))
+lv = ag.lua_values()
+check("values of guard.lua", (lv["DIR"], lv["DEFAULT_WINDOW"], lv["DEFAULT_LIMIT"], lv["MAX_NAMES"], lv["SETTINGS"], lv["LIMIT_MIN"], lv["LIMIT_MAX"], lv["WINDOW_MIN"], lv["WINDOW_MAX"]),
+	("/run/miab-auth-guard", 1800, 30, 10000, "/usr/local/lib/mailinabox/dovecot-auth-guard/settings", 3, 1000, 60, 86400))
+cfg = ag.settings(settings_file="/nonexistent")
+check("defaults apply without a settings file", (cfg["LIMIT"], cfg["WINDOW"]), (30, 1800))
+check("panel defaults and ranges", (ag.defaults(), ag.ranges()), ({"limit": 30, "window": 30}, {"limit": [3, 1000], "window": [1, 1440]}))
+good, _ = ag.validate_settings({"limit": "50", "window": 60})
+check("valid setting", good, {"limit": 50, "window": 60})
+bad = 0
+for v in ({"limit": "2"}, {"limit": "1001"}, {"limit": "3.5"}, {"limit": "-5"}, {"limit": "30\nwindow 1"}, {"window": "0"}, {"window": "1441"}, {"limit": True}):
+	try:
+		ag.validate_settings(v)
+	except ag.AuthGuardError:
+		bad += 1
+check("invalid settings refused", bad, 8)
+st, warn = ag.validate_settings({"limit": "x", "window": 10}, strict=False)
+check("stored bad value: default and a warning", (st, len(warn)), ({"limit": 30, "window": 10}, 1))
+check("settings file text", ag.render_settings_file({"limit": 50, "window": 60}).splitlines()[-2:], ["limit 50", "window 3600"])
 
 check("key plain", ag.key_of("Alice@Example.com"), "a-alice@example.com")
 check("key escaped", ag.key_of("a/b c@ex.com"), "a-a%2Fb%20c@ex.com")
@@ -121,6 +138,44 @@ with tempfile.TemporaryDirectory() as root:
 	ag.notify({}, cfg, now=NOW + 3800, scan_func=scan_with(many), send=mails.append, state_path=sp)
 	st = ag.load_state(sp)
 	check("pending capped", (len(st["pending"]), st["dropped"]), (ag.MAX_PENDING, 5))
+
+with tempfile.TemporaryDirectory() as root:
+	# The settings file: written through the directory's descriptor, read back
+	# as the Lua code reads it; values out of range ignored.
+	sf = os.path.join(root, "settings")
+	os.chmod(root, 0o755)
+	check("file written", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), True)
+	check("unchanged file not rewritten", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), False)
+	c = ag.settings(settings_file=sf)
+	check("Lua-side reading of the file", (c["LIMIT"], c["WINDOW"], oct(os.stat(sf).st_mode & 0o777)), (50, 3600, "0o644"))
+	with open(sf, "w") as f:
+		f.write("limit 2\nwindow 999999\n")
+	c = ag.settings(settings_file=sf)
+	check("out of range: defaults", (c["LIMIT"], c["WINDOW"]), (30, 1800))
+	os.chmod(root, 0o777)
+	try:
+		ag.write_settings_file("x", sf)
+		check("refuses a directory others may write", "written", "AuthGuardError")
+	except ag.AuthGuardError:
+		check("refuses a directory others may write", "AuthGuardError", "AuthGuardError")
+	os.chmod(root, 0o755)
+
+	# status() and unlock() of the control panel.
+	ag.known_accounts = lambda env: {"alice@example.com"}
+	ag.get_settings = lambda env: ({"limit": 30, "window": 30}, [])
+	ag.settings = lambda *a, **k: dict(ag.lua_values(), LIMIT=30, WINDOW=1800)
+	res = ag.status({}, scan_func=lambda: {"names": [{"key": "a-alice@example.com", "failures": 31, "last": NOW}, {"key": "a-x%40y@example.com", "failures": 2, "last": NOW}], "events": [], "missing": False})
+	check("status", [(n["name"], n["refused"], n["account"]) for n in res["names"]], [("alice@example.com", True, True), ("x@y@example.com", False, False)])
+	check("status setting", (res["settings"], res["applied"], res["warnings"]), ({"limit": 30, "window": 30}, {"limit": 30, "window": 30}, []))
+	removed = []
+	ag.unlock("a-alice@example.com", scan_func=lambda: removed.append(1))
+	refused = 0
+	for k in ("../x", "total", "events", "a-a/b", ""):
+		try:
+			ag.unlock(k, scan_func=lambda: removed.append(2))
+		except ag.AuthGuardError:
+			refused += 1
+	check("unlock", (removed, refused), ([1], 5))
 
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

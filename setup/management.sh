@@ -169,6 +169,9 @@ tools/write_conf.py /etc/cron.d/mailinabox-auth-guard << EOF;
 # Dovecot's limit of failed logins from the box itself: mail new locks.
 */10 * * * *	root	(cd $PWD && management/auth_guard.py --notify)
 EOF
+# Its limit and window, as System > Intrusion Protection set them in
+# settings.yaml (also after a migration), for the Lua code of Dovecot.
+management/auth_guard.py --apply
 
 # Start the management server, or restart it when its code, its start script
 # and unit, /etc/mailinabox.conf (read when it starts) or the packages of its

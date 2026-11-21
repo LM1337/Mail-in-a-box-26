@@ -139,9 +139,10 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 #    each. It returns no password, so it can accept none. Logins from other
 #    addresses keep Dovecot's delay and penalty.
 #  * miab-auth-guard-check, the first one (deny = yes), refuses an account
-#    name with 100 different wrong passwords from the box within 30 minutes
-#    for logins from the box, at once and before the password is checked,
-#    until it has fewer. Only the failures of the name itself count, so made-up names
+#    name with 30 different wrong passwords from the box within 30 minutes
+#    (System > Intrusion Protection sets both numbers; the Lua code reads
+#    them from a small file on every login from the box) for logins from the
+#    box, at once and before the password is checked, until it has fewer. Only the failures of the name itself count, so made-up names
 #    cannot lower the limit of a real account, and the other accounts are
 #    not slowed down. Logins from other addresses (the IMAP and SMTP logins
 #    of the user's own mail programs) are not refused. The price: while
