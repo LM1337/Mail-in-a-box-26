@@ -679,14 +679,51 @@ zone:
 
 ########################################################################
 
-def find_dnssec_signing_keys(domain, env):
+# The keys are in $STORAGE_ROOT/dns/dnssec, which root reads to sign the
+# zones. The storage user owns $STORAGE_ROOT and could put a dns/ of its own
+# there (B212), whose .conf names a key file elsewhere (KSK=../../x): root
+# would copy that file and write the copy outside its temporary directory.
+# The .conf files and the keys are read only through dns/ and dnssec/ opened
+# once and checked (utils.open_root_dir), as regular files of root's, and a
+# key name is a plain file name (B191).
+DNSSEC_KEY_NAME_RE = re.compile(r"^K[A-Za-z0-9._+-]+$")
+
+def open_dnssec_dir(env):
+	# The descriptor of $STORAGE_ROOT/dns/dnssec, through dns/; both must be
+	# directories of root's own. ValueError with the reason otherwise.
+	path = os.path.join(env['STORAGE_ROOT'], 'dns', 'dnssec')
+	try:
+		dfd = open_root_dir(os.path.join(env['STORAGE_ROOT'], 'dns'))
+	except OSError as e:
+		raise ValueError(str(e)) from e
+	try:
+		return open_root_dir('dnssec', dir_fd=dfd)
+	except OSError as e:
+		raise ValueError(str(e).replace("dnssec", path, 1)) from e
+	finally:
+		os.close(dfd)
+
+def read_dnssec_file(env, kfd, name, limit=65536):
+	# The text of the regular file `name` of root's in dnssec/ (kfd).
+	path = os.path.join(env['STORAGE_ROOT'], 'dns', 'dnssec')
+	try:
+		return read_root_file(kfd, name, limit=limit).decode("utf-8", "replace")
+	except FileNotFoundError as e:
+		raise ValueError(f"{path}/{name} does not exist") from e
+	except OSError as e:
+		raise ValueError(f"{path}/{e}") from e
+
+def find_dnssec_signing_keys(domain, env, kfd):
 	# For key that we generated (one per algorithm)...
-	d = os.path.join(env['STORAGE_ROOT'], 'dns/dnssec')
-	keyconfs = [f for f in os.listdir(d) if f.endswith(".conf")]
+	path = os.path.join(env['STORAGE_ROOT'], 'dns', 'dnssec')
+	keyconfs = [f for f in os.listdir(kfd) if f.endswith(".conf")]
 	for keyconf in keyconfs:
-		# Load the file holding the KSK and ZSK key filenames.
-		keyconf_fn = os.path.join(d, keyconf)
-		keyinfo = load_env_vars_from_file(keyconf_fn)
+		# Load the file holding the KSK and ZSK key filenames (KEY=VALUE
+		# lines, the first of a name counts, as load_env_vars_from_file).
+		keyinfo = {}
+		for line in read_dnssec_file(env, kfd, keyconf, limit=4096).splitlines():
+			if "=" in line.strip():
+				keyinfo.setdefault(*line.strip().split("=", 1))
 
 		# Skip this key if the conf file has a setting named DOMAINS,
 		# holding a comma-separated list of domain names, and if this
@@ -699,17 +736,23 @@ def find_dnssec_signing_keys(domain, env):
 			continue
 
 		for keytype in ("KSK", "ZSK"):
-			yield keytype, keyinfo[keytype]
+			keyfn = keyinfo.get(keytype)
+			if not keyfn or not DNSSEC_KEY_NAME_RE.match(keyfn):
+				msg = f"{path}/{keyconf} names no {keytype} key file (a plain file name K...)."
+				raise ValueError(msg)
+			yield keytype, keyfn
 
 def hash_dnssec_keys(domain, env):
 	# Create a stable (by sorting the items) hash of all of the private keys
 	# that will be used to sign this domain.
 	keydata = []
-	for keytype, keyfn in sorted(find_dnssec_signing_keys(domain, env)):
-		oldkeyfn = os.path.join(env['STORAGE_ROOT'], 'dns/dnssec', keyfn + ".private")
-		keydata.extend((keytype, keyfn))
-		with open(oldkeyfn, encoding="utf-8") as fr:
-			keydata.append( fr.read() )
+	kfd = open_dnssec_dir(env)
+	try:
+		for keytype, keyfn in sorted(find_dnssec_signing_keys(domain, env, kfd)):
+			keydata.extend((keytype, keyfn))
+			keydata.append(read_dnssec_file(env, kfd, keyfn + ".private"))
+	finally:
+		os.close(kfd)
 	keydata = "".join(keydata).encode("utf8")
 	return hashlib.sha1(keydata).hexdigest()
 
@@ -728,34 +771,40 @@ def sign_zone(domain, zonefile, env):
 	# Each key has a .key and .private file. Collect a list of filenames
 	# for all of the keys (and separately just the key-signing keys).
 	with tempfile.TemporaryDirectory(prefix="mailinabox-dnssec-") as tmpdir:
-		sign_zone_with_keys(domain, zonefile, tmpdir, env)
+		kfd = open_dnssec_dir(env)
+		try:
+			sign_zone_with_keys(domain, zonefile, tmpdir, env, kfd)
+		finally:
+			os.close(kfd)
 
-def sign_zone_with_keys(domain, zonefile, tmpdir, env):
+def sign_zone_with_keys(domain, zonefile, tmpdir, env, kfd):
 	all_keys = []
 	ksk_keys = []
-	for keytype, keyfn in find_dnssec_signing_keys(domain, env):
-		newkeyfn = os.path.join(tmpdir, keyfn.replace("_domain_", domain))
+	tfd = os.open(tmpdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+	try:
+		for keytype, keyfn in find_dnssec_signing_keys(domain, env, kfd):
+			newname = keyfn.replace("_domain_", domain)
+			if "/" in newname or newname in (".", ".."):
+				msg = f"{keyfn} with the domain {domain} is no file name."
+				raise ValueError(msg)
+			newkeyfn = os.path.join(tmpdir, newname)
 
-		for ext in (".private", ".key"):
-			# Copy the .key and .private files to the temporary directory to
-			# patch them up.
-			#
-			# Use os.umask and open().write() to securely create a copy that only
-			# we (root) can read.
-			oldkeyfn = os.path.join(env['STORAGE_ROOT'], 'dns/dnssec', keyfn + ext)
-			with open(oldkeyfn, encoding="utf-8") as fr:
-				keydata = fr.read()
-			keydata = keydata.replace("_domain_", domain)
-			prev_umask = os.umask(0o77) # ensure written file is not world-readable
-			try:
-				with open(newkeyfn + ext, "w", encoding="utf-8") as fw:
+			for ext in (".private", ".key"):
+				# Copy the .key and .private files (read through the checked
+				# dnssec/) to the temporary directory to patch them up: a new
+				# file that only we (root) can read, created in that
+				# directory (never through a link or over another file).
+				keydata = read_dnssec_file(env, kfd, keyfn + ext)
+				keydata = keydata.replace("_domain_", domain)
+				fd = os.open(newname + ext, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tfd)
+				with os.fdopen(fd, "w", encoding="utf-8") as fw:
 					fw.write(keydata)
-			finally:
-				os.umask(prev_umask) # other files we write should be world-readable
 
-		# Put the patched key filename base (without extension) into the list of keys we'll sign with.
-		all_keys.append(newkeyfn)
-		if keytype == "KSK": ksk_keys.append(newkeyfn)
+			# Put the patched key filename base (without extension) into the list of keys we'll sign with.
+			all_keys.append(newkeyfn)
+			if keytype == "KSK": ksk_keys.append(newkeyfn)
+	finally:
+		os.close(tfd)
 
 	# Do the signing.
 	expiry_date = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y%m%d")
@@ -896,33 +945,15 @@ def read_dnssec_ksk_pubkey(env, alg_name):
 	# replace dns/, and the status checks read these files as root.
 	# ValueError with the reason when they cannot be trusted or read.
 	path = os.path.join(env['STORAGE_ROOT'], 'dns', 'dnssec')
-	try:
-		dfd = open_root_dir(os.path.join(env['STORAGE_ROOT'], 'dns'))
-	except OSError as e:
-		raise ValueError(str(e)) from e
-	try:
-		kfd = open_root_dir('dnssec', dir_fd=dfd)
-	except OSError as e:
-		raise ValueError(str(e).replace("dnssec", path, 1)) from e
-	finally:
-		os.close(dfd)
-
-	def read(name, limit):
-		try:
-			return read_root_file(kfd, name, limit=limit).decode("utf-8", "replace")
-		except FileNotFoundError as e:
-			raise ValueError(f"{path}/{name} does not exist") from e
-		except OSError as e:
-			raise ValueError(f"{path}/{e}") from e
-
+	kfd = open_dnssec_dir(env)
 	try:
 		ksk = None
-		for line in read(f"{alg_name}.conf", 4096).splitlines():
+		for line in read_dnssec_file(env, kfd, f"{alg_name}.conf", 4096).splitlines():
 			if line.startswith("KSK="):
 				ksk = line[4:].strip()
-		if not ksk or not re.match(r"^K[A-Za-z0-9._+-]+$", ksk):
+		if not ksk or not DNSSEC_KEY_NAME_RE.match(ksk):
 			raise ValueError(f"{path}/{alg_name}.conf names no KSK")
-		fields = read(ksk + ".key", 65536).split("\t")
+		fields = read_dnssec_file(env, kfd, ksk + ".key", 65536).split("\t")
 		if len(fields) < 4 or len(fields[3].split(" ")) < 4:
 			raise ValueError(f"{path}/{ksk}.key is not a DNSKEY record")
 		return fields[3].split(" ")[3].strip()

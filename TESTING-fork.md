@@ -347,7 +347,10 @@ report. The groups:
   directory or database (also as a command, exit code 1), which
   setup/start.sh runs before setup changes anything, and the KSK's public
   key that the status checks read only through a checked `dns/` and
-  `dns/dnssec/` (B183); group admin runs it (`admin-storage-dirs-unit`).
+  `dns/dnssec/` (B183), and the zone signing, which reads the keys
+  only through them and writes their patched copies only into its
+  temporary directory, also with a key name that holds a path (B191);
+  group admin runs it (`admin-storage-dirs-unit`).
   `tests/fork/update-check-compare.py` (B201; no box needed) runs the
   comparison of `tools/update-check.sh after` on states in a temporary
   directory: Postfix and Dovecot settings that only the record after the

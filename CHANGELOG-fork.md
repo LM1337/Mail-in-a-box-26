@@ -516,6 +516,24 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   checks go on. New cases in `tests/fork/storage-dirs.py` and
   `tests/fork/status-dns.py`.
 
+* **Zone signing reads the DNSSEC keys only through a checked dns/ (B191)**\
+  The DNS update (and its daily run that signs the zones again) read the
+  `.conf` files in `dns/dnssec/` and the key files they name by path, as
+  root, and wrote the patched copies to its temporary directory under the
+  names from the `.conf` without checking them. The storage user could put
+  a `dns/` of its own in place of the box's (B212), even while the update
+  ran, whose `.conf` names a key with `../` in its name: root then copied
+  a file of the storage user's to a place of its choice outside the
+  temporary directory (for example a configuration directory that a root
+  job reads), and signed the zones with its keys. The `.conf` files and
+  the keys are now read only through the checked `dns/` and `dnssec/`
+  (root's own, not writable by others, regular files of root's), a key
+  name must be a plain file name (`K` and letters, digits, `._+-`), and
+  the copies are new files created in the temporary directory only. When
+  that fails the DNS update stops with the reason and the zones stay as
+  they are. The keys' hash in the zone files is unchanged, so no zone is
+  signed again for this update. New cases in `tests/fork/storage-dirs.py`.
+
 * **Nextcloud takes X-Forwarded-For only from nginx's own proxy (B213)**\
   Nextcloud takes the client's address from `X-Forwarded-For` on every
   connection from 127.0.0.1 (`trusted_proxies`, B121), so any local account
