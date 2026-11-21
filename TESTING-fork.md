@@ -290,6 +290,13 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `tests/fork/status-dns.py` (B181; no box needed) runs the status
+  checks' `query_dns()` against a stand-in for dnspython: records,
+  NXDOMAIN and NoAnswer, a failed lookup, a timeout, YXDOMAIN and a name
+  too long for DNS (no exception, `[error]`), a nameserver of its own;
+  and the Spamhaus DBL check of a mail domain (not listed, listed, a
+  failed lookup, a name too long with `.dbl.spamhaus.org`). Group admin
+  runs it (`admin-status-dns-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

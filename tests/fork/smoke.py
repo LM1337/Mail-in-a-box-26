@@ -4849,6 +4849,7 @@ def main():
         run_check("admin-nextcloud-throttle-unit", c_local_test, ctx, "nextcloud-throttle.py")
         run_check("admin-notifications-unit", c_local_test, ctx, "admin-mail.py")
         run_check("admin-status-changes-unit", c_local_test, ctx, "status-changes.py")
+        run_check("admin-status-dns-unit", c_local_test, ctx, "status-dns.py")
         run_check("admin-panel-fragments", c_local_test, ctx, "panel-fragments.py")
         run_check("admin-panel-assets", c_panel_assets, ctx)
         run_check("admin-panel-assets-unit", c_local_test, ctx, "panel-assets.py")

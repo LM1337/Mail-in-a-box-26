@@ -8,7 +8,7 @@ import sys, os, os.path, re, datetime, multiprocessing.pool
 import asyncio
 import dateutil.parser, dateutil.relativedelta, dateutil.tz
 
-import dns.reversename, dns.resolver
+import dns.exception, dns.name, dns.reversename, dns.resolver
 import idna
 import psutil
 import postfix_mta_sts_resolver.resolver
@@ -845,13 +845,32 @@ def check_mail_domain(domain, env, output):
 	# The user might have chosen a domain that was previously in use by a spammer
 	# and will not be able to reliably send mail.
 	
+	check_domain_dbl(domain, output)
+
+def dns_name_too_long(qname):
+	# Whether qname is longer than a DNS name may be (255 octets), so that
+	# no lookup of it can be made (query_dns gives "[error]", B181).
+	try:
+		dns.name.from_text(qname)
+	except dns.name.NameTooLong:
+		return True
+	except dns.exception.DNSException:
+		pass
+	return False
+
+def check_domain_dbl(domain, output):
 	# See https://www.spamhaus.org/news/article/807/using-our-public-mirrors-check-your-return-codes-now. for
 	# information on spamhaus return codes
-	dbl = query_dns(domain+'.dbl.spamhaus.org', "A", nxdomain=None)
+	dbl_qname = domain + '.dbl.spamhaus.org'
+	dbl = query_dns(dbl_qname, "A", nxdomain=None)
 	if dbl is None:
 		output.print_ok("Domain is not blacklisted by dbl.spamhaus.org.")
 	elif dbl == "[timeout]":
 		output.print_warning(f"Connection to dbl.spamhaus.org timed out. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
+	elif dbl == "[error]" and dns_name_too_long(dbl_qname):
+		# A domain of more than about 237 characters: with the suffix the
+		# name is too long for DNS, so it cannot be looked up (B181).
+		output.print_warning(f"Could not determine whether the domain {domain} is blacklisted by dbl.spamhaus.org: its name is too long to be looked up there.")
 	elif dbl == "[error]":
 		# The lookup failed, which is no answer (B150).
 		output.print_warning(f"Could not connect to dbl.spamhaus.org. Could not determine whether the domain {domain} is blacklisted. Please try again later.")
@@ -906,8 +925,10 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 	# as the nameserver.
 	resolver = dns.resolver.get_default_resolver()
 
-	# Make sure at is not a string that cannot be used as a nameserver
-	if at and at not in {'[Not set]', '[timeout]'}:
+	# Ask the nameserver at the address 'at' instead. The callers pass the
+	# box's own address or the result of a successful lookup, never a
+	# sentinel such as '[Not Set]', '[timeout]' or '[error]'.
+	if at:
 		resolver = dns.resolver.Resolver()
 		resolver.nameservers = [at]
 
@@ -928,6 +949,12 @@ def query_dns(qname, rtype, nxdomain='[Not Set]', at=None, as_list=False):
 		# No server gave an answer: each one answered SERVFAIL, REFUSED or
 		# another error, or could not be reached. That is not "no such
 		# record", so it has a value of its own, like a timeout (B150).
+		return "[error]"
+	except (dns.name.NameTooLong, dns.resolver.YXDOMAIN):
+		# The name cannot be asked: it is longer than DNS allows (a long
+		# domain with ".dbl.spamhaus.org" appended), or a DNAME would make
+		# it so. No answer either, and no traceback that ends the whole
+		# status check run (B181).
 		return "[error]"
 	except dns.exception.Timeout:
 		return "[timeout]"

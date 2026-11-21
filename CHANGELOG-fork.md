@@ -75,6 +75,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `$STORAGE_ROOT/www/custom.yaml`: the location's own headers had replaced
   the server's (B180, upstream). New offline test
   `tests/fork/nginx-hsts.py` and smoke check `web-hsts-admin`.
+* **Status checks no longer crash on overlong domain names (B181)**\
+  The status checks end no longer with a traceback when a lookup cannot be
+  made: a mail domain whose name is too long with `.dbl.spamhaus.org`
+  appended (more than about 237 characters) gets the warning that it is
+  too long to be looked up in the Spamhaus DBL, and a lookup that a DNAME
+  makes too long (YXDOMAIN) counts as a failed lookup (B181, upstream).
+  New offline test `tests/fork/status-dns.py` and smoke check
+  `admin-status-dns-unit`.
 
 ### Planned
 
@@ -252,14 +260,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
   (following a link) to 0600. It gives no root and needs code running as
   the storage user, which no service of the box runs (B147).
-* **Status checks query_dns() crashes on overlong domain names**\
-  The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
-  nor `NameTooLong`: a mail domain whose name is too long with
-  `.dbl.spamhaus.org` appended raises out of its checks and ends the
-  status check run with a traceback (from reading the code). Its guard for
-  the `at` argument tests `'[Not set]'`, which no lookup returns (the value
-  is `'[Not Set]'`, and now `'[error]'` too); the callers exclude both
-  before, so the guard is dead code.
 * **Failed DS lookup is reported as "DS record is not set" (B150)**\
   When the lookup of a domain's DS record fails, the status checks still
   say "This domain's DNSSEC DS record is not set" (a failed lookup counts

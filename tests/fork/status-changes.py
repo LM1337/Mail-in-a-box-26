@@ -35,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MGMT = os.path.join(HERE, "..", "..", "management")
 
 STUBS = ["dateutil", "dateutil.parser", "dateutil.relativedelta", "dateutil.tz",
-	"dns", "dns.reversename", "dns.resolver", "idna", "psutil",
+	"dns", "dns.exception", "dns.name", "dns.reversename", "dns.resolver", "idna", "psutil",
 	"postfix_mta_sts_resolver", "postfix_mta_sts_resolver.resolver",
 	"dns_update", "web_update", "ssl_certificates", "mailconfig", "utils",
 	"backup", "fail2ban_admin"]
