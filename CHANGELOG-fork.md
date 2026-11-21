@@ -91,7 +91,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   slow-login jails on a box upgraded in place; dbus, systemd-tmpfiles,
   AppArmor (named) and containerd notes of the release upgrades; and in
   `log-audit-allow-old-box.txt` Dovecot 2.3's anvil note at the old box's
-  stop.
+  stop and `postqueue`'s note when `--check-old` reads the stopped old
+  box's queue. From the repeated runs: an IMAP process and an smtpd that
+  lose their service in the moment of setup's Dovecot and Postfix reloads.
 * **Checks that the control panel's icons and scripts are installed**\
   The planned item "Control panel asks for a favicon.ico that is not
   installed" (an nginx 404 for `/admin/assets/branding/favicon.ico`, noted
