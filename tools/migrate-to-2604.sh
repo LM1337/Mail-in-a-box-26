@@ -2348,7 +2348,8 @@ report_old_roundcube() {
 	fi
 	warn "Local changes to Roundcube on the old box that the migration does not carry over (they do not stop it):"
 	while IFS= read -r x; do say "  $x"; done <<< "$items"
-	say "Roundcube is not part of $STORAGE_ROOT: setup installs its own here and writes its own"
+	# Not $STORAGE_ROOT: preflight runs before migrate_ssh sets it (B185).
+	say "Roundcube is not part of ${OLD[CONF_STORAGE_ROOT]:-the data directory}: setup installs its own here and writes its own"
 	say "config/config.inc.php. This tool keeps a copy of the old config.inc.php and of these plugin"
 	say "directories in $OLD_RC. The old plugins are not copied back on their own: a plugin"
 	say "for the old Roundcube can break the new one. Phase verify lists what is still missing, and"

@@ -263,7 +263,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   while that file exists, System Status shows a warning with the items
   under "show more", and so the daily status change mail names it too. The
   new option `--ack-local` of both tools, or removing the file, ends it.
-  New offline test `tests/fork/roundcube-local.py`.
+  New offline test `tests/fork/roundcube-local.py`. A first version of the
+  migration tool's report stopped its preflight check, and so `--check`
+  and the migration of every box with such changes, with "STORAGE_ROOT:
+  unbound variable" (B185, found in the test runs of this release; the
+  test now runs both tools' reports as bash with `set -u`).
 * **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
   tools/update-check.sh now records `tls_eecdh_auto_curves` and
   `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such

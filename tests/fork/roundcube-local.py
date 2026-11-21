@@ -26,6 +26,8 @@ This test checks:
   * "verify" names only what the Roundcube after setup does not have, writes
     local-changes.json (0600) with the open items and removes it when
     nothing is open;
+  * the preflight reports of both tools run under "set -euo pipefail"
+    before anything else of the tool (B185: no unbound variable);
   * System Status (management/status_checks.py) shows that file as a
     warning with the items as extra lines, and ignores a link, a file that
     another account could write, or a missing file.
@@ -295,9 +297,55 @@ def main():
 	sc.check_local_changes_after_upgrade({}, rec)
 	check("a directory that others can write is ignored", rec.calls == [], str(rec.calls))
 
+	# The preflight reports of both tools, run as bash with "set -euo
+	# pipefail" as in the tools, with local changes, before anything else of
+	# the tool has run (B185: the migration tool's report named
+	# $STORAGE_ROOT, which preflight does not set yet, and stopped with
+	# "unbound variable").
+	for tool, fn in (("tools/migrate-to-2604.sh", "report_old_roundcube"), ("tools/upgrade-in-place-to-2604.sh", "report_roundcube")):
+		check("preflight report (%s): local changes named, exit 0, no unbound variable (B185)" % tool, *preflight_report(tool, fn))
+
 	print()
 	print("%d failed" % len(FAILED) if FAILED else "all passed")
 	return 1 if FAILED else 0
+
+
+def preflight_report(tool, fn):
+	src = open(os.path.join(ROOT, tool), encoding="utf-8").read()
+	py = re.search(r"\nROUNDCUBE_PY=\$\(cat <<'EOF'\n.*?\nEOF\n\)\n", src, re.S)
+	funcs = []
+	for name in (fn, "roundcube_plugin_dirs"):
+		m = re.search(r"\n%s\(\) \{.*?\n\}\n" % name, src, re.S)
+		if m:
+			funcs.append(m.group(0))
+	if not py or not funcs:
+		return False, "function or ROUNDCUBE_PY not found"
+	d = tempfile.mkdtemp()
+	rc = os.path.join(d, "roundcubemail")
+	os.makedirs(os.path.join(rc, "config"))
+	for p in ("archive", "password", "contextmenu"):
+		os.makedirs(os.path.join(rc, "plugins", p))
+	with open(os.path.join(rc, "config", "config.inc.php"), "w", encoding="utf-8") as f:
+		t = template().replace("'carddav')", "'carddav','contextmenu')")
+		i = t.rfind("?>")
+		f.write((t[:i] + "$config['draft_autosave'] = 120;\n" + t[i:]) if i >= 0 else t + "$config['draft_autosave'] = 120;\n")
+	script = "set -euo pipefail\nunset STORAGE_ROOT\n" + py.group(0) + """
+section() { echo "== $*"; }
+say() { echo "$*"; }
+warn() { echo "WARNING: $*"; }
+state_get() { echo; }
+remote() { bash -c "$1"; }
+declare -A OLD=([CONF_STORAGE_ROOT]=/home/user-data)
+RC_DIR=%s
+OLD_RC=/root/x/old-roundcube
+SELF=%s
+HOOK_DIR=/etc/mailinabox/upgrade-2604.d
+""" % (rc, os.path.basename(tool)) + "".join(funcs) + "\n%s\n" % fn
+	r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+	out = r.stdout + r.stderr
+	ok = (r.returncode == 0 and "unbound variable" not in out and "plugin directory plugins/contextmenu" in out
+		and "setting draft_autosave" in out)
+	return ok, "exit %d: %s" % (r.returncode, out[:1500])
 
 
 sys.exit(main())
