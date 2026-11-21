@@ -17,10 +17,33 @@ source /etc/mailinabox.conf # load global vars
 
 db_path=$STORAGE_ROOT/mail/users.sqlite
 
+# $STORAGE_ROOT/mail and users.sqlite belong to root alone (B210). Up to
+# v78-r2604.4 the directory was root:www-data 775 and the database root:www-data
+# 664, as upstream has them, because Roundcube's password plugin wrote the
+# database itself as www-data (and SQLite creates its journal next to it):
+# code running as www-data could rewrite every account, its password, its
+# privileges and its aliases, and every local account could read all password
+# hashes. Roundcube now changes a password through the management daemon
+# (setup/webmail.sh, management/self_password.py), and every other reader
+# opens the database as root: Dovecot's auth-worker runs as root, Postfix's
+# daemons open their sqlite tables as root before they drop their privileges
+# and enter their chroot, the management daemon, the nightly backup and the
+# tools run as root. In SQLite's rollback journal mode (the default, see
+# below) a reader needs no write access to the directory; only the writer
+# (root) creates the journal there, with the database's owner and mode.
+# What else is in the directory has an owner of its own (mailboxes and sieve:
+# mail, dkim: opendkim, postgrey, spamassassin: spampd, roundcube: www-data),
+# so the directory itself is root:root 755: www-data can no longer rename,
+# replace or remove anything in it. Through descriptors (tools/write_conf.py
+# --own), refusing a symbolic link (B147).
+if [ -d "$STORAGE_ROOT/mail" ]; then
+	tools/write_conf.py --own "$STORAGE_ROOT/mail" root root 755
+fi
+
 # Create an empty database if it doesn't yet exist. It is made in a directory
 # of root's own and written into place with tools/write_conf.py, which does not
-# follow a symbolic link: www-data may write in $STORAGE_ROOT/mail
-# (setup/webmail.sh), and sqlite3 as root created the database wherever a link
+# follow a symbolic link: up to v78-r2604.4 www-data could write in
+# $STORAGE_ROOT/mail, and sqlite3 as root created the database wherever a link
 # put there pointed (B147).
 if [ ! -f "$db_path" ]; then
 	echo "Creating new user database: $db_path";
@@ -29,9 +52,42 @@ if [ ! -f "$db_path" ]; then
 	echo "CREATE TABLE aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_tmp/users.sqlite";
 	echo "CREATE TABLE mfa (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, secret TEXT NOT NULL, mru_token TEXT, label TEXT, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);" | sqlite3 "$db_tmp/users.sqlite";
 	echo "CREATE TABLE auto_aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, destination TEXT NOT NULL, permitted_senders TEXT);" | sqlite3 "$db_tmp/users.sqlite";
-	tools/write_conf.py "$db_path" 644 < "$db_tmp/users.sqlite"
+	tools/write_conf.py "$db_path" 600 < "$db_tmp/users.sqlite"
 	rm -rf "$db_tmp"
 fi
+
+# Owner and mode of the database (B210): root:root 0600, the password hashes
+# are no longer readable by every local account. Changing them does not touch
+# the open descriptors of Dovecot and Postfix, so no lookup fails.
+tools/write_conf.py --own "$db_path" root root 600
+
+# The rollback journal, not WAL: in WAL mode every reader must be able to
+# write the -shm file next to the database, and Postfix's daemons, which read
+# it after they dropped their privileges, cannot (upstream #2185; setup/
+# webmail.sh keeps Roundcube from switching its own database's mode). A
+# database in WAL mode (byte 18 of the header is 2) is switched back, through
+# the checked directory (/proc/self/fd/N: the directory that was opened, not
+# a path another account could change).
+python3 -I - "$STORAGE_ROOT/mail" << 'PY'
+import os, sqlite3, stat, sys
+sys.path.insert(0, os.path.join(os.getcwd(), "tools"))
+import write_conf
+dfd = write_conf.open_dir(sys.argv[1])
+st = os.fstat(dfd)
+if st.st_uid != 0 or st.st_mode & 0o022:
+	sys.exit("%s is not a directory of root's own" % sys.argv[1])
+fd = os.open("users.sqlite", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+with os.fdopen(fd, "rb") as f:
+	fst = os.fstat(f.fileno())
+	if not stat.S_ISREG(fst.st_mode) or fst.st_uid != 0:
+		sys.exit("users.sqlite is not a regular file of root's")
+	header = f.read(20)
+if len(header) == 20 and header[18] == 2:
+	conn = sqlite3.connect("/proc/self/fd/%d/users.sqlite" % dfd)
+	mode = conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+	conn.close()
+	print("users.sqlite was in WAL mode, now:", mode)
+PY
 
 # ### User Authentication
 

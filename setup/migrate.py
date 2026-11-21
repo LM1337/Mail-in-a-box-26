@@ -219,12 +219,60 @@ def read_migration_id(path):
 			raise OSError(f"{path} is not a regular file")
 		return f.read(64).decode("utf-8", "replace").strip()
 
-def write_migration_id(path, ver):
+def load_write_conf():
 	spec = importlib.util.spec_from_file_location("write_conf",
 		os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "write_conf.py"))
 	write_conf = importlib.util.module_from_spec(spec)
 	spec.loader.exec_module(write_conf)
-	write_conf.write_if_changed(path, (str(ver) + "\n").encode())
+	return write_conf
+
+def write_migration_id(path, ver):
+	load_write_conf().write_if_changed(path, (str(ver) + "\n").encode())
+
+# The storage user owns $STORAGE_ROOT and so mailinabox.version: it could
+# write a lower number there, and the next setup run would run the data
+# migrations from there again as root (each one that cannot run twice
+# stopped setup, but before that, depending on the number, migration 8
+# deleted the DKIM key, 11 moved the Let's Encrypt account away, 12 dropped
+# Roundcube's CardDAV tables and all webmail sessions, 5 chmodded
+# backup/secret_key.txt). Setup therefore also records the number of the last
+# migration that ran on this box in a file of root's own,
+# /var/lib/mailinabox/storage-migration ("NUMBER STORAGE_ROOT"), and does not
+# trust a lower number in mailinabox.version (B211). The record counts only for
+# the STORAGE_ROOT it names. mailinabox.version stays where it is and as it
+# is, so that it goes with the data into backups and to a new box (where no
+# record exists, the file counts, as before). A higher number than the record
+# counts (the number written after a migration and before the record, a run
+# that ended in between); a missing mailinabox.version is taken from the
+# record.
+MIGRATION_RECORD = "/var/lib/mailinabox/storage-migration"
+RECORD_OWNER = 0 # root (tests/fork/migration-record.py runs as another user)
+
+def read_migration_record(env, path=None):
+	# The recorded number for this STORAGE_ROOT, or None.
+	path = path or MIGRATION_RECORD
+	try:
+		fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+	except FileNotFoundError:
+		return None
+	with os.fdopen(fd, "rb") as f:
+		st = os.fstat(f.fileno())
+		if not stat.S_ISREG(st.st_mode) or st.st_uid != RECORD_OWNER or st.st_mode & 0o022:
+			raise OSError(f"{path} is not a regular file of root's own")
+		text = f.read(4096).decode("utf-8", "replace").strip()
+	number, _, root = text.partition(" ")
+	if not number.isdigit():
+		raise OSError(f"{path} does not start with a number")
+	if root != env["STORAGE_ROOT"]:
+		return None
+	return int(number)
+
+def write_migration_record(env, ver, path=None):
+	path = path or MIGRATION_RECORD
+	if "\n" in env["STORAGE_ROOT"]:
+		raise OSError("STORAGE_ROOT has a line break")
+	os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+	load_write_conf().write_if_changed(path, ("%d %s\n" % (ver, env["STORAGE_ROOT"])).encode())
 
 def run_migrations():
 	if not os.access("/etc/mailinabox.conf", os.W_OK, effective_ids=True):
@@ -242,17 +290,58 @@ def run_migrations():
 			print(f"Cannot read {migration_id_file}: {e}", file=sys.stderr)
 			sys.exit(1)
 
+	try:
+		recorded = read_migration_record(env)
+	except OSError as e:
+		print(f"Cannot read {MIGRATION_RECORD}: {e}", file=sys.stderr)
+		sys.exit(1)
+
 	if migration_id is None:
 		# Load the legacy location of the migration ID. We'll drop support
 		# for this eventually.
 		migration_id = env.get("MIGRATIONID")
+
+	if migration_id is None and recorded is not None:
+		# The file is gone, but this box ran the migrations up to the
+		# record on this STORAGE_ROOT: go on from there (setup/start.sh
+		# would otherwise take the data for new and skip all migrations).
+		print(f"{migration_id_file} is missing; this box recorded migration #{recorded} for it ({MIGRATION_RECORD}).")
+		migration_id = str(recorded)
+		try:
+			write_migration_id(migration_id_file, recorded)
+			# The storage user's again, as setup/start.sh makes it (B147).
+			if env.get("STORAGE_USER"):
+				import pwd
+				pw = pwd.getpwnam(env["STORAGE_USER"])
+				load_write_conf().own(migration_id_file, pw.pw_uid, pw.pw_gid, 0o644)
+		except (OSError, KeyError) as e:
+			print(f"Cannot write {migration_id_file}: {e}", file=sys.stderr)
+			sys.exit(1)
 
 	if migration_id is None:
 		print()
 		print(f"{migration_id_file} file doesn't exists. Skipping migration...")
 		return
 
+	if not str(migration_id).strip().isdigit():
+		print(f"{migration_id_file} does not hold the number of a migration.", file=sys.stderr)
+		sys.exit(1)
 	ourver = int(migration_id)
+
+	if recorded is not None and ourver < recorded:
+		print(f"""
+{migration_id_file} says #{ourver}, but this box has run the data
+migrations up to #{recorded} on {env['STORAGE_ROOT']} ({MIGRATION_RECORD}).
+Setup does not run migrations again for a lower number: the storage user
+owns that file, and a migration that runs twice can delete data (B211).
+
+* If you restored an older backup of {env['STORAGE_ROOT']}, its migrations
+  must run: remove {MIGRATION_RECORD} and run setup again.
+* Otherwise put the number back, as the storage user (not as root by path
+  in its directory):
+  sudo -u {env.get('STORAGE_USER', 'user-data')} sh -c 'echo {recorded} > {migration_id_file}'
+  and run setup again.""", file=sys.stderr)
+		sys.exit(1)
 
 	while True:
 		next_ver = (ourver + 1)
@@ -279,11 +368,14 @@ def run_migrations():
 		ourver = next_ver
 
 		# Write out our current version now. Do this sooner rather than later
-		# in case of any problems.
+		# in case of any problems. mailinabox.version first, then the record:
+		# a run that ends in between leaves a higher number in the file,
+		# which the next run takes (see above).
 		try:
 			write_migration_id(migration_id_file, ourver)
+			write_migration_record(env, ourver)
 		except OSError as e:
-			print(f"Cannot write {migration_id_file}: {e}", file=sys.stderr)
+			print(f"Cannot write {migration_id_file} or {MIGRATION_RECORD}: {e}", file=sys.stderr)
 			sys.exit(1)
 
 		# Delete the legacy location of this field.
@@ -293,6 +385,15 @@ def run_migrations():
 
 		# iterate and try next version...
 
+	# The record of a box that had none (the first run of this version), or
+	# after a higher number in the file.
+	if recorded != ourver:
+		try:
+			write_migration_record(env, ourver)
+		except OSError as e:
+			print(f"Cannot write {MIGRATION_RECORD}: {e}", file=sys.stderr)
+			sys.exit(1)
+
 if __name__ == "__main__":
 	if sys.argv[-1] == "--current":
 		# Return the number of the highest migration.
@@ -300,4 +401,7 @@ if __name__ == "__main__":
 	elif sys.argv[-1] == "--migrate":
 		# Perform migrations.
 		run_migrations()
+	elif len(sys.argv) == 4 and sys.argv[1] == "--record":
+		# setup/start.sh on a new STORAGE_ROOT: record its number (B211).
+		write_migration_record({"STORAGE_ROOT": sys.argv[2]}, int(sys.argv[3]))
 

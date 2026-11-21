@@ -153,6 +153,80 @@ paths:
                     privileges:
                       - admin
                     status: ok
+  /me/password:
+    post:
+      tags:
+        - User
+      summary: Change the password of the calling user.
+      description: |
+        A mail user changes their own password. Authenticate with HTTP Basic
+        authentication as `email:current password` (as for `/login`); a user with
+        two-factor authentication also sends the current code in the `x-auth-token`
+        header, as for `/login`. Session API keys and the system API key are not
+        accepted: only the password of the account whose current password was given
+        is changed. The new password must meet the same rules as for
+        `/mail/users/password`.
+
+        Roundcube's password plugin uses this (the fork's driver calls the management
+        daemon on 127.0.0.1), so that the web server's account needs no access to the
+        user database. A wrong current password is logged as a failed login (the
+        `miab-management` jail of fail2ban); after 5 failures for an account or 10
+        for a client address within 10 minutes, further attempts are refused with 429
+        for the rest of that time.
+      operationId: changeOwnPassword
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChangeOwnPasswordRequest'
+            example:
+              password: s3curE_pa5Sw0rD
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/me/password" \
+              -d "password=<new password>" \
+              -u "<email>:<current password>"
+      responses:
+        200:
+          description: The password was changed.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: OK
+        400:
+          description: The new password was refused.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Passwords must be at least eight characters.
+        401:
+          description: No email address and current password were given.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Give the email address and the current password (HTTP Basic authentication).
+        403:
+          description: |
+            The email address or the current password is wrong, the two-factor code is
+            not valid, or the account uses two-factor authentication and no code was
+            given.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Incorrect email address or password.
+        429:
+          description: Too many failed attempts for the account or the client address.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Too many failed attempts. Try again in a few minutes.
   /system/status:
     post:
       tags:
@@ -2982,6 +3056,16 @@ components:
         - 'off'
       example: private
       description: System privacy status.
+    ChangeOwnPasswordRequest:
+      type: object
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          format: password
+          description: The new password.
+      description: The new password of the calling user.
     MailUserSetPasswordRequest:
       type: object
       required:

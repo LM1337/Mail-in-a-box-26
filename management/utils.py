@@ -55,6 +55,79 @@ def write_settings(config, env):
             pass
         raise
 
+# DIRECTORIES OF ROOT'S OWN BELOW STORAGE_ROOT (B212)
+
+# backup/ and dns/ belong to root, but they are in STORAGE_ROOT, which the
+# storage user owns: it can rename either and put a directory of its own in
+# its place, with a backup target and a passphrase of its choice, or DNS
+# records. As in tools/update-check.sh (B117), such a directory is opened
+# once and checked through its descriptor: a directory (not a symbolic link)
+# of root's own that no group or other account may write. Its files are then
+# read and written only through that descriptor, so a directory put there
+# later does not count.
+
+ROOT_DIR_OWNER = 0 # root (the offline tests run as another user)
+
+def open_root_dir(path):
+    # The descriptor of the directory `path`, or OSError (FileNotFoundError
+    # when it does not exist) with the reason.
+    import stat
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        raise
+    except OSError as e:
+        if os.path.islink(path):
+            raise OSError(f"{path} is a symbolic link") from e
+        raise OSError(f"{path} cannot be opened as a directory: {e.strerror}") from e
+    st = os.fstat(fd)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != ROOT_DIR_OWNER or st.st_mode & 0o022:
+        os.close(fd)
+        raise OSError(f"{path} is not a directory of root's own (owned by root, not writable by group or others)")
+    return fd
+
+def read_root_file(dfd, name, limit=1 << 20):
+    # The content (bytes) of the regular file `name` of root's in the
+    # directory dfd (open_root_dir), not through a link; FileNotFoundError
+    # when it is missing, OSError for anything else.
+    import stat
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != ROOT_DIR_OWNER:
+            raise OSError(f"{name} is not a regular file of root's")
+        data = f.read(limit + 1)
+    if len(data) > limit:
+        raise OSError(f"{name} is larger than {limit} bytes")
+    return data
+
+def write_root_file(dfd, name, data, mode):
+    # Writes data (bytes) as `name` in the directory dfd (open_root_dir): a new
+    # file of root's with `mode` under a random name (O_EXCL, never through a
+    # link), renamed over the old one.
+    import secrets
+    for _ in range(100):
+        tmp = f".{name}.{secrets.token_hex(6)}"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+            break
+        except FileExistsError:
+            continue
+    else:
+        raise OSError(f"cannot create a temporary file for {name}")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+        os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dfd)
+        except OSError:
+            pass
+        raise
+
 def load_settings(env):
     import rtyaml, stat
     fn = os.path.join(env['STORAGE_ROOT'], 'settings.yaml')

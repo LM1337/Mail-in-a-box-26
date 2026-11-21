@@ -4,12 +4,13 @@
 # and mail aliases and restarts nsd.
 ########################################################################
 
-import sys, os, os.path, datetime, re, hashlib, base64, tempfile
+import sys, os, os.path, datetime, re, hashlib, base64, tempfile, stat
 import ipaddress
 import rtyaml
 import dns.resolver
 
 from utils import shell, load_env_vars_from_file, safe_domain_name, sort_domains, get_ssh_port, get_ssh_config_values
+from utils import open_root_dir, read_root_file, write_root_file
 from ssl_certificates import get_ssl_certificates, check_certificate
 
 # From https://stackoverflow.com/questions/3026957/how-to-validate-a-domain-name-using-regex-php/16491074#16491074
@@ -853,10 +854,44 @@ def write_opendkim_tables(domains, env):
 
 ########################################################################
 
-def get_custom_dns_config(env, only_real_records=False):
+# $STORAGE_ROOT/dns belongs to root, but the storage user owns $STORAGE_ROOT
+# and could rename dns/ and put a directory of its own there: the records in
+# its custom.yaml would go into the zones, and root wrote custom.yaml there by
+# path with open("w"), which follows a symbolic link. custom.yaml is read and
+# written only through the checked directory (utils.open_root_dir, B212).
+def open_dns_dir(env):
+	path = os.path.join(env['STORAGE_ROOT'], 'dns')
 	try:
-		with open(os.path.join(env['STORAGE_ROOT'], 'dns/custom.yaml'), encoding="utf-8") as f:
-			custom_dns = rtyaml.load(f)
+		return open_root_dir(path)
+	except FileNotFoundError:
+		raise
+	except OSError as e:
+		msg = f"{e}. The custom DNS records in it are not used until it is a directory of root's own again (chown root:root, chmod 755; check custom.yaml in it)."
+		raise ValueError(msg) from e
+
+def read_custom_dns_yaml(env):
+	# The text of dns/custom.yaml, None when it (or dns/) is missing.
+	# ValueError when the directory or the file cannot be trusted: the zones
+	# are then not built (the old ones stay), rather than built without the
+	# custom records.
+	try:
+		dfd = open_dns_dir(env)
+	except FileNotFoundError:
+		return None
+	try:
+		return read_root_file(dfd, 'custom.yaml').decode("utf-8", "replace")
+	except FileNotFoundError:
+		return None
+	except OSError as e:
+		msg = f"{env['STORAGE_ROOT']}/dns/{e}. The custom DNS records in it are not used until it is a regular file of root's again."
+		raise ValueError(msg) from e
+	finally:
+		os.close(dfd)
+
+def get_custom_dns_config(env, only_real_records=False):
+	text = read_custom_dns_yaml(env)
+	try:
+		custom_dns = rtyaml.load(text) if text is not None else None
 		if not isinstance(custom_dns, dict): raise ValueError # caught below
 	except:
 		return [ ]
@@ -935,10 +970,26 @@ def write_custom_dns_config(config, env):
 					values = values[0]
 				dns[qname][rtype] = values
 
-	# Write.
+	# Write, through the checked directory (B212): a new file of root's,
+	# renamed over the old one, with the read bits of the old one (0644 for a
+	# new one, as upstream's open("w") made it).
 	config_yaml = rtyaml.dump(dns)
-	with open(os.path.join(env['STORAGE_ROOT'], 'dns/custom.yaml'), "w", encoding="utf-8") as f:
-		f.write(config_yaml)
+	try:
+		dfd = open_dns_dir(env)
+	except FileNotFoundError:
+		os.mkdir(os.path.join(env['STORAGE_ROOT'], 'dns'), 0o755)
+		dfd = open_dns_dir(env)
+	try:
+		mode = 0o644
+		try:
+			st = os.stat('custom.yaml', dir_fd=dfd, follow_symlinks=False)
+			if stat.S_ISREG(st.st_mode):
+				mode = stat.S_IMODE(st.st_mode) & 0o644
+		except FileNotFoundError:
+			pass
+		write_root_file(dfd, 'custom.yaml', config_yaml.encode("utf-8"), mode)
+	finally:
+		os.close(dfd)
 
 def set_custom_dns_record(qname, rtype, value, action, env):
 	# validate qname

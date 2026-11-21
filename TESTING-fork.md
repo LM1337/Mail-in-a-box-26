@@ -276,6 +276,36 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `api-self-password` (B210): a test user (`smokepw-<token>`) changes their
+  own password through `POST /me/password`: a wrong current password gets
+  403 (one failed login), a short new one 400, no credentials 401; the
+  change and the change back work and IMAP takes only the new password;
+  then the same through Roundcube's Settings > Password (Roundcube's own
+  "Current password incorrect." for a wrong current password, the change
+  and the change back, checked with IMAP). The user, its archived mailbox
+  and (with `--ssh`) its Roundcube record are removed.
+  `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
+  logic with stand-ins for the login check and the password change: HTTP
+  Basic credentials in UTF-8 and Latin-1, only the caller's password
+  changed, the policy, two-factor authentication (no code: 403 and not
+  counted; a wrong code: counted), the limits per account and per address
+  and their expiry; group admin runs it (`admin-self-password-unit`).
+  `tests/fork/migration-record.py` (B211; no box needed) runs
+  setup/migrate.py with its migrations replaced by recorders against a
+  temporary `STORAGE_ROOT` and record: no record, the same number, a lower
+  number in `mailinabox.version` (setup stops before any migration), a
+  higher one, a missing file (taken from the record), the record of another
+  `STORAGE_ROOT`, a record that is a link, writable by others or broken, and
+  a failed migration; group admin runs it (`admin-migration-record-unit`).
+  `tests/fork/storage-dirs.py` (B212; no box needed) checks the reads and
+  writes of `backup/` and `dns/` below `STORAGE_ROOT` through a checked
+  directory (management/utils.py): the helpers (a link, a group-writable
+  directory, another owner, a FIFO, the size limit, a link at the name
+  replaced without touching its target), backup.py and dns_update.py with
+  the directory replaced by a link or a group-writable copy with another
+  account's settings (not used, nothing written there, the nightly backup
+  stops with the reason) and with `custom.yaml` a link; group admin runs it
+  (`admin-storage-dirs-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
@@ -311,7 +341,11 @@ report. The groups:
   exist) from the box's public address through the `/webdav` proxy, which
   connects to Nextcloud from 127.0.0.1, is logged and counted by Nextcloud
   for that address, not for 127.0.0.1 (B121; its attempts are reset
-  afterwards); `zpush-sync`: an ActiveSync account as a phone sets it
+  afterwards); `nextcloud-forwarded-for-local` (B213, with `--ssh`): a
+  failed login from the box itself straight to
+  `/cloud/remote.php/webdav/` with a forged `X-Forwarded-For` and a forged
+  proof header is logged by Nextcloud as 127.0.0.1, and nothing is counted
+  for the forged address; `zpush-sync`: an ActiveSync account as a phone sets it
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
   contact folders), and a marked event and two marked contacts put into
   alice's Nextcloud over DAV just before arrive, one of the cards with a
@@ -1194,6 +1228,33 @@ only in a headless browser at an earlier commit of the branch, and through
 the API in the runs; and the release commit itself, which after `d80a036`
 changes only the version strings, `tools/expected-changes/` and the
 documentation.
+
+### After v78-r2604.4: B210 to B213 (2026-11-21)
+
+The hardening of the user database (B210), of the migration number
+(B211), of the backup and DNS settings (B212) and of Nextcloud's forwarded
+address (B213), on the branch `fix/r5-harden`. Only T5b ran: the copy of a
+production box at v78-r2604.3, updated non-interactively with
+`bootstrap.sh` and `TAG=<commit>` from the lab's mirror, with the second
+test box as the peer for port 25 and the backup target. During every setup
+run the peer sent a marked test mail (`X-Miab-Test: 1`) every 3 s over
+port 25 to a mailbox of the box.
+
+| Run | Result |
+|---|---|
+| T5b, `a985eb9` | setup stopped in web.sh: `nginx -t` refused the map with the proxy's secret ("could not build map_hash"); fixed in `0c41779`. Up to that point the user database was already root:root 0600, and all 48 test mails of the run were accepted. |
+| T5b repeated, `0c41779` | exit 0 in 198 s, a second run exit 0; smoke 95 of 104: every request of the `/caldav`, `/carddav` and `/webdav` proxy got HTTP 500 ("fastcgi request length mismatch": the map's regular expression replaced the captures of the PHP location), so Z-Push's ActiveSync answered 503; fixed in `2c1c054` (an update of the same box to it: the groups web and activesync 16/16). |
+| T5b final, `7b2b03d` (from the snapshot again) | the nightly backup on v78-r2604.3 first (exit 0). The update exit 0 in 207 s: `$STORAGE_ROOT/mail` root:root 755, `users.sqlite` root:root 0600 and still in the rollback journal mode, Roundcube's driver `mailinabox`, the migration record "15", `/etc/nginx/miab-nextcloud-proxy.conf` root:root 0600, `nginx -t` fine. 68 test mails, all accepted at once; 2 of them deferred for a few seconds inside the box (4.4.x, spampd restarting, as on every setup run before) and delivered on the next try. A second setup run exit 0 in 77 s changed no file's content (only the times of the files setup writes on every run), and the secret stayed. Smoke 104/104, among them `api-self-password` (the endpoint and Roundcube's Settings > Password), `nextcloud-forwarded-for` and `-local`, `zpush-sync`, `zpush-ping`, CalDAV, CardDAV and the backup checks. A failed CalDAV and CardDAV login from the peer was logged by Nextcloud under the peer's address. |
+| B211 and B212 on that box | the storage user wrote "11" into `mailinabox.version`: setup stopped before any migration with the message, the DKIM key untouched; with the file removed by the storage user, setup took 15 from the record and wrote it back. The storage user replaced `backup/` with a directory of its own (another target and passphrase): the nightly backup stopped with the reason and wrote nothing to the other target, saving the settings in the control panel was refused, the status checks showed it; after the directory was put back, a backup exit 0. The same with `dns/`: the DNS update failed with the reason and the zones stayed unchanged. |
+| Backup and restore | duplicity restored `mail/users.sqlite` from the backup after the update (root:root 0600, `integrity_check` ok) and `mail/` from the backup before it (root:www-data 775 and 0664, as v78-r2604.3 had them). The box with those older modes set back by hand and `mailinabox.version` removed by the storage user, updated to `cc934a9`: exit 0, the modes root's again, the version file written back as the storage user's; smoke 104/104. |
+| Downgrade and back | bootstrap with `TAG=v78-r2604.4`: exit 0; the directory and the database root:www-data again, Roundcube's sql driver, the nginx file unused; a password change in Roundcube worked. Then back to `cc934a9`: exit 0, root's again, a password change in Roundcube through the new driver worked. Test mails of both runs all delivered. |
+
+Log audit of the final run (since its first update): one unknown class,
+the bounce of an automatic reply to the test mails' sender, which does not
+exist on the peer (a lab artifact). Not tested: T1, T2, T3, T4, T6 (a
+fresh install creates the database with mode 0600 and the record through
+setup/start.sh; not run), the opt-in smoke group fail2ban, a user with
+two-factor authentication in Roundcube (offline only).
 
 ### Production use
 

@@ -54,6 +54,133 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
 
+### Security
+
+* **Webmail can no longer rewrite the user database (B210)**\
+  `users.sqlite`, the database of all mail accounts, their password hashes,
+  privileges and aliases, is root's only now (root:root 0600), and
+  `$STORAGE_ROOT/mail` is root:root 755. Up to v78-r2604.4 the database was
+  root:www-data 0664 in a directory that www-data could write, as upstream
+  has it, because Roundcube's password plugin wrote it with SQL. So any code
+  running as www-data could set the password of any account (also an
+  administrator's), give itself the admin privilege, or add an alias that
+  forwards a user's mail to the outside, and every local account could read
+  all password hashes. Code running as www-data takes a hole in PHP,
+  Roundcube, Nextcloud or Z-Push, but such holes are real and recent: the
+  PHP releases of October 2026 ("PHP2Shell", CVE-2026-109618 and
+  CVE-2026-109619, remote code execution, fixed in PHP 8.5.12, 8.4.27,
+  8.3.36 and 8.2.35) and of 19 November 2026 (PHP 8.5.13 and others,
+  several remote code execution issues), and Roundcube's post-authentication
+  remote code execution CVE-2025-49113 (fixed in 1.6.11 and 1.5.10,
+  exploited in the wild). Each gives code as www-data on a Mail-in-a-Box,
+  and before this release that code could take over every mail account.
+  Roundcube's Settings > Password now changes the password through the
+  management daemon: the fork's password driver
+  (`conf/roundcube-password-mailinabox.php`) calls the new endpoint
+  `POST /me/password` on 127.0.0.1, which checks the current password (and
+  two-factor authentication) as the control panel's login does, applies the
+  same password rules and hash as the control panel, changes only the
+  caller's own password, logs failed attempts for fail2ban's
+  `miab-management` jail and refuses more after 5 failures for an account or
+  10 for an address within 10 minutes. Roundcube's own messages (a wrong
+  current password, a short new one) are as before. Every other reader opens
+  the database as root (Dovecot's auth-worker, Postfix's daemons before they
+  drop their privileges, the management daemon, the backup, the tools); the
+  database stays in SQLite's rollback journal mode, in which readers need no
+  write access to the directory. New offline test
+  `tests/fork/self-password.py`, smoke check `api-self-password` (the
+  endpoint and Roundcube's settings page).
+
+* **Setup no longer reruns data migrations for a lowered version (B211)**\
+  The storage user owns `$STORAGE_ROOT/mailinabox.version` and could write a
+  lower number into it, and the next setup run ran the data migrations from
+  there again as root (depending on the number deleting the DKIM key, moving
+  the Let's Encrypt account away, dropping Roundcube's CardDAV tables and
+  all webmail sessions). Setup now also records the number of the last
+  migration that ran in `/var/lib/mailinabox/storage-migration` (root's own,
+  with the path of the `$STORAGE_ROOT` it belongs to) and stops before any
+  migration when the file says less, with what to do; a missing file is
+  taken from the record. The file itself stays where and as it was, so it
+  still goes into backups and to a new box. New offline test
+  `tests/fork/migration-record.py`.
+
+* **Backup and DNS settings only from directories of root's own (B212)**\
+  The nightly backup, the control panel and the DNS update read
+  `backup/custom.yaml`, `backup/secret_key.txt` and `dns/custom.yaml`
+  below `$STORAGE_ROOT`, and write the two `custom.yaml`, only through the
+  checked directory (a directory of root's own, not a symbolic link, not
+  writable by group or others, opened once), as the fork's tools do since
+  B117 and as `settings.yaml` is written since B87. Upstream read them by
+  path and wrote `custom.yaml` with `open(..., "w")` as root: the storage
+  user, which owns `$STORAGE_ROOT`, could replace `backup/` and have the
+  backups of `$STORAGE_ROOT` go to a server of its own with a passphrase it
+  knows, or put records of its own into the DNS zones. When such a
+  directory or file cannot be trusted, no backup is made and the DNS zones
+  are not rebuilt (the old ones stay), with the reason (for the backup in
+  the nightly mail, for both in the status checks). `backup/custom.yaml` is
+  now written with mode 0600 (it can hold the target's credentials). New
+  offline test `tests/fork/storage-dirs.py`.
+
+* **Nextcloud takes X-Forwarded-For only from nginx's own proxy (B213)**\
+  Nextcloud takes the client's address from `X-Forwarded-For` on every
+  connection from 127.0.0.1 (`trusted_proxies`, B121), so any local account
+  or service could make it log a failed login under another address, which
+  the `miab-owncloud` jail then banned. nginx's proxy of `/caldav`,
+  `/carddav` and `/webdav` now proves itself to `/cloud` with a secret
+  header (from `/etc/nginx/miab-nextcloud-proxy.conf`, root's only,
+  made once by setup and kept), and nginx passes `X-Forwarded-For` to
+  Nextcloud's PHP only with that secret; PHP never sees the secret. Clients
+  on the Internet keep their own address through the proxy (throttle and
+  jail as before), Z-Push stays 127.0.0.1, and another local request is
+  logged as 127.0.0.1, which fail2ban ignores. A downgrade to
+  v78-r2604.4 leaves the file unused. New smoke check
+  `nextcloud-forwarded-for-local`.
+
+### Upgrade note
+
+* **User database root's only; webmail password changes via the daemon (B210)**\
+  Setup gives `$STORAGE_ROOT/mail` to root:root 755 and `users.sqlite` to
+  root:root 0600 (through descriptors), and switches Roundcube's password
+  plugin to the fork's driver. Mail is not interrupted: Dovecot and Postfix
+  keep their open database, and new lookups open it as root. Between
+  setup's Roundcube step and the restart of the management daemon a few
+  minutes later, a password change in webmail fails with "Could not save
+  new password. Connection error." (try again after the update). A user
+  with two-factor authentication changes the password in the control panel
+  (System > Users) instead of webmail. Scripts of your own that read
+  `users.sqlite` as another account than root no longer can. A backup of
+  this version restored on an older version, or a downgrade to
+  v78-r2604.4, works: its setup gives the directory and the database back
+  to www-data and the plugin back to its SQL driver (the driver file
+  `plugins/password/drivers/mailinabox.php` stays, unused). An older backup
+  restored on this version gets the new owner and modes at the next setup
+  run.
+
+* **Backups stop if backup/ is not root's own (B212)**\
+  If `$STORAGE_ROOT/backup` or `$STORAGE_ROOT/dns` is not a directory of
+  root's own (owner root, mode 755 as setup makes them), or `custom.yaml`
+  or `secret_key.txt` in it is not a regular file of root's, backups (and
+  DNS updates) stop with the reason. Put them right with `chown root:root`
+  and `chmod 755` (and check the files in them).
+
+* **A proxy of your own to the box's /cloud is seen as 127.0.0.1 (B213)**\
+  A proxy that you set up in `www/custom.yaml` to the box's own `/cloud`
+  (`https://127.0.0.1/cloud/...`) no longer passes the client's address to
+  Nextcloud: Nextcloud sees 127.0.0.1, which is on its brute-force bypass
+  list, so its clients skip Nextcloud's throttle and the `miab-owncloud`
+  jail. The box's own paths (`/caldav`, `/carddav`, `/webdav`, `/cloud`)
+  are not affected.
+
+* **Restoring an older backup on the same box: remove the migration record (B211)**\
+  The first setup run of this version records the box's migration number
+  in `/var/lib/mailinabox/storage-migration`. If you later restore a backup
+  of `$STORAGE_ROOT` made before a migration of a newer release, setup stops
+  ("... says #N, but this box has run the data migrations up to #M"):
+  remove that file and run setup again, so that the backup's migrations
+  run. A restore on a new box and the migration tool are not affected (a
+  new box has no record). A downgrade to v78-r2604.4 ignores the record
+  and leaves the number as it is, so the way back up works too.
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
@@ -142,19 +269,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   to put such networks on the allowlist; nothing finds them on its own.
   Leaving `miab-zpush` out of recidive would let an attacker guess 20
   passwords every few minutes for good, so it still counts there.
-* **Nextcloud trusts X-Forwarded-For on every local connection (B121)**\
-  Nextcloud takes the client's address from `X-Forwarded-For` on every
-  connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
-  of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the
-  header itself. A local account or a compromised service can make
-  Nextcloud log a failed login under another address, which
-  `miab-owncloud` bans; before, such a login was logged as 127.0.0.1,
-  which fail2ban ignores. Local accounts could already write such lines
-  into the logs that fail2ban reads (logger(1); www-data owns Nextcloud's
-  log), so this is a second way to an existing one; clients on the
-  Internet cannot do it (the proxy replaces the header). A fix: the proxy
-  proves itself to the `/cloud` location with a secret header from a
-  root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
 * **Setup restarts several services on every run**\
   Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
   postgrey, named, systemd-resolved, munin-node and the management daemon
@@ -202,41 +316,13 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   not installed (nginx 404).
 * **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
   `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
-* **Upstream code still writes custom.yaml in user-owned storage (B87, B117)**\
-  Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
-  `management/backup.py` and `management/dns_update.py` still write
-  `custom.yaml` as root with `open(..., "w")` (B87 covers only
-  `settings.yaml`), and the nightly backup reads its target and
-  `secret_key.txt` there by path. An account that can replace `backup/`
-  could point the backups (of `$STORAGE_ROOT`, its own data) to a server of
-  its own with a passphrase it knows. The fork's tools read them, and write
-  the paused `custom.yaml`, only through a checked `backup/` of root's own
-  (B117).
-* **$STORAGE_ROOT/mail stays writable by www-data (B147)**\
-  `$STORAGE_ROOT/mail` stays root:www-data with mode 775, as upstream has
-  it: Roundcube's password plugin writes `users.sqlite` as www-data, and
-  SQLite needs to create its journal in the same directory. So www-data
-  can rename, replace or remove anything in it: the mailboxes, the DKIM
-  keys, the user database, the postgrey and SpamAssassin data. Setup no
-  longer follows a link it finds there (B147), but code running as
-  www-data can still stop mail (remove `users.sqlite` or `mailboxes`), and
-  the management daemon, which runs as root, opens `users.sqlite` by path
-  (`open_database()` in management/mailconfig.py). A fix moves
-  `users.sqlite` into a directory of its own that only it and its journal
-  live in, and gives `$STORAGE_ROOT/mail` back to root (755); that changes
-  the paths in the Dovecot, Postfix, Roundcube and management
-  configuration and in the backups, so it needs its own release and test
-  runs.
-* **Storage user can lower mailinabox.version and rerun migrations (B147)**\
-  The storage user owns `$STORAGE_ROOT/mailinabox.version` and its
-  directory, so it can write a lower number there, and the next setup run
-  runs the data migrations from there again as root. Each such run stops at
-  the first migration that cannot run twice, until the file is put right;
-  before that, depending on the number, migration 8 deletes the DKIM key,
-  11 moves the Let's Encrypt account away, 12 drops Roundcube's CardDAV
-  tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
-  (following a link) to 0600. It gives no root and needs code running as
-  the storage user, which no service of the box runs (B147).
+* **www-data is still in the group dovecot**\
+  Setup adds www-data to the group dovecot, as upstream did "so PHP can use
+  doveadm, for the password changing plugin". No version of this fork uses
+  that (its password plugin hashed in PHP, and since B210 the management
+  daemon changes the password). The group gives access to some of Dovecot's
+  sockets (for example its statistics); taking www-data out of it needs a
+  check of what else relies on it (seen in the work on B210).
 * **Status checks query_dns() crashes on overlong domain names**\
   The status checks' `query_dns()` catches neither dnspython's `YXDOMAIN`
   nor `NameTooLong`: a mail domain whose name is too long with
