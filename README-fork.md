@@ -854,36 +854,42 @@ fixed)" lists a few more.
   connection wrote meanwhile, which SQLite refuses at once, whatever the
   timeout. Setup supports only SQLite for Nextcloud.
 * **Failed logins from the box itself (B126).** Dovecot answers a failed
-  login from 127.0.0.1 or ::1 at once and does not slow down later logins
+  login from the box itself at once and does not slow down later logins
   from there: those logins come from Z-Push, Roundcube and Nextcloud, which
   fail2ban protects with the client's own address, and the delay made a
   wrong ActiveSync password take up to 50 s and slowed down every other
-  user. Instead Dovecot counts these failures per account: an account with
-  30 different wrong passwords from the box within 30 minutes (System >
-  Intrusion Protection changes both numbers) is refused
-  for logins from the box (ActiveSync, Autodiscover, webmail, Nextcloud,
-  and IMAP, POP3, ManageSieve or SMTP submission on 127.0.0.1) until it has
-  fewer, even with its right password. A password sent again counts once:
-  a phone that keeps sending an old password, or a repeated typo, does not
-  lock the account (Dovecot keeps only a 16-bit tag of a salted hash of
-  each wrong password, never the password). The other accounts are not slowed down,
-  and the account's own mail programs that log in from outside are not
-  refused. So a process on the box (any local account, or code running as
-  www-data after a hole in PHP or a web app) can try at most 30 passwords
-  of each account per 30 minutes. The other side: someone who tries the
-  passwords of one account through ActiveSync, webmail or Nextcloud from
-  addresses that fail2ban does not ban (fewer than 20 failures within
-  30 to 120 s each) locks that account's phones, webmail and Nextcloud out
-  while they keep trying. The box mails each new lock to the report
-  recipient (System > Notifications, at most one mail an hour); System >
-  Intrusion Protection lists the counted and refused accounts with a
-  button to end a lock (also `sudo management/auth_guard.py --status` and
-  `--unlock ADDRESS`). If Dovecot cannot write its counts
-  (`/run/miab-auth-guard`), failed logins from the box get Dovecot's delay
-  again. Logins from other addresses keep Dovecot's delay. Guesses through
-  Microsoft's servers once they are on the allowlist (System > Intrusion
-  Protection): fail2ban no longer bans them, and only this limit per
-  account remains.
+  user. "From the box" is every address of 127.0.0.0/8, ::1 and the box's
+  own addresses, as a process on the box can use any of them. Instead
+  Dovecot counts these failures per account: an account with 30 different
+  wrong passwords from the box within 30 minutes (System > Intrusion
+  Protection changes both numbers) is refused for logins from the box
+  (ActiveSync, Autodiscover, webmail, Nextcloud, and IMAP, POP3,
+  ManageSieve or SMTP submission from the box) until it has fewer, even
+  with its right password. A password sent again counts once: a phone that
+  keeps sending an old password, or a repeated typo, does not lock the
+  account (Dovecot keeps only a 16-bit tag of a salted hash of each wrong
+  password, never the password). Only real accounts are counted, so
+  made-up names change nothing for the others. The other accounts are not
+  slowed down, and the account's own mail programs that log in from
+  outside are not refused. So a process on the box (any local account, or
+  code running as www-data after a hole in PHP or a web app) can try at
+  most 30 passwords of each account per 30 minutes, also with many
+  connections at once. Such a process can still raise Dovecot's penalty of
+  127.0.0.1 with a login whose authorization name differs from its login
+  name (it fails before these checks) and so slow down the others. The
+  other side: someone who tries the passwords of one account through
+  ActiveSync, webmail or Nextcloud from one or more addresses that fail2ban
+  does not ban (fewer than 20 failures within 30 to 120 s each) locks that
+  account's phones, webmail and Nextcloud out while they keep trying. The
+  box mails each new lock to the report recipient (System > Notifications,
+  at most one mail an hour); System > Intrusion Protection lists the
+  counted and refused accounts with a button to end a lock (also `sudo
+  management/auth_guard.py --status` and `--unlock ADDRESS`). If Dovecot
+  cannot write its counts (`/run/miab-auth-guard`), failed logins from the
+  box get Dovecot's delay again. Logins from other addresses keep
+  Dovecot's delay. Guesses through Microsoft's servers once they are on the
+  allowlist (System > Intrusion Protection): fail2ban no longer bans them,
+  and only this limit per account remains.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
   answers NXDOMAIN, also for its own test entries. That looks like "not
@@ -943,38 +949,46 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
   unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
 * **Fehlgeschlagene Anmeldungen von der Box selbst (B126).** Dovecot
-  beantwortet eine fehlgeschlagene Anmeldung von 127.0.0.1 oder ::1 sofort
-  und bremst spätere Anmeldungen von dort nicht: Diese Anmeldungen kommen
-  von Z-Push, Roundcube und Nextcloud, die fail2ban mit der eigenen Adresse
-  des Clients schützt, und die Verzögerung ließ ein falsches
+  beantwortet eine fehlgeschlagene Anmeldung von der Box selbst sofort und
+  bremst spätere Anmeldungen von dort nicht: Diese Anmeldungen kommen von
+  Z-Push, Roundcube und Nextcloud, die fail2ban mit der eigenen Adresse des
+  Clients schützt, und die Verzögerung ließ ein falsches
   ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen Benutzer.
+  „Von der Box“ heißt jede Adresse aus 127.0.0.0/8, ::1 und die eigenen
+  Adressen der Box, denn ein Prozess auf der Box kann jede davon benutzen.
   Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 30
   verschiedenen falschen Passwörtern von der Box innerhalb von 30 Minuten
   (beide Zahlen lassen sich unter System > Intrusion Protection ändern)
   wird für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
-  Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand auf 127.0.0.1)
+  Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand von der Box)
   abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Ein
   erneut gesendetes Passwort zählt nur einmal: Ein Handy, das immer wieder
   ein altes Passwort schickt, oder ein wiederholter Tippfehler sperrt das
   Konto nicht (Dovecot behält von jedem falschen Passwort nur ein
-  16-Bit-Kennzeichen eines Hashes mit Zufallswert, nie das Passwort). Die
-  anderen Konten werden nicht gebremst, und die eigenen Mailprogramme des
-  Kontos, die sich von außen anmelden, werden nicht abgewiesen. Ein Prozess
-  auf der Box (jedes lokale Konto oder Code, der nach einer Lücke in PHP
-  oder einer Web-Anwendung als www-data läuft) kann also höchstens 30
-  Passwörter pro Konto und 30 Minuten durchprobieren. Die Kehrseite: Wer
-  die Passwörter eines Kontos über ActiveSync, Webmail oder Nextcloud von
-  Adressen aus durchprobiert, die fail2ban nicht sperrt (je weniger als 20
+  16-Bit-Kennzeichen eines Hashes mit Zufallswert, nie das Passwort).
+  Gezählt werden nur echte Konten, erfundene Namen ändern für die anderen
+  also nichts. Die anderen Konten werden nicht gebremst, und die eigenen
+  Mailprogramme des Kontos, die sich von außen anmelden, werden nicht
+  abgewiesen. Ein Prozess auf der Box (jedes lokale Konto oder Code, der
+  nach einer Lücke in PHP oder einer Web-Anwendung als www-data läuft)
+  kann also höchstens 30 Passwörter pro Konto und 30 Minuten
+  durchprobieren, auch mit vielen Verbindungen gleichzeitig. Ein solcher
+  Prozess kann den Strafzähler von Dovecot für 127.0.0.1 weiterhin mit
+  einer Anmeldung erhöhen, deren Autorisierungsname vom Anmeldenamen
+  abweicht (sie scheitert vor diesen Prüfungen), und so die anderen
+  bremsen. Die Kehrseite: Wer die Passwörter eines Kontos über ActiveSync,
+  Webmail oder Nextcloud von einer oder mehreren Adressen aus
+  durchprobiert, die fail2ban nicht sperrt (je weniger als 20
   Fehlversuche in 30 bis 120 s), sperrt die Handys, das Webmail und
   Nextcloud dieses Kontos aus, solange er weitermacht. Die Box schickt jede
   neue Sperre an den Empfänger der Berichte (System > Notifications,
   höchstens eine Mail pro Stunde); System > Intrusion Protection listet die
   gezählten und abgewiesenen Konten mit einem Knopf, der eine Sperre beendet
-  (auch `sudo management/auth_guard.py --status` und `--unlock ADRESSE`). Kann Dovecot
-  seine Zähler nicht schreiben (`/run/miab-auth-guard`), bekommen
-  fehlgeschlagene Anmeldungen von der Box wieder die Verzögerung von
-  Dovecot. Anmeldungen von anderen Adressen behalten die Verzögerung von
-  Dovecot. Versuche über die Server von Microsoft, sobald sie in der
+  (auch `sudo management/auth_guard.py --status` und `--unlock ADRESSE`).
+  Kann Dovecot seine Zähler nicht schreiben (`/run/miab-auth-guard`),
+  bekommen fehlgeschlagene Anmeldungen von der Box wieder die Verzögerung
+  von Dovecot. Anmeldungen von anderen Adressen behalten die Verzögerung
+  von Dovecot. Versuche über die Server von Microsoft, sobald sie in der
   Freigabeliste stehen (System > Intrusion Protection): fail2ban sperrt sie
   nicht mehr, und es bleibt nur diese Grenze pro Konto.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche

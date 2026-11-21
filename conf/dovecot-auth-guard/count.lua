@@ -1,47 +1,28 @@
 -- Mail-in-a-Box: the last passdb of setup/mail-users.sh, reached only when
 -- the passdbs before it did not accept the login. For a login from the box
--- itself it records the failure for the account name with the tag of the
--- wrong password (guard.lua; a password sent again counts once) and
--- answers it at once, without Dovecot's delay and penalty; it can accept no
--- password (it returns none). Do not edit: setup writes it again on every
--- run.
+-- itself it records the failure of a real account (guard.lua's list of
+-- accounts) with the tag of the wrong password (a password sent again
+-- counts once), and answers it at once, without Dovecot's delay and
+-- penalty; it can accept no password (it returns none). A name that is no
+-- account is answered at once and not recorded: there is nothing to guess.
+-- Do not edit: setup writes it again on every run.
 
 local G = dofile("/usr/local/lib/mailinabox/dovecot-auth-guard/guard.lua")
 
 local SALT = G.salt() -- for the tags of the wrong passwords, never written
-local names, nnames = {}, 0 -- key -> { failures within the window, last time }
-local warned_state, warned_full = false, false
+-- Only without the list of accounts: the names counted (key -> time of the
+-- last failure), at most MAX_NAMES; a name is forgotten only when it had no
+-- failure in the window, never to make room.
+local names, nnames = {}, 0
+local warned_state, warned_full, warned_list = false, false, false
 
--- When MAX_NAMES names are tracked: forget the names without a failure in
--- the window, then, if that is not enough, the tenth with the fewest
--- failures (made-up names have one or two). A name at the limit is never
--- dropped, so a lock cannot be flushed with made-up names.
-local function make_room(now)
-	for k, v in pairs(names) do
-		if now - v[2] >= G.WINDOW then
+local function prune(now)
+	for k, t in pairs(names) do
+		if now - t >= G.WINDOW then
 			os.remove(G.path(k))
 			names[k] = nil
 			nnames = nnames - 1
 		end
-	end
-	if nnames < G.MAX_NAMES then
-		return
-	end
-	local list = {}
-	for k, v in pairs(names) do
-		if v[1] < G.LIMIT then
-			list[#list + 1] = k
-		end
-	end
-	table.sort(list, function(a, b)
-		local x, y = names[a], names[b]
-		if x[1] ~= y[1] then return x[1] < y[1] end
-		return x[2] < y[2]
-	end)
-	for i = 1, math.min(#list, G.MAX_NAMES // 10) do
-		os.remove(G.path(list[i]))
-		names[list[i]] = nil
-		nnames = nnames - 1
 	end
 end
 
@@ -52,22 +33,34 @@ function auth_passdb_lookup(req)
 	G.load()
 	local now = os.time()
 	local key = G.key(req.user)
-	if names[key] == nil then
-		if nnames >= G.MAX_NAMES then
-			make_room(now)
-			if not warned_full then
-				G.event(now, "names", G.MAX_NAMES, "-")
-				req:log_warning(string.format("miab-auth-guard: failed logins of more than %d account names from the box itself in %d s; the names with the fewest failures are forgotten", G.MAX_NAMES, G.WINDOW))
-				warned_full = true
-			end
-		end
-		if nnames >= G.MAX_NAMES then
-			-- Every tracked name is at the limit: this one is answered at
-			-- once but not counted (no global penalty either way).
+	local accounts = G.accounts(now)
+	if accounts then
+		warned_list = false
+		if not accounts[key] then
 			return dovecot.auth.PASSDB_RESULT_OK, { nodelay = "yes" }
 		end
-		names[key] = { 0, now }
-		nnames = nnames + 1
+	else
+		if not warned_list then
+			req:log_warning("miab-auth-guard: no list of accounts (" .. G.ACCOUNTS .. "); every name is counted, at most " .. G.MAX_NAMES)
+			warned_list = true
+		end
+		if names[key] == nil then
+			if nnames >= G.MAX_NAMES then
+				prune(now)
+			end
+			if nnames >= G.MAX_NAMES then
+				-- No room: Dovecot's delay and penalty (as before B126),
+				-- never no limit and never a lock forgotten.
+				if not warned_full then
+					req:log_warning(string.format("miab-auth-guard: failed logins of more than %d names from the box itself in %d s; new names get Dovecot's delay", G.MAX_NAMES, G.WINDOW))
+					warned_full = true
+				end
+				return dovecot.auth.PASSDB_RESULT_USER_UNKNOWN, "no room"
+			end
+			nnames = nnames + 1
+			warned_full = false
+		end
+		names[key] = now
 	end
 	local n, new = G.add(G.path(key), now, G.tag(SALT, req.password))
 	if n == nil then
@@ -80,7 +73,6 @@ function auth_passdb_lookup(req)
 		return dovecot.auth.PASSDB_RESULT_USER_UNKNOWN, "no state"
 	end
 	warned_state = false
-	names[key] = { n, now }
 	if new and n == G.LIMIT then
 		G.event(now, "locked", n, key)
 		req:log_warning(string.format("miab-auth-guard: %d different wrong passwords of this account from the box itself in %d s; logins from the box itself are refused for it until they are fewer", n, G.WINDOW))

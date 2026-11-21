@@ -4607,10 +4607,19 @@ spec = json.loads(sys.stdin.readline())
 # The box to itself on 127.0.0.1: its certificate names the host name (and
 # is self-signed in the lab); this tests the login, not the certificate.
 tls = ssl.create_default_context(); tls.check_hostname = False; tls.verify_mode = ssl.CERT_NONE
-def login(user, pw):
+class IMAP4_SSL_FROM(imaplib.IMAP4_SSL):
+    # IMAP over TLS from a chosen local address (127.0.0.0/8 counts as the box).
+    def __init__(self, host, port, src, **kw):
+        self._src = src
+        super().__init__(host, port, **kw)
+    def _create_socket(self, timeout):
+        import socket
+        sock = socket.create_connection((self.host, self.port), timeout, source_address=(self._src, 0) if self._src else None)
+        return self.ssl_context.wrap_socket(sock, server_hostname=self.host)
+def login(user, pw, src=None):
     t = time.time()
     try:
-        M = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=tls, timeout=60)
+        M = IMAP4_SSL_FROM("127.0.0.1", 993, src, ssl_context=tls, timeout=60)
     except Exception as e:
         return "connect: %s" % e, time.time() - t
     try:
@@ -4632,7 +4641,8 @@ if spec.get("same"):
 if spec.get("wrong"):
     t = time.time(); fails = 0
     for i in range(spec["wrong"]):
-        r, _ = login(spec["user"], "wrong-%s-%d" % (spec["tok"], i))
+        # From changing addresses of 127.0.0.0/8: they all count as the box.
+        r, _ = login(spec["user"], "wrong-%s-%d" % (spec["tok"], i), "127.0.%d.%d" % (i // 200, 2 + i % 200))
         fails += r != "ok"
     out["wrong"] = [fails, round(time.time() - t, 2)]
 for name, user, pw in spec.get("right", []):
@@ -4659,7 +4669,8 @@ def c_login_auth_guard(ctx):
     # Protection): 150 logins of one account with the same wrong password (a
     # phone with an old one) count once and do not lock it. With the limit
     # set to 5 through the API (it applies at once, no reload), 40 different
-    # wrong passwords of another account from 127.0.0.1 are answered at once
+    # wrong passwords of another account from changing addresses of
+    # 127.0.0.0/8 are answered at once
     # (no 2 s delay each); that account is then refused from 127.0.0.1 even
     # with its right password, while the first account logs in from there at
     # once (no penalty of 127.0.0.1) and the refused one still logs in from

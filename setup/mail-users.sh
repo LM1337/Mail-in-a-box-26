@@ -150,6 +150,16 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 #    or Nextcloud from addresses fail2ban does not ban, that account's own
 #    phones, webmail and Nextcloud are refused too (README-fork.md, "Known
 #    issues").
+# "From the box" is every address of 127.0.0.0/8, ::1 and the box's own
+# addresses (a process on the box can use any of them; fail2ban ignores them
+# all). Only real accounts are counted (management/auth_guard.py writes the
+# list whenever accounts change): made-up names need no state and cannot
+# crowd out the count of an account. Logins of one account at the same
+# moment count while their passwords are checked, so a burst of parallel
+# guesses stops at the limit too. auth_username_chars is empty so that every
+# failure reaches these passdbs (Dovecot's list of allowed characters
+# refused names with "+" or a space before them, with its delay and the
+# penalty of 127.0.0.1).
 # If the state cannot be written, failed logins from the box get Dovecot's
 # delay and penalty again (as before B126), never no limit.
 # management/auth_guard.py (cron, every 10 minutes) mails new locks to the
@@ -167,6 +177,10 @@ for f in guard check count; do
 done
 
 tools/write_conf.py /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
+# Every user name reaches the passdbs (Dovecot's default list of allowed
+# characters refuses e.g. "+" or a space before them, with its delay and the
+# penalty of 127.0.0.1, B126); the SQL passdb escapes %{user}.
+auth_username_chars =
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
 

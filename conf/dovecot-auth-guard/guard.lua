@@ -25,17 +25,18 @@
 -- count.lua chooses when it starts (65536 values: two different guesses
 -- seldom share one, and a tag tells nothing about the password).
 --
--- Only the failures of the name itself count: made-up names cannot lower
--- the limit of a real account. Logins from other addresses are left to
--- Dovecot as before.
+-- Only the failures of the account itself count, and only real accounts
+-- are counted: made-up names cannot lower the limit of a real account,
+-- crowd out its count, or fill the state. "From the box itself" is every
+-- address of 127.0.0.0/8, ::1 and the box's own addresses (M.from_box).
+-- Logins from other addresses are left to Dovecot as before.
 --
 -- The state is in DIR (tmpfs, 0700, the account dovecot: the auth process
 -- runs as dovecot, /etc/tmpfiles.d/miab-auth-guard.conf creates it), so
 -- that both passdbs see it (each passdb has a Lua state of its own) and no
 -- other account can change it. A file per name, a line "<time> <tag>" per
--- failed login with a new tag. count.lua tracks at most MAX_NAMES names;
--- beyond that it drops the names with the fewest failures (made-up names
--- have one), never a locked one. management/auth_guard.py reads the state,
+-- failed login (a tag counts once), for real accounts only (M.accounts).
+-- management/auth_guard.py reads the state,
 -- removes the files of names without failures in the window and mails the
 -- events. If the state cannot be written, failed logins get Dovecot's delay
 -- and penalty again (as before B126), never no limit.
@@ -43,42 +44,84 @@
 local M = {}
 
 M.DIR = "/run/miab-auth-guard"
-M.DEFAULT_LIMIT = 30    -- different wrong passwords of one name within the window
+M.DEFAULT_LIMIT = 30    -- different wrong passwords of one account within the window
 M.DEFAULT_WINDOW = 1800 -- seconds
-M.MAX_NAMES = 10000     -- names that count.lua tracks at once
+M.MAX_NAMES = 2000      -- names tracked without the list of accounts (see M.accounts)
 M.MAX_EVENTS = 1048576  -- bytes of the events file
 
--- The limit and the window that apply: System > Intrusion Protection in
--- the control panel sets them (management/auth_guard.py writes SETTINGS,
--- "limit N" and "window SECONDS"); read on every login from the box, so a
--- change applies at once, without a reload of Dovecot. A missing file or a
--- value out of range means the default.
+-- The limit, the window and the box's own addresses: System > Intrusion
+-- Protection in the control panel sets the first two, setup the addresses
+-- (management/auth_guard.py writes SETTINGS: "limit N", "window SECONDS",
+-- "local ADDRESS" per address of the box, from /etc/mailinabox.conf). Read
+-- on every login from the box, so a change applies at once, without a
+-- reload of Dovecot. A missing file or a value out of range means the
+-- default.
 M.SETTINGS = "/usr/local/lib/mailinabox/dovecot-auth-guard/settings"
 M.LIMIT_MIN, M.LIMIT_MAX = 3, 1000
 M.WINDOW_MIN, M.WINDOW_MAX = 60, 86400
-M.LIMIT, M.WINDOW = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW
+M.LIMIT, M.WINDOW, M.LOCAL = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, {}
 
 function M.load()
-	local limit, window = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW
+	local limit, window, addrs = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, {}
 	local f = io.open(M.SETTINGS, "r")
 	if f then
 		for line in f:lines() do
-			local k, v = line:match("^(%a+) (%d+)$")
-			v = tonumber(v)
-			if k == "limit" and v and v >= M.LIMIT_MIN and v <= M.LIMIT_MAX then
-				limit = v
-			elseif k == "window" and v and v >= M.WINDOW_MIN and v <= M.WINDOW_MAX then
-				window = v
+			local k, v = line:match("^(%a+) (%S+)$")
+			local n = tonumber(v)
+			if k == "limit" and n and n >= M.LIMIT_MIN and n <= M.LIMIT_MAX then
+				limit = n
+			elseif k == "window" and n and n >= M.WINDOW_MIN and n <= M.WINDOW_MAX then
+				window = n
+			elseif k == "local" and v:match("^[%x:.]+$") then
+				addrs[string.lower(v)] = true
 			end
 		end
 		f:close()
 	end
-	M.LIMIT, M.WINDOW = limit, window
+	M.LIMIT, M.WINDOW, M.LOCAL = limit, window, addrs
 end
 
+-- A login from the box itself: any address of 127.0.0.0/8 (a process on the
+-- box can use any of them), ::1, their IPv4-mapped forms, and the box's own
+-- addresses (a process on the box can connect to them too). fail2ban
+-- ignores all of these.
 function M.from_box(req)
-	local ip = req.remote_ip
-	return ip == "127.0.0.1" or ip == "::1"
+	local ip = string.lower(req.remote_ip or "")
+	local v4 = ip:match("^::ffff:(%d+%.%d+%.%d+%.%d+)$")
+	if v4 then
+		ip = v4
+	end
+	return ip:match("^127%.%d+%.%d+%.%d+$") ~= nil or ip == "::1"
+		or ip == "0:0:0:0:0:0:0:1" or M.LOCAL[ip] == true
+end
+
+-- The list of accounts (management/auth_guard.py writes ACCOUNTS, one key
+-- per line, root:dovecot 0640, whenever accounts change and every 10
+-- minutes): only the failures of real accounts are counted, so made-up
+-- names need no file and cannot crowd out or flush the count of an
+-- account. Read again at most every 10 seconds. nil when the list is
+-- missing: then every name is counted, at most MAX_NAMES at once.
+M.ACCOUNTS = "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts"
+local accounts, accounts_time = nil, -1000
+function M.accounts(now)
+	if now - accounts_time < 10 then
+		return accounts
+	end
+	accounts_time = now
+	local f = io.open(M.ACCOUNTS, "r")
+	if not f then
+		accounts = nil
+		return nil
+	end
+	local list = {}
+	for line in f:lines() do
+		if line:match("^[ah]%-") then
+			list[line] = true
+		end
+	end
+	f:close()
+	accounts = list
+	return list
 end
 
 -- 64-bit FNV-1a (Lua 5.4 integers wrap around).
@@ -137,16 +180,20 @@ local function parse(line, now)
 end
 
 -- The different tags of a name within WINDOW (their number, whether tag is
--- one of them) and the lines of its file.
+-- one of them), the lines of its file, and the lines of the last second
+-- (failures recorded since, for check.lua).
 function M.recent(path, now, tag)
 	local f = io.open(path, "r")
 	if not f then
-		return 0, false, 0
+		return 0, false, 0, 0
 	end
-	local seen, n, all, has = {}, 0, 0, false
+	local seen, n, all, has, fresh = {}, 0, 0, false, 0
 	for line in f:lines() do
 		all = all + 1
 		local t, tg = parse(line, now)
+		if t and t >= now - 1 then
+			fresh = fresh + 1
+		end
 		if t and not seen[tg] then
 			seen[tg] = true
 			n = n + 1
@@ -156,7 +203,7 @@ function M.recent(path, now, tag)
 		end
 	end
 	f:close()
-	return n, has, all
+	return n, has, all, fresh
 end
 
 local function write_file(path, text)
@@ -178,18 +225,20 @@ end
 -- the number of different tags within WINDOW and whether this one is new,
 -- or nil when the state cannot be written.
 function M.add(path, now, tag)
+	-- A tag seen within the window is written again too (it still counts
+	-- once): check.lua subtracts the failures of the last second from the
+	-- logins it let through. Old lines and repeats are dropped from time to
+	-- time, so a file holds about its different tags plus 20 lines.
 	local n, has, all = M.recent(path, now, tag)
-	if has then
-		return n, false
-	end
 	if all - n > 20 then
-		-- Drop the old lines (and repeats).
+		-- Drop the old lines and the repeats, except those of the last
+		-- second (check.lua counts them).
 		local keep, seen = {}, {}
 		local f = io.open(path, "r")
 		if f then
 			for line in f:lines() do
 				local t, tg = parse(line, now)
-				if t and not seen[tg] then
+				if t and (not seen[tg] or t >= now - 1) then
 					seen[tg] = true
 					keep[#keep + 1] = line .. "\n"
 				end
@@ -208,6 +257,9 @@ function M.add(path, now, tag)
 	a:close()
 	if not ok then
 		return nil
+	end
+	if has then
+		return n, false
 	end
 	return n + 1, true
 end

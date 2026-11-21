@@ -4,7 +4,8 @@ Offline test of management/auth_guard.py -- python3 stdlib only, no box
 needed (B126: the limit of failed logins from the box itself).
 
   * the values of conf/dovecot-auth-guard/guard.lua are read (window 1800 s,
-    limit 100, at most 10000 names);
+    limit 30, at most 2000 names without the list of accounts), the box's
+    own addresses and the list of accounts written for the Lua code;
   * an account name becomes the same file name as in guard.lua (lower case,
     %XX for other bytes), and back;
   * scan(): names with different wrong passwords in the window (a tag sent
@@ -45,7 +46,8 @@ def check(name, got, want):
 cfg = ag.settings()
 lv = ag.lua_values()
 check("values of guard.lua", (lv["DIR"], lv["DEFAULT_WINDOW"], lv["DEFAULT_LIMIT"], lv["MAX_NAMES"], lv["SETTINGS"], lv["LIMIT_MIN"], lv["LIMIT_MAX"], lv["WINDOW_MIN"], lv["WINDOW_MAX"]),
-	("/run/miab-auth-guard", 1800, 30, 10000, "/usr/local/lib/mailinabox/dovecot-auth-guard/settings", 3, 1000, 60, 86400))
+	("/run/miab-auth-guard", 1800, 30, 2000, "/usr/local/lib/mailinabox/dovecot-auth-guard/settings", 3, 1000, 60, 86400))
+check("accounts path", lv["ACCOUNTS"], "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts")
 cfg = ag.settings(settings_file="/nonexistent")
 check("defaults apply without a settings file", (cfg["LIMIT"], cfg["WINDOW"]), (30, 1800))
 check("panel defaults and ranges", (ag.defaults(), ag.ranges()), ({"limit": 30, "window": 30}, {"limit": [3, 1000], "window": [1, 1440]}))
@@ -61,6 +63,11 @@ check("invalid settings refused", bad, 8)
 st, warn = ag.validate_settings({"limit": "x", "window": 10}, strict=False)
 check("stored bad value: default and a warning", (st, len(warn)), ({"limit": 30, "window": 10}, 1))
 check("settings file text", ag.render_settings_file({"limit": 50, "window": 60}).splitlines()[-2:], ["limit 50", "window 3600"])
+env_ips = {"PUBLIC_IP": "192.0.2.10", "PUBLIC_IPV6": "2001:DB8:0:0::10", "PRIVATE_IP": "192.0.2.10", "PRIVATE_IPV6": "", "OTHER": "x"}
+check("box addresses", ag.box_addresses(env_ips), ["192.0.2.10", "2001:db8::10"])
+check("box addresses refuse junk", ag.box_addresses({"PUBLIC_IP": "1.2.3.4\nlimit 3", "PUBLIC_IPV6": "fe80::1%eth0"}), [])
+check("settings file with addresses", ag.render_settings_file({"limit": 30, "window": 30}, ["192.0.2.10", "2001:db8::10"]).splitlines()[-2:], ["local 192.0.2.10", "local 2001:db8::10"])
+check("accounts list", ag.render_accounts(["b@example.com", "A@example.com", "a@example.com"]), "a-a@example.com\na-b@example.com\n")
 
 check("key plain", ag.key_of("Alice@Example.com"), "a-alice@example.com")
 check("key escaped", ag.key_of("a/b c@ex.com"), "a-a%2Fb%20c@ex.com")
@@ -144,6 +151,11 @@ with tempfile.TemporaryDirectory() as root:
 	# as the Lua code reads it; values out of range ignored.
 	sf = os.path.join(root, "settings")
 	os.chmod(root, 0o755)
+	af = os.path.join(root, "accounts")
+	check("accounts file written 0640 with its group", (ag.write_settings_file("a-x@example.com\n", af, group=os.getgid(), mode=0o640), oct(os.stat(af).st_mode & 0o777)), (True, "0o640"))
+	check("accounts unchanged not rewritten", ag.write_settings_file("a-x@example.com\n", af, group=os.getgid(), mode=0o640), False)
+	os.chmod(af, 0o644)
+	check("a changed mode is put back", (ag.write_settings_file("a-x@example.com\n", af, group=os.getgid(), mode=0o640), oct(os.stat(af).st_mode & 0o777)), (True, "0o640"))
 	check("file written", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), True)
 	check("unchanged file not rewritten", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), False)
 	c = ag.settings(settings_file=sf)

@@ -447,9 +447,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   three times per request) or a repeated typo cannot lock the account,
   while each guess counts; only a 16-bit tag of a hash of the password
   with a random salt is kept, never the password. Only the failures of
-  the name itself count: made-up names do not lower the
-  limit of a real account, and a flood of them does not flush a lock (the
-  names with the fewest failures are forgotten first). The other accounts
+  the account itself count, and only real accounts are counted (the
+  management daemon writes the list of accounts whenever they change):
+  made-up names do not lower the limit of a real account, crowd out its
+  count or fill the state. "From the box" means every address of
+  127.0.0.0/8, ::1 and the box's own addresses, as a process on the box
+  can use any of them. Logins of one account that are being checked at the
+  same moment count too, so a burst of parallel guesses also stops at the
+  limit; and `auth_username_chars` is empty, so that a user name with "+"
+  or a space no longer fails before these checks with Dovecot's delay and
+  the penalty of 127.0.0.1. The other accounts
   are not slowed down (no penalty of 127.0.0.1), and the account's own
   mail programs that log in from outside are not refused. The price:
   someone who tries the passwords of one account through ActiveSync,

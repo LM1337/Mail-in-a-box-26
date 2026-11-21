@@ -24,6 +24,10 @@
 #   auth_guard.py --apply      (setup) writes the settings file that the Lua
 #                              code reads from settings.yaml
 #
+# --apply also writes the box's own addresses (a login from them counts as
+# one from the box) and the list of accounts (only real accounts are
+# counted), which --notify and every change of the users write again.
+#
 # The limit (30 different wrong passwords) and the window (30 minutes) are
 # set in the control panel (System > Intrusion Protection, the API
 # /system/auth-guard); the Lua code reads them on every login from the box.
@@ -59,6 +63,7 @@ def lua_values(path=GUARD_LUA):
 	# the same ones.
 	values = { "DIR": "/run/miab-auth-guard", "DEFAULT_LIMIT": 30, "DEFAULT_WINDOW": 1800, "MAX_NAMES": 10000,
 		"SETTINGS": "/usr/local/lib/mailinabox/dovecot-auth-guard/settings",
+		"ACCOUNTS": "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts",
 		"LIMIT_MIN": 3, "LIMIT_MAX": 1000, "WINDOW_MIN": 60, "WINDOW_MAX": 86400 }
 	with open(path, encoding="utf-8") as f:
 		for line in f:
@@ -159,16 +164,38 @@ def save_settings(env, values):
 	utils.write_settings(config, env)
 
 
-def render_settings_file(values):
+ADDRESS_RE = re.compile(r"^[0-9a-fA-F:.]{2,45}$")
+
+
+def box_addresses(env):
+	# The box's own addresses (/etc/mailinabox.conf): a process on the box
+	# can connect to them, so logins from them are logins from the box.
+	import ipaddress
+	out = []
+	for k in ("PUBLIC_IP", "PUBLIC_IPV6", "PRIVATE_IP", "PRIVATE_IPV6"):
+		v = (env.get(k) or "").strip()
+		try:
+			a = ipaddress.ip_address(v)
+		except ValueError:
+			continue
+		s = a.compressed.lower()
+		if ADDRESS_RE.match(s) and s not in out:
+			out.append(s)
+	return out
+
+
+def render_settings_file(values, addresses=()):
 	return ("# Mail-in-a-Box: Dovecot's limit of failed logins from the box itself\n"
 		"# (System > Intrusion Protection; management/auth_guard.py). Do not edit.\n"
-		f"limit {values['limit']}\nwindow {values['window'] * 60}\n")
+		f"limit {values['limit']}\nwindow {values['window'] * 60}\n"
+		+ "".join(f"local {a}\n" for a in addresses if ADDRESS_RE.match(a)))
 
 
-def write_settings_file(text, path=None):
+def write_settings_file(text, path=None, group=None, mode=0o644):
 	# Through the descriptor of its directory, which must be root's and not
 	# writable by others (setup/mail-users.sh creates it); a new file is
 	# renamed over the old one, so Dovecot reads the old or the new one.
+	# group: the group of the new file (with mode 0640 for the accounts).
 	path = path or lua_values()["SETTINGS"]
 	d, name = os.path.split(path)
 	dfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -179,16 +206,20 @@ def write_settings_file(text, path=None):
 		try:
 			fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
 			try:
-				if os.read(fd, 65536).decode("utf-8", "replace") == text:
+				st = os.fstat(fd)
+				same = stat.S_IMODE(st.st_mode) == mode and (group is None or st.st_gid == group)
+				if same and os.read(fd, 16 * 1048576).decode("utf-8", "replace") == text:
 					return False
 			finally:
 				os.close(fd)
 		except FileNotFoundError:
 			pass
 		tmp = f".{name}.{os.getpid()}.tmp"
-		fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dfd)
+		fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
 		try:
-			os.fchmod(fd, 0o644)
+			if group is not None:
+				os.fchown(fd, -1, group)
+			os.fchmod(fd, mode)
 			os.write(fd, text.encode("utf-8"))
 			os.fsync(fd)
 		finally:
@@ -202,7 +233,24 @@ def write_settings_file(text, path=None):
 def apply_config(env, values=None, path=None):
 	if values is None:
 		values, _ = get_settings(env)
-	return write_settings_file(render_settings_file(values), path)
+	return write_settings_file(render_settings_file(values, box_addresses(env)), path)
+
+
+def render_accounts(users):
+	keys = sorted(set(k for k in (key_of(u) for u in users) if k))
+	return "".join(k + "\n" for k in keys)
+
+
+def write_accounts(env, users=None, path=None):
+	# The list of accounts for count.lua (only real accounts are counted):
+	# root:dovecot 0640, as it names every account of the box. Written by
+	# setup, after every change of the users (mailconfig.kick) and by
+	# --notify every 10 minutes.
+	if users is None:
+		from mailconfig import get_mail_users
+		users = get_mail_users(env)
+	path = path or lua_values()["ACCOUNTS"]
+	return write_settings_file(render_accounts(users), path, group=pwd.getpwnam("dovecot").pw_gid, mode=0o640)
 
 
 def update_settings(env, values, reset=False, path=None):
@@ -325,19 +373,23 @@ def as_dovecot(func, *args, **kwargs):
 	r, w = os.pipe()
 	pid = os.fork()
 	if pid == 0:
-		os.close(r)
-		code = 0
+		# The child never returns into the caller's code: whatever happens
+		# (also a signal or a broken pipe), it ends with os._exit.
+		code = 1
 		try:
-			os.setgroups([])
-			os.setgid(pw.pw_gid)
-			os.setuid(pw.pw_uid)
-			out = json.dumps({ "ok": func(*args, **kwargs) })
-		except Exception as e:
-			out = json.dumps({ "error": f"{type(e).__name__}: {e}" })
-			code = 1
-		with os.fdopen(w, "w") as f:
-			f.write(out)
-		os._exit(code)
+			os.close(r)
+			try:
+				os.setgroups([])
+				os.setgid(pw.pw_gid)
+				os.setuid(pw.pw_uid)
+				out = json.dumps({ "ok": func(*args, **kwargs) })
+				code = 0
+			except Exception as e:
+				out = json.dumps({ "error": f"{type(e).__name__}: {e}" })
+			with os.fdopen(w, "w") as f:
+				f.write(out)
+		finally:
+			os._exit(code)
 	os.close(w)
 	with os.fdopen(r) as f:
 		data = f.read()
@@ -377,9 +429,9 @@ def message(events, accounts, cfg, dropped=0):
 	return (
 		f"Dovecot refused the logins from the box itself (ActiveSync, Autodiscover, webmail, Nextcloud) for these accounts "
 		f"after {cfg['LIMIT']} different wrong passwords in {minutes} minutes (a password sent again counts once):\n\n" + "\n".join(lines) + "\n\n"
-		f"These logins come through services of the box, so fail2ban does not see the failures of one account from many "
-		f"addresses. It may be someone who tries the account's passwords through ActiveSync, webmail or Nextcloud from many "
-		f"addresses, or a process on the box that tries passwords (a phone with an old password sends the same one again and counts once). While an "
+		f"These logins come through services of the box, so fail2ban sees only each client's own failures. It may be someone who "
+		f"tries the account's passwords through ActiveSync, webmail or Nextcloud from one address below fail2ban's thresholds or "
+		f"from many, or a process on the box that tries passwords (a phone with an old password sends the same one again and counts once). While an "
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
 		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
 		f"passwords in the last {minutes} minutes.\n\n"
@@ -476,9 +528,14 @@ def main(argv):
 		for w in warnings:
 			print(w, file=sys.stderr)
 		apply_config(env, values)
+		write_accounts(env)
 		return 0
 	cfg = settings()
 	if argv[1] == "--notify":
+		try:
+			write_accounts(env)
+		except Exception as e:
+			print(f"auth_guard.py: the list of accounts could not be written: {e}", file=sys.stderr)
 		notify(env, cfg)
 		return 0
 	if argv[1] == "--unlock":

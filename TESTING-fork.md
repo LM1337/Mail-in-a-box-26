@@ -333,13 +333,16 @@ report. The groups:
   of a test account with the same wrong password from 127.0.0.1 on the box
   (it must not lock the account), sets the limit to 5 through
   `POST /system/auth-guard` (a limit of 2 must be refused), makes 40
-  logins of another test account with different wrong passwords (answered
-  at once), then expects that account refused from there with its right
+  logins of another test account with different wrong passwords from
+  changing addresses of 127.0.0.0/8 (answered at once), then expects that account refused from there with its right
   password, the first account logging in from there in under 3 s, the
   refused account logging in from outside, `GET /system/auth-guard` and
   `--status` naming it and `POST /system/auth-guard/unlock` ending the
   lock; it restores the setting. The Lua code itself was checked with Dovecot 2.4.2 of
-  Ubuntu 26.04 in a container (BUGS-fork.md, B126).
+  Ubuntu 26.04 in a container (BUGS-fork.md, B126), also against the gaps a
+  security review found: rotating 127.x addresses and the box's own
+  address, a flood of made-up names, user names with "+", and bursts of 200
+  parallel guesses.
   `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
   logic with stand-ins for the login check and the password change: HTTP
   Basic credentials in UTF-8 and Latin-1, only the caller's password
