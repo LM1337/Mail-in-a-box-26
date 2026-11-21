@@ -323,8 +323,10 @@ report. The groups:
   setup/migrate.py with its migrations replaced by recorders against a
   temporary `STORAGE_ROOT` and record: no record, the same number, a lower
   number in `mailinabox.version` (setup stops before any migration), a
-  higher one, one above the newest migration (recorded only up to the
-  newest, a record never lowered), a missing file (taken from the record), the record of another
+  higher one, one above the newest migration (setup stops unless the
+  record has the same number, a downgrade; a later release's migration
+  still runs after the right number is written back; a record never
+  lowered), a missing file (taken from the record), the record of another
   `STORAGE_ROOT`, a record that is a link, writable by others or broken, and
   a failed migration; group admin runs it (`admin-migration-record-unit`).
   `tests/fork/storage-dirs.py` (B212; no box needed) checks the reads and

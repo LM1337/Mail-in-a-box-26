@@ -243,8 +243,9 @@ def write_migration_id(path, ver):
 # is, so that it goes with the data into backups and to a new box (where no
 # record exists, the file counts, as before). A higher number than the record
 # counts (the number written after a migration and before the record, a run
-# that ended in between), but is recorded only up to the newest migration
-# here; a missing mailinabox.version is taken from the record.
+# that ended in between), but only up to the newest migration here: above
+# it, setup stops unless the record says the same (a downgrade); a missing
+# mailinabox.version is taken from the record.
 MIGRATION_RECORD = "/var/lib/mailinabox/storage-migration"
 RECORD_OWNER = 0 # root (tests/fork/migration-record.py runs as another user)
 
@@ -343,6 +344,37 @@ owns that file, and a migration that runs twice can delete data (B211).
   and run setup again.""", file=sys.stderr)
 		sys.exit(1)
 
+	# A number above the newest migration of this version that the record
+	# does not confirm (the storage user's, or a typo; a downgrade leaves the
+	# record of the newer release, which ran its migrations up to the number
+	# it wrote): no migration would run from there, neither now nor after an
+	# update, so the migrations of a later release would be skipped and the
+	# record would then claim them. Stop, as for a lower number.
+	newest = get_current_migration()
+	if ourver > newest and (recorded is None or recorded < ourver):
+		if recorded is not None:
+			back = recorded
+			record_text = f"this box has run the data migrations\nup to #{recorded} on {env['STORAGE_ROOT']} ({MIGRATION_RECORD})."
+			back_text = f"#{recorded}, as recorded"
+		else:
+			back = newest
+			record_text = f"this box has no record of the data\nmigrations on {env['STORAGE_ROOT']} ({MIGRATION_RECORD})."
+			back_text = f"#{newest} if this version set up the data"
+		print(f"""
+{migration_id_file} says #{ourver}, more than the newest data
+migration of this version (#{newest}), and {record_text}
+Setup does not take such a number: the data migrations of later releases
+would never run (B211).
+
+* If a newer release of Mail-in-a-Box ran its migrations on this data, run
+  the setup of that release.
+* Otherwise put the number of the last migration that ran back
+  ({back_text}), as the storage user (not as root by path in its
+  directory):
+  sudo -u {env.get('STORAGE_USER', 'user-data')} sh -c 'echo {back} > {migration_id_file}'
+  and run setup again.""", file=sys.stderr)
+		sys.exit(1)
+
 	while True:
 		next_ver = (ourver + 1)
 		migration_func = globals().get("migration_%d" % next_ver)
@@ -386,18 +418,12 @@ owns that file, and a migration that runs twice can delete data (B211).
 		# iterate and try next version...
 
 	# The record of a box that had none (the first run of this version), or
-	# after a higher number in the file. Never above the newest migration of
-	# this version: the storage user (or a typo) could write any number into
-	# the file, and a record of that number would skip the migrations of later
-	# releases for good and refuse the right number when it is written back.
-	# Never lowered either (a downgrade keeps the record of the newer release).
-	newest = get_current_migration()
-	if ourver > newest:
-		print(f"{migration_id_file} says #{ourver}, more than the newest data migration of this version (#{newest}); recording #{newest}.")
-	new_record = min(ourver, newest)
-	if recorded is None or new_record > recorded:
+	# after a higher number in the file (up to the newest migration here, see
+	# above). Never lowered (a downgrade keeps the record of the newer
+	# release, whose number is then also in the file).
+	if recorded is None or ourver > recorded:
 		try:
-			write_migration_record(env, new_record)
+			write_migration_record(env, ourver)
 		except OSError as e:
 			print(f"Cannot write {MIGRATION_RECORD}: {e}", file=sys.stderr)
 			sys.exit(1)

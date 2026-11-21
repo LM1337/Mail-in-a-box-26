@@ -396,9 +396,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   migration that ran in `/var/lib/mailinabox/storage-migration` (root's own,
   with the path of the `$STORAGE_ROOT` it belongs to) and stops before any
   migration when the file says less, with what to do; a missing file is
-  taken from the record. A higher number counts as before, but the record
-  takes it only up to the newest migration of the running version, so a
-  wrong number cannot skip the migrations of later releases for good. The
+  taken from the record. A higher number counts as before, but only up to
+  the newest migration of the running version: above it setup stops too,
+  unless the record has the same number (a downgrade), so a wrong number
+  cannot skip the migrations of later releases. A first version took such
+  a number and recorded the newest migration, and the next release's
+  migrations were then skipped and recorded as run (found in the review). The
   file itself stays where and as it was, so it
   still goes into backups and to a new box. New offline test
   `tests/fork/migration-record.py`.
