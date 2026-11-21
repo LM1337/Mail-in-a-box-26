@@ -341,8 +341,9 @@ report. The groups:
   lock; it restores the setting. The Lua code itself was checked with Dovecot 2.4.2 of
   Ubuntu 26.04 in a container (BUGS-fork.md, B126), also against the gaps a
   security review found: rotating 127.x addresses and the box's own
-  address, a flood of made-up names, user names with "+", and bursts of 200
-  parallel guesses.
+  address (also without a "local" line), a flood of made-up names, a full
+  pool of names not on the list, user names with "+", bursts of 200
+  parallel guesses, and right passwords in parallel (never refused).
   `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
   logic with stand-ins for the login check and the password change: HTTP
   Basic credentials in UTF-8 and Latin-1, only the caller's password

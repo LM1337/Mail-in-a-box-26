@@ -452,11 +452,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   name not on it, such as an account added while the list could not be
   written, is counted in a separate pool of 500 names):
   made-up names do not lower the limit of a real account, crowd out its
-  count or fill the state. "From the box" means every address of
-  127.0.0.0/8, ::1 and the box's own addresses, as a process on the box
-  can use any of them. Logins of one account that are being checked at the
-  same moment count too, so a burst of parallel guesses also stops at the
-  limit; and `auth_username_chars` is empty, so that a user name with "+"
+  count or fill the state. Only wrong passwords count; a login with the
+  right password never does. "From the box" means every address of
+  127.0.0.0/8, ::1, every address of the box's interfaces (link-local ones
+  included, written again every 10 minutes) and any connection from an
+  address to itself, as a process on the box can use any of them. Many
+  connections at the same moment can get a few more guesses checked before
+  the first failure is recorded (32 instead of 30 with 200 connections in
+  a test), once per window, as the passwords are checked in parallel; and `auth_username_chars` is empty, so that a user name with "+"
   or a space no longer fails before these checks with Dovecot's delay and
   the penalty of 127.0.0.1. The other accounts
   are not slowed down (no penalty of 127.0.0.1), and the account's own

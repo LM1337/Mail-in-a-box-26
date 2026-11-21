@@ -54,13 +54,15 @@ function auth_passdb_lookup(req)
 			-- account added since the list was written (if writing it
 			-- failed). Counted in a pool of its own (POOL names, forgotten
 			-- only without failures in the window), which cannot touch the
-			-- accounts on the list; when the pool is full, answered at once
-			-- and not counted (no penalty for the others either).
+			-- accounts on the list; when the pool is full, such names are
+			-- refused by check.lua (pool-full) until there is room again.
 			if pool[key] == nil then
 				if npool >= G.POOL then
 					prune_pool(now)
+					G.set_pool_full(npool >= G.POOL, now)
 				end
 				if npool >= G.POOL then
+					-- check.lua refuses such names for the next 60 seconds.
 					return dovecot.auth.PASSDB_RESULT_OK, { nodelay = "yes" }
 				end
 				npool = npool + 1

@@ -858,8 +858,9 @@ fixed)" lists a few more.
   from there: those logins come from Z-Push, Roundcube and Nextcloud, which
   fail2ban protects with the client's own address, and the delay made a
   wrong ActiveSync password take up to 50 s and slowed down every other
-  user. "From the box" is every address of 127.0.0.0/8, ::1 and the box's
-  own addresses, as a process on the box can use any of them. Instead
+  user. "From the box" is every address of 127.0.0.0/8, ::1 and every
+  address of the box's interfaces, as a process on the box can use any of
+  them. Only wrong passwords count, a login with the right password never. Instead
   Dovecot counts these failures per account: an account with 30 different
   wrong passwords from the box within 30 minutes (System > Intrusion
   Protection changes both numbers) is refused for logins from the box
@@ -873,8 +874,9 @@ fixed)" lists a few more.
   slowed down, and the account's own mail programs that log in from
   outside are not refused. So a process on the box (any local account, or
   code running as www-data after a hole in PHP or a web app) can try at
-  most 30 passwords of each account per 30 minutes, also with many
-  connections at once. Such a process can still raise Dovecot's penalty of
+  most 30 passwords of each account per 30 minutes (with very many
+  connections at the same moment a few more, once, as the passwords are
+  checked in parallel). Such a process can still raise Dovecot's penalty of
   127.0.0.1 with a login whose authorization name differs from its login
   name (it fails before these checks) and so slow down the others. The
   other side: someone who tries the passwords of one account through
@@ -954,8 +956,10 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   Z-Push, Roundcube und Nextcloud, die fail2ban mit der eigenen Adresse des
   Clients schützt, und die Verzögerung ließ ein falsches
   ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen Benutzer.
-  „Von der Box“ heißt jede Adresse aus 127.0.0.0/8, ::1 und die eigenen
-  Adressen der Box, denn ein Prozess auf der Box kann jede davon benutzen.
+  „Von der Box“ heißt jede Adresse aus 127.0.0.0/8, ::1 und jede Adresse
+  der Netzwerkschnittstellen der Box, denn ein Prozess auf der Box kann
+  jede davon benutzen. Es zählen nur falsche Passwörter, eine Anmeldung mit
+  dem richtigen Passwort nie.
   Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 30
   verschiedenen falschen Passwörtern von der Box innerhalb von 30 Minuten
   (beide Zahlen lassen sich unter System > Intrusion Protection ändern)
@@ -972,7 +976,8 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   abgewiesen. Ein Prozess auf der Box (jedes lokale Konto oder Code, der
   nach einer Lücke in PHP oder einer Web-Anwendung als www-data läuft)
   kann also höchstens 30 Passwörter pro Konto und 30 Minuten
-  durchprobieren, auch mit vielen Verbindungen gleichzeitig. Ein solcher
+  durchprobieren (mit sehr vielen gleichzeitigen Verbindungen einmalig ein
+  paar mehr, weil die Passwörter parallel geprüft werden). Ein solcher
   Prozess kann den Strafzähler von Dovecot für 127.0.0.1 weiterhin mit
   einer Anmeldung erhöhen, deren Autorisierungsname vom Anmeldenamen
   abweicht (sie scheitert vor diesen Prüfungen), und so die anderen

@@ -167,13 +167,25 @@ def save_settings(env, values):
 ADDRESS_RE = re.compile(r"^[0-9a-fA-F:.]{2,45}$")
 
 
-def box_addresses(env):
-	# The box's own addresses (/etc/mailinabox.conf): a process on the box
-	# can connect to them, so logins from them are logins from the box.
+def interface_addresses():
+	# Every address of the box's interfaces (ip -o addr: also link-local,
+	# temporary and additional ones), without prefix length and scope.
+	try:
+		out = subprocess.run(["ip", "-o", "addr", "show"], capture_output=True, text=True, timeout=10).stdout
+	except (OSError, subprocess.SubprocessError):
+		return []
+	return re.findall(r"\binet6? ([0-9a-fA-F:.]+)(?:%\S+)?/\d+", out)
+
+
+def box_addresses(env, interfaces=None):
+	# The box's own addresses (/etc/mailinabox.conf and its interfaces): a
+	# process on the box can connect to them, so logins from them are logins
+	# from the box. Written as Dovecot prints them (compressed, lower case).
 	import ipaddress
 	out = []
-	for k in ("PUBLIC_IP", "PUBLIC_IPV6", "PRIVATE_IP", "PRIVATE_IPV6"):
-		v = (env.get(k) or "").strip()
+	values = [(env.get(k) or "").strip() for k in ("PUBLIC_IP", "PUBLIC_IPV6", "PRIVATE_IP", "PRIVATE_IPV6")]
+	values += interface_addresses() if interfaces is None else interfaces
+	for v in values:
 		try:
 			a = ipaddress.ip_address(v)
 		except ValueError:
@@ -543,6 +555,10 @@ def main(argv):
 			write_accounts(env)
 		except Exception as e:
 			print(f"auth_guard.py: the list of accounts could not be written: {e}", file=sys.stderr)
+		try:
+			apply_config(env) # the box's addresses may have changed
+		except Exception as e:
+			print(f"auth_guard.py: the settings file could not be written: {e}", file=sys.stderr)
 		notify(env, cfg)
 		return 0
 	if argv[1] == "--unlock":

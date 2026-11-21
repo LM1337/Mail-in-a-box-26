@@ -64,8 +64,14 @@ st, warn = ag.validate_settings({"limit": "x", "window": 10}, strict=False)
 check("stored bad value: default and a warning", (st, len(warn)), ({"limit": 30, "window": 10}, 1))
 check("settings file text", ag.render_settings_file({"limit": 50, "window": 60}).splitlines()[-2:], ["limit 50", "window 3600"])
 env_ips = {"PUBLIC_IP": "192.0.2.10", "PUBLIC_IPV6": "2001:DB8:0:0::10", "PRIVATE_IP": "192.0.2.10", "PRIVATE_IPV6": "", "OTHER": "x"}
-check("box addresses", ag.box_addresses(env_ips), ["192.0.2.10", "2001:db8::10"])
-check("box addresses refuse junk", ag.box_addresses({"PUBLIC_IP": "1.2.3.4\nlimit 3", "PUBLIC_IPV6": "fe80::1%eth0"}), [])
+check("box addresses", ag.box_addresses(env_ips, interfaces=["127.0.0.1", "fe80::B8FC:1eff:fe60:6fe3", "198.51.100.7", "192.0.2.10"]),
+	["192.0.2.10", "2001:db8::10", "127.0.0.1", "fe80::b8fc:1eff:fe60:6fe3", "198.51.100.7"])
+check("box addresses refuse junk", ag.box_addresses({"PUBLIC_IP": "1.2.3.4\nlimit 3", "PUBLIC_IPV6": "fe80::1%eth0"}, interfaces=[]), [])
+_out = "2: eth0    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth0\n2: eth0    inet6 fe80::1%eth0/64 scope link\n2: eth0    inet6 2001:db8::10/64 scope global"
+_orig = ag.subprocess.run
+ag.subprocess.run = lambda *a, **k: type("R", (), {"stdout": _out})()
+check("ip -o addr parsed", ag.interface_addresses(), ["192.0.2.10", "fe80::1", "2001:db8::10"])
+ag.subprocess.run = _orig
 check("settings file with addresses", ag.render_settings_file({"limit": 30, "window": 30}, ["192.0.2.10", "2001:db8::10"]).splitlines()[-2:], ["local 192.0.2.10", "local 2001:db8::10"])
 check("accounts list", ag.render_accounts(["b@example.com", "A@example.com", "a@example.com"]), "a-a@example.com\na-b@example.com\n")
 

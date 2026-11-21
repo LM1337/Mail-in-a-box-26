@@ -35,7 +35,8 @@
 -- runs as dovecot, /etc/tmpfiles.d/miab-auth-guard.conf creates it), so
 -- that both passdbs see it (each passdb has a Lua state of its own) and no
 -- other account can change it. A file per name, a line "<time> <tag>" per
--- failed login (a tag counts once), for real accounts only (M.accounts).
+-- failed login with a new tag, for the accounts on the list (M.accounts)
+-- and a pool of other names.
 -- management/auth_guard.py reads the state,
 -- removes the files of names without failures in the window and mails the
 -- events. If the state cannot be written, failed logins get Dovecot's delay
@@ -73,7 +74,7 @@ function M.load()
 				limit = n
 			elseif k == "window" and n and n >= M.WINDOW_MIN and n <= M.WINDOW_MAX then
 				window = n
-			elseif k == "local" and v:match("^[%x:.]+$") then
+			elseif k == "local" and v:match("^[%x:.]+$") and #v <= 45 then
 				addrs[string.lower(v)] = true
 			end
 		end
@@ -83,17 +84,23 @@ function M.load()
 end
 
 -- A login from the box itself: any address of 127.0.0.0/8 (a process on the
--- box can use any of them), ::1, their IPv4-mapped forms, and the box's own
--- addresses (a process on the box can connect to them too). fail2ban
+-- box can use any of them), ::1, their IPv4-mapped forms, every address of
+-- the box's interfaces (setup and the cron job of auth_guard.py write them
+-- as "local" lines, link-local ones included; their scope "%eth0" is
+-- dropped here), and any connection whose source is its destination (a
+-- process on the box that connects to one of the box's addresses). fail2ban
 -- ignores all of these.
-function M.from_box(req)
-	local ip = string.lower(req.remote_ip or "")
+local function plain(ip)
+	ip = string.lower(ip or "")
+	ip = ip:gsub("%%.*$", "")
 	local v4 = ip:match("^::ffff:(%d+%.%d+%.%d+%.%d+)$")
-	if v4 then
-		ip = v4
-	end
+	return v4 or ip
+end
+function M.from_box(req)
+	local ip = plain(req.remote_ip)
 	return ip:match("^127%.%d+%.%d+%.%d+$") ~= nil or ip == "::1"
 		or ip == "0:0:0:0:0:0:0:1" or M.LOCAL[ip] == true
+		or (ip ~= "" and ip == plain(req.local_ip))
 end
 
 -- The list of accounts (management/auth_guard.py writes ACCOUNTS, one key
@@ -226,20 +233,19 @@ end
 -- the number of different tags within WINDOW and whether this one is new,
 -- or nil when the state cannot be written.
 function M.add(path, now, tag)
-	-- A tag seen within the window is written again too (it still counts
-	-- once): check.lua subtracts the failures of the last second from the
-	-- logins it let through. Old lines and repeats are dropped from time to
-	-- time, so a file holds about its different tags plus 20 lines.
+	-- A tag seen within the window is not written again: it counts once.
 	local n, has, all = M.recent(path, now, tag)
+	if has then
+		return n, false
+	end
 	if all - n > 20 then
-		-- Drop the old lines and the repeats, except those of the last
-		-- second (check.lua counts them).
+		-- Drop the old lines.
 		local keep, seen = {}, {}
 		local f = io.open(path, "r")
 		if f then
 			for line in f:lines() do
 				local t, tg = parse(line, now)
-				if t and (not seen[tg] or t >= now - 1) then
+				if t and not seen[tg] then
 					seen[tg] = true
 					keep[#keep + 1] = line .. "\n"
 				end
@@ -259,10 +265,33 @@ function M.add(path, now, tag)
 	if not ok then
 		return nil
 	end
-	if has then
-		return n, false
-	end
 	return n + 1, true
+end
+
+-- count.lua's pool of names not on the list is full: a flag file with its
+-- time, so that check.lua sees it. It holds for 60 seconds; count.lua writes
+-- it again while the pool stays full (after the 60 seconds one such name
+-- reaches it), so it can never stay behind once there is room.
+function M.pool_full(now)
+	local f = io.open(M.path("pool-full"), "r")
+	if not f then
+		return false
+	end
+	local t = tonumber(f:read("l") or "")
+	f:close()
+	return t ~= nil and now - t < 60 and t <= now + 60
+end
+
+function M.set_pool_full(full, now)
+	if full then
+		local f = io.open(M.path("pool-full"), "w")
+		if f then
+			f:write(now, "\n")
+			f:close()
+		end
+	else
+		os.remove(M.path("pool-full"))
+	end
 end
 
 -- An event for management/auth_guard.py: "<time> <kind> <count> <key>".
