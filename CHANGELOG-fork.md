@@ -34,6 +34,21 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
 
+### Changed
+
+* **Checks that the control panel's icons and scripts are installed**\
+  The planned item "Control panel asks for a favicon.ico that is not
+  installed" (an nginx 404 for `/admin/assets/branding/favicon.ico`, noted
+  in rc7) is closed without a change of setup: setup/management.sh copies
+  the file since the fork's icons were added, and T1 of v78-r2604.0 found
+  the panel's icons served. A possible source of the 404 is an update of
+  rc7 or earlier, where setup emptied the assets directory before it
+  filled it again (B157, fixed in v78-r2604.2). New offline check
+  `tests/fork/panel-assets.py` (every file that a template names under
+  `/admin/assets/` is one that setup installs, and the icons that setup
+  copies are in the repository) and smoke check `admin-panel-assets`
+  (each of them is served, the icons are the files of `branding/`).
+
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -200,9 +215,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   again); setup reloads Dovecot only when its configuration changed (B122).
 * **Munin critical-only alerts never mail the return to normal**\
   Critical only (Munin's alerts) never mails the return to normal.
-* **Control panel asks for a favicon.ico that is not installed**\
-  The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
-  not installed (nginx 404).
 * **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
   `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
 * **Upstream code still writes custom.yaml in user-owned storage (B87, B117)**\

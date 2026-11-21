@@ -2410,6 +2410,36 @@ def c_fail2ban_panel(ctx):
     return "Intrusion Protection page present"
 
 
+def c_panel_assets(ctx):
+    # Every script, style and icon that the control panel's page names under
+    # /admin/assets/ is served (HTTP 200), and the fork's icons are the files
+    # of branding/ (a favicon.ico that setup did not install was a planned
+    # item from rc7 to v78-r2604.4; tests/fork/panel-assets.py checks the
+    # same offline).
+    r = http_req(ctx, "GET", "/admin/")
+    if r.status != 200:
+        raise Fail("/admin/: HTTP %d" % r.status)
+    paths = sorted(set(re.findall(r"/admin/assets/[^\"'\s?#)]+", r.text())))
+    if "/admin/assets/branding/favicon.ico" not in paths:
+        raise Fail("the page names no /admin/assets/branding/favicon.ico")
+    repo = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    bad = []
+    for path in paths:
+        a = http_req(ctx, "GET", path)
+        if a.status != 200 or not a.body:
+            bad.append("%s: HTTP %d, %d bytes" % (path, a.status, len(a.body)))
+            continue
+        if path.startswith("/admin/assets/branding/"):
+            fn = os.path.join(repo, "branding", path[len("/admin/assets/branding/"):])
+            if os.path.isfile(fn):
+                with open(fn, "rb") as f:
+                    if f.read() != a.body:
+                        bad.append("%s is not the file of branding/" % path)
+    if bad:
+        raise Fail("; ".join(bad))
+    return "%d assets served" % len(paths)
+
+
 def c_fail2ban_report(ctx):
     r = admin_api(ctx, "GET", "system/fail2ban/report")
     if r.status != 200:
@@ -4820,6 +4850,8 @@ def main():
         run_check("admin-notifications-unit", c_local_test, ctx, "admin-mail.py")
         run_check("admin-status-changes-unit", c_local_test, ctx, "status-changes.py")
         run_check("admin-panel-fragments", c_local_test, ctx, "panel-fragments.py")
+        run_check("admin-panel-assets", c_panel_assets, ctx)
+        run_check("admin-panel-assets-unit", c_local_test, ctx, "panel-assets.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):

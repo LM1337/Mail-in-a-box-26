@@ -280,6 +280,13 @@ report. The groups:
   HTTPS server with `add_header` lines of its own has the server's HSTS
   line (nginx inherits a server's `add_header` only into blocks that have
   none), and none when HSTS is off.
+  `tests/fork/panel-assets.py` (no box needed) checks that every file the
+  control panel's templates name under `/admin/assets/` is one that
+  `setup/management.sh` installs (its downloads, Bootstrap 3.4.1's archive,
+  its copy of `branding/`), that the icons it copies are in the repository
+  and that nginx serves `/admin/assets` from that directory;
+  `admin-panel-assets` fetches each of them from the box (HTTP 200, the
+  icons the same as the files of `branding/`).
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
