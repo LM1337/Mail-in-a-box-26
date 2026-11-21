@@ -108,6 +108,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   checkout's commit; after the checkout, it stops if the commit is still
   another one. When the source cannot be asked, it says so and uses the
   checkout as before. README-fork.md ("Updating the fork") is updated.
+* **In-place upgrade --check proposes the start command with SOURCE and TAG (B203)**\
+  The start command that `upgrade-in-place-to-2604.sh --check` proposes
+  (and repeats when blockers stop a run) now begins with `SOURCE=...` and
+  `TAG=...` when they are set, quoted for the shell, and through
+  `curl | bash` names the script of that source instead of the GitHub URL.
+  Whoever copied the line before ran the release from GitHub instead of
+  the source and tag that were checked.
 
 ### Planned
 
@@ -205,9 +212,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   can neither see a listing nor say that they could not check; the comment
   in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
   127.255.255.254.
-* **In-place upgrade --check prints the GitHub URL for other sources**\
-  `upgrade-in-place-to-2604.sh --check` prints the start command with the
-  GitHub URL also when `SOURCE` and `TAG` name another source.
 * **A Dovecot reload ends open IMAP sessions (B122)**\
   A Dovecot reload ends the open IMAP sessions (their clients log in
   again); setup reloads Dovecot only when its configuration changed (B122).

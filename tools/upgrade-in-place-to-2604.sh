@@ -2559,10 +2559,23 @@ the command again, or go back with: $SELF --rollback"
 Nothing was changed. '$(start_command | sed 's/$/ --check/')' lists them again."
 }
 
+# The command that starts the upgrade: this script with the options of this
+# run, and SOURCE and TAG when they are set (B203; quoted for the shell).
+# Through curl | bash there is no file: the script of the default source, or
+# of SOURCE, saved to a file.
 start_command() {
-	local c=$SELF
-	if [ -z "$SELF_FILE" ]; then c="$DEFAULT_RAW/tools/$SCRIPT_NAME (saved to a file)"; else c=$SELF_FILE; fi
-	echo "$c$(resume_flags | sed 's/^/ /' | tr '\n' ' ' | sed 's/ $//')"
+	local c env=() pre=
+	if [ -n "${SOURCE:-}" ]; then env+=("SOURCE=$SOURCE"); fi
+	if [ -n "${TAG:-}" ]; then env+=("TAG=$TAG"); fi
+	if [ ${#env[@]} -gt 0 ]; then pre=$(printf '%q ' "${env[@]}"); fi
+	if [ -n "$SELF_FILE" ]; then
+		c=$(printf '%q' "$SELF_FILE")
+	elif [ -z "${SOURCE:-}" ] || same_repo "$SOURCE" "$DEFAULT_SOURCE"; then
+		c="$DEFAULT_RAW/tools/$SCRIPT_NAME (saved to a file)"
+	else
+		c="tools/$SCRIPT_NAME of $(printf '%q' "$SOURCE") (saved to a file)"
+	fi
+	echo "$pre$c$(resume_flags | sed 's/^/ /' | tr '\n' ' ' | sed 's/ $//')"
 }
 
 show_plan() {
