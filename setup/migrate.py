@@ -219,12 +219,15 @@ def read_migration_id(path):
 			raise OSError(f"{path} is not a regular file")
 		return f.read(64).decode("utf-8", "replace").strip()
 
-def write_migration_id(path, ver):
+def load_write_conf():
 	spec = importlib.util.spec_from_file_location("write_conf",
 		os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "write_conf.py"))
 	write_conf = importlib.util.module_from_spec(spec)
 	spec.loader.exec_module(write_conf)
-	write_conf.write_if_changed(path, (str(ver) + "\n").encode())
+	return write_conf
+
+def write_migration_id(path, ver):
+	load_write_conf().write_if_changed(path, (str(ver) + "\n").encode())
 
 # The storage user owns $STORAGE_ROOT and so mailinabox.version: it could
 # write a lower number there, and the next setup run would run the data
@@ -269,11 +272,7 @@ def write_migration_record(env, ver, path=None):
 	if "\n" in env["STORAGE_ROOT"]:
 		raise OSError("STORAGE_ROOT has a line break")
 	os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
-	spec = importlib.util.spec_from_file_location("write_conf",
-		os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "write_conf.py"))
-	write_conf = importlib.util.module_from_spec(spec)
-	spec.loader.exec_module(write_conf)
-	write_conf.write_if_changed(path, ("%d %s\n" % (ver, env["STORAGE_ROOT"])).encode())
+	load_write_conf().write_if_changed(path, ("%d %s\n" % (ver, env["STORAGE_ROOT"])).encode())
 
 def run_migrations():
 	if not os.access("/etc/mailinabox.conf", os.W_OK, effective_ids=True):
@@ -310,7 +309,12 @@ def run_migrations():
 		migration_id = str(recorded)
 		try:
 			write_migration_id(migration_id_file, recorded)
-		except OSError as e:
+			# The storage user's again, as setup/start.sh makes it (B147).
+			if env.get("STORAGE_USER"):
+				import pwd
+				pw = pwd.getpwnam(env["STORAGE_USER"])
+				load_write_conf().own(migration_id_file, pw.pw_uid, pw.pw_gid, 0o644)
+		except (OSError, KeyError) as e:
 			print(f"Cannot write {migration_id_file}: {e}", file=sys.stderr)
 			sys.exit(1)
 

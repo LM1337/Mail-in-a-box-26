@@ -131,6 +131,12 @@ check("higher number than the record: taken", run()[:4], (None, [15], "15", "15 
 
 state(version=None, record="12 %s\n" % ROOT)
 check("file missing: from the record", run()[:4], (None, [13, 14, 15], "15", "15 " + ROOT))
+import pwd  # noqa: E402
+migrate.load_environment = lambda: {"STORAGE_ROOT": ROOT, "STORAGE_USER": pwd.getpwuid(os.getuid()).pw_name}
+state(version=None, record="15 %s\n" % ROOT)
+os.makedirs(ROOT, exist_ok=True)
+check("file missing: written back, the storage user's, mode 0644", (run()[:3], oct(os.stat(VERSION).st_mode & 0o777)), ((None, [], "15"), "0o644"))
+migrate.load_environment = lambda: {"STORAGE_ROOT": ROOT}
 
 state(version=None, record=None)
 check("new STORAGE_ROOT without record: skipped as before", run()[:4], (None, [], None, None))
