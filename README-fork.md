@@ -976,6 +976,14 @@ The admin panel sets who gets these mails, under System > Notifications
 * **Level**: warning and critical (the default), or critical only. Critical
   only mails the changes of plugins that have a critical value and lists
   only those values; warnings and the return to normal are not mailed.
+  Munin's text template can name the values that are critical, warning or
+  unknown now and those that are back to normal in this run, but not the
+  state a value had before. So critical only cannot mail the end of a
+  critical state alone (it would have to mail every return to normal, also
+  of values that were only in warning, which this level leaves out), and a
+  value that drops from critical to warning is not mailed either. To be
+  told when a value is back to normal, choose warning and critical;
+  `/var/lib/munin/limits` shows the current state of each value.
 * **Send test mail** sends one notification to the saved recipient through
   the same command as the alerts (subject "Munin test notification", header
   `X-Miab-Test: 1`).
@@ -1013,7 +1021,16 @@ Monitoring):
 * **Level**: Warnung und kritisch (Standard) oder nur kritisch. Nur kritisch
   meldet die Änderungen der Plugins mit einem kritischen Wert und listet nur
   diese Werte; Warnungen und die Rückkehr zum Normalzustand werden nicht
-  gemeldet.
+  gemeldet. Munins Textvorlage kann die Werte nennen, die jetzt kritisch,
+  in Warnung oder unbekannt sind, und die Werte, die in diesem Lauf wieder
+  normal sind, aber nicht den Zustand, den ein Wert vorher hatte. Deshalb
+  kann „nur kritisch“ das Ende eines kritischen Zustands nicht allein
+  melden (es müsste jede Rückkehr zum Normalzustand melden, auch die von
+  Werten, die nur in Warnung waren, die diese Stufe auslässt), und ein
+  Wert, der von kritisch auf Warnung sinkt, wird auch nicht gemeldet. Wer
+  erfahren will, wann ein Wert wieder normal ist, wählt Warnung und
+  kritisch; `/var/lib/munin/limits` zeigt den aktuellen Zustand jedes
+  Werts.
 * **Send test mail** schickt eine Benachrichtigung an den gespeicherten
   Empfänger, über denselben Befehl wie die Warnungen (Betreff „Munin test
   notification“, Kopfzeile `X-Miab-Test: 1`).

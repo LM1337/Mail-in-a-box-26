@@ -230,7 +230,14 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   A Dovecot reload ends the open IMAP sessions (their clients log in
   again); setup reloads Dovecot only when its configuration changed (B122).
 * **Munin critical-only alerts never mail the return to normal**\
-  Critical only (Munin's alerts) never mails the return to normal.
+  Critical only (Munin's alerts) never mails the return to normal. Not
+  possible with Munin's text template, which `contact.admin.text` sets:
+  munin-limits (Munin 2.0) gives it the values that are critical, warning
+  or unknown now and those back to normal in this run (`fofields`), not
+  the state a value had before, so a template cannot tell a value back
+  from critical from one back from warning, nor see one that drops from
+  critical to warning. README-fork.md (Munin alerts) says so. A fix would
+  need munin-notify to keep the critical values of the last run itself.
 * **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
   `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
 * **Upstream code still writes custom.yaml in user-owned storage (B87, B117)**\

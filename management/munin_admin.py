@@ -59,7 +59,11 @@ ADDRESS_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_+-]*(\.[A-Za-z0-9_+-]+)*@([A-Z
 
 # munin-limits' own text for one service, restricted to the critical values.
 # A service without a critical value gives an empty text. (Munin's template
-# language; munin-limits turns \n and \t into a line break and a tab.)
+# language; munin-limits turns \n and \t into a line break and a tab.) The
+# return to normal is not in it: the template sees the current states
+# (cfields, wfields, ufields) and the values back to normal in this run
+# (fofields), but not the state a value had before, so it cannot tell a
+# value back from critical from one back from warning (README-fork.md).
 CRITICAL_TEXT = (r"${if:cfields ${var:group} :: ${var:host} :: ${var:graph_title}\n\tCRITICALs:"
 	r"${loop<,>:cfields  ${var:label} is ${var:value} (outside range [${var:crange}])"
 	r"${if:extinfo : ${var:extinfo}}}.\n}")
