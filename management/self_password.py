@@ -31,8 +31,11 @@ import time
 
 # Failures that refuse more attempts for WINDOW seconds: per account (any
 # caller, so that this endpoint is no way to guess one account's password at
-# full speed) and per client address. It does not bound local guessing as a
-# whole: Dovecot answers failed logins from 127.0.0.1 at once (B126, over
+# full speed) and per client address. Only accounts that exist are counted:
+# failures for made-up names would fill the limiter and push out the
+# failures of a real account (the endpoint is local only, so telling which
+# accounts exist reveals nothing to the Internet). It does not bound local
+# guessing as a whole: Dovecot answers failed logins from 127.0.0.1 at once (B126, over
 # IMAP, POP3, ManageSieve and SMTP submission; README-fork.md, "Known
 # issues").
 MAX_FAILURES_ACCOUNT = 5
@@ -98,7 +101,8 @@ class FailureLimiter:
 		if len(self.failures) > self.max_keys:
 			# Drop the keys whose newest failure is oldest, those of addresses
 			# first: a caller that forges new addresses must not flush the
-			# failures of an account.
+			# failures of an account (and accounts count only when they
+			# exist, see change_own_password).
 			for k in sorted(self.failures, key=lambda k: (k.startswith("account:"), self.failures[k][-1]))[:len(self.failures) - self.max_keys]:
 				del self.failures[k]
 
@@ -113,12 +117,15 @@ def client_address(request):
 	return xff[0].strip() if xff else (request.remote_addr or "")
 
 
-def change_own_password(request, env, check_user_auth, set_mail_password, limiter, log_failure):
+def change_own_password(request, env, check_user_auth, set_mail_password, limiter, log_failure, account_exists):
 	# Returns (body, HTTP status). check_user_auth(email, password, request,
 	# env) raises ValueError (auth.AuthService.check_user_auth);
 	# set_mail_password(email, password, env) returns "OK" or (message,
 	# status) and raises ValueError for a password that the policy refuses;
-	# log_failure(request) writes the failed-login line for fail2ban.
+	# log_failure(request) writes the failed-login line for fail2ban;
+	# account_exists(email, env) tells whether a failure counts for the
+	# account too (only after a failure, so a right password costs nothing
+	# more).
 	email, current = parse_basic_auth(request.headers.get("Authorization", ""))
 	new = request.form.get("password", "")
 	if not email or not current:
@@ -136,7 +143,8 @@ def change_own_password(request, env, check_user_auth, set_mail_password, limite
 		if reason == "missing-totp-token":
 			# The password was right; this endpoint cannot ask for the code.
 			return (MSG_MFA, 403)
-		limiter.add(account_key)
+		if account_exists(email, env):
+			limiter.add(account_key)
 		limiter.add(address_key)
 		log_failure(request)
 		if "invalid-totp-token" in reason:

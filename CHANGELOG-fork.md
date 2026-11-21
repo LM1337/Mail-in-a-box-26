@@ -376,8 +376,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   two-factor authentication) as the control panel's login does, applies the
   same password rules and hash as the control panel, changes only the
   caller's own password, logs failed attempts for fail2ban's
-  `miab-management` jail and refuses more after 5 failures for an account or
-  10 for an address within 10 minutes. Roundcube's own messages (a wrong
+  `miab-management` jail and refuses more after 5 failures for an account
+  (one that exists, so that made-up names cannot push a real account's
+  failures out of the limiter) or 10 for an address within 10 minutes. Roundcube's own messages (a wrong
   current password, a short new one) are as before. Every other reader opens
   the database as root (Dovecot's auth-worker, Postfix's daemons before they
   drop their privileges, the management daemon, the backup, the tools); the

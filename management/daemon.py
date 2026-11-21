@@ -18,7 +18,7 @@ from functools import wraps
 from flask import Flask, request, render_template, Response, send_from_directory, make_response
 
 import auth, utils, self_password
-from mailconfig import get_mail_users, get_mail_users_ex, get_admins, add_mail_user, set_mail_password, remove_mail_user
+from mailconfig import get_mail_users, get_mail_users_ex, get_admins, add_mail_user, set_mail_password, remove_mail_user, get_mail_password
 from mailconfig import get_mail_user_privileges, add_remove_mail_user_privilege
 from mailconfig import get_mail_aliases, get_mail_aliases_ex, get_mail_domains, add_mail_alias, remove_mail_alias
 from mailconfig import get_mail_quota, set_mail_quota
@@ -191,11 +191,18 @@ def session_me(): # not "me": that name holds this file's path (above)
 # users.sqlite. See management/self_password.py.
 self_password_limiter = self_password.FailureLimiter()
 
+def mail_user_exists(email, env):
+	try:
+		get_mail_password(email, env)
+	except ValueError:
+		return False
+	return True
+
 @app.route('/me/password', methods=["POST"])
 def session_me_password():
 	body, status = self_password.change_own_password(request, env,
 		auth_service.check_user_auth, set_mail_password,
-		self_password_limiter, log_failed_login)
+		self_password_limiter, log_failed_login, mail_user_exists)
 	if status == 200:
 		app.logger.info("%s changed their own password", self_password.parse_basic_auth(request.headers.get("Authorization", ""))[0])
 	return Response(body.rstrip("\n") + "\n", status=status, mimetype='text/plain')

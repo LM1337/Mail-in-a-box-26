@@ -17,7 +17,9 @@ python3 stdlib only, no box needed.
     expire;
   * the limiter keeps at most max_keys keys, and drops those of addresses
     before those of accounts (forged addresses do not flush an account's
-    failures).
+    failures); failures for accounts that do not exist count only for the
+    address, so made-up names with forged addresses do not flush a real
+    account's failures either.
 
   tests/fork/self-password.py
 
@@ -100,8 +102,12 @@ class Clock:
 		return self.t
 
 
+def account_exists(email, env):
+	return email in USERS
+
+
 def run(req, limiter):
-	return sp.change_own_password(req, {}, check_user_auth, set_mail_password, limiter, LOGGED.append)
+	return sp.change_own_password(req, {}, check_user_auth, set_mail_password, limiter, LOGGED.append, account_exists)
 
 
 # Basic credentials
@@ -178,6 +184,21 @@ for i in range(30):
 	clock.t += 1
 	lim.add("address:192.0.2.%d" % i)
 check("new addresses do not flush an account's failures", ("account:victim@example.com" in lim.failures, len(lim.failures)), (True, 10))
+
+# Made-up account names with forged addresses (each a new one) do not
+# flush a real account's failures
+lim = sp.FailureLimiter(clock=clock, max_keys=50)
+for i in range(sp.MAX_FAILURES_ACCOUNT):
+	clock.t += 1
+	run(Req("alice@example.com", "guess%d" % i, "y" * 9), lim)
+check("victim blocked", run(Req("alice@example.com", "newpass456", "y" * 9), lim)[1], 429)
+for i in range(200):
+	clock.t += 0.01
+	run(Req("r%d@x" % i, "pw", "y" * 9, xff="2001:db8::%x" % i), lim)
+check("made-up accounts are not counted", any(k.startswith("account:r") for k in lim.failures), False)
+check("made-up accounts and forged addresses: the victim stays blocked", run(Req("alice@example.com", "newpass456", "y" * 9), lim)[1], 429)
+check("a made-up account still counts for its address",
+	[run(Req("ghost@example.com", "pw", "y" * 9, xff="192.0.2.99"), lim)[1] for i in range(sp.MAX_FAILURES_ADDRESS + 1)][-1], 429)
 
 if failures:
 	print("\n%d case(s) failed: %s" % (len(failures), ", ".join(failures)))

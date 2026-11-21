@@ -316,7 +316,8 @@ report. The groups:
   Basic credentials in UTF-8 and Latin-1, only the caller's password
   changed, the policy, two-factor authentication (no code: 403 and not
   counted; a wrong code: counted), the limits per account and per address
-  and their expiry, and that forged addresses do not flush an account's
+  and their expiry, and that forged addresses, also with made-up account
+  names (which count only for the address), do not flush an account's
   failures from the limiter; group admin runs it (`admin-self-password-unit`).
   `tests/fork/migration-record.py` (B211; no box needed) runs
   setup/migrate.py with its migrations replaced by recorders against a

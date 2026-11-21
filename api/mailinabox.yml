@@ -171,9 +171,9 @@ paths:
         daemon on 127.0.0.1), so that the web server's account needs no access to the
         user database. Only on 127.0.0.1:10222: nginx answers `/admin/me/password`
         with 404. A wrong current password is logged as a failed login (the
-        `miab-management` jail of fail2ban); after 5 failures for an account or 10
-        for a client address within 10 minutes, further attempts are refused with 429
-        for the rest of that time.
+        `miab-management` jail of fail2ban); after 5 failures for an account that
+        exists or 10 for a client address within 10 minutes, further attempts are
+        refused with 429 for the rest of that time.
       operationId: changeOwnPassword
       requestBody:
         required: true
