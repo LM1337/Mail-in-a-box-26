@@ -84,7 +84,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   as postmaster@, kept their local part and missed the rules of
   fts-xapian's notes). New or wider rules, each with its reason: a report
   recipient at another provider in System > Notifications; Roundcube's
-  CardDAV migration race of two first logins (a known issue); Z-Push's
+  CardDAV migration race of two first logins (README-fork.md names it for an
+  update from rc7); Z-Push's
   "could not stat folder" at setup's Dovecot reload; fail2ban's note on the
   first match of `miab-munin` after its start; the in-place and migration
   tools' own notices of local Roundcube changes; the first start of the

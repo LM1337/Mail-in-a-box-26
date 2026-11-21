@@ -68,7 +68,9 @@ manifest no longer matches: the start snapshot of T5b from v78-r2604.2 to
 v78-r2604.4 was prepared that way, so `mig-pop3-uidl-alice` failed on every
 run from it, and the lab used a corrected copy of the manifest for that VM.
 A start snapshot prepared with `spam-move.py` works with the original
-manifest.
+manifest. The start snapshot of v78-r2604.5 (the box copy at the published
+v78-r2604.4) got the moved mail's seeded UID back in the lab and works with
+the original manifest too.
 
 ## Scenarios
 
@@ -80,6 +82,7 @@ manifest.
 | T4 | the 22.04 test VM | in place, 22.04 → 24.04 → 26.04, two release upgrades | `curl …/tools/upgrade-in-place-to-2604.sh \| sudo bash -s -- --yes` | migrated |
 | T5 | the 24.04 test VM after an in-place upgrade with rc3 | update of a box that already runs the fork | `git remote set-url` to GitHub, then `sudo bash -c "$(curl -fsSL …/setup/bootstrap.sh)"`; the setup dialogs answered with Enter | migrated |
 | T6 | a box on the Internet (public DNS, open port 25), before a final release | fresh install, then an update of it | as T1, then as T5; `tools/update-check.sh` around the update, `mailcheck` with a real external probe address | fresh |
+| T7 | a test VM with the published release before, given a copy of the configuration of a production box (users, aliases, settings, custom DNS/web settings; no mail, cloud data, keys or backups; all passwords replaced), isolated from the Internet for mail and DNS | update to the release under test, as on that box | `bootstrap.sh` with `TAG=<commit>`; `tools/update-check.sh before`/`after` | none (logins, maps and the panel checked one by one) |
 | T1n | the installed T1 box (from v78-r2604.2) | setup's network checks, `setup/network-checks.sh` of the release before and of the release under test, each under setup's shell options (`set -euo pipefail`) | the script run on the box through its own resolver; cases: not listed, a listed hostname, a listed IP address, a public resolver, a failing resolver | none |
 
 Variants: **T3b** is a clean T3 run from the tag after a first run had found
@@ -342,14 +345,18 @@ report. The groups:
   `$STORAGE_ROOT/mail` and `users.sqlite`) refusing a directory that root
   does not own already, and `--check-own-root-only` naming such a
   directory or database (also as a command, exit code 1), which
-  setup/start.sh runs before setup changes anything; group admin runs it
-  (`admin-storage-dirs-unit`).
+  setup/start.sh runs before setup changes anything, and the KSK's public
+  key that the status checks read only through a checked `dns/` and
+  `dns/dnssec/` (B183); group admin runs it (`admin-storage-dirs-unit`).
   `tests/fork/update-check-compare.py` (B201; no box needed) runs the
   comparison of `tools/update-check.sh after` on states in a temporary
   directory: Postfix and Dovecot settings that only the record after the
   update has are "newly recorded (not judged)" and counted in the RESULT
   line, a changed value of a setting in both records is still judged (with
-  and without a rule), a new line of another file is still unexpected.
+  and without a rule), a new line of another file is still unexpected,
+  every drop-in that setup writes is in a list of expected changes, and
+  `after` adds the old-box allowlist after a change of the Ubuntu release
+  (B187).
   `tests/fork/roundcube-local.py` (B200; no box needed) checks the report
   of local Roundcube changes that the in-place and migration tools share
   (the two copies must be the same): its idea of setup's settings against
@@ -361,7 +368,21 @@ report. The groups:
   read completely, control characters in names, the comparison with the
   Roundcube after setup and its file `local-changes.json` (0600, removed
   when nothing is open), and System Status's warning from that file
-  (which ignores a link and files that another account can write).
+  (which ignores a link and files that another account can write); a
+  local plugin that the web server cannot read, the modes of the kept
+  copy (B186), and both tools' preflight reports run as bash with `set -u`
+  (B185).
+  `tests/fork/clone-ref.py` (B188; no box needed) clones a tag, a branch
+  and a full commit id from a repository in a temporary directory with the
+  tools' `clone_ref` and bootstrap.sh's first clone, and refuses a short or
+  unknown commit id without leaving a directory.
+  `tests/fork/quiesce-order.py` (B190; no box needed) runs the in-place
+  tool's `quiesce_units` and `mask_units` with a stand-in systemctl: the
+  services of the apt timers are masked first, together.
+  `tests/fork/old-side-filter.py` (B154; no box needed) runs the migration
+  tool's filter of the old box's messages: escape sequences shown with
+  "?", the CR of a CR LF line end dropped, the command's output and exit
+  code kept.
   `tests/fork/owncloud-backup-prune.py` (no box needed) checks the removal
   of old Nextcloud backup copies in a temporary `STORAGE_ROOT`: the three
   newest copies and those of the last 14 days stay (also after three
@@ -410,8 +431,10 @@ report. The groups:
   "Could not check" without the DS records to set, no, a correct and a
   wrong DS record give the messages as before, a zone's checks look its
   DS records up once and suggest DNSSEC only when none is set, and the
-  box's name checks its zone's DS records only when they are set. Group
-  admin runs it (`admin-status-dns-unit`).
+  box's name checks its zone's DS records only when they are set; an
+  unreadable KSK key gives the DS records without it (B183), and the test
+  of outbound port 25 discards nc's output (B184). Group admin runs it
+  (`admin-status-dns-unit`).
   `tests/fork/cloud-relays.py` (B126; no box needed) checks how System >
   Intrusion Protection recognises Microsoft's servers: the shipped list
   `conf/fail2ban/microsoft-relays.txt` (header, IPv4 and IPv6, the
@@ -1376,6 +1399,85 @@ exist on the peer (a lab artifact). Not tested: T1, T2, T3, T4, T6 (a
 fresh install creates the database with mode 0600 and the record through
 setup/start.sh; not run), the opt-in smoke group fail2ban, a user with
 two-factor authentication in Roundcube (offline only).
+
+### v78-r2604.5 (unreleased)
+
+The release of the branch `fix/b178`: B178 to B182 (System Status, the
+status mail, HSTS of the panel, the DNS checks), B200 to B204 (the tools),
+B210 to B213 (the hardening), System > Notifications, the restart of
+services only on a change, the Microsoft relay hint and the pruning of
+Nextcloud's backup copies. All runs installed or updated the branch from
+the lab's mirror of the repository, on one hypervisor, with the second test
+box as the peer for port 25, the probe address of `mailcheck`, the rsync
+target of `backup` and the source of the attacks. During setup runs of T5b
+the peer sent a marked test mail (`X-Miab-Test: 1`) every 3 s over port 25.
+
+The first round ran every scenario on `e9f5641`. Its findings were fixed
+in `223d83e` to `6bc2109` (B183 to B190, follow-ups of B154, B200 and
+B204, the log audit's lists and normaliser); T1 to T5b ran again on
+`6bc2109`, of the feature checks of T5b only the two that had failed. After them only the log audit's lists (`0abae8e`) and
+this documentation changed. T6 did not run.
+
+T7 is new: a test VM whose mail and DNS were kept inside the lab, with the
+published v78-r2604.4, given a copy of the configuration of a
+production box: its users, aliases, settings and custom DNS/web settings,
+without mail, cloud data, keys or backups, all passwords replaced; then
+updated to the commit under test as on the box. It runs no smoke test
+(that would add users to the copy) and was rolled back to its clean
+snapshot afterwards.
+
+First round, `e9f5641`:
+
+| Run | Result |
+|---|---|
+| T1 (fresh 26.04, network checks on) | install exit 0 in 2284 s with "Your Mail-in-a-Box is running." (a first attempt stopped with exit 100 in `apt-get update`: a PHP mirror in the middle of a sync, not the fork). `users.sqlite` root:root 0600, migration record 15, Roundcube's driver `mailinabox`, Dovecot's nodelay passdb, HSTS on `/admin/`, all panel assets, the Microsoft relay list accepted; smoke 110/110 (with `--provision`, the api group and `--fail2ban`), after a reboot 79/79. Two more setup runs exit 0 (98 s, 79 s); the second restarted only units whose files the lab had changed after the install (lab DNS, the test environment, the smoke test's DKIM tables), the third none. Log audit 0 unknown after classification; two rule gaps of the allowlist (a report recipient at another provider, fail2ban's note on `miab-munin`'s first match), fixed in the lists. |
+| T2 (22.04 v78 with local Roundcube changes → fresh 26.04) | the documented `--check` and the documented migration stopped in the preflight check with "STORAGE_ROOT: unbound variable" (B185), with nothing changed; with the changes moved aside `--check` found no blockers. With the variable given from outside the migration passed: "All checks passed", mail offline 21 min 45 s, the counts and keys the same, the old Roundcube's changes kept and named, smoke 21/21 and 110/110 after a reboot. ssh's messages from the old box ended in "?" (follow-up of B154), the exit code file of the tmux window was 0644 until the next call (follow-up of B204). |
+| T3 (the 24.04 copy of a production box, in place, `--keep-local`) | `TAG=<commit id>` could not be cloned (B188); with `TAG=` the branch at the same commit: "All checks passed", mail offline 1 h 31 min, the push hook, full-text search with the old indexes, the Docker stand-in and the hooks; `mailcheck` OK; smoke 21/21 (19/21 before an unmarked lab mail of the snapshot was removed). The plugin that the documented hook copied back from `old-roundcube/` could not be read by the web server, and Roundcube logged an error on every request (B186); `update-check.sh after` named the old release's spamd line as new (B187). |
+| T4 (22.04 v78 → 24.04 → 26.04, in place) | "All checks passed", mail offline 2 h 09 min, 3 reboots, the fallback SSH served every probe while port 22 was down (66/66); B200's report and `--ack-local`, B161's messages after a failed `--redo-from`, Dovecot's nodelay; smoke 21/21 and 110/110. When mail went offline, the mask of one apt timer started the other one's missed run: unattended-upgrade installed a kernel after the system archive had been made (B190). |
+| T5b (the copy of a production box at the published v78-r2604.4, the operator's update) | `update-check.sh before` and `backup` exit 0; the update interactive in a pty under client load (both instances RESULT OK, no failed login of the load, `load-no-failed-login` PASS), exit 0 in 119 s with the end line; 289 of 289 test mails accepted, 4 deferred inside the box during the documented restarts and delivered, none lost; Dovecot's and PHP-FPM's reloads cut a few IDLE and ActiveSync connections, as documented. `after`: "CHANGED", the lab's origin and the new drop-in of spampd's restart record, which the list of expected changes lacked (fixed in `223d83e`); `mailcheck` OK; smoke 122/122. The modes of B210, the record of B211, Roundcube's driver, `/me/password` 404 from outside, HSTS, the relay list, B126's nodelay (a wrong ActiveSync password answered in 0.035 s instead of 13.5 to 26 s), the pruning of Nextcloud's backup copies (the 3 newest and those of 14 days kept, other names left), the restarts on the first run, none on the second (75 s) and third run, sa-update's restart of spampd recorded through the drop-in; B202 (a local tag of the release name: the old bootstrap was fooled, the new one fetched); two downgrades to v78-r2604.4 and back, a reboot on each side, Roundcube's password change with both drivers; smoke at the end 110/110. Setup printed "database is locked" in Nextcloud's step under the load (B189). |
+| T5b features (the same box after the update) | in a headless browser: System Status with "show more" (B178), the TLS and External DNS pages, System > Notifications (a recipient at another provider, the test mail, the Munin select), Munin in a new tab, Intrusion Protection with the Microsoft hint, its dialog and the allowlist entry removed again; no console error on these pages. The report recipient got the test mail and a change mail with whole checks (B179); a broken `admin_mail` written by hand was replaced by the standard address with a warning. Roundcube's password change (right and wrong current password, the limiter's 429, the two-factor hint), `users.sqlite` unreadable for www-data, the storage user's swaps of `mail/` and a higher `mailinabox.version` stopped by setup before any change, B213, B182 against a refusing and a silent server; smoke 121/121. Found: with a `dns/` of the storage user's own the status checks ended with a traceback and the panel's status answered HTTP 500 (B183); a status change mail went out every night with nc's "succeeded!" line (B184, also in v78-r2604.4). |
+| T7 (the configuration copy, isolated) | the published v78-r2604.4 installed (exit 0, 1492 s), the data imported, setup with it exit 0, `before` exit 0, the update exit 0 in 82 s with the end line, two more setup runs exit 0 with no restart and no changed file but the nightly job's minute (406 files compared); status checks over all domains without a traceback; System > Notifications as the aliases say; all mailboxes, aliases and domains in Postfix's and Dovecot's maps; 14 logins over IMAP, SMTP, webmail and ActiveSync; Roundcube's password change through the new driver; `users.sqlite` root:root 0600; nginx and the custom proxy; the panel in a browser without errors. `after`: the same missing drop-in as in T5b (and the lab's origin). The lab's DNS answered for the box's zones, but the DS lookups of the zone names went to the public parent zones until the lab rejected outgoing DNS (a gap of the harness, closed during the run; only the public zone names left the lab). Three findings about the configuration itself went to its operator; one of them is a missing warning of the fork (Planned: a local fail2ban file with `ignoreip` overrides the panel's allowlist). |
+
+Second round, `6bc2109`:
+
+| Run | Result |
+|---|---|
+| T5b (the operator's update again, from the start snapshot at the published v78-r2604.4) | `before` and `backup` exit 0 (the copy verified on the rsync target); the update interactive under client load, exit 0 in 123 s with the end line; both load instances RESULT OK with no failed login (0 auth, 0 throttled results); 289 of 289 test mails accepted; the 2 s probe never found ports 25, 587, 993 or LMTP down, spampd 6 s at its restart; setup's output without "database is locked" (B189). `after`, with the published origin as a production box has it: "RESULT: OK - 0 unexpected, 13 expected changes, 2 newly recorded (not judged)", the drop-in accepted; its log audit named new classes of the client load (see below), so it exited 1; `mailcheck` OK. Smoke 122/122 with `--fail2ban`, the api group and `load-no-failed-login`. A second run exit 0 in 87 s: every unit kept its main process and invocation, 36 of 36 mails. B183: with a `dns/` of the storage user's own the status checks exit 0 without a traceback, the panel's status HTTP 200, the DS records shown with "Public Key: not shown" and the reason; the DNS update refused (exit 22), the zones unchanged; restored, the keys shown again. B184: `--show-changes` without a change printed 0 bytes, also through `2>&1`. Reboot: running, no failed unit; the run after it exit 0 in 104 s restarted each restart-on-change unit once (as documented), 41 of 41 mails. Smoke 110/110 at the end. |
+| T2 (as in the first round, both machines from their snapshots) | the documented `--check` with `TAG=<full commit id>` named the 3 local Roundcube changes and found no blockers, exit 0 (B185). The documented migration exit 0, "All checks passed"; mail offline 43 min (setup 43 min, with three other runs on the same disks), the new box answered on port 25 after 8.5 min. No "?" at the end of ssh's messages and no escape byte in `migrate.log` (29 banner lines of the old box filtered, B154); no entry of `/root/migration` with group or other bits, the exit code file 0600 (B204); the kept plugin 0755/0644, copied back with `cp -a` and readable by www-data, no load error in Roundcube, `--redo-from verify` exit 0 with only the settings open (B186). Smoke 21/21; after a reboot 109/110: `zpush-sync` got HTTP 500 for a calendar PUT while the first Nextcloud cron jobs after the 7 upgrade steps held the SQLite lock (the known issue), and 110/110 when run again. Log audit of the new box 0 unknown (112 allowed); of the old box one class, `postqueue`'s note at `--check-old` (rule added in `0abae8e`). The migration itself ran with `TAG=` the branch at the same commit; the tool's clone of the full commit id was checked on the new box. |
+| T1 (fresh 26.04, network checks on) | bootstrap with `TAG=<full commit id>` (B188): exit 0 in 2345 s with the end line, the checkout at `6bc2109`; 44 of 44 checks; smoke 110/110 (`--provision`, the api group, `--fail2ban`); a second run in a pty exit 0 in 96 s (it restarted the same four units as the first round's second run, after the same lab steps; not traced again); after a reboot 44 of 44 checks and smoke 79/79; log audit 0 unknown, 115 allowed. |
+| T3 (the 24.04 copy of a production box, as in the first round, from its snapshot) | `before` and `backup` with the Docker stand-in exit 0 (verified on the rsync target), `--ssh-fallback-test` clean, `--check --keep-local` with `TAG=<full commit id>`: no blockers, the proposed start command with that `TAG`. Started with `TAG=<full commit id>` (B188): cloned, "All checks passed", mail offline 1 h 33 min; the plugin brought back by the documented hook root:root 0755/0644 and loaded, no error in Roundcube's log, `old-roundcube/` 0700 with its `config.inc.php` 0600 (B186). The lab's setting had been put after the closing `?>` of the old configuration, which the report named as "text outside of PHP" (a lab artefact of the first round too). `after`: "RESULT: NOT JUDGED" (exit 3, the documented end of a release change), its log audit with the old-box list (B187) 0 unknown; `mailcheck` OK; `--cleanup-only` (also with `--old-checkout`) exit 0; reboot; smoke 21/21; log audit since the start 0 unknown (516 allowed, 16 known from the baseline). |
+| T4 (22.04 v78 seeded → 24.04 → 26.04, in place, from its snapshot) | `--check --no-backup-check` with `TAG=<full commit id>`: no blockers, the start command with that `TAG`; started with it (B188): cloned, "All checks passed", mail offline 2 h 02 min, 3 reboots, setup's end line. When mail went offline both apt timers only logged "Unit to trigger vanished", and `history.log` has no run of unattended-upgrade after the downtime began, only the tool's own package steps (B190). The plugin brought back by the documented hook root:root 0755/0644, readable by www-data, no load error; verify named only the two settings (B186). Reboot: SSH back after 22 s, no failed unit; smoke 21/21 (`--only migrated,api`) and 110/110; log audit since the start with the old-box list 0 unknown, 650 allowed. |
+
+Log audit: each class of every run was classified from its log lines.
+The harmless ones got rules in `tests/fork/log-audit-allow*.txt` (in
+`ff42e07` and `0abae8e`; `log-audit.sh` also masks the local part of a
+mailbox path under the box's own name). Left visible on purpose, all
+before or outside the setup runs and with the lab's client load: Nextcloud's
+"database is locked" with its ActiveSync and nginx follow-ups (the known
+issue of Nextcloud on SQLite), the CardDAV plugin's migration race at two
+first webmail logins of new users in the same second (README-fork.md names
+it for the update from rc7; the continuation lines of its multi-line SQL
+error are classes of their own),
+and Z-Push's loop detection after a Sync that setup's PHP-FPM reload cut.
+
+Not tested in this release: T6 (no box on the Internet); Let's Encrypt
+(the TLS page only shown); real Microsoft servers (the relay hint with a
+ban set by hand); B181 with a real overlong domain (only
+`tests/fork/status-dns.py` through the smoke test); outbound port 25 to
+the Internet and the blacklist checks (the lab's resolvers and forward
+zones answer, the Spamhaus checks say "could not check"); the in-place
+runs with `--no-backup-check` (T4) and the migration with
+`--skip-network-checks`; T7 with `SKIP_NETWORK_CHECKS`, without smoke test,
+backup, `mailcheck`, client load or reboot; client load only in T5b;
+`update-check.sh backup` with Docker volumes only in T3; a downgrade with
+the old bootstrap from the mirror's tag (from GitHub's, same commit); a
+bootstrap with a tag that the source does not have; the second round did
+not repeat the browser checks, the storage user's swaps of `mail/` and of
+`mailinabox.version`, B202, the downgrades, T4's `--ssh-fallback-test`
+and B161's hook, nor T1's third setup run (the code there did not change);
+T7 was not repeated: of its findings only the missing line of the list of
+expected changes was fixed, and `after` in the second T5b checked that
+line on the same path, without the data of the production box.
 
 ### Production use
 
