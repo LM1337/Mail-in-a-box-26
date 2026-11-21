@@ -34,6 +34,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
 
+### Changed
+
+* **Tests: the lab preparation leaves the seeded mails alone**\
+  New `tests/fork/spam-move.py` for test boxes: it moves a marked test mail
+  of its own into Spam and back, so that IMAPSieve runs sa-learn as for a
+  user's client, deletes it and checks that the other mails keep their
+  UIDs. The preparation of the update test's start snapshot (T5b) moved a
+  seeded INBOX mail instead, which gave it a new UID and so a new POP3 UIDL,
+  and the smoke check `mig-pop3-uidl-alice` failed on every run from that
+  snapshot, also before any update (T5b of v78-r2604.3). A snapshot
+  prepared with the new script works with the original manifest
+  (TESTING-fork.md, "Test environment").
+
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -108,15 +121,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   `after` and `mailcheck` with that record; otherwise that `before` and
   `backup` can be run before the next update and `after` and `mailcheck`
   after it, optionally (README-fork.md, "Updating the fork").
-* **Smoke check mig-pop3-uidl-alice fails on the T5b lab snapshot**\
-  The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
-  snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX
-  mail to Spam and back, which gave it a new UID and so a new POP3 UIDL
-  (UID 9 became 12). It fails the same way before any update. The lab
-  now has a corrected copy of the manifest for that VM and a new snapshot
-  of v78-r2604.2 as the start of T5b; the preparation still needs to
-  leave the seeded mails alone (T5b of v78-r2604.3).
-
 * **`bootstrap.sh` is fooled by a local tag of the release name**\
   bootstrap.sh decides whether to fetch by the name that `git describe`
   prints for the checkout, so a local tag of the release's name on another

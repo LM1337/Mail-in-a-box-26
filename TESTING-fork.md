@@ -58,6 +58,18 @@ signature; a local backup. It writes a manifest (POP3 UIDLs, folder counts,
 Bayes counts, Sieve scripts, DKIM key, Nextcloud items) that the smoke test
 compares against after a migration or upgrade.
 
+A preparation that should leave the state of a box after its users trained
+the spam filter (sa-learn through IMAPSieve) uses `tests/fork/spam-move.py`:
+it appends a marked test mail (`X-Miab-Test: 1`, a Message-ID
+`@smoketest.invalid`) to a user's INBOX, moves that mail to Spam and back
+and deletes it, and checks that the other mails keep their UIDs. Moving a
+seeded mail instead gives it a new UID and so a new POP3 UIDL, which the
+manifest no longer matches: the start snapshot of T5b from v78-r2604.2 to
+v78-r2604.4 was prepared that way, so `mig-pop3-uidl-alice` failed on every
+run from it, and the lab used a corrected copy of the manifest for that VM.
+A start snapshot prepared with `spam-move.py` works with the original
+manifest.
+
 ## Scenarios
 
 | ID | Start state | Path | Tool / command | Smoke mode |
