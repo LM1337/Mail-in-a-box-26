@@ -276,6 +276,12 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `tests/fork/update-check-compare.py` (B201; no box needed) runs the
+  comparison of `tools/update-check.sh after` on states in a temporary
+  directory: Postfix and Dovecot settings that only the record after the
+  update has are "newly recorded (not judged)" and counted in the RESULT
+  line, a changed value of a setting in both records is still judged (with
+  and without a rule), a new line of another file is still unexpected.
   `tests/fork/roundcube-local.py` (B200; no box needed) checks the report
   of local Roundcube changes that the in-place and migration tools share
   (the two copies must be the same): its idea of setup's settings against

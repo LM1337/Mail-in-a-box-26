@@ -76,6 +76,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   under "show more", and so the daily status change mail names it too. The
   new option `--ack-local` of both tools, or removing the file, ends it.
   New offline test `tests/fork/roundcube-local.py`.
+* **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
+  tools/update-check.sh now records `tls_eecdh_auto_curves` and
+  `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such
+  as the post-quantum one of v78-r2604.3) shows in its list of changes.
+  `after` judges only the settings that both records have: a setting that
+  only the record after the update has (recorded by a newer version of the
+  tool, so its value before is unknown) is listed in a section "Newly
+  recorded (not judged)" of `changes.txt` and counted in the RESULT line,
+  not as an unexpected change. New offline test
+  `tests/fork/update-check-compare.py`.
 
 ### Planned
 
@@ -89,16 +99,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   copies (one box had 2.5 GB there; the directory is not in the box's
   backup). Setup could keep the newest few copies and remove older ones
   (seen in the review of v78-r2604.4).
-* **update-check.sh does not record two Postfix TLS parameters**\
-  tools/update-check.sh records 24 Postfix parameters, but not
-  `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
-  change of v78-r2604.3 does not show in its list of changes (seen in T5b
-  of v78-r2604.3; the smoke check `tls-key-exchange` shows it). Planned:
-  record both, and `after` judges only keys that both records have: a key
-  that only the record after the update has (recorded by a newer version
-  of the tool) goes into a section "newly recorded (not judged)" of
-  `changes.txt` and is counted in its RESULT line, but is no unexpected
-  change. Output stays on the console and in `/root/update-check/`.
 * **Setup does not point to update-check.sh**\
   Setup does not mention tools/update-check.sh. Planned: at the end of a
   setup run on an existing box (not the first install, and not when the

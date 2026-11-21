@@ -188,7 +188,10 @@ and the Docker stacks you name (`--docker-dir`, `--docker-volume`,
 checksum) or in `/root/update-check`. After the update, `after` records the
 state again and lists each change as EXPECTED (announced by the releases in
 between, `tools/expected-changes/`; for an update to a branch or commit
-after the newest release also `unreleased.txt` there) or UNEXPECTED, and runs the log audit
+after the newest release also `unreleased.txt` there) or UNEXPECTED (a
+Postfix or Dovecot setting that only the newer record has, because a newer
+version of the tool records it, is listed as "newly recorded (not judged)"
+and counted in the RESULT line), and runs the log audit
 against the baseline: only new message classes count (`--internet` accepts
 the usual noise of a public box). The lists cover updates of this fork on
 one Ubuntu release: after an in-place upgrade or a migration from upstream
@@ -412,7 +415,10 @@ Sicherungen (rsync-Ziele; per Prüfsumme kontrolliert) oder nach
 `/root/update-check`. Nach dem Update hält `after` den Zustand erneut fest,
 führt jede Änderung als EXPECTED (von den Releases dazwischen angekündigt,
 `tools/expected-changes/`; bei einem Update auf einen Zweig oder Commit nach
-dem neuesten Release auch `unreleased.txt` dort) oder UNEXPECTED auf und lässt das Log-Audit gegen
+dem neuesten Release auch `unreleased.txt` dort) oder UNEXPECTED auf (eine
+Postfix- oder Dovecot-Einstellung, die nur die neuere Aufzeichnung hat, weil
+eine neuere Version des Werkzeugs sie aufzeichnet, steht unter „newly
+recorded (not judged)“ und wird in der RESULT-Zeile mitgezählt) und lässt das Log-Audit gegen
 die Vergleichsbasis laufen: Es zählen nur neue Meldungsklassen
 (`--internet` nimmt das übliche Rauschen einer öffentlichen Box hin). Die
 Listen decken Updates dieses Forks auf einem Ubuntu-Release ab: Nach einem
