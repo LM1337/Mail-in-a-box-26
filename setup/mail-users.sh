@@ -47,6 +47,30 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # user's quota (G and M are 2^30/2^20 bytes, divided by 10 and rounded down).
 # Written atomically (tools/write_conf.py): a Dovecot config process that
 # started while this file was truncated ran without a passdb (B120).
+#
+# No delay for failed logins from the box itself (B126). Dovecot answers a
+# failed login only after auth_failure_delay (2 s), and each one raises a
+# penalty of the client's address that delays its next logins, failed or
+# not, by up to 15 s. Every IMAP login from 127.0.0.1 or ::1 comes from a
+# service of the box that checks a client's password with it: Z-Push
+# (ActiveSync, Autodiscover; up to three tries per request), Roundcube and
+# Nextcloud's IMAP login. So a wrong password took Z-Push 10 to 50 s, and a
+# few failed logins of one client below the ban thresholds slowed the logins
+# of all other users of these services down to 15 s. These services are
+# protected by fail2ban with the real client's address (miab-zpush,
+# miab-roundcube, miab-owncloud and Nextcloud's own throttle); Dovecot's
+# delay of 127.0.0.1 only slowed them all down together. The extra field
+# "nodelay" (passdb_fields, in a remote filter: auth settings such as
+# auth_failure_delay are not allowed there in Dovecot 2.4) answers a failed
+# login from these addresses at once, and a failure answered at once does
+# not raise the penalty either. passdb_fields apply only when a passdb finds
+# the user, so a second passdb follows sql: a static one without a password,
+# which finds every user and can never accept one ("No password returned"
+# is a failed login), so that a login of an unknown user from these
+# addresses is answered at once as well. A login that sql accepts never
+# reaches it. Logins from other addresses keep the delay and the penalty.
+# The remaining risk: a local process can try IMAP passwords on 127.0.0.1
+# without delay (README-fork.md, "Known issues").
 tools/write_conf.py /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite
@@ -54,6 +78,19 @@ sqlite_path=$STORAGE_ROOT/mail/users.sqlite
 passdb sql {
   query = SELECT email as user, password FROM users WHERE email='%{user}';
   default_password_scheme = SHA512-CRYPT
+}
+passdb miab-nodelay {
+  driver = static
+}
+remote 127.0.0.1 {
+  passdb_fields {
+    nodelay = yes
+  }
+}
+remote ::1 {
+  passdb_fields {
+    nodelay = yes
+  }
 }
 userdb sql {
   query = SELECT email AS user, "mail" as uid, "mail" as gid, "$STORAGE_ROOT/mail/mailboxes/%{user | domain}/%{user | username}" as home, quota AS quota_storage_size, (CASE WHEN substr(quota, -1) = 'G' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 107374182 WHEN substr(quota, -1) = 'M' THEN CAST(substr(quota, 1, length(quota) - 1) AS INTEGER) * 104857 ELSE CAST(quota AS INTEGER) / 10 END) || 'B' AS quota_storage_grace FROM users WHERE email='%{user}';

@@ -156,6 +156,25 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (`php-fpm8.5 -t`) first and restarts PHP-FPM when it does not run (after
   an upgrade of Nextcloud), runs an older package or replaced module, or
   has not logged "ready to handle connections" within 30 s of the reload.
+* **Failed ActiveSync logins no longer take 10 to 50 seconds (B126)**\
+  A wrong password over ActiveSync or Autodiscover took 13 to 26 s (seen
+  up to 50 s), and a few failed logins of one client, below the ban
+  threshold of `miab-zpush`, slowed the correct logins of all other users
+  down to 15 s (measured on a test box: one wrong password every 3 s).
+  Z-Push checks each password with up to three IMAP logins from
+  127.0.0.1, and Dovecot delayed each failed login by 2 s and raised a
+  penalty of 127.0.0.1 that delayed all later logins from there, of every
+  user, by up to 15 s; Roundcube's and Nextcloud's IMAP logins come from
+  127.0.0.1 too. Dovecot now answers failed logins from 127.0.0.1 and ::1
+  at once and raises no penalty for them (the passdb field `nodelay` in a
+  `remote` filter, and a static passdb without a password after the SQL
+  one, so that unknown users are covered too; it can accept no
+  password). These logins all come from services that fail2ban protects
+  with the client's own address (`miab-zpush`, `miab-roundcube`,
+  `miab-owncloud` and Nextcloud's throttle); logins from other addresses
+  keep Dovecot's delay and penalty. The remaining risk, a local process
+  that tries IMAP passwords on 127.0.0.1 without delay, is in
+  README-fork.md, "Known issues".
 ### Upgrade note
 
 * **The update removes all but the three newest Nextcloud backup copies**\
@@ -216,13 +235,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
   as every update goes through that code and that release had no test
   run of it.
-* **Failed ActiveSync or Autodiscover logins take 10 to 50 seconds (B126)**\
-  A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
-  test of B126): Z-Push tries the IMAP login three times, and Dovecot
-  delays failed logins, possibly more for an address with many failures,
-  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
-  `miab-zpush` threshold slows down the ActiveSync logins of other users
-  is not measured.
 * **`miab-zpush` can ban all users behind shared cloud servers (B126)**\
   `miab-zpush` counts failures per address, like the other jails, and is
   always on: behind the shared servers of a mail app that syncs through its

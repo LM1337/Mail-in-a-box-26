@@ -659,6 +659,15 @@ fixed)" lists a few more.
   transaction that read first and then wants to write after another
   connection wrote meanwhile, which SQLite refuses at once, whatever the
   timeout. Setup supports only SQLite for Nextcloud.
+* **No delay for failed IMAP logins from the box itself (B126).** Dovecot
+  answers a failed login from 127.0.0.1 or ::1 at once and does not slow
+  down later logins from there: those logins come from Z-Push, Roundcube
+  and Nextcloud, which fail2ban protects with the client's own address, and
+  the delay made a wrong ActiveSync password take up to 50 s and slowed
+  down every other user. The other side: a process on the box (any local
+  account) can try IMAP passwords on 127.0.0.1 as fast as Dovecot answers,
+  and fail2ban does not ban 127.0.0.1. Logins from other addresses keep
+  Dovecot's delay.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
   answers NXDOMAIN, also for its own test entries. That looks like "not
@@ -704,6 +713,16 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   Transaktion, die zuerst gelesen hat und dann schreiben will, nachdem eine
   andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
   unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
+* **Keine Verzögerung fehlgeschlagener IMAP-Anmeldungen von der Box selbst
+  (B126).** Dovecot beantwortet eine fehlgeschlagene Anmeldung von
+  127.0.0.1 oder ::1 sofort und bremst spätere Anmeldungen von dort nicht:
+  Diese Anmeldungen kommen von Z-Push, Roundcube und Nextcloud, die fail2ban
+  mit der eigenen Adresse des Clients schützt, und die Verzögerung ließ ein
+  falsches ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen
+  Benutzer. Die Kehrseite: Ein Prozess auf der Box (jedes lokale Konto) kann
+  IMAP-Passwörter auf 127.0.0.1 so schnell durchprobieren, wie Dovecot
+  antwortet, und fail2ban sperrt 127.0.0.1 nicht. Anmeldungen von anderen
+  Adressen behalten die Verzögerung von Dovecot.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
   Resolver (B136).** Über manche öffentliche Resolver (in den Tests
   8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen
