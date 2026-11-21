@@ -372,9 +372,12 @@ report. The groups:
   directory and a new inode of a file it only looks at change it,
   `__pycache__` does not, missing files give no error; and, with stand-ins
   for the service commands, a restart on the first call, on a change and
-  for a service that does not run, none without a change, and nothing
+  for a service that does not run or that something else restarted after
+  the checksum was recorded (not at boot: a downgrade and the way back
+  up), none without a change, and nothing
   recorded after a failed restart. The same for PHP-FPM (B122): nothing
-  without a change of its configuration, a reload on a change, a restart
+  without a change of its configuration, a reload on a change or after a
+  restart by something else, a restart
   when the reload brings no "ready to handle connections", when
   `php-fpm8.5 -t` refuses the configuration, or when PHP-FPM does not run
   before or after the reload.

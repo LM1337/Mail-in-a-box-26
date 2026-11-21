@@ -260,6 +260,32 @@ function service_runs_current_package {
 	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
 }
 
+function started_after_record {
+	# started_after_record UNIT RECORD
+	# True when UNIT's process started after RECORD (a checksum that setup
+	# writes right after it restarted or reloaded UNIT) was last written, and
+	# not while the system booted: something other than this setup restarted
+	# it since, so the record does not say what it runs. For example a
+	# downgrade to a version that keeps no record (v78-r2604.4 restarts these
+	# services on every run, with its own code and configuration): going back
+	# up gives the same checksum as before the downgrade, and the service
+	# would keep running the old version. A restart by an administrator, a
+	# package or needrestart costs one more restart (or reload) at the next
+	# run. A unit started at boot ran the files that the record describes.
+	# False when a time cannot be read (service_runs_current_package checks
+	# that the unit runs).
+	local unit=$1 record=$2 started written booted
+	written=$(stat -c %Y -- "$record" 2> /dev/null) || return 1
+	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
+	[ -n "$started" ] || return 1
+	started=$(date -d "$started" +%s 2> /dev/null) || return 1
+	[ "$started" -gt "$written" ] || return 1
+	booted=$(systemctl show -P FinishTimestamp 2> /dev/null || true)
+	[ -n "$booted" ] || return 0 # the boot has not finished: not known
+	booted=$(date -d "$booted" +%s 2> /dev/null) || return 0
+	[ "$started" -gt "$booted" ]
+}
+
 function config_checksum {
 	# The SHA-256 of what a service reads when it starts, for restart_on_change.
 	# Each argument is
@@ -305,14 +331,17 @@ function restart_on_change {
 	# /var/lib/mailinabox/UNIT-config.sha256, as for Dovecot, see
 	# load_dovecot), or when it does not run or runs the program of an older
 	# PACKAGE (service_runs_current_package; empty PACKAGE: only the
-	# replaced files are checked). A box updated to this version restarts
-	# each of them once more, as it has no checksums yet.
+	# replaced files are checked), or when something else restarted it since
+	# setup wrote the record (started_after_record: a downgrade and the way
+	# back up). A box updated to this version restarts each of them once
+	# more, as it has no checksums yet.
 	local unit=$1 pkg=$2 sum record
 	shift 2
 	record=/var/lib/mailinabox/$unit-config.sha256
 	sum=$(config_checksum "$@")
 	enable_service "$unit"
-	if service_runs_current_package "$unit.service" "$pkg" && [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+	if service_runs_current_package "$unit.service" "$pkg" && [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ] \
+		&& ! started_after_record "$unit.service" "$record"; then
 		return 0
 	fi
 	hide_output service "$unit" restart
@@ -373,7 +402,8 @@ function load_php_fpm {
 	# CardDAV, webmail, Nextcloud).
 	#
 	# Now nothing is done when PHP-FPM runs the program of the current
-	# package and its configuration is the one it loaded last: the files in
+	# package, was not restarted by something else since (started_after_record),
+	# and its configuration is the one it loaded last: the files in
 	# /etc/php/VER/fpm (php.ini, php-fpm.conf, the pools, the modules in
 	# conf.d) and mods-available, as a checksum in
 	# /var/lib/mailinabox/php-fpm-config.sha256 (config_checksum). PHP code
@@ -404,7 +434,7 @@ function load_php_fpm {
 		"tree:/etc/php/$PHP_VER/mods-available" "tree:/etc/systemd/system/$unit.service.d")
 	enable_service "$unit"
 	if service_runs_current_package "$unit.service" "$unit"; then
-		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ] && ! started_after_record "$unit.service" "$record"; then
 			return 0
 		fi
 		if "php-fpm$PHP_VER" -t > /dev/null 2>&1; then

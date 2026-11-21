@@ -102,7 +102,15 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   management daemon restarts it; Munin's plugin links; the management
   daemon's code, start script, `/etc/mailinabox.conf` and the packages of
   its virtualenv), or when it
-  does not run or runs the program of an older package. The first run of
+  does not run or runs the program of an older package, or when something
+  else restarted it after setup recorded the checksum (not at boot). The
+  last one covers a downgrade to v78-r2604.4, whose setup restarts them
+  with its own code and keeps no checksum, and the way back up: the
+  checksum is the same as before the downgrade, and the management daemon
+  of v78-r2604.4 (without `POST /me/password` for webmail's password
+  change) would have kept running; a restart by an administrator or a
+  package costs one more restart at the next run. The same holds for
+  PHP-FPM (B122, a reload then). The first run of
   this release restarts each of them once more. New offline test
   `tests/fork/restart-on-change.py`.
 * **Setup removes old Nextcloud backup copies, keeps the newest three**\

@@ -19,11 +19,14 @@ restart_on_change runs with stand-ins for the service commands and a
 temporary record directory: the first call restarts and records, a second
 one with the same files does nothing, a change restarts again, a service
 that does not run (or runs an older package) is restarted although nothing
-changed, and a failed restart records nothing. load_php_fpm, the same way:
+changed, one that something else restarted after the record was written
+(not at boot: a downgrade and the way back up) is restarted, and a failed
+restart records nothing. load_php_fpm, the same way:
 a reload when the configuration changed, nothing when it did not, a
 restart when the reload brings no "ready to handle connections", when
 php-fpm -t refuses the configuration, when PHP-FPM does not run afterwards
-or did not run before.
+or did not run before, and a reload when something else restarted it after
+the record was written.
 
 It also checks that the services of the planned item are no longer
 restarted with restart_service.
@@ -133,6 +136,12 @@ with tempfile.TemporaryDirectory() as t:
 enable_service() { :; }
 service_runs_current_package() { [ "$RUNS" = yes ]; }
 service() { echo "$*" >> {log}; [ "$FAIL" != yes ]; }
+systemctl() {
+	case "$*" in
+	"show -P ActiveEnterTimestamp svc.service") echo "${STARTED:-}" ;;
+	"show -P FinishTimestamp") echo "${BOOTED:-}" ;;
+	esac
+}
 eval "$(declare -f restart_on_change | sed 's|/var/lib/mailinabox|{rec}|g')"
 restart_on_change svc svc-pkg {args}
 """.replace("{log}", shlex.quote(log)).replace("{rec}", rec).replace("{args}", " ".join(shlex.quote(a) for a in args))
@@ -153,6 +162,21 @@ restart_on_change svc svc-pkg {args}
 	check("changed configuration: restart", rc == 0 and calls() == 2, err)
 	rc, out, err = bash(stub, {"RUNS": "no", "FAIL": "no"})
 	check("not running or an older package: restart", rc == 0 and calls() == 3, err)
+	# started_after_record: the record written at 1700000000.
+	recfile = os.path.join(rec, "svc-config.sha256")
+	def at(**env):
+		os.utime(recfile, (1700000000, 1700000000))
+		e = {"RUNS": "yes", "FAIL": "no"}
+		e.update(env)
+		return bash(stub, e)
+	rc, out, err = at(STARTED="@1699999000", BOOTED="@1699998000")
+	check("started before the record: no restart", rc == 0 and calls() == 3, err)
+	rc, out, err = at(STARTED="@1700000100", BOOTED="@1700000200")
+	check("started after the record, at boot: no restart", rc == 0 and calls() == 3, err)
+	rc, out, err = at(STARTED="@1700000100", BOOTED="@1700000050")
+	check("restarted by something else after the record (a downgrade): restart", rc == 0 and calls() == 4, err)
+	rc, out, err = at(STARTED="@1700000100", BOOTED="")
+	check("started after the record, boot not finished: restart", rc == 0 and calls() == 5, err)
 	write(conf, "a = 4\n")
 	with open(os.path.join(rec, "svc-config.sha256"), encoding="utf-8") as f:
 		before = f.read()
@@ -179,6 +203,7 @@ systemctl() {
 	case "$1" in
 	reload) echo reload >> {calls}; [ "$READY" = yes ] && echo "NOTICE: ready to handle connections" >> {log}; return 0 ;;
 	is-active) [ "$ACTIVE" = yes ] ;;
+	show) case "$3" in ActiveEnterTimestamp) echo "${STARTED:-}" ;; FinishTimestamp) echo "${BOOTED:-}" ;; esac ;;
 	esac
 }
 service() { echo "$*" >> {calls}; }
@@ -215,6 +240,12 @@ load_php_fpm
 	os.unlink(os.path.join(rec, "php-fpm-config.sha256"))
 	rc, c, out = fpm(ACTIVE="no")
 	check("PHP-FPM stopped after the reload: restart", rc == 0 and c == ["reload", "php8.5-fpm restart"], repr((rc, c, out)))
+	rc, c, out = fpm()
+	os.utime(os.path.join(rec, "php-fpm-config.sha256"), (1700000000, 1700000000))
+	rc, c, out = fpm(STARTED="@1700000100", BOOTED="@1700000200")
+	check("PHP-FPM started after the record at boot: nothing", rc == 0 and c == [], repr((rc, c, out)))
+	rc, c, out = fpm(STARTED="@1700000100", BOOTED="@1700000050")
+	check("PHP-FPM restarted by something else after the record: a reload", rc == 0 and c == ["reload"], repr((rc, c, out)))
 
 for script, unit in (("setup/dkim.sh", "opendkim"), ("setup/dkim.sh", "opendmarc"), ("setup/spamassassin.sh", "spampd"),
 		("setup/mail-postfix.sh", "postgrey"), ("setup/system.sh", "named"), ("setup/system.sh", "systemd-resolved"),
