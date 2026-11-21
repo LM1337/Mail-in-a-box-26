@@ -578,8 +578,12 @@ echo "nameserver 127.0.0.1" > /etc/resolv.conf
 # bind9.service is only its alias, a link that exists while named is enabled,
 # so a disabled named could not be enabled (or restarted) by that name (B67).
 
-restart_service named
-systemctl restart systemd-resolved
+# Both only when their configuration (or package) changed, see
+# restart_on_change: a restart of named makes the box's lookups fail for a
+# moment (the spam checks of incoming mail, DANE of outgoing mail).
+restart_on_change named bind9 /etc/default/named tree:/etc/bind tree:/etc/systemd/system/named.service.d
+restart_on_change systemd-resolved systemd-resolved /etc/systemd/resolved.conf \
+	tree:/etc/systemd/resolved.conf.d /etc/resolv.conf
 
 # ### Fail2Ban Service
 

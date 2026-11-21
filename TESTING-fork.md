@@ -289,6 +289,15 @@ report. The groups:
   a complete newest record, a link in the place of a record or of the
   directory), exit code 0 always; and that setup/start.sh shows it only
   without `FIRST_TIME_SETUP` and `MIAB_SETUP_TOOL`, which both tools set.
+  `tests/fork/restart-on-change.py` (no box needed) checks the checksum
+  that decides whether setup restarts OpenDKIM, OpenDMARC, spampd,
+  postgrey, named, systemd-resolved, munin-node and the management daemon:
+  a changed file, a new file in a tree, a new name or link target in a
+  directory and a new inode of a file it only looks at change it,
+  `__pycache__` does not, missing files give no error; and, with stand-ins
+  for the service commands, a restart on the first call, on a change and
+  for a service that does not run, none without a change, and nothing
+  recorded after a failed restart.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

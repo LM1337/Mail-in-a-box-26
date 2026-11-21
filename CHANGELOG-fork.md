@@ -46,6 +46,23 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
+* **Setup restarts OpenDKIM, spampd and others only on a change**\
+  Setup restarted OpenDKIM and OpenDMARC, spampd, postgrey, named,
+  systemd-resolved, munin-node and the management daemon on every run,
+  also when nothing had changed; while OpenDKIM restarts, Postfix passes
+  mail unsigned (`milter_default_action`), while spampd or postgrey
+  restart, deliveries wait or are deferred, and while named restarts, the
+  box's lookups fail. Each of them is now restarted only when what it
+  reads at its start changed since setup last restarted it (a checksum in
+  `/var/lib/mailinabox/<unit>-config.sha256`, as for Dovecot since B122:
+  its configuration files and drop-ins; for OpenDKIM also `TrustedHosts`
+  and the DKIM key file, not `KeyTable` and `SigningTable`, for which the
+  management daemon restarts it; Munin's plugin links; the management
+  daemon's code, start script, `/etc/mailinabox.conf` and the packages of
+  its virtualenv), or when it
+  does not run or runs the program of an older package. The first run of
+  this release restarts each of them once more. New offline test
+  `tests/fork/restart-on-change.py`.
 * **Setup removes old Nextcloud backup copies, keeps the newest three**\
   `$STORAGE_ROOT/owncloud-backup` grew with every update of Nextcloud and of
   its pinned apps: each leaves a copy of the database, `config.php` and the
@@ -195,12 +212,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   Internet cannot do it (the proxy replaces the header). A fix: the proxy
   proves itself to the `/cloud` location with a secret header from a
   root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
-* **Setup restarts several services on every run**\
-  Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
-  postgrey, named, systemd-resolved, munin-node and the management daemon
-  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
-  (`milter_default_action`). Candidates for a reload or a restart only on a
-  change.
 * **nginx sends no HSTS header on /admin/**\
   nginx sets no HSTS header on `/admin/`: the headers of that location
   replace the server's (upstream). Browsers that visited another page of

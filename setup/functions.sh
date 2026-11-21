@@ -250,12 +250,74 @@ function service_runs_current_package {
 	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
 	[ -n "$started" ] || return 1
 	started=$(date -d "$started" +%s 2> /dev/null) || return 1
-	installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
-	[[ $installed =~ ^[0-9]+$ ]] || return 1
-	[ "$installed" -le "$started" ] || return 1
+	if [ -n "$pkg" ]; then # empty: a service of no package of its own
+		installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
+		[[ $installed =~ ^[0-9]+$ ]] || return 1
+		[ "$installed" -le "$started" ] || return 1
+	fi
 	pid=$(systemctl show -P MainPID "$unit" 2> /dev/null || true)
 	[[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
 	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
+}
+
+function config_checksum {
+	# The SHA-256 of what a service reads when it starts, for restart_on_change.
+	# Each argument is
+	#   FILE       its content ("missing" when it does not exist);
+	#   tree:DIR   the names and contents of the regular files below DIR
+	#              (without Python's __pycache__ directories);
+	#   dir:DIR    the names in DIR, with their types and the targets of the
+	#              symbolic links (Munin's plugins), not their contents;
+	#   stat:FILE  its name, inode, size and time, read without following a
+	#              symbolic link and without opening it (a file of another
+	#              account, such as the DKIM key, which root does not read).
+	# All of them are in directories of root's own, except the stat: ones.
+	local a
+	for a in "$@"; do
+		case "$a" in
+		tree:*)
+			echo "$a"
+			find "${a#tree:}" -name __pycache__ -prune -o -type f -print0 2> /dev/null | LC_ALL=C sort -z | xargs -0r sha256sum 2> /dev/null || true ;;
+		dir:*)
+			echo "$a"
+			find "${a#dir:}" -mindepth 1 -maxdepth 1 -printf '%f %y %l\n' 2> /dev/null | LC_ALL=C sort || true ;;
+		stat:*)
+			stat -c '%n %i %s %Y' -- "${a#stat:}" 2> /dev/null || echo "${a#stat:} missing" ;;
+		*)
+			if [ -f "$a" ]; then
+				echo "$a $(sha256sum < "$a" 2> /dev/null || echo unreadable)"
+			else
+				echo "$a missing"
+			fi ;;
+		esac
+	done | sha256sum | cut -d' ' -f1
+}
+
+function restart_on_change {
+	# restart_on_change UNIT PACKAGE ARG...
+	# Setup restarted OpenDKIM, OpenDMARC, spampd, postgrey, named,
+	# systemd-resolved, munin-node and the management daemon on every run,
+	# also when nothing had changed. While OpenDKIM restarts, Postfix passes
+	# mail unsigned (milter_default_action=accept); while OpenDMARC, spampd
+	# or postgrey restart, mail waits or is deferred. This restarts UNIT only
+	# when what it reads at its start (ARG..., see config_checksum) is not
+	# what it read at the last restart by setup (the checksum is kept in
+	# /var/lib/mailinabox/UNIT-config.sha256, as for Dovecot, see
+	# load_dovecot), or when it does not run or runs the program of an older
+	# PACKAGE (service_runs_current_package; empty PACKAGE: only the
+	# replaced files are checked). A box updated to this version restarts
+	# each of them once more, as it has no checksums yet.
+	local unit=$1 pkg=$2 sum record
+	shift 2
+	record=/var/lib/mailinabox/$unit-config.sha256
+	sum=$(config_checksum "$@")
+	enable_service "$unit"
+	if service_runs_current_package "$unit.service" "$pkg" && [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+		return 0
+	fi
+	hide_output service "$unit" restart
+	mkdir -p /var/lib/mailinabox
+	echo "$sum" > "$record"
 }
 
 function reload_fail2ban {

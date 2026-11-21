@@ -226,10 +226,14 @@ tools/editconf.py /etc/dovecot/conf.d/10-mail.conf \
 sudo -u spampd /usr/bin/sa-learn --sync 2>/dev/null
 tools/write_conf.py --own-tree "$STORAGE_ROOT/mail/spamassassin" spampd spampd 660 770
 
-# Kick services. Dovecot reloads only if the settings above changed its
-# configuration (mail_access_groups on the first run), see load_dovecot
-# (B122).
-restart_service spampd
+# Kick services. spampd restarts only when its configuration or
+# SpamAssassin's in /etc changed (a new rule set from sa-update restarts it
+# through /etc/spamassassin/sa-update-hooks.d), see restart_on_change; mail
+# waits for it while it restarts. Dovecot reloads only if the settings above
+# changed its configuration (mail_access_groups on the first run), see
+# load_dovecot (B122).
+restart_on_change spampd spampd /etc/spampd.cfg /etc/default/spampd tree:/etc/spamassassin \
+	tree:/etc/systemd/system/spampd.service.d
 rm -rf /run/spampd
 load_dovecot
 
