@@ -878,9 +878,11 @@ fixed)" lists a few more.
   management daemon open the database by its path and would use that
   copy. It needs code running as the storage user, which no service of the
   box runs; the real accounts then no longer work, so it does not go
-  unnoticed. Setup stops at such a directory or database instead of
-  making it root's ("not taken over"). The same holds for `ssl/` (the
-  private keys).
+  unnoticed. Setup stops at such a directory or database, before it
+  changes anything, instead of making it root's ("not taken over").
+  `ssl/` (the private keys) can be replaced the same way, and setup does
+  not check it: the services would read the keys of the storage user's
+  directory.
 
 ### Deutsch
 
@@ -953,9 +955,11 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   ihren Pfad und nähmen diese Kopie. Dafür muss Code als Speicherbenutzer
   laufen, und kein Dienst der Box läuft so; die echten Konten funktionieren
   dann nicht mehr, es bleibt also nicht unbemerkt. setup bricht bei einem
-  solchen Verzeichnis oder einer solchen Datenbank ab, statt sie root zu
-  geben („not taken over“). Dasselbe gilt für `ssl/` (die privaten
-  Schlüssel).
+  solchen Verzeichnis oder einer solchen Datenbank ab, bevor es etwas
+  ändert, statt sie root zu geben („not taken over“). Auch `ssl/` (die
+  privaten Schlüssel) lässt sich so ersetzen, und setup prüft es nicht:
+  Die Dienste läsen dann die Schlüssel aus dem Verzeichnis des
+  Speicherbenutzers.
 
 Security updates and Ubuntu Pro / Sicherheitsupdates und Ubuntu Pro
 -------------------------------------------------------------------

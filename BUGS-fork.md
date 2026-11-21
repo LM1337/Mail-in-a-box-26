@@ -2433,8 +2433,8 @@ upstream pull requests, independent of the 26.04 port.
   every mailbox). The root:root 755 of `mail/` (B210) keeps out www-data,
   not the owner of the parent directory. Setup no longer makes such a
   directory or database root's (`tools/write_conf.py --own-root-only`, it
-  stops with "not taken over"). The same holds for `ssl/` (private keys
-  read by path). It needs code running as the storage user, as B211 and
+  stops with "not taken over"). `ssl/` (private keys read by path) can be
+  replaced the same way, and setup does not check it. It needs code running as the storage user, as B211 and
   B212 do; a fix needs the database and the keys in a directory of root's
   outside `$STORAGE_ROOT` (or a bind mount), which changes the paths of
   the backups and the tools ("Planned" in CHANGELOG-fork.md; found in the
