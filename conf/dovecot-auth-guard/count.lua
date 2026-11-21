@@ -3,8 +3,9 @@
 -- itself it records the failure of a real account (guard.lua's list of
 -- accounts) with the tag of the wrong password (a password sent again
 -- counts once), and answers it at once, without Dovecot's delay and
--- penalty; it can accept no password (it returns none). A name that is no
--- account is answered at once and not recorded: there is nothing to guess.
+-- penalty; it can accept no password (it returns none). A name that is not
+-- on the list of accounts is counted in a small pool of its own (see
+-- below), so made-up names cannot crowd out the accounts.
 -- Do not edit: setup writes it again on every run.
 
 local G = dofile("/usr/local/lib/mailinabox/dovecot-auth-guard/guard.lua")
@@ -15,6 +16,18 @@ local SALT = G.salt() -- for the tags of the wrong passwords, never written
 -- failure in the window, never to make room.
 local names, nnames = {}, 0
 local warned_state, warned_full, warned_list = false, false, false
+
+local pool, npool = {}, 0 -- names not on the list (key -> time of the last failure)
+
+local function prune_pool(now)
+	for k, t in pairs(pool) do
+		if now - t >= G.WINDOW then
+			os.remove(G.path(k))
+			pool[k] = nil
+			npool = npool - 1
+		end
+	end
+end
 
 local function prune(now)
 	for k, t in pairs(names) do
@@ -37,7 +50,22 @@ function auth_passdb_lookup(req)
 	if accounts then
 		warned_list = false
 		if not accounts[key] then
-			return dovecot.auth.PASSDB_RESULT_OK, { nodelay = "yes" }
+			-- Not on the list: most likely a made-up name, but it may be an
+			-- account added since the list was written (if writing it
+			-- failed). Counted in a pool of its own (POOL names, forgotten
+			-- only without failures in the window), which cannot touch the
+			-- accounts on the list; when the pool is full, answered at once
+			-- and not counted (no penalty for the others either).
+			if pool[key] == nil then
+				if npool >= G.POOL then
+					prune_pool(now)
+				end
+				if npool >= G.POOL then
+					return dovecot.auth.PASSDB_RESULT_OK, { nodelay = "yes" }
+				end
+				npool = npool + 1
+			end
+			pool[key] = now
 		end
 	else
 		if not warned_list then

@@ -268,13 +268,20 @@ def update_settings(env, values, reset=False, path=None):
 def key_of(address):
 	# The file name of an account name, as guard.lua's M.key() (A-Z in lower
 	# case, as Lua's string.lower; every byte other than a-z 0-9 @ . _ + - as
-	# %XX); None for a name that guard.lua hashes (longer than 200 characters
-	# escaped).
+	# %XX); "h-" and a hash for a name longer than 200 characters escaped.
 	u = (address or "").encode("utf-8").lower()
 	e = "".join(chr(b) if (0x61 <= b <= 0x7a or 0x30 <= b <= 0x39 or b in b"@._+-") else "%%%02X" % b for b in u)
 	if len(e) <= 200:
 		return "a-" + e
-	return None
+	return "h-%016x-%d" % (fnv1a(u), len(u))
+
+
+def fnv1a(data):
+	# 64-bit FNV-1a, as guard.lua's (Lua 5.4 integers wrap around).
+	h = 0xcbf29ce484222325
+	for b in data:
+		h = ((h ^ b) * 1099511628211) & 0xffffffffffffffff
+	return h
 
 
 def name_of(key):

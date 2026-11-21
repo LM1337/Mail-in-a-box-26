@@ -47,6 +47,7 @@ M.DIR = "/run/miab-auth-guard"
 M.DEFAULT_LIMIT = 30    -- different wrong passwords of one account within the window
 M.DEFAULT_WINDOW = 1800 -- seconds
 M.MAX_NAMES = 2000      -- names tracked without the list of accounts (see M.accounts)
+M.POOL = 500            -- names not on the list that are tracked (count.lua)
 M.MAX_EVENTS = 1048576  -- bytes of the events file
 
 -- The limit, the window and the box's own addresses: System > Intrusion
@@ -97,9 +98,9 @@ end
 
 -- The list of accounts (management/auth_guard.py writes ACCOUNTS, one key
 -- per line, root:dovecot 0640, whenever accounts change and every 10
--- minutes): only the failures of real accounts are counted, so made-up
--- names need no file and cannot crowd out or flush the count of an
--- account. Read again at most every 10 seconds. nil when the list is
+-- minutes): the accounts on it are always counted; names that are not on
+-- it share a pool of POOL (count.lua), so made-up names cannot crowd out
+-- or flush the count of an account. Read again at most every 10 seconds. nil when the list is
 -- missing: then every name is counted, at most MAX_NAMES at once.
 M.ACCOUNTS = "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts"
 local accounts, accounts_time = nil, -1000

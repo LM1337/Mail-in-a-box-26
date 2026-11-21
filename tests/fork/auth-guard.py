@@ -72,7 +72,7 @@ check("accounts list", ag.render_accounts(["b@example.com", "A@example.com", "a@
 check("key plain", ag.key_of("Alice@Example.com"), "a-alice@example.com")
 check("key escaped", ag.key_of("a/b c@ex.com"), "a-a%2Fb%20c@ex.com")
 check("key umlaut", (ag.key_of("jörg@ex.com"), ag.key_of("JÖRG@ex.com")), ("a-j%C3%B6rg@ex.com", "a-j%C3%96rg@ex.com")) # as Lua: only A-Z lowered
-check("key long", ag.key_of("x" * 300 + "@ex.com"), None)
+check("key long (as Lua's FNV-1a)", ag.key_of("x" * 300 + "@ex.com"), "h-406c9ac38f299459-307")
 check("name back", (ag.name_of("a-j%C3%B6rg@ex.com"), ag.name_of("a-a%0Ab@ex.com"), ag.name_of("h-0123456789abcdef-300")),
 	("jörg@ex.com", "a?b@ex.com", "(a name of more than 200 characters)"))
 check("key pattern", [bool(ag.KEY_RE.match(k)) for k in ("a-alice@example.com", "a-..", "h-0123456789abcdef-12", "total", "a-x/y", "events")],

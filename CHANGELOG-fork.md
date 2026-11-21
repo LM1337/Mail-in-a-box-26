@@ -448,7 +448,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   while each guess counts; only a 16-bit tag of a hash of the password
   with a random salt is kept, never the password. Only the failures of
   the account itself count, and only real accounts are counted (the
-  management daemon writes the list of accounts whenever they change):
+  management daemon writes the list of accounts whenever they change; a
+  name not on it, such as an account added while the list could not be
+  written, is counted in a separate pool of 500 names):
   made-up names do not lower the limit of a real account, crowd out its
   count or fill the state. "From the box" means every address of
   127.0.0.0/8, ::1 and the box's own addresses, as a process on the box
