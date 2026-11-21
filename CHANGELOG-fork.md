@@ -137,6 +137,25 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
 
+* **Setup leaves PHP-FPM alone when its configuration is unchanged (B122)**\
+  Setup restarted PHP-FPM once per run (B122), which ended every running
+  request: ActiveSync's Pings and Syncs, CalDAV and CardDAV, webmail and
+  Nextcloud got HTTP 502. Now setup does nothing when PHP-FPM runs the
+  current package and its configuration (`/etc/php/8.5/fpm` with the
+  pools and the modules of `conf.d`, `mods-available`) is the one it
+  loaded last (a checksum in `/var/lib/mailinabox/php-fpm-config.sha256`),
+  so an update that changes nothing there no longer disturbs the clients.
+  When it changed, setup reloads PHP-FPM instead of restarting it: the
+  reload reads php.ini, the pools and the modules anew as a restart does
+  (checked with a module turned off and `memory_limit` changed), keeps the
+  listening socket, and lets the running requests finish for up to 5 s
+  (`process_control_timeout`, new in `php-fpm.conf`). A request that runs
+  longer, such as a Ping, is still ended then (502, as before), and new
+  requests wait up to those 5 s; so the plan's idea that a reload would
+  keep the long polls does not hold. Setup checks the configuration
+  (`php-fpm8.5 -t`) first and restarts PHP-FPM when it does not run (after
+  an upgrade of Nextcloud), runs an older package or replaced module, or
+  has not logged "ready to handle connections" within 30 s of the reload.
 ### Upgrade note
 
 * **The update removes all but the three newest Nextcloud backup copies**\
@@ -197,9 +216,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   `HEAD` would find it; not changed in the bug-fix release v78-r2604.1,
   as every update goes through that code and that release had no test
   run of it.
-* **Setup restarts PHP-FPM, ending ActiveSync long polls (B122)**\
-  Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
-  polls; a reload with a `process_control_timeout` would keep them.
 * **Failed ActiveSync or Autodiscover logins take 10 to 50 seconds (B126)**\
   A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
   test of B126): Z-Push tries the IMAP login three times, and Dovecot

@@ -219,9 +219,9 @@ elif [ -n "$PROBE_ADDRESS" ]; then
 	echo "PROBE_ADDRESS=$PROBE_ADDRESS is not a plain mail address; it is left out of /etc/mailinabox.conf."
 fi
 
-# Start service configuration. PHP-FPM is restarted once, after zpush.sh, not
-# by each script that changes its configuration (restart_php_fpm in
-# setup/functions.sh).
+# Start service configuration. PHP-FPM loads its configuration once, after
+# zpush.sh, not for each script that changes it (restart_php_fpm and
+# load_php_fpm in setup/functions.sh).
 PHP_FPM_RESTART=later
 source setup/system.sh
 source setup/ssl.sh

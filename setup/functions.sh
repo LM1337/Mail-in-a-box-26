@@ -357,17 +357,78 @@ function reload_postfix {
 
 function restart_php_fpm {
 	# setup/web.sh, webmail.sh, nextcloud.sh and zpush.sh each change PHP-FPM's
-	# configuration (php.ini, the pool, PHP modules). A restart ends the running
-	# requests, ActiveSync's long polls among them, and nginx answers 502 for
-	# a moment. setup/start.sh sets PHP_FPM_RESTART=later and restarts PHP-FPM
-	# once, after the last of them; a script run on its own restarts it at
-	# once. Not a reload: with process_control_timeout at 0 (the package's
-	# default) a reload ends the running requests just the same, and a reload
-	# that fails leaves PHP-FPM stopped.
+	# configuration (php.ini, the pool, PHP modules). setup/start.sh sets
+	# PHP_FPM_RESTART=later and loads it once, after the last of them; a
+	# script run on its own loads it at once (load_php_fpm).
 	if [ "${PHP_FPM_RESTART:-}" = later ]; then
 		return 0
 	fi
-	restart_service php"$PHP_VER"-fpm
+	load_php_fpm
+}
+
+function load_php_fpm {
+	# Setup restarted PHP-FPM once per run (B122). A restart ends every
+	# running request, ActiveSync's long polls among them, and nginx answers
+	# 502 for them and, for a second, for new ones (ActiveSync, CalDAV and
+	# CardDAV, webmail, Nextcloud).
+	#
+	# Now nothing is done when PHP-FPM runs the program of the current
+	# package and its configuration is the one it loaded last: the files in
+	# /etc/php/VER/fpm (php.ini, php-fpm.conf, the pools, the modules in
+	# conf.d) and mods-available, as a checksum in
+	# /var/lib/mailinabox/php-fpm-config.sha256 (config_checksum). PHP code
+	# that setup replaces needs nothing: opcache checks the files' times
+	# (opcache.revalidate_freq=1, setup/nextcloud.sh).
+	#
+	# Otherwise a reload: PHP-FPM runs its program again in the same process
+	# (SIGUSR2), which reads php-fpm.conf, the pools, php.ini and the modules
+	# (conf.d) anew, as a restart does, and keeps the listening socket, so no
+	# connection is refused: new requests wait in its queue until the new
+	# workers take them. First the old workers finish their running
+	# requests, for up to process_control_timeout (setup/web.sh sets 5 s;
+	# with the package's 0 a reload ends them at once); a longer request,
+	# such as an ActiveSync Ping, is ended then (nginx answers it with 502,
+	# as at a restart), and new requests wait that long. php-fpm -t first: a
+	# reload with a configuration that PHP-FPM refuses would stop it, so the
+	# restart below shows the error then. The reload is asynchronous: setup
+	# waits until PHP-FPM logs that it is ready again ("ready to handle
+	# connections" in its log after the reload), and restarts it if it has
+	# not within 30 s or no longer runs.
+	#
+	# A restart also when PHP-FPM does not run (setup/nextcloud.sh stopped it
+	# for an upgrade of Nextcloud) or runs the program of an older package or
+	# a replaced module (service_runs_current_package).
+	local unit=php$PHP_VER-fpm log=/var/log/php$PHP_VER-fpm.log sum size i
+	local record=/var/lib/mailinabox/php-fpm-config.sha256
+	sum=$(config_checksum "tree:/etc/php/$PHP_VER/fpm" "dir:/etc/php/$PHP_VER/fpm/conf.d" \
+		"tree:/etc/php/$PHP_VER/mods-available" "tree:/etc/systemd/system/$unit.service.d")
+	enable_service "$unit"
+	if service_runs_current_package "$unit.service" "$unit"; then
+		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+			return 0
+		fi
+		if "php-fpm$PHP_VER" -t > /dev/null 2>&1; then
+			size=$(stat -c %s "$log" 2> /dev/null || echo 0)
+			if systemctl reload "$unit" > /dev/null 2>&1; then
+				for i in $(seq 300); do
+					if [[ $(tail -c "+$((size + 1))" "$log" 2> /dev/null || true) == *"ready to handle connections"* ]]; then
+						if systemctl is-active --quiet "$unit"; then
+							mkdir -p /var/lib/mailinabox
+							echo "$sum" > "$record"
+							return 0
+						fi
+						break
+					fi
+					systemctl is-active --quiet "$unit" || break
+					sleep 0.1
+				done
+			fi
+		fi
+		echo "PHP-FPM did not load its new configuration with a reload; restarting it."
+	fi
+	hide_output service "$unit" restart
+	mkdir -p /var/lib/mailinabox
+	echo "$sum" > "$record"
 }
 
 function stop_php_fpm {
