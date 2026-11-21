@@ -182,6 +182,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `$STORAGE_ROOT/owncloud-backup` but the three newest. To keep an older
   one, move it out of that directory before the update (to a name that is
   not a date and time, or elsewhere).
+* **The update reloads Dovecot and PHP-FPM once and restarts a few services**\
+  The first setup run of this release reloads Dovecot (its new auth
+  configuration, B126: the open IMAP sessions end, and their clients log
+  in again) and PHP-FPM (its new `process_control_timeout`, B122: a Ping
+  that is open then gets HTTP 502 after 5 s), and restarts OpenDKIM,
+  OpenDMARC, spampd, postgrey, named, systemd-resolved, munin-node and the
+  management daemon once more, as it has no checksums of them yet. Later
+  runs leave them alone unless their configuration changes.
 
 ### Planned
 
