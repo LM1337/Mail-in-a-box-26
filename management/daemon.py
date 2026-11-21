@@ -332,7 +332,12 @@ def dns_update():
 @authorized_personnel_only
 def dns_get_secondary_nameserver():
 	from dns_update import get_custom_dns_config, get_secondary_dns
-	return json_response({ "hostnames": get_secondary_dns(get_custom_dns_config(env), mode=None) })
+	try:
+		records = list(get_custom_dns_config(env))
+	except ValueError as e:
+		# dns/ or its custom.yaml cannot be trusted (B212): the reason, not a traceback.
+		return (str(e), 500)
+	return json_response({ "hostnames": get_secondary_dns(records, mode=None) })
 
 @app.route('/dns/secondary-nameserver', methods=['POST'])
 @authorized_personnel_only
@@ -348,7 +353,11 @@ def dns_set_secondary_nameserver():
 def dns_get_records(qname=None, rtype=None):
 	# Get the current set of custom DNS records.
 	from dns_update import get_custom_dns_config, get_dns_zones
-	records = get_custom_dns_config(env, only_real_records=True)
+	try:
+		records = list(get_custom_dns_config(env, only_real_records=True))
+	except ValueError as e:
+		# dns/ or its custom.yaml cannot be trusted (B212): the reason, not a traceback.
+		return (str(e), 500)
 
 	# Filter per the arguments for the more complex GET routes below.
 	records = [r for r in records

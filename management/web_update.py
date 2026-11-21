@@ -2,7 +2,7 @@
 # domains for which a mail account has been set up.
 ########################################################################
 
-import os.path, re, rtyaml
+import os.path, re, sys, rtyaml
 
 from mailconfig import get_mail_domains
 from dns_update import get_custom_dns_config, get_dns_zones
@@ -50,7 +50,15 @@ def get_web_domains(env, include_www_redirects=True, include_auto=True, exclude_
 
 def get_domains_with_a_records(env):
 	domains = set()
-	dns = get_custom_dns_config(env)
+	try:
+		dns = list(get_custom_dns_config(env))
+	except ValueError as e:
+		# dns/ or its custom.yaml cannot be trusted (B212). Only the zones are
+		# not built without the custom records; the web configuration, the TLS
+		# certificates and the status checks go on as without them (the
+		# status checks and the DNS update report the reason).
+		print(f"The custom DNS records are not used: {e}", file=sys.stderr)
+		dns = []
 	for domain, rtype, value in dns:
 		if rtype == "CNAME" or (rtype in {"A", "AAAA"} and value not in {"local", env['PUBLIC_IP'], env['PUBLIC_IPV6']}):
 			domains.add(domain)

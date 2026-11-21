@@ -382,7 +382,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   knows, or put records of its own into the DNS zones. When such a
   directory or file cannot be trusted, no backup is made and the DNS zones
   are not rebuilt (the old ones stay), with the reason (for the backup in
-  the nightly mail, for both in the status checks). `backup/custom.yaml` is
+  the nightly mail, for both in the status checks); the web configuration
+  and the TLS certificates go on without the custom DNS records. `backup/custom.yaml` is
   now written with mode 0600 (it can hold the target's credentials). New
   offline test `tests/fork/storage-dirs.py`.
 

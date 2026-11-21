@@ -8,8 +8,8 @@ user owns STORAGE_ROOT and can replace either. management/backup.py and
 management/dns_update.py read and write their files only through the
 checked directory (management/utils.py open_root_dir, read_root_file,
 write_root_file). Run as an ordinary user: "root's own" is this user here
-(utils.ROOT_DIR_OWNER), and rtyaml, dateutil, exclusiveprocess, dnspython
-and ssl_certificates are replaced by stand-ins (YAML as JSON).
+(utils.ROOT_DIR_OWNER), and rtyaml, dateutil, exclusiveprocess, dnspython,
+ssl_certificates and mailconfig are replaced by stand-ins (YAML as JSON).
 
   * open_root_dir: a directory of the owner, not writable by group or
     others, is taken; a symbolic link, a group-writable directory, one of
@@ -27,7 +27,9 @@ and ssl_certificates are replaced by stand-ins (YAML as JSON).
   * dns_update.py: the custom records come from a checked dns/; a replaced
     dns/ raises ValueError (the zones are not built without the records), a
     missing file gives no records, the file is written through the
-    directory with its read bits kept.
+    directory with its read bits kept; web_update.py (the web configuration,
+    the TLS certificates, the status checks) goes on without the records
+    of a replaced dns/ and says why, instead of failing.
 
   tests/fork/storage-dirs.py
 
@@ -64,13 +66,14 @@ rtyaml.load = lambda text: json.loads(text)
 rtyaml.dump = lambda obj: json.dumps(obj, indent=1) + "\n"
 sys.modules["rtyaml"] = rtyaml
 for name in ("dateutil", "dateutil.parser", "dateutil.relativedelta", "dateutil.tz", "exclusiveprocess",
-		"dns", "dns.resolver", "ssl_certificates"):
+		"dns", "dns.resolver", "ssl_certificates", "mailconfig"):
 	sys.modules[name] = Anything(name)
 
 import utils  # noqa: E402
 utils.ROOT_DIR_OWNER = os.getuid()
 import backup  # noqa: E402
 import dns_update  # noqa: E402
+import web_update  # noqa: E402
 
 failures = []
 
@@ -94,6 +97,7 @@ def raises(fn, *a):
 tmp = tempfile.mkdtemp(prefix="storage-dirs-")
 ROOT = os.path.join(tmp, "user-data")
 ENV = {"STORAGE_ROOT": ROOT}
+WEB_ENV = dict(ENV, PUBLIC_IP="192.0.2.100", PUBLIC_IPV6="2001:db8::100")
 OUTSIDE = os.path.join(tmp, "outside")
 PASS = "A" * 60
 EVIL = "E" * 60
@@ -220,6 +224,11 @@ for how in ("link", "group-writable"):
 	check("dns %s: refused (ValueError)" % how, raises(lambda: list(dns_update.get_custom_dns_config(ENV))), "ValueError")
 	check("dns %s: not written" % how, raises(dns_update.write_custom_dns_config, [("a.example.com", "A", "192.0.2.9")], ENV), "ValueError")
 	check("dns %s: outside unchanged" % how, "a.example.com" in open(os.path.join(OUTSIDE, "custom.yaml")).read(), False)
+	with contextlib.redirect_stderr(io.StringIO()) as err:
+		got = web_update.get_domains_with_a_records(WEB_ENV)
+	check("dns %s: web and TLS go on without the records, with the reason" % how, (got, "not used" in err.getvalue()), (set(), True))
+fresh()
+check("dns: web_update reads the custom A records", web_update.get_domains_with_a_records(WEB_ENV), {"www.example.com"})
 
 shutil.rmtree(tmp)
 if failures:
