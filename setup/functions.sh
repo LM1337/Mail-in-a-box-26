@@ -272,30 +272,42 @@ function service_runs_current_package {
 	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
 }
 
-function started_after_record {
-	# started_after_record UNIT RECORD
-	# True when UNIT's process started after RECORD (a checksum that setup
-	# writes right after it restarted or reloaded UNIT) was last written, and
-	# not while the system booted: something other than this setup restarted
-	# it since, so the record does not say what it runs. For example a
-	# downgrade to a version that keeps no record (v78-r2604.4 restarts these
-	# services on every run, with its own code and configuration): going back
-	# up gives the same checksum as before the downgrade, and the service
-	# would keep running the old version. A restart by an administrator, a
-	# package or needrestart costs one more restart (or reload) at the next
-	# run. A unit started at boot ran the files that the record describes.
-	# False when a time cannot be read (service_runs_current_package checks
-	# that the unit runs).
-	local unit=$1 record=$2 started written booted
-	written=$(stat -c %Y -- "$record" 2> /dev/null) || return 1
-	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
-	[ -n "$started" ] || return 1
-	started=$(date -d "$started" +%s 2> /dev/null) || return 1
-	[ "$started" -gt "$written" ] || return 1
-	booted=$(systemctl show -P FinishTimestamp 2> /dev/null || true)
-	[ -n "$booted" ] || return 0 # the boot has not finished: not known
-	booted=$(date -d "$booted" +%s 2> /dev/null) || return 0
-	[ "$started" -gt "$booted" ]
+function unit_invocation {
+	# unit_invocation UNIT
+	# The InvocationID of UNIT's current run, or nothing. systemd gives a unit
+	# a new one each time it starts (at boot, at a restart by setup, an
+	# administrator, a package or a hook); a reload keeps it.
+	local id
+	id=$(systemctl show -P InvocationID "$1" 2> /dev/null || true)
+	if [[ $id =~ ^[0-9a-f]{32}$ ]]; then
+		echo "$id"
+	fi
+}
+
+function record_matches {
+	# record_matches UNIT RECORD SUM
+	# True when RECORD ("SUM INVOCATION", written by write_record right after
+	# setup restarted or reloaded UNIT) names SUM and the run of UNIT that is
+	# active now. Any other start of UNIT since makes it false: what the unit
+	# read then is not known. A downgrade to a version that keeps no record
+	# (v78-r2604.4 restarts these services on every run, with its own code
+	# and configuration) and the way back up give the same checksum as
+	# before the downgrade, also with a reboot in between (the services
+	# start at boot from the old checkout and the old files then), and the
+	# old version would have kept running. The start time of the unit cannot
+	# tell these apart from a plain reboot. The price: one more restart (or
+	# reload) at the first setup run after a reboot or after a restart by
+	# something else.
+	local inv
+	inv=$(unit_invocation "$1")
+	[ -n "$inv" ] && [ "$(cat "$2" 2> /dev/null || true)" = "$3 $inv" ]
+}
+
+function write_record {
+	# write_record UNIT RECORD SUM
+	# Records SUM with the run of UNIT that is active now (record_matches).
+	mkdir -p "$(dirname "$2")"
+	echo "$3 $(unit_invocation "$1")" > "$2"
 }
 
 function config_checksum {
@@ -343,22 +355,20 @@ function restart_on_change {
 	# /var/lib/mailinabox/UNIT-config.sha256, as for Dovecot, see
 	# load_dovecot), or when it does not run or runs the program of an older
 	# PACKAGE (service_runs_current_package; empty PACKAGE: only the
-	# replaced files are checked), or when something else restarted it since
-	# setup wrote the record (started_after_record: a downgrade and the way
-	# back up). A box updated to this version restarts each of them once
-	# more, as it has no checksums yet.
+	# replaced files are checked), or when it was started since setup wrote
+	# the record, by anything else or at boot (record_matches: a downgrade
+	# and the way back up). A box updated to this version restarts each of
+	# them once more, as it has no checksums yet.
 	local unit=$1 pkg=$2 sum record
 	shift 2
 	record=/var/lib/mailinabox/$unit-config.sha256
 	sum=$(config_checksum "$@")
 	enable_service "$unit"
-	if service_runs_current_package "$unit.service" "$pkg" && [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ] \
-		&& ! started_after_record "$unit.service" "$record"; then
+	if service_runs_current_package "$unit.service" "$pkg" && record_matches "$unit.service" "$record" "$sum"; then
 		return 0
 	fi
 	hide_output service "$unit" restart
-	mkdir -p /var/lib/mailinabox
-	echo "$sum" > "$record"
+	write_record "$unit.service" "$record" "$sum"
 }
 
 function reload_fail2ban {
@@ -414,8 +424,8 @@ function load_php_fpm {
 	# CardDAV, webmail, Nextcloud).
 	#
 	# Now nothing is done when PHP-FPM runs the program of the current
-	# package, was not restarted by something else since (started_after_record),
-	# and its configuration is the one it loaded last: the files in
+	# package, was not started since by anything else or at boot
+	# (record_matches), and its configuration is the one it loaded last: the files in
 	# /etc/php/VER/fpm (php.ini, php-fpm.conf, the pools, the modules in
 	# conf.d) and mods-available, as a checksum in
 	# /var/lib/mailinabox/php-fpm-config.sha256 (config_checksum). PHP code
@@ -446,7 +456,7 @@ function load_php_fpm {
 		"tree:/etc/php/$PHP_VER/mods-available" "tree:/etc/systemd/system/$unit.service.d")
 	enable_service "$unit"
 	if service_runs_current_package "$unit.service" "$unit"; then
-		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ] && ! started_after_record "$unit.service" "$record"; then
+		if record_matches "$unit.service" "$record" "$sum"; then
 			return 0
 		fi
 		if "php-fpm$PHP_VER" -t > /dev/null 2>&1; then
@@ -455,8 +465,7 @@ function load_php_fpm {
 				for i in $(seq 300); do
 					if [[ $(tail -c "+$((size + 1))" "$log" 2> /dev/null || true) == *"ready to handle connections"* ]]; then
 						if systemctl is-active --quiet "$unit"; then
-							mkdir -p /var/lib/mailinabox
-							echo "$sum" > "$record"
+							write_record "$unit.service" "$record" "$sum"
 							return 0
 						fi
 						break
@@ -469,8 +478,7 @@ function load_php_fpm {
 		echo "PHP-FPM did not load its new configuration with a reload; restarting it."
 	fi
 	hide_output service "$unit" restart
-	mkdir -p /var/lib/mailinabox
-	echo "$sum" > "$record"
+	write_record "$unit.service" "$record" "$sum"
 }
 
 function stop_php_fpm {

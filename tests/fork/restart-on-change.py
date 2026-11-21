@@ -19,14 +19,16 @@ restart_on_change runs with stand-ins for the service commands and a
 temporary record directory: the first call restarts and records, a second
 one with the same files does nothing, a change restarts again, a service
 that does not run (or runs an older package) is restarted although nothing
-changed, one that something else restarted after the record was written
-(not at boot: a downgrade and the way back up) is restarted, and a failed
-restart records nothing. load_php_fpm, the same way:
-a reload when the configuration changed, nothing when it did not, a
-restart when the reload brings no "ready to handle connections", when
-php-fpm -t refuses the configuration, when PHP-FPM does not run afterwards
-or did not run before, and a reload when something else restarted it after
-the record was written.
+changed, one that runs another invocation than the record names (started
+since by something else or at boot: a downgrade, a reboot and the way
+back up) is restarted, as is one without a readable invocation or with a
+record of the earlier format (the checksum alone), and a failed restart
+records nothing. load_php_fpm, the same way: a reload when the
+configuration changed, nothing when it did not, a restart when the reload
+brings no "ready to handle connections", when php-fpm -t refuses the
+configuration, when PHP-FPM does not run afterwards or did not run
+before, and a reload when it runs another invocation than the record
+names.
 
 service_runs_current_package with stand-ins for systemctl and dpkg-query:
 the unit's own package and the library packages after it (an update of
@@ -143,8 +145,7 @@ service_runs_current_package() { [ "$RUNS" = yes ]; }
 service() { echo "$*" >> {log}; [ "$FAIL" != yes ]; }
 systemctl() {
 	case "$*" in
-	"show -P ActiveEnterTimestamp svc.service") echo "${STARTED:-}" ;;
-	"show -P FinishTimestamp") echo "${BOOTED:-}" ;;
+	"show -P InvocationID svc.service") echo "${INV-0123456789abcdef0123456789abcdef}" ;;
 	esac
 }
 eval "$(declare -f restart_on_change | sed 's|/var/lib/mailinabox|{rec}|g')"
@@ -167,21 +168,28 @@ restart_on_change svc svc-pkg {args}
 	check("changed configuration: restart", rc == 0 and calls() == 2, err)
 	rc, out, err = bash(stub, {"RUNS": "no", "FAIL": "no"})
 	check("not running or an older package: restart", rc == 0 and calls() == 3, err)
-	# started_after_record: the record written at 1700000000.
+	# record_matches: the record names the checksum and the invocation.
 	recfile = os.path.join(rec, "svc-config.sha256")
-	def at(**env):
-		os.utime(recfile, (1700000000, 1700000000))
-		e = {"RUNS": "yes", "FAIL": "no"}
-		e.update(env)
-		return bash(stub, e)
-	rc, out, err = at(STARTED="@1699999000", BOOTED="@1699998000")
-	check("started before the record: no restart", rc == 0 and calls() == 3, err)
-	rc, out, err = at(STARTED="@1700000100", BOOTED="@1700000200")
-	check("started after the record, at boot: no restart", rc == 0 and calls() == 3, err)
-	rc, out, err = at(STARTED="@1700000100", BOOTED="@1700000050")
-	check("restarted by something else after the record (a downgrade): restart", rc == 0 and calls() == 4, err)
-	rc, out, err = at(STARTED="@1700000100", BOOTED="")
-	check("started after the record, boot not finished: restart", rc == 0 and calls() == 5, err)
+	def recorded():
+		with open(recfile, encoding="utf-8") as f:
+			return f.read().split()
+	sum1 = recorded()[0]
+	check("the record names the checksum and the invocation",
+		recorded() == [sum1, "0123456789abcdef0123456789abcdef"], repr(recorded()))
+	other = "fedcba9876543210fedcba9876543210"
+	rc, out, err = bash(stub, {"RUNS": "yes", "FAIL": "no", "INV": other})
+	check("another invocation (started by something else or at boot, a downgrade and a reboot): restart",
+		rc == 0 and calls() == 4 and recorded() == [sum1, other], err)
+	rc, out, err = bash(stub, {"RUNS": "yes", "FAIL": "no", "INV": other})
+	check("then the same invocation: no restart", rc == 0 and calls() == 4, err)
+	rc, out, err = bash(stub, {"RUNS": "yes", "FAIL": "no", "INV": ""})
+	check("no invocation readable: restart", rc == 0 and calls() == 5, err)
+	with open(recfile, "w", encoding="utf-8") as f:
+		f.write(sum1 + "\n")
+	rc, out, err = bash(stub, {"RUNS": "yes", "FAIL": "no"})
+	check("a record of the earlier format (the checksum alone): restart", rc == 0 and calls() == 6, err)
+	rc, out, err = bash(stub, {"RUNS": "yes", "FAIL": "no"})
+	check("then nothing changed: no restart", rc == 0 and calls() == 6, err)
 	write(conf, "a = 4\n")
 	with open(os.path.join(rec, "svc-config.sha256"), encoding="utf-8") as f:
 		before = f.read()
@@ -208,7 +216,7 @@ systemctl() {
 	case "$1" in
 	reload) echo reload >> {calls}; [ "$READY" = yes ] && echo "NOTICE: ready to handle connections" >> {log}; return 0 ;;
 	is-active) [ "$ACTIVE" = yes ] ;;
-	show) case "$3" in ActiveEnterTimestamp) echo "${STARTED:-}" ;; FinishTimestamp) echo "${BOOTED:-}" ;; esac ;;
+	show) [ "$3" = InvocationID ] && echo "${INV-0123456789abcdef0123456789abcdef}" ;;
 	esac
 }
 service() { echo "$*" >> {calls}; }
@@ -246,11 +254,12 @@ load_php_fpm
 	rc, c, out = fpm(ACTIVE="no")
 	check("PHP-FPM stopped after the reload: restart", rc == 0 and c == ["reload", "php8.5-fpm restart"], repr((rc, c, out)))
 	rc, c, out = fpm()
-	os.utime(os.path.join(rec, "php-fpm-config.sha256"), (1700000000, 1700000000))
-	rc, c, out = fpm(STARTED="@1700000100", BOOTED="@1700000200")
-	check("PHP-FPM started after the record at boot: nothing", rc == 0 and c == [], repr((rc, c, out)))
-	rc, c, out = fpm(STARTED="@1700000100", BOOTED="@1700000050")
-	check("PHP-FPM restarted by something else after the record: a reload", rc == 0 and c == ["reload"], repr((rc, c, out)))
+	rc, c, out = fpm()
+	check("PHP-FPM, same invocation: nothing", rc == 0 and c == [], repr((rc, c, out)))
+	rc, c, out = fpm(INV="fedcba9876543210fedcba9876543210")
+	check("PHP-FPM, another invocation (started by something else or at boot): a reload", rc == 0 and c == ["reload"], repr((rc, c, out)))
+	rc, c, out = fpm(INV="fedcba9876543210fedcba9876543210")
+	check("PHP-FPM, then the same invocation: nothing", rc == 0 and c == [], repr((rc, c, out)))
 
 # service_runs_current_package with stand-ins: the unit started at 1000,
 # dpkg-query answers the Last-Modified time of each package from PKGTIMES

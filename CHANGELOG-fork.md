@@ -108,14 +108,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   postgrey and munin-node also of the Perl modules they read, which no
   "(deleted)" mapping shows: `spamassassin`, `libnet-server-perl`,
   `munin-common`, so that a SpamAssassin update still restarts spampd as
-  the restart on every run did), or when something
-  else restarted it after setup recorded the checksum (not at boot). The
+  the restart on every run did), or when it was started since setup
+  recorded the checksum, by anything else or at boot (the record names
+  the unit's systemd `InvocationID` too). The
   last one covers a downgrade to v78-r2604.4, whose setup restarts them
-  with its own code and keeps no checksum, and the way back up: the
+  with its own code and keeps no checksum, and the way back up, also with
+  a reboot in between (the services then start at boot from the old
+  checkout and files): the
   checksum is the same as before the downgrade, and the management daemon
   of v78-r2604.4 (without `POST /me/password` for webmail's password
-  change) would have kept running; a restart by an administrator or a
-  package costs one more restart at the next run. The same holds for
+  change) would have kept running. A first version went by the start
+  time and trusted every start at boot, which missed the reboot (found in
+  the review). The price: the first setup run after a reboot, or after a
+  restart by an administrator or a package, restarts each of them once
+  more. The same holds for
   PHP-FPM (B122, a reload then). The first run of
   this release restarts each of them once more. New offline test
   `tests/fork/restart-on-change.py`.
@@ -496,7 +502,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   that is open then gets HTTP 502 after 5 s), and restarts OpenDKIM,
   OpenDMARC, spampd, postgrey, named, systemd-resolved, munin-node and the
   management daemon once more, as it has no checksums of them yet. Later
-  runs leave them alone unless their configuration changes.
+  runs leave them alone unless their configuration changes or they were
+  started since by something else; the first run after a reboot restarts
+  them (PHP-FPM: reloads it) once more.
 
 ### Planned
 
