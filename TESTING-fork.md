@@ -264,6 +264,10 @@ report. The groups:
   `management/daemon.py` is documented and every documented operation has a
   route, that `smoke.py` calls or excludes each of them, and the content
   types it expects.
+  `tests/fork/panel-fragments.py` (B178; no box needed) checks that no
+  HTML fragment of the control panel's templates has a self-closing tag of
+  a non-void element followed by more markup, which jQuery 3 reads as an
+  opening tag.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

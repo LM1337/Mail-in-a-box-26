@@ -96,7 +96,7 @@ function show_external_dns() {
 
         var r = zones[j][1];
         for (var i = 0; i < r.length; i++) {
-          var n = $("<tr class='values'><td class='qname'/><td class='rtype'/><td class='value'/></tr>");
+          var n = $("<tr class='values'><td class='qname'></td><td class='rtype'></td><td class='value'></td></tr>");
           n.find('.qname').text(r[i].qname);
           n.find('.rtype').text(r[i].rtype);
           n.find('.value').text(r[i].value);

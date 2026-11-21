@@ -106,7 +106,10 @@ function show_system_status() {
       let count_by_status = { ok: 0, error: 0, warning: 0 };
 
       for (var i = 0; i < r.length; i++) {
-        var n = $("<tr><td class='status'/><td class='message'><p style='margin: 0'/><div class='extra'/><a class='showhide' href='#'/></tr>");
+        // Every element is closed explicitly: jQuery 3.5 and later no longer
+        // expand <div/> to <div></div>, so the link would end up inside the
+        // hidden div.extra, and "show more" never appeared (B178).
+        var n = $("<tr><td class='status'></td><td class='message'><p style='margin: 0'></p><div class='extra'></div><a class='showhide' href='#'></a></td></tr>");
         if (i == 0) n.addClass('first')
         if (r[i].type == "heading")
                 n.addClass(r[i].type)

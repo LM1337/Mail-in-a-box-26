@@ -11,6 +11,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Fixed
+
+* System Status shows the extra lines of its checks again: the "show more"
+  link under a check was missing since rc4, so for example the DS records
+  that "This domain's DNSSEC DS record is not set ... See below for
+  instructions" refers to could not be seen. The TLS page shows the result
+  of a certificate request again ("The TLS certificate was provisioned and
+  installed." or the error). Both came from the update of the control
+  panel's jQuery to 3.x, which reads `<div/>` as an opening tag (B178). New
+  static check `tests/fork/panel-fragments.py`.
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,

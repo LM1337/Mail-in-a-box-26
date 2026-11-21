@@ -200,7 +200,9 @@ function provision_tls_cert() {
         }
 
         // create an HTML block to display the results of this request
-        var n = $("<div><h4/><p/></div>");
+        // Closed explicitly: with jQuery 3.5 and later a self-closing h4 holds
+        // the p that follows, and its text() then removes the result (B178).
+        var n = $("<div><h4></h4><p></p></div>");
         $('#ssl_provision_result').append(n);
 
         // plain log line
