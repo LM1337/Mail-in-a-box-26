@@ -279,14 +279,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   time setup ran again (or so far), instead of counting "Mail offline ...
   so far" from the start of the original downtime.
 * **Migration tool's files in /root/migration are root's only (B204)**\
-  The files of `tools/migrate-to-2604.sh` in `/root/migration` are 0600
-  (directories 0700), among them the copies of the old box's backup key
-  `old-id_rsa_miab`, of its `passwd` and `group` and of its `/etc`; they
-  were 0644 in a directory of root's only (0700), so nothing was exposed.
-  The copies of the old box are written with umask 077, and the tool takes
-  group and other access away from everything in the directory at its
-  start, after each phase and at its end, also from the files of a
-  migration that an older version of the tool started.
+  The files and directories directly in `/root/migration` (the state of
+  `tools/migrate-to-2604.sh`) are 0600 and 0700, among them the copies of
+  the old box's backup key `old-id_rsa_miab`, of its `passwd` and `group`
+  and the archive of its `/etc`; they were 0644 in a directory of root's
+  only (0700), so nothing was exposed. The copies of the old box are
+  written with umask 077, and the tool takes group and other access away
+  from the entries directly in the directory at its start, after each
+  phase and at its end, also from those of a migration that an older
+  version of the tool started. The unpacked copy of the old `/etc`
+  (`old-etc/`) keeps the modes of the old box inside its 0700 directory.
 * **Setup leaves PHP-FPM alone when its configuration is unchanged (B122)**\
   Setup restarted PHP-FPM once per run (B122), which ended every running
   request: ActiveSync's Pings and Syncs, CalDAV and CardDAV, webmail and
