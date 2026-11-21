@@ -838,15 +838,21 @@ fixed)" lists a few more.
   transaction that read first and then wants to write after another
   connection wrote meanwhile, which SQLite refuses at once, whatever the
   timeout. Setup supports only SQLite for Nextcloud.
-* **No delay for failed IMAP logins from the box itself (B126).** Dovecot
+* **No delay for failed logins from the box itself (B126).** Dovecot
   answers a failed login from 127.0.0.1 or ::1 at once and does not slow
   down later logins from there: those logins come from Z-Push, Roundcube
   and Nextcloud, which fail2ban protects with the client's own address, and
   the delay made a wrong ActiveSync password take up to 50 s and slowed
   down every other user. The other side: a process on the box (any local
-  account) can try IMAP passwords on 127.0.0.1 as fast as Dovecot answers,
-  and fail2ban does not ban 127.0.0.1. Logins from other addresses keep
-  Dovecot's delay.
+  account, or code running as www-data after a hole in PHP or a web app)
+  can try the password of any account as fast as Dovecot answers, over
+  IMAP, POP3, ManageSieve or SMTP submission (Postfix asks Dovecot) on
+  127.0.0.1, and fail2ban does not ban 127.0.0.1; the limit of webmail's
+  password change (`POST /me/password`) does not cover these. Logins from
+  other addresses keep Dovecot's delay. The same holds for guesses through
+  Microsoft's servers once they are on the allowlist (System > Intrusion
+  Protection): fail2ban no longer bans them, and Z-Push's IMAP logins from
+  127.0.0.1 are not delayed.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
   answers NXDOMAIN, also for its own test entries. That looks like "not
@@ -892,16 +898,23 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   Transaktion, die zuerst gelesen hat und dann schreiben will, nachdem eine
   andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
   unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
-* **Keine Verzögerung fehlgeschlagener IMAP-Anmeldungen von der Box selbst
+* **Keine Verzögerung fehlgeschlagener Anmeldungen von der Box selbst
   (B126).** Dovecot beantwortet eine fehlgeschlagene Anmeldung von
   127.0.0.1 oder ::1 sofort und bremst spätere Anmeldungen von dort nicht:
   Diese Anmeldungen kommen von Z-Push, Roundcube und Nextcloud, die fail2ban
   mit der eigenen Adresse des Clients schützt, und die Verzögerung ließ ein
   falsches ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen
-  Benutzer. Die Kehrseite: Ein Prozess auf der Box (jedes lokale Konto) kann
-  IMAP-Passwörter auf 127.0.0.1 so schnell durchprobieren, wie Dovecot
-  antwortet, und fail2ban sperrt 127.0.0.1 nicht. Anmeldungen von anderen
-  Adressen behalten die Verzögerung von Dovecot.
+  Benutzer. Die Kehrseite: Ein Prozess auf der Box (jedes lokale Konto oder
+  Code, der nach einer Lücke in PHP oder einer Web-Anwendung als www-data
+  läuft) kann das Passwort jedes Kontos so schnell durchprobieren, wie
+  Dovecot antwortet, über IMAP, POP3, ManageSieve oder den SMTP-Versand
+  (Postfix fragt Dovecot) auf 127.0.0.1, und fail2ban sperrt 127.0.0.1
+  nicht; die Grenze der Passwortänderung im Webmail (`POST /me/password`)
+  gilt dafür nicht. Anmeldungen von anderen Adressen behalten die
+  Verzögerung von Dovecot. Dasselbe gilt für Versuche über die Server von
+  Microsoft, sobald sie in der Freigabeliste stehen (System > Intrusion
+  Protection): fail2ban sperrt sie nicht mehr, und die IMAP-Anmeldungen von
+  Z-Push von 127.0.0.1 aus werden nicht verzögert.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
   Resolver (B136).** Über manche öffentliche Resolver (in den Tests
   8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen
@@ -1525,7 +1538,9 @@ the following, on by default:
   downloads nothing), shows a hint and offers a button that puts the
   network on the allowlist after a question; nothing is put there on its
   own. On the allowlist, password guesses through these servers are no
-  longer banned, only Dovecot's delay of each failed login remains. The
+  longer banned, and nothing slows them down either: Z-Push checks each
+  password with an IMAP login from 127.0.0.1, which Dovecot answers at
+  once (B126, "Known issues"). The
   address's reverse DNS name is shown only as extra information, and only
   when it resolves back to the address: the owner of an address sets its
   PTR record. Other apps that sync through their provider's servers are
@@ -1768,9 +1783,10 @@ eingeschaltet:
   herunter), zeigt einen Hinweis und bietet eine Schaltfläche an, die das
   Netz nach einer Rückfrage in die Freigabeliste setzt; von selbst kommt
   nichts hinein. In der Freigabeliste werden Passwortversuche über diese
-  Server nicht mehr gesperrt, nur Dovecots Verzögerung jeder
-  fehlgeschlagenen Anmeldung bleibt. Den Namen aus dem Reverse-DNS zeigt
-  die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
+  Server nicht mehr gesperrt, und nichts bremst sie mehr: Z-Push prüft
+  jedes Passwort mit einer IMAP-Anmeldung von 127.0.0.1 aus, die Dovecot
+  sofort beantwortet (B126, „Bekannte Einschränkungen“). Den Namen aus
+  dem Reverse-DNS zeigt die Seite nur als Zusatzinformation und nur, wenn er wieder auf die
   Adresse auflöst: Den PTR-Eintrag setzt der Inhaber der Adresse. Andere
   Apps, die über die Server ihres Anbieters synchronisieren, erkennt sie
   nicht.

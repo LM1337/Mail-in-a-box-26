@@ -50,7 +50,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   users of the app banned, and anyone can cause it on purpose (B126;
   `miab-zpush` still counts for recidive). The hint offers a
   button "Put <network> on the allowlist", which asks first and says what
-  it costs (guesses through these servers are no longer banned); nothing is
+  it costs (guesses through these servers are no longer banned, and with
+  Dovecot's answer at once to the IMAP logins of Z-Push from 127.0.0.1,
+  B126, not slowed down either); nothing is
   put on the allowlist on its own. The addresses are recognised by
   Microsoft's published IP ranges of Exchange Online (Microsoft 365 IP
   Address and URL web service, service area Exchange) and of its
@@ -321,7 +323,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   with the client's own address (`miab-zpush`, `miab-roundcube`,
   `miab-owncloud` and Nextcloud's throttle); logins from other addresses
   keep Dovecot's delay and penalty. The remaining risk, a local process
-  that tries IMAP passwords on 127.0.0.1 without delay, is in
+  that tries passwords on 127.0.0.1 without delay (over IMAP, POP3,
+  ManageSieve and SMTP submission, which all ask Dovecot), and guesses
+  through Microsoft's servers once they are on the allowlist, is in
   README-fork.md, "Known issues".
 
 ### Security

@@ -125,8 +125,9 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # is a failed login), so that a login of an unknown user from these
 # addresses is answered at once as well. A login that sql accepts never
 # reaches it. Logins from other addresses keep the delay and the penalty.
-# The remaining risk: a local process can try IMAP passwords on 127.0.0.1
-# without delay (README-fork.md, "Known issues").
+# The remaining risk: a local process can try passwords on 127.0.0.1 without
+# delay, over every protocol that asks Dovecot (IMAP, POP3, ManageSieve, and
+# SMTP submission through Postfix; README-fork.md, "Known issues").
 tools/write_conf.py /etc/dovecot/conf.d/auth-sql.conf.ext << EOF;
 sql_driver = sqlite
 sqlite_path=$STORAGE_ROOT/mail/users.sqlite

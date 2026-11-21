@@ -28,8 +28,11 @@ import base64
 import time
 
 # Failures that refuse more attempts for WINDOW seconds: per account (any
-# caller, so that a local process cannot guess one account's password at full
-# speed) and per client address.
+# caller, so that this endpoint is no way to guess one account's password at
+# full speed) and per client address. It does not bound local guessing as a
+# whole: Dovecot answers failed logins from 127.0.0.1 at once (B126, over
+# IMAP, POP3, ManageSieve and SMTP submission; README-fork.md, "Known
+# issues").
 MAX_FAILURES_ACCOUNT = 5
 MAX_FAILURES_ADDRESS = 10
 WINDOW = 600
