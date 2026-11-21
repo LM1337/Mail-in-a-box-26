@@ -761,7 +761,10 @@ tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
 # We moved to v0.6.3 in 193763f8. Ignore errors - maybe there are duplicated users with the
 # correct backend already.
 # As www-data, which owns the database and its directory, not as root by path (B147).
-sudo -u www-data sqlite3 "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
+# With a busy timeout: Nextcloud's cron job or a CalDAV/CardDAV client may hold
+# the write lock, and without one sqlite3 gave up at once ("database is
+# locked", B189).
+sudo -u www-data sqlite3 -cmd ".timeout 60000" "$STORAGE_ROOT/owncloud/owncloud.db" "UPDATE oc_users_external SET backend='127.0.0.1';" || /bin/true
 
 # Set up a general cron job for Nextcloud.
 # Also add another job for Calendar updates, per advice in the Nextcloud docs

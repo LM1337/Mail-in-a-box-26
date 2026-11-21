@@ -352,6 +352,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   The file with the exit code that the tmux window writes after the run
   (`.multiplexer-exit-code`) is made 0600 as well; a first version left it
   0644 until the next call of the tool.
+* **Setup waits for Nextcloud's database lock (B189)**\
+  Setup's update of the `user_external` rows in Nextcloud's SQLite database
+  gave up at once when a CalDAV or CardDAV client or Nextcloud's cron job
+  was writing ("Error: stepping, database is locked (5)" in setup's
+  output). It now waits up to 60 seconds for the lock.
 * **Setup leaves PHP-FPM alone when its configuration is unchanged (B122)**\
   Setup restarted PHP-FPM once per run (B122), which ended every running
   request: ActiveSync's Pings and Syncs, CalDAV and CardDAV, webmail and
