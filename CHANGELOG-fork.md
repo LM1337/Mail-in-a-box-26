@@ -439,9 +439,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   of `$STORAGE_ROOT` made before a migration of a newer release, setup stops
   ("... says #N, but this box has run the data migrations up to #M"):
   remove that file and run setup again, so that the backup's migrations
-  run. A restore on a new box and the migration tool are not affected (a
-  new box has no record). A downgrade to v78-r2604.4 ignores the record
-  and leaves the number as it is, so the way back up works too.
+  run. A restore on a new box is not affected (a new box has no record),
+  and `tools/migrate-to-2604.sh` removes the record before each of its
+  setup runs, as the copy of the old box decides there (also after its
+  rehearsal or a rollback on the same machine). A downgrade to
+  v78-r2604.4 ignores the record and leaves the number as it is, so the
+  way back up works too.
 
 * **The update removes all but the three newest Nextcloud backup copies**\
   The first setup run of this release removes every copy in

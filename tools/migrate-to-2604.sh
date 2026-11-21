@@ -3275,6 +3275,13 @@ run_setup() {
 	if [ -n "$NEW_PRIVATE_IP" ]; then envs+=("PRIVATE_IP=$NEW_PRIVATE_IP"); fi
 	if [ -n "$NEW_PRIVATE_IPV6" ]; then envs+=("PRIVATE_IPV6=$NEW_PRIVATE_IPV6"); fi
 
+	# $STORAGE_ROOT holds the copy of the old box (or of its backup), and its
+	# mailinabox.version says which migrations the copy still needs. A record of
+	# an earlier setup run on this machine (the rehearsal, a run before a
+	# rollback) is of the data that the copy replaced: setup would stop at the
+	# lower number of the copy (B211). Root's own file in a directory of root's.
+	rm -f /var/lib/mailinabox/storage-migration
+
 	local rc=0 started
 	started=$(date +%s)
 	(cd "$MIAB_DIR" && env "${envs[@]}" setup/start.sh) < /dev/null || rc=$?

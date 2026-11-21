@@ -623,7 +623,8 @@ in `/var/lib/mailinabox/storage-migration` (root's own) and stops before any
 migration when `mailinabox.version` says less. After restoring an older
 backup of `$STORAGE_ROOT` on the same box, setup stops with that message:
 remove `/var/lib/mailinabox/storage-migration` and run setup again, so that
-the backup's migrations run. A restore on a new box needs nothing.
+the backup's migrations run. A restore on a new box needs nothing, and the
+migration tool removes the record itself before each of its setup runs.
 
 **Backup and DNS settings only from root's directories (B212).** The backup
 target and passphrase (`backup/custom.yaml`, `backup/secret_key.txt`) and the
@@ -700,7 +701,8 @@ Migration ab, wenn `mailinabox.version` weniger angibt. Nach dem
 Zurückspielen einer älteren Sicherung von `$STORAGE_ROOT` auf derselben Box
 bricht setup mit dieser Meldung ab: `/var/lib/mailinabox/storage-migration`
 löschen und setup erneut starten, damit die Migrationen der Sicherung laufen.
-Auf einer neuen Box ist dafür nichts zu tun.
+Auf einer neuen Box ist dafür nichts zu tun, und das Umzugswerkzeug löscht
+die Datei vor jedem seiner Läufe von setup selbst.
 
 **Einstellungen von Sicherung und DNS nur aus Verzeichnissen von root (B212).**
 Ziel und Passphrase der Sicherung (`backup/custom.yaml`,
