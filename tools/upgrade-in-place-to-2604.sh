@@ -705,7 +705,7 @@ rm -f "$env_file"
 printf "%s\n\n" "$hint"
 "$@"
 rc=$?
-echo "$rc" > "$rc_file"
+(umask 077 && echo "$rc" > "$rc_file")
 echo
 echo "The command ended with exit code $rc. Press Enter to close this window${close:+ (it closes by itself after $close seconds, --yes)}."
 wait_enter

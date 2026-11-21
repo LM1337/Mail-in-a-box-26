@@ -2399,7 +2399,7 @@ upstream pull requests, independent of the 26.04 port.
 * **Fix:** The functions that write the copies of the old box (`snapshot_old_etc`, `save_old_users`, `save_reference`) write with umask 077, the log is created with it, and `private_state` takes group and other access away from every file and directory directly in `/root/migration` (`find -perm /077 -exec chmod go=`) at the start of a run, after each phase and at the end, also from those of a migration that an older version started. The tool does not set umask 077 for the whole run: setup and the packages it installs need root's normal umask. The contents of `old-etc/` keep the modes of the old `/etc` (in a directory that is 0700 now).
 * **Affects:** v78 no, PR #2603 no. Origin: Fork (the migration tool since rc1).
 * **Evidence:** T2 of v78-r2604.2 (`ls -l /root/migration`). In isolation, `save_reference` and `private_state` of the released tool and of the fix with the old box's commands run locally, root's umask 022 and a file of 0644 left from before: the released tool left the copies 0644 and the directories 0755; the fix wrote them 0600 and 0700 and made the old file 0600. Not run in a migration.
-* **Found by:** migration test (T2 of v78-r2604.2); **commit:** see `git log --grep B204`; **fixed in:** unreleased
+* **Found by:** migration test (T2 of v78-r2604.2); **commit:** see `git log --grep B204`; **fixed in:** unreleased (the exit code file of the tmux window, which a first version of the fix left 0644, found in T2 of v78-r2604.5)
 
 ### B210
 

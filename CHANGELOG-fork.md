@@ -332,6 +332,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   phase and at its end, also from those of a migration that an older
   version of the tool started. The unpacked copy of the old `/etc`
   (`old-etc/`) keeps the modes of the old box inside its 0700 directory.
+  The file with the exit code that the tmux window writes after the run
+  (`.multiplexer-exit-code`) is made 0600 as well; a first version left it
+  0644 until the next call of the tool.
 * **Setup leaves PHP-FPM alone when its configuration is unchanged (B122)**\
   Setup restarted PHP-FPM once per run (B122), which ended every running
   request: ActiveSync's Pings and Syncs, CalDAV and CardDAV, webmail and
