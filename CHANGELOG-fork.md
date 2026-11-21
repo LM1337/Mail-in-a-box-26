@@ -115,6 +115,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `curl | bash` names the script of that source instead of the GitHub URL.
   Whoever copied the line before ran the release from GitHub instead of
   the source and tag that were checked.
+* **Migration tool filters the old box's error messages too (B154)**\
+  `tools/migrate-to-2604.sh` passes the standard error of every command
+  that talks to the old box (its scripts through ssh, the login checks, the
+  copies of `/etc` and of the zones, rsync's checks and copies) to the
+  terminal with control characters replaced by "?", as it does for the
+  other text of the old box since B154; before, an error message of the old
+  box could send escape sequences to the terminal. The progress filter of
+  the main copy does the same for rsync's output.
 
 ### Planned
 
@@ -269,11 +277,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   When the lookup of a domain's DS record fails, the status checks still
   say "This domain's DNSSEC DS record is not set" (a failed lookup counts
   as no DS record, as before B150); "could not check" would be right.
-* **Migration tool passes the old box's stderr unfiltered (B154)**\
-  `tools/migrate-to-2604.sh` passes the old box's standard error (the
-  error messages of its remote scripts, through ssh) to the terminal
-  unfiltered; the other text of the old box gets "?" for control
-  characters (B154).
 * **Wrong in-place upgrade messages after a failed --redo-from (B161)**\
   The in-place upgrade's messages after a `--redo-from` that fails: on an
   upgrade that had finished, the exit message says that cron jobs, update

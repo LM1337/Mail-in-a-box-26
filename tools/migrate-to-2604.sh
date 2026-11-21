@@ -152,6 +152,17 @@ section() {
 # terminal and the reports: control characters other than tab become "?", so
 # that it cannot send escape sequences to the terminal (B154).
 printable() { sed 's/[^[:print:][:blank:]]/?/g'; }
+# Run a command whose standard error comes from the old box (ssh and the
+# remote command's messages, rsync with its remote side) with that error
+# output passed through printable, line by line (B154). Standard input and
+# output stay as they are; the exit code is the command's. The pipeline ends
+# when the command has ended and its messages are written (ssh's master
+# connection, which outlives it, keeps no copy of its standard error).
+old_side() { # COMMAND...
+	local rc=0
+	{ "$@" 2>&1 1>&3 3>&- | sed -u 's/[^[:print:][:blank:]]/?/g' >&2; } 3>&1 || rc=$?
+	return "$rc"
+}
 human() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "${1:-0} bytes"; }
 fmt_dur() { # seconds -> "7 min" / "2 h 05 min"
 	local m=$(((${1:-0} + 59) / 60))
@@ -724,7 +735,7 @@ ssh_init() {
 	fi
 
 	say "Connecting to $SSH_TARGET..."
-	if ! ssh "${SSH_ARGS[@]}" "$SSH_TARGET" true < /dev/null; then
+	if ! old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" true < /dev/null; then
 		die "Cannot log in to $SSH_TARGET with SSH (key authentication, no password prompts).
 Set up the key login for root of THIS machine first:
   ssh-keygen -t ed25519                (here, as root; accept the defaults)
@@ -733,7 +744,7 @@ Set up the key login for root of THIS machine first:
   test it here: ssh ${SSH_PORT:+-p $SSH_PORT }$SSH_TARGET true
 Or give another key with --ssh-key, or use a user with passwordless sudo: --from USER@$OLD_HOST."
 	fi
-	if [ -n "$REMOTE_SUDO" ] && ! ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "sudo -n true" < /dev/null; then
+	if [ -n "$REMOTE_SUDO" ] && ! old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "sudo -n true" < /dev/null; then
 		die "$OLD_USER on $OLD_HOST cannot use sudo without a password (sudo -n).
 Allow it, e.g. with '$OLD_USER ALL=(ALL) NOPASSWD:ALL' in /etc/sudoers.d/, or log in as root."
 	fi
@@ -766,7 +777,7 @@ script_with_vars() {
 
 # shellcheck disable=SC2029 # REMOTE_SUDO is meant to expand here
 remote_bash() {
-	script_with_vars "$@" | ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}bash -s"
+	script_with_vars "$@" | old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}bash -s"
 }
 
 local_bash() {
@@ -776,7 +787,7 @@ local_bash() {
 # Run one command line as root on the old box.
 # shellcheck disable=SC2029 # the command line is built here on purpose
 remote() {
-	ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "$REMOTE_SUDO$1" < /dev/null
+	old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "$REMOTE_SUDO$1" < /dev/null
 }
 
 # Read KEY=VALUE lines into the associative array named by $1.
@@ -1623,7 +1634,7 @@ EOF
 # only, and every 5 minutes one of them goes to the log; all other lines go to
 # stdout (terminal and log) and to the stats file argv[1]. argv[2] is the log.
 PROGRESS_PY=$(cat <<'EOF'
-import sys, time
+import sys, time, unicodedata
 stats = open(sys.argv[1], "w", encoding="utf-8", errors="replace")
 log = open(sys.argv[2], "a", encoding="utf-8", errors="replace")
 try:
@@ -1664,6 +1675,11 @@ def progress(s):
 			out.write("  [%s] %s\n" % (stamp, s))
 			out.flush()
 
+# rsync's output includes the old box's error messages (its remote side, ssh):
+# control and format characters become "?", as printable does in the tool (B154).
+def clean(s):
+	return "".join("?" if unicodedata.category(c)[0] == "C" and c != "\t" else c for c in s)
+
 buf = b""
 inp = sys.stdin.buffer
 while True:
@@ -1676,13 +1692,13 @@ while True:
 		if not found:
 			break
 		i = min(found)
-		seg, sep, buf = buf[:i].decode("utf-8", "replace"), buf[i:i + 1], buf[i + 1:]
+		seg, sep, buf = clean(buf[:i].decode("utf-8", "replace")), buf[i:i + 1], buf[i + 1:]
 		if sep == b"\r":
 			progress(seg)
 		elif seg.strip():
 			full(seg)
 if buf.strip():
-	full(buf.decode("utf-8", "replace"))
+	full(clean(buf.decode("utf-8", "replace")))
 if tty and shown:
 	tty.write("\n")
 EOF
@@ -2338,7 +2354,7 @@ save_old_roundcube() {
 		if [ -n "$d" ]; then extra+=("plugins/$d"); fi
 	done < <(python3 -I -c "$ROUNDCUBE_PY" extra "$OLD_RC.new/plugins.txt")
 	# shellcheck disable=SC2029
-	ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C $RC_DIR -cf - config/config.inc.php ${extra[*]} 2> /dev/null" \
+	old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C $RC_DIR -cf - config/config.inc.php ${extra[*]} 2> /dev/null" \
 		< /dev/null | tar -C "$OLD_RC.new" --no-same-owner -xf - || rc=$?
 	if [ "$rc" != 0 ]; then warn "Could not copy all of config.inc.php ${extra[*]} from the old box's Roundcube (exit code $rc)."; fi
 	if [ -f "$OLD_RC.new/config/config.inc.php" ]; then mv "$OLD_RC.new/config/config.inc.php" "$OLD_RC.new/config.inc.php"; fi
@@ -2400,7 +2416,7 @@ check_rsync_old() {
 	local rc=0
 	command -v rsync > /dev/null || return 0     # installed by the migration
 	[ -n "${OLD[RSYNC_VERSION]:-}" ] || return 0 # a blocker already
-	rsync --list-only -e "$RSYNC_RSH" "--rsync-path=$RSYNC_PATH" "$RSYNC_TARGET:$STORAGE_ROOT/" > /dev/null || rc=$?
+	old_side rsync --list-only -e "$RSYNC_RSH" "--rsync-path=$RSYNC_PATH" "$RSYNC_TARGET:$STORAGE_ROOT/" > /dev/null || rc=$?
 	if [ "$rc" = 0 ]; then
 		say "rsync:             works ($RSYNC_TARGET:$STORAGE_ROOT/)"
 	else
@@ -2462,7 +2478,7 @@ snapshot_old_etc() {
 	say "Saving a copy of the old box's /etc, 'postconf -n' and root's crontab in $STATE_DIR..."
 	local rc=0
 	# shellcheck disable=SC2029
-	ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C / --numeric-owner -czf - etc 2> /dev/null" \
+	old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C / --numeric-owner -czf - etc 2> /dev/null" \
 		< /dev/null > "$STATE_DIR/old-etc.tar.gz.new" || rc=$?
 	# tar exits with 1 when a file changed while it was read.
 	[ "$rc" -le 1 ] || die "Could not copy /etc from the old box (exit code $rc)."
@@ -3332,14 +3348,14 @@ phase_extras() {
 	if [ "${OLD[HAS_ZPUSH]:-0}" = 1 ]; then
 		# Same Z-Push 2.7 state format; without it every phone does a full resync.
 		mkdir -p /var/lib/z-push
-		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
+		old_side rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/z-push/" /var/lib/z-push/ || warn "Could not copy the Z-Push state."
 		chown -R www-data:www-data /var/lib/z-push
 		chmod 750 /var/lib/z-push
 		say "Z-Push state copied."
 	fi
 	if [ "${OLD[HAS_MUNIN]:-0}" = 1 ] && id munin > /dev/null 2>&1; then
 		mkdir -p /var/lib/munin
-		rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
+		old_side rsync "${args[@]}" "$RSYNC_TARGET:/var/lib/munin/" /var/lib/munin/ || warn "Could not copy the munin data."
 		chown -R munin:munin /var/lib/munin
 		say "munin graphs copied."
 	fi
@@ -4088,7 +4104,7 @@ do_push_zones() {
 		|| die "Could not save the old box's zone files."
 	# shellcheck disable=SC2029 # REMOTE_SUDO is meant to expand here
 	tar -C /etc/nsd/zones -cf - "${push[@]}" \
-		| ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C /etc/nsd/zones --no-same-owner -xf -" \
+		| old_side ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "${REMOTE_SUDO}tar -C /etc/nsd/zones --no-same-owner -xf -" \
 		|| die "Could not copy the zones to the old box."
 	remote "systemctl reload nsd || nsd-control reload" || warn "Could not reload nsd on the old box ('systemctl reload nsd' there)."
 	state_set ZONES_PUSHED 1
