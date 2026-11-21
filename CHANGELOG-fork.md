@@ -83,6 +83,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   makes too long (YXDOMAIN) counts as a failed lookup (B181, upstream).
   New offline test `tests/fork/status-dns.py` and smoke check
   `admin-status-dns-unit`.
+* **Failed DS lookup: "could not check", not "DS record is not set" (B182)**\
+  When the lookup of a zone's DS record times out or fails, System Status
+  and the daily status change notice say "Could not check this domain's
+  DNSSEC DS record: the DNS lookup timed out/failed" instead of "This
+  domain's DNSSEC DS record is not set" with the DS records to set (B182,
+  upstream; B150 had left the DS lookups as they were). A zone's checks
+  look its DS records up once instead of three times. New cases in
+  `tests/fork/status-dns.py`.
 
 ### Planned
 
@@ -260,10 +268,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   tables and all webmail sessions, and 5 chmods `backup/secret_key.txt`
   (following a link) to 0600. It gives no root and needs code running as
   the storage user, which no service of the box runs (B147).
-* **Failed DS lookup is reported as "DS record is not set" (B150)**\
-  When the lookup of a domain's DS record fails, the status checks still
-  say "This domain's DNSSEC DS record is not set" (a failed lookup counts
-  as no DS record, as before B150); "could not check" would be right.
 * **Migration tool passes the old box's stderr unfiltered (B154)**\
   `tools/migrate-to-2604.sh` passes the old box's standard error (the
   error messages of its remote scripts, through ssh) to the terminal

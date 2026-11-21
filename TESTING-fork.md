@@ -295,8 +295,13 @@ report. The groups:
   NXDOMAIN and NoAnswer, a failed lookup, a timeout, YXDOMAIN and a name
   too long for DNS (no exception, `[error]`), a nameserver of its own;
   and the Spamhaus DBL check of a mail domain (not listed, listed, a
-  failed lookup, a name too long with `.dbl.spamhaus.org`). Group admin
-  runs it (`admin-status-dns-unit`).
+  failed lookup, a name too long with `.dbl.spamhaus.org`); and the
+  DNSSEC DS check (B182): a DS lookup that timed out or failed gives
+  "Could not check" without the DS records to set, no, a correct and a
+  wrong DS record give the messages as before, a zone's checks look its
+  DS records up once and suggest DNSSEC only when none is set, and the
+  box's name checks its zone's DS records only when they are set. Group
+  admin runs it (`admin-status-dns-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

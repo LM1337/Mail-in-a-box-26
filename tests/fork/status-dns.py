@@ -16,7 +16,14 @@ whose resolver answers from a table:
     nameserver given with "at" gets a resolver of its own;
   * the Spamhaus DBL check of a mail domain: not listed, listed, a failed
     lookup, and a domain whose name with ".dbl.spamhaus.org" is too long
-    for DNS.
+    for DNS;
+  * the DNSSEC DS check (B182): a lookup that timed out or failed gives
+    "Could not check this domain's DNSSEC DS record" without the DS records
+    to set, not "DS record is not set"; no DS record, a correct and a wrong
+    one as before; the checks of a zone look its DS records up once, check
+    them first when they are set or the lookup failed, and suggest DNSSEC
+    last only when no DS record is set; the box's own name checks the DS
+    records of its zone only when they are set.
 
 The modules that status_checks.py imports and that are not in the standard
 library, or need a box, are replaced by stand-ins.
@@ -188,8 +195,120 @@ def case_dbl():
 		[("print_warning", f"Could not determine whether the domain {LONG} is blacklisted by dbl.spamhaus.org: its name is too long to be looked up there.")])
 
 
+# --- the DNSSEC DS check (B182)
+
+ZONE_DS = "example.com.\t3600\tIN\tDS\t12345 13 2 ABCDEF0123"
+FILES = {
+	"/etc/nsd/zones/example.com.txt.ds": ZONE_DS + "\n",
+	"/storage/dns/dnssec/Kexample.key": "example.com.\tIN\tDNSKEY\t257 3 13 PUBKEYDATA\n",
+}
+
+
+class FakePath:
+	# os.path for status_checks.py with exists() answering from FILES.
+	def __getattr__(self, name):
+		return getattr(os.path, name)
+
+	@staticmethod
+	def exists(p):
+		return p in FILES
+
+
+class FakeOs:
+	path = FakePath()
+
+	def __getattr__(self, name):
+		return getattr(os, name)
+
+
+def fake_open(p, *a, **k):
+	import io
+	if p not in FILES:
+		raise FileNotFoundError(p)
+	return io.StringIO(FILES[p])
+
+
+ENV = {"STORAGE_ROOT": "/storage", "PRIMARY_HOSTNAME": "box.example.com", "PUBLIC_IP": "192.0.2.1", "PUBLIC_IPV6": None}
+ZONEFILES = {"example.com": "example.com.txt"}
+
+
+def ds_messages(ds_answer):
+	ANSWERS.clear()
+	if ds_answer is not None:
+		ANSWERS[("example.com", "DS")] = ds_answer
+	out = Output()
+	sm.check_dnssec("example.com", ENV, out, ZONEFILES)
+	return out.calls
+
+
+def case_dnssec():
+	sm.os = FakeOs()
+	sm.open = fake_open
+	sm.load_env_vars_from_file = lambda fn: {"KSK": "Kexample"}
+
+	ANSWERS.clear()
+	ANSWERS[("a.example.com", "DS")] = ["12345 13 2 ABCDEF0123"]
+	ANSWERS[("b.example.com", "DS")] = NoAnswer()
+	ANSWERS[("c.example.com", "DS")] = NoNameservers()
+	ANSWERS[("d.example.com", "DS")] = Timeout()
+	check("query_ds: records, none, failed, timed out",
+		[sm.query_ds(d) for d in ("a.example.com", "b.example.com", "c.example.com", "d.example.com", "e.example.com")],
+		[["12345 13 2 ABCDEF0123"], [], "[error]", "[timeout]", []])
+
+	for name, answer, verb in (("failed", NoNameservers(), "failed"), ("timed out", Timeout(), "timed out")):
+		got = ds_messages(answer)
+		check(f"check_dnssec: lookup {name}: one warning, no DS records to set", got,
+			[("print_warning", f"Could not check this domain's DNSSEC DS record: the DNS lookup {verb}. Please try again later. If this persists, see the other issues listed here for this domain.")])
+	got = ds_messages(None)
+	check("check_dnssec: no DS record: not set, with the DS records to set",
+		(got[0][0], got[0][1][:44], any("ABCDEF0123" in t for _, t in got[1:])),
+		("print_warning", "This domain's DNSSEC DS record is not set. T", True))
+	check("check_dnssec: correct DS record", ds_messages(["12345 13 2 ABCDEF0123"]),
+		[("print_ok", "DNSSEC 'DS' record is set correctly at registrar.")])
+	got = ds_messages(["11111 13 2 0000"])
+	check("check_dnssec: wrong DS record: incorrect, with the current one",
+		(got[0][0], got[0][1][:46], got[-1][1]),
+		("print_error", "This domain's DNSSEC DS record is incorrect. T", "Key Tag: 11111, Algorithm: 13, Digest Type: 2, Digest: 0000"))
+
+	# Which DNSSEC checks the checks of a zone and of the box's name make.
+	seen = []
+	real_check_dnssec = sm.check_dnssec
+	sm.check_dnssec = lambda domain, env, output, zf, is_checking_primary=False, ds=None: seen.append((domain, is_checking_primary, ds))
+	sm.get_custom_dns_config = lambda env: []
+	sm.get_custom_dns_records = lambda records, qname, rtype: []
+	sm.get_secondary_dns = lambda records, mode=None: []
+	sm.get_mail_aliases = lambda env: []
+	sm.build_tlsa_record = lambda env: "3 1 1 X"
+	try:
+		for name, answer, first, last in (
+				("DS set", ["12345 13 2 ABCDEF0123"], [("example.com", False, ["12345 13 2 ABCDEF0123"])], []),
+				("no DS", None, [], [("example.com", False, [])]),
+				("DS lookup failed", NoNameservers(), [("example.com", False, "[error]")], []),
+				("DS lookup timed out", Timeout(), [("example.com", False, "[timeout]")], [])):
+			ANSWERS.clear()
+			if answer is not None:
+				ANSWERS[("example.com", "DS")] = answer
+			del seen[:]
+			del CALLS[:]
+			ds = sm.query_ds("example.com")
+			sm.check_dns_zone("example.com", ENV, Output(), ZONEFILES, ds=ds)
+			got_first = list(seen)
+			del seen[:]
+			sm.check_dns_zone_suggestions("example.com", ENV, Output(), ZONEFILES, [], ds=ds)
+			lookups = [c for c in CALLS if c[1] == "DS"]
+			check(f"zone checks, {name}: DNSSEC first / last, one DS lookup", (got_first, list(seen), len(lookups)), (first, last, 1))
+
+			del seen[:]
+			sm.check_primary_hostname_dns("box.example.com", ENV, Output(), ["example.com"], ZONEFILES)
+			want = [("example.com", True, answer)] if isinstance(answer, list) else []
+			check(f"box's name, {name}: DS records of its zone checked only when set", seen, want)
+	finally:
+		sm.check_dnssec = real_check_dnssec
+
+
 case_query_dns()
 case_dbl()
+case_dnssec()
 
 if FAILED:
 	print(f"{len(FAILED)} case(s) failed")
