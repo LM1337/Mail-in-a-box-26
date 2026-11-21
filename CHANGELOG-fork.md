@@ -267,7 +267,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   migration tool's report stopped its preflight check, and so `--check`
   and the migration of every box with such changes, with "STORAGE_ROOT:
   unbound variable" (B185, found in the test runs of this release; the
-  test now runs both tools' reports as bash with `set -u`).
+  test now runs both tools' reports as bash with `set -u`). The kept
+  plugin copies keep their modes (`old-roundcube/` itself is root's only),
+  and phase verify names a local plugin that the web server cannot read:
+  a first version made the copies root's only, and a plugin brought back
+  with `cp -a` as proposed was not loaded by Roundcube, which logged an
+  error on every request (B186, found in the test runs of this release).
 * **update-check.sh records the two TLS key exchange parameters of Postfix (B201)**\
   tools/update-check.sh now records `tls_eecdh_auto_curves` and
   `tls_ffdhe_auto_groups` too, so a change of Postfix's key exchange (such

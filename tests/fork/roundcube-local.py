@@ -26,6 +26,10 @@ This test checks:
   * "verify" names only what the Roundcube after setup does not have, writes
     local-changes.json (0600) with the open items and removes it when
     nothing is open;
+  * "verify" names a local plugin of the new Roundcube that the web server
+    (www-data) cannot read completely, and the in-place tool keeps the
+    plugin copies with their modes, so that "cp -a" brings back a readable
+    plugin (B186);
   * the preflight reports of both tools run under "set -euo pipefail"
     before anything else of the tool (B185: no unbound variable);
   * System Status (management/status_checks.py) shows that file as a
@@ -252,6 +256,42 @@ def main():
 	out, err = run("verify", run.file(upstream), core, run.file(tpl), core, "--json", j, "x", "/x --ack-local")
 	check("unchanged upstream box after setup: nothing, no file", out == [] and not os.path.exists(j), str(out) + err)
 
+	# B186: a plugin brought back with the modes of a root-only copy cannot
+	# be read by the web server; verify names it (and keeps the file).
+	rc = os.path.join(tempfile.mkdtemp(), "roundcubemail")
+	os.makedirs(os.path.join(rc, "config"))
+	with open(os.path.join(rc, "config", "config.inc.php"), "w", encoding="utf-8") as f:
+		f.write(back)
+	names = run.file("acl\ncontextmenu\ntwofactor_gauthenticator\n")
+	for pl in ("acl", "contextmenu", "twofactor_gauthenticator"):
+		os.makedirs(os.path.join(rc, "plugins", pl, "lib"))
+		for fn in (pl + ".php", "lib/x.php"):
+			with open(os.path.join(rc, "plugins", pl, fn), "w") as f:
+				f.write("<?php\n")
+	os.chmod(os.path.join(rc, "plugins", "contextmenu"), 0o700)
+	os.chmod(os.path.join(rc, "plugins", "contextmenu", "contextmenu.php"), 0o600)
+	os.chmod(os.path.join(rc, "plugins", "twofactor_gauthenticator", "lib", "x.php"), 0o640)
+	out, err = run("verify", old_cfg, names, os.path.join(rc, "config", "config.inc.php"), names, "--json", j, "x", "/x --ack-local")
+	check("B186: unreadable plugin copies named (2 entries, 1 entry), setup's acl not looked at",
+		out == ["plugin directory plugins/contextmenu: the web server (www-data) cannot read 2 of its files and directories (contextmenu, ...), so Roundcube does not load it",
+			"plugin directory plugins/twofactor_gauthenticator: the web server (www-data) cannot read 1 of its files and directories (twofactor_gauthenticator/lib/x.php), so Roundcube does not load it"]
+		and os.path.exists(j), str(out) + err)
+	for dp, dn, fn in os.walk(os.path.join(rc, "plugins")):
+		os.chmod(dp, 0o755)
+		for x in fn:
+			os.chmod(os.path.join(dp, x), 0o644)
+	out, err = run("verify", old_cfg, names, os.path.join(rc, "config", "config.inc.php"), names, "--json", j, "x", "/x --ack-local")
+	check("B186: readable plugins: nothing open", out == [] and not os.path.exists(j), str(out) + err)
+
+	# B186: the in-place tool keeps the plugin copies with their modes (root's
+	# only is old-roundcube/ itself and the old config.inc.php).
+	check("B186: save_old_roundcube keeps the plugins' modes", *save_old_roundcube_modes())
+	for tool in TOOLS:
+		src = open(os.path.join(ROOT, tool), encoding="utf-8").read()
+		fn = re.search(r"\nsave_old_roundcube\(\) \{.*?\n\}\n", src, re.S).group(0)
+		check("B186: %s: no chmod -R go= of the kept copy" % tool,
+			'\tchmod -R go= "$OLD_RC.new"' not in fn and '\tchmod go= "$OLD_RC.new" "$OLD_RC.new/plugins.txt"' in fn)
+
 	# System Status.
 	sc = load_status_checks()
 	sc.LOCAL_CHANGES_OWNER = os.getuid()
@@ -308,6 +348,45 @@ def main():
 	print()
 	print("%d failed" % len(FAILED) if FAILED else "all passed")
 	return 1 if FAILED else 0
+
+
+def save_old_roundcube_modes():
+	tool = "tools/upgrade-in-place-to-2604.sh"
+	src = open(os.path.join(ROOT, tool), encoding="utf-8").read()
+	py = re.search(r"\nROUNDCUBE_PY=\$\(cat <<'EOF'\n.*?\nEOF\n\)\n", src, re.S).group(0)
+	funcs = "".join(re.search(r"\n%s\(\) \{.*?\n\}\n" % n, src, re.S).group(0) for n in ("save_old_roundcube", "roundcube_plugin_dirs"))
+	d = tempfile.mkdtemp()
+	rc = os.path.join(d, "roundcubemail")
+	os.makedirs(os.path.join(rc, "config"))
+	os.makedirs(os.path.join(rc, "plugins", "archive"))
+	os.makedirs(os.path.join(rc, "plugins", "contextmenu", "skins"))
+	os.chmod(os.path.join(rc, "plugins", "contextmenu"), 0o755)
+	with open(os.path.join(rc, "config", "config.inc.php"), "w") as f:
+		f.write(template())
+	os.chmod(os.path.join(rc, "config", "config.inc.php"), 0o640)
+	for fn in ("contextmenu.php", "skins/a.css"):
+		with open(os.path.join(rc, "plugins", "contextmenu", fn), "w") as f:
+			f.write("x\n")
+		os.chmod(os.path.join(rc, "plugins", "contextmenu", fn), 0o644)
+	old_rc = os.path.join(d, "state", "old-roundcube")
+	os.makedirs(os.path.dirname(old_rc))
+	script = "set -euo pipefail\n" + py + """
+say() { echo "$*"; }
+die() { echo "DIE $*"; exit 1; }
+state_get() { echo; }
+state_set() { :; }
+RC_DIR=%s
+OLD_RC=%s
+""" % (rc, old_rc) + funcs + "\nsave_old_roundcube\n"
+	r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+	if r.returncode != 0:
+		return False, r.stdout + r.stderr
+	modes = {}
+	for rel in ("", "plugins.txt", "config.inc.php", "plugins/contextmenu", "plugins/contextmenu/contextmenu.php", "plugins/contextmenu/skins/a.css"):
+		modes[rel] = oct(stat.S_IMODE(os.stat(os.path.join(old_rc, rel)).st_mode))
+	want = {"": "0o700", "plugins.txt": "0o600", "config.inc.php": "0o600", "plugins/contextmenu": "0o755",
+		"plugins/contextmenu/contextmenu.php": "0o644", "plugins/contextmenu/skins/a.css": "0o644"}
+	return modes == want, repr(modes)
 
 
 def preflight_report(tool, fn):

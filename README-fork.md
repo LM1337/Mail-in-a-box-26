@@ -2076,7 +2076,10 @@ hook, for example:
     grep -q "'contextmenu'" "$RC/config/config.inc.php" \
       || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
 
-and run `--redo-from local-ext`, which checks again. When everything is dealt
+and run `--redo-from local-ext`, which checks again. `cp -a` keeps the
+plugin's modes as they were in the old Roundcube; the web server (www-data)
+must be able to read the plugin, and phase verify names one that it cannot
+read (Roundcube does not load it then). When everything is dealt
 with (or not wanted), `upgrade-in-place-to-2604.sh --ack-local` (or removing
 the file) ends the warning. Setup writes `config.inc.php` again on the next
 update, so keep such a change in a script of your own.
@@ -2320,7 +2323,10 @@ zurück, zum Beispiel:
     grep -q "'contextmenu'" "$RC/config/config.inc.php" \
       || sed -i "s/^\(\$config\['plugins'\] = array(\)/\1'contextmenu', /" "$RC/config/config.inc.php"
 
-und danach `--redo-from local-ext`, das erneut prüft. Ist alles erledigt
+und danach `--redo-from local-ext`, das erneut prüft. `cp -a` behält die
+Rechte des Plugins aus dem alten Roundcube; der Webserver (www-data) muss das
+Plugin lesen können, und die Phase verify nennt eines, das er nicht lesen
+kann (Roundcube lädt es dann nicht). Ist alles erledigt
 (oder nicht mehr gewünscht), beendet `upgrade-in-place-to-2604.sh
 --ack-local` (oder das Löschen der Datei) die Warnung. Setup schreibt
 `config.inc.php` beim nächsten Update wieder neu; eine solche Änderung also
@@ -2733,8 +2739,9 @@ containers do not, the tool checks).
   System Status shows a warning with the items under "show more", and so
   does the daily status mail. Bring back what the new Roundcube supports
   (copy the plugin directory to `/usr/local/lib/roundcubemail/plugins/` and
-  add it to `$config['plugins']`; setup writes the file again on every run),
-  then end the warning with `migrate-to-2604.sh --ack-local` (or remove the
+  add it to `$config['plugins']`; setup writes the file again on every run;
+  the web server, www-data, must be able to read the plugin, which phase
+  verify checks), then end the warning with `migrate-to-2604.sh --ack-local` (or remove the
   file). Not with `--from-backup`: a backup has no Roundcube.
 
 #### After the migration
@@ -3157,7 +3164,8 @@ das, manche Container nicht; das Werkzeug prüft es).
   Statusmail. Was das neue Roundcube unterstützt, zurückholen (das
   Plugin-Verzeichnis nach `/usr/local/lib/roundcubemail/plugins/` kopieren
   und in `$config['plugins']` eintragen; setup schreibt die Datei bei jedem
-  Lauf neu), danach die Warnung mit `migrate-to-2604.sh --ack-local` beenden
+  Lauf neu; der Webserver, www-data, muss das Plugin lesen können, was die
+  Phase verify prüft), danach die Warnung mit `migrate-to-2604.sh --ack-local` beenden
   (oder die Datei löschen). Nicht bei `--from-backup`: Eine Sicherung enthält
   kein Roundcube.
 

@@ -1367,6 +1367,53 @@ def compare(old, old_dirs, new=None, new_dirs=None):
 	return items
 
 
+def web_unreadable(rc_dir, dirs, limit=20000):
+	# The local plugin directories of the Roundcube in rc_dir that the web
+	# server (www-data, which runs Roundcube) cannot read completely: a file
+	# without read permission, a directory without read and search
+	# permission for it (B186: a copy with the modes of old-roundcube/, root's
+	# only, is not loaded). Links are not followed.
+	import pwd, stat
+	try:
+		pw = pwd.getpwnam("www-data")
+		uid, groups = pw.pw_uid, set(os.getgrouplist("www-data", pw.pw_gid))
+	except (KeyError, OSError):
+		uid, groups = -1, set()
+
+	def ok(st, need):
+		bits = st.st_mode >> 6 if st.st_uid == uid else st.st_mode >> 3 if st.st_gid in groups else st.st_mode
+		return bits & need == need
+
+	items = []
+	for d in dirs:
+		if d in SETUP_PLUGIN_DIRS or not NAME_RE.match(d):
+			continue
+		top = os.path.join(rc_dir, "plugins", d)
+		if not os.path.isdir(top) or os.path.islink(top):
+			continue
+		bad, first, n = 0, None, 0
+		for root, subdirs, files in os.walk(top):
+			for entry in [None] + subdirs + files:
+				p = root if entry is None else os.path.join(root, entry)
+				n += 1
+				try:
+					st = os.lstat(p)
+				except OSError:
+					continue
+				if stat.S_ISLNK(st.st_mode):
+					continue
+				need = 5 if stat.S_ISDIR(st.st_mode) else 4
+				if (entry is None or not stat.S_ISDIR(st.st_mode)) and not ok(st, need):
+					bad += 1
+					first = first or os.path.relpath(p, os.path.join(rc_dir, "plugins"))
+			if n > limit:
+				break
+		if bad:
+			items.append("plugin directory plugins/%s: the web server (www-data) cannot read %d of its files and directories (%s%s), so Roundcube does not load it" % (
+				name(d), bad, shown(first, 80), ", ..." if bad > 1 else ""))
+	return items
+
+
 def write_json(path, tool, ack, items):
 	# Root's only, written next to it and renamed into place; the directory is
 	# root's own (0700).
@@ -1396,6 +1443,9 @@ def main(argv):
 	elif len(argv) in (5, 9) and argv[0] == "verify":
 		new = read_config(argv[3]) or {"settings": {}, "plugins": [], "other": [], "error": "is missing"}
 		items = compare(read_config(argv[1]), read_names(argv[2]), new, read_names(argv[4]))
+		old_dirs = read_names(argv[2])
+		items += web_unreadable(os.path.dirname(os.path.dirname(os.path.abspath(argv[3]))),
+			[d for d in read_names(argv[4]) if d in old_dirs])
 		if len(argv) == 9 and argv[5] == "--json":
 			if items:
 				write_json(argv[6], argv[7], argv[8], items)
@@ -2367,7 +2417,12 @@ save_old_roundcube() {
 		tar -C "$RC_DIR" -cf - -- "${extra[@]}" | tar -C "$OLD_RC.new" -xf - \
 			|| die "Could not copy the Roundcube plugins ${extra[*]} to $OLD_RC."
 	fi
-	chmod -R go= "$OLD_RC.new"
+	# The directory is root's only (0700). The old config.inc.php holds
+	# Roundcube's key and maybe passwords; the plugin copies keep their modes,
+	# so that "cp -a" brings back a plugin that the web server can read
+	# (B186: with "chmod -R go=", Roundcube could not load it).
+	chmod go= "$OLD_RC.new" "$OLD_RC.new/plugins.txt"
+	if [ -f "$OLD_RC.new/config.inc.php" ]; then chmod go= "$OLD_RC.new/config.inc.php"; fi
 	rm -rf "$OLD_RC"
 	mv -T "$OLD_RC.new" "$OLD_RC"
 	state_set ROUNDCUBE_SAVED_AT "$(date -u +%FT%TZ)"
@@ -2398,7 +2453,9 @@ whole old tree in the system archive)"). Bring back what the new Roundcube suppo
 	say "in $HOOK_DIR/*.sh, for example (then run '$SELF --redo-from local-ext'):"
 	say "  cp -a \"\$UPGRADE_STATE_DIR/old-roundcube/plugins/NAME\" $RC_DIR/plugins/"
 	say "  and add 'NAME' to \$config['plugins'] in $RC_DIR/config/config.inc.php"
-	say "Setup writes config.inc.php again on every run (also on later updates)."
+	say "(cp -a keeps the plugin's modes; the web server, www-data, must be able to read it,"
+	say "which phase verify checks.) Setup writes config.inc.php again on every run (also on"
+	say "later updates)."
 	say "System Status warns about these until '$SELF --ack-local' (or removing $LOCAL_CHANGES)."
 }
 
