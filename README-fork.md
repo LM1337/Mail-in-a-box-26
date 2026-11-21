@@ -610,7 +610,7 @@ and the status checks.
 proxy of `/caldav`, `/carddav` and `/webdav` connects to Nextcloud from
 127.0.0.1 and passes the client's address in `X-Forwarded-For`. nginx now
 passes that header to Nextcloud only from this proxy, which proves itself
-with a secret from `/etc/nginx/conf.d/miab-nextcloud-proxy.conf` (root's
+with a secret from `/etc/nginx/miab-nextcloud-proxy.conf` (root's
 only, made once by setup), so another process on the box can no longer
 have a failed login logged and banned under an address of its choice. A
 proxy of your own in `www/custom.yaml` to the box's own `/cloud` is seen as
@@ -690,7 +690,7 @@ den Statusprüfungen.
 von 127.0.0.1 aus mit Nextcloud und reicht die Adresse des Clients in
 `X-Forwarded-For` weiter. nginx gibt diesen Header jetzt nur noch von diesem
 Proxy an Nextcloud weiter; der Proxy weist sich mit einem Geheimnis aus
-`/etc/nginx/conf.d/miab-nextcloud-proxy.conf` aus (nur für root lesbar, von
+`/etc/nginx/miab-nextcloud-proxy.conf` aus (nur für root lesbar, von
 setup einmal erzeugt). Ein anderer Prozess auf der Box kann so keine
 fehlgeschlagene Anmeldung mehr unter einer Adresse seiner Wahl protokollieren
 und sperren lassen. Ein eigener Proxy in `www/custom.yaml` auf das `/cloud`

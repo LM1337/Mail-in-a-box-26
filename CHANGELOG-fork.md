@@ -127,12 +127,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   or service could make it log a failed login under another address, which
   the `miab-owncloud` jail then banned. nginx's proxy of `/caldav`,
   `/carddav` and `/webdav` now proves itself to `/cloud` with a secret
-  header (from `/etc/nginx/conf.d/miab-nextcloud-proxy.conf`, root's only,
+  header (from `/etc/nginx/miab-nextcloud-proxy.conf`, root's only,
   made once by setup and kept), and nginx passes `X-Forwarded-For` to
   Nextcloud's PHP only with that secret; PHP never sees the secret. Clients
   on the Internet keep their own address through the proxy (throttle and
   jail as before), Z-Push stays 127.0.0.1, and another local request is
-  logged as 127.0.0.1, which fail2ban ignores. New smoke check
+  logged as 127.0.0.1, which fail2ban ignores. A downgrade to
+  v78-r2604.4 leaves the file unused. New smoke check
   `nextcloud-forwarded-for-local`.
 
 ### Upgrade note
