@@ -38,19 +38,37 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   setup builds a new tree in `/usr/local/lib/roundcubemail` and writes its
   own plugin list into `config/config.inc.php`, so extra plugins (and
   changes to that file) are gone afterwards, and neither the preflight
-  check nor `etc-report.txt` names them. Planned: the preflight check
-  lists the plugin directories that setup does not install and the
-  differences of the plugin list and of other settings in
-  `config.inc.php` (blocking like the other local extensions unless
-  `--keep-local`), the system archive keeps the old tree, and the report
-  of phase verify names what a hook in `/etc/mailinabox/upgrade-2604.d/`
-  has to bring back (a question about local changes in the in-place
-  upgrade, after v78-r2604.4). The migration tool (tools/migrate-to-2604.sh)
-  has the same gap and gets the same report.
+  check nor `etc-report.txt` names them (a question about local changes in
+  the in-place upgrade, after v78-r2604.4). Planned, without stopping the
+  upgrade: the preflight check warns and names the plugin directories that
+  setup does not install and the differences of the plugin list and of
+  other settings in `config.inc.php`, and the upgrade goes on; the system
+  archive keeps the old tree; the report of phase verify names what is
+  missing and how a hook in `/etc/mailinabox/upgrade-2604.d/` brings it
+  back. The old plugins are not copied back on their own (a plugin for the
+  old Roundcube can break the new one). The open items go into a
+  root-only file, and while it exists System Status shows a warning with
+  the details under "show more" (and so the daily mail of the status
+  checks names it); `--ack-local` or removing the file ends it. The
+  migration tool (tools/migrate-to-2604.sh) has the same gap and gets the
+  same report and warning.
 * tools/update-check.sh records 24 Postfix parameters, but not
   `tls_eecdh_auto_curves` and `tls_ffdhe_auto_groups`, so the post-quantum
-  change of this release does not show in its list of changes (seen in T5b
-  of v78-r2604.3; the smoke check `tls-key-exchange` shows it).
+  change of v78-r2604.3 does not show in its list of changes (seen in T5b
+  of v78-r2604.3; the smoke check `tls-key-exchange` shows it). Planned:
+  record both, and `after` judges only keys that both records have: a key
+  that only the record after the update has (recorded by a newer version
+  of the tool) goes into a section "newly recorded (not judged)" of
+  `changes.txt` and is counted in its RESULT line, but is no unexpected
+  change. Output stays on the console and in `/root/update-check/`.
+* Setup does not mention tools/update-check.sh. Planned: at the end of a
+  setup run on an existing box (not the first install, and not when the
+  in-place or migration tool runs setup, which have their own reports),
+  setup prints a short hint, without stopping: if the newest record in
+  `/root/update-check/` has a "before" but no "after", the commands
+  `after` and `mailcheck` with that record; otherwise that `before` and
+  `backup` can be run before the next update and `after` and `mailcheck`
+  after it, optionally (README-fork.md, "Updating the fork").
 * The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
   snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX
   mail to Spam and back, which gave it a new UID and so a new POP3 UIDL
