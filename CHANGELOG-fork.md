@@ -34,6 +34,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
 
+### Changed
+
+* **README: known issues (B122, B121, B137)**\
+  README-fork.md has a new section "Known issues / Bekannte
+  Einschränkungen" (English and German) with three issues from the list of
+  planned work: a Dovecot reload ends the open IMAP sessions (B122); it
+  still causes two client-visible failures, a login handed to the new auth
+  process at that moment and a Z-Push answer that cannot connect again
+  (B122, B121, B137); and a race in the migration of Roundcube's CardDAV
+  plugin when two sessions log in at once after its upgrade (to be
+  reported to the plugin project).
+
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -161,20 +173,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
   (`milter_default_action`). Candidates for a reload or a restart only on a
   change.
-* **A Dovecot reload still causes two client-visible failures (B122, B121, B137)**\
-  A Dovecot reload (B122) still has two client-visible moments: a login
-  that the old login process hands to the new auth process at that moment
-  fails as an internal failure (Nextcloud's `user_external` counts it as a
-  failed login of the client; harmless for 127.0.0.1 after B121), and a
-  FolderSync or Ping that Z-Push answers during the reload gets a server
-  error if Z-Push cannot connect again (B137).
-* **Roundcube CardDAV plugin migration race after an upgrade**\
-  Roundcube's CardDAV plugin can log "duplicate column name: account_id",
-  "no such column: active" or "UNIQUE constraint failed:
-  carddav_migrations.filename" when two sessions log in at the same moment
-  for the first time after an upgrade of the plugin (a race in its schema
-  migration; one of the logins fails once). After an update from rc7 or
-  earlier, `update-check.sh after` accepts the last form.
 * **nginx sends no HSTS header on /admin/**\
   nginx sets no HSTS header on `/admin/`: the headers of that location
   replace the server's (upstream). Browsers that visited another page of
@@ -192,9 +190,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
 * **In-place upgrade --check prints the GitHub URL for other sources**\
   `upgrade-in-place-to-2604.sh --check` prints the start command with the
   GitHub URL also when `SOURCE` and `TAG` name another source.
-* **A Dovecot reload ends open IMAP sessions (B122)**\
-  A Dovecot reload ends the open IMAP sessions (their clients log in
-  again); setup reloads Dovecot only when its configuration changed (B122).
 * **Munin critical-only alerts never mail the return to normal**\
   Critical only (Munin's alerts) never mails the return to normal.
 * **Control panel asks for a favicon.ico that is not installed**\

@@ -598,6 +598,63 @@ is running.“:
   das schrittweise Upgrade einer alten Nextcloud braucht.
 
 
+Known issues / Bekannte Einschränkungen
+---------------------------------------
+
+### English
+
+These issues of the current release are known and not fixed. The fixed bugs
+are in [BUGS-fork.md](BUGS-fork.md), whose section "Known limitations (not
+fixed)" lists a few more.
+
+* **A Dovecot reload ends open IMAP sessions (B122).** Setup reloads
+  Dovecot only when its configuration changed, which most updates do not
+  do. A reload keeps the listening sockets, so no connection is refused,
+  but Dovecot ends the open IMAP sessions, and their clients log in again.
+* **A Dovecot reload still causes two client-visible failures (B122, B121,
+  B137).** A login that the old login process hands to the new auth
+  process at that moment fails as an internal failure; Nextcloud's IMAP
+  login (`user_external`) counts it as a failed login of the client
+  (harmless for 127.0.0.1 since B121). A FolderSync or Ping that Z-Push
+  answers during the reload gets a server error when Z-Push cannot
+  connect to Dovecot again (B137); the phone tries again.
+* **A race in the migration of Roundcube's CardDAV plugin after an
+  upgrade.** When two sessions log in at the same moment for the first
+  time after an upgrade of the plugin, its schema migration runs twice and
+  logs "duplicate column name: account_id", "no such column: active" or
+  "UNIQUE constraint failed: carddav_migrations.filename", and one of the
+  logins fails once. After an update from rc7 or earlier,
+  `update-check.sh after` accepts the last form. To be reported to the
+  plugin project.
+
+### Deutsch
+
+Diese Einschränkungen des aktuellen Releases sind bekannt und nicht behoben.
+Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
+„Known limitations (not fixed)“ nennt noch einige mehr.
+
+* **Ein Reload von Dovecot beendet offene IMAP-Sitzungen (B122).** setup
+  lädt Dovecot nur neu, wenn sich seine Konfiguration geändert hat, was bei
+  den meisten Updates nicht der Fall ist. Beim Reload bleiben die
+  Listening-Sockets offen, keine Verbindung wird abgewiesen, aber Dovecot
+  beendet die offenen IMAP-Sitzungen, und ihre Clients melden sich neu an.
+* **Ein Reload von Dovecot führt noch zu zwei Fehlern, die Clients sehen
+  (B122, B121, B137).** Eine Anmeldung, die der alte Login-Prozess genau in
+  diesem Moment an den neuen Auth-Prozess übergibt, scheitert als interner
+  Fehler; die IMAP-Anmeldung von Nextcloud (`user_external`) zählt das als
+  fehlgeschlagene Anmeldung des Clients (für 127.0.0.1 seit B121 harmlos).
+  Ein FolderSync oder Ping, den Z-Push während des Reloads beantwortet,
+  bekommt einen Serverfehler, wenn Z-Push keine neue Verbindung zu Dovecot
+  bekommt (B137); das Telefon versucht es erneut.
+* **Eine Wettlaufsituation in der Migration des CardDAV-Plugins von
+  Roundcube nach einem Upgrade.** Melden sich nach einem Upgrade des
+  Plugins zwei Sitzungen im selben Moment zum ersten Mal an, läuft seine
+  Schema-Migration zweimal und protokolliert „duplicate column name:
+  account_id“, „no such column: active“ oder „UNIQUE constraint failed:
+  carddav_migrations.filename“, und eine der Anmeldungen scheitert einmal.
+  Nach einem Update von rc7 oder älter akzeptiert `update-check.sh after`
+  die letzte Form. Eine Meldung an das Plugin-Projekt steht noch aus.
+
 Greylisting exceptions / Ausnahmen vom Greylisting
 --------------------------------------------------
 
