@@ -44,6 +44,13 @@
 #   is opened as above; PATH must be a directory or a regular file with one
 #   hard link, and a symbolic link or anything else is refused.
 #
+# tools/write_conf.py --own-root-only PATH USER GROUP MODE
+#   the same, but PATH must belong to root already (checked through the
+#   descriptor): for a file or directory of root's in a directory that another
+#   account owns ($STORAGE_ROOT/mail and users.sqlite in the storage user's
+#   home), which that account could have replaced with one of its own; --own
+#   would make that one root's.
+#
 # tools/write_conf.py --check-own PATH...
 #   changes nothing: prints "PATH: why" for each PATH that --own would refuse
 #   (a missing PATH is fine) and exits 1 if there is one. setup/start.sh runs
@@ -58,6 +65,7 @@ import stat
 import sys
 
 MAX_LINKS = 40
+ROOT_UID = 0 # the owner that --own-root-only requires (a test may set another)
 
 
 def _root_only(st):
@@ -235,8 +243,8 @@ def check_own(path):
 		os.close(dfd)
 
 
-def own(path, uid, gid, mode):
-	"""See --own in the header."""
+def own(path, uid, gid, mode, root_only=False):
+	"""See --own and --own-root-only in the header."""
 	directory, name = os.path.split(os.path.abspath(path))
 	dfd = open_dir(directory)
 	try:
@@ -252,6 +260,10 @@ def own(path, uid, gid, mode):
 			raise OSError("%s changed while it was looked at" % path)
 		if stat.S_ISREG(fst.st_mode) and fst.st_nlink > 1:
 			raise OSError("%s has %d hard links" % (path, fst.st_nlink))
+		if root_only and fst.st_uid != ROOT_UID:
+			raise OSError("%s belongs to uid %d, not to root, and is not taken over: another "
+				"account may have put it there. Check it, and give it to root (chown root:root) "
+				"if it is the box's own" % (path, fst.st_uid))
 		os.fchown(fd, uid, gid)
 		os.fchmod(fd, mode)
 	finally:
@@ -270,18 +282,20 @@ if __name__ == "__main__":
 			for p in problems:
 				print(p)
 			sys.exit(1 if problems else 0)
-		if len(sys.argv) == 6 and sys.argv[1] == "--own":
-			own(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid, int(sys.argv[5], 8))
+		if len(sys.argv) == 6 and sys.argv[1] in ("--own", "--own-root-only"):
+			own(sys.argv[2], pwd.getpwnam(sys.argv[3]).pw_uid, grp.getgrnam(sys.argv[4]).gr_gid, int(sys.argv[5], 8),
+				root_only=sys.argv[1] == "--own-root-only")
 			sys.exit(0)
 		if len(sys.argv) not in (2, 3) or sys.argv[1].startswith("--"):
 			print("usage: tools/write_conf.py FILE [MODE] < CONTENT\n"
 				"       tools/write_conf.py --own-tree DIR USER GROUP [FILEMODE DIRMODE]\n"
 				"       tools/write_conf.py --own PATH USER GROUP MODE\n"
+				"       tools/write_conf.py --own-root-only PATH USER GROUP MODE\n"
 				"       tools/write_conf.py --check-own PATH...", file=sys.stderr)
 			sys.exit(1)
 		mode = int(sys.argv[2], 8) if len(sys.argv) == 3 else 0o644
 		write_if_changed(sys.argv[1], sys.stdin.buffer.read(), mode)
 	except (OSError, ValueError, KeyError) as e:
-		args = sys.argv[2:3] if sys.argv[1:2] in (["--own-tree"], ["--own"]) else sys.argv[1:2]
+		args = sys.argv[2:3] if sys.argv[1:2] in (["--own-tree"], ["--own"], ["--own-root-only"]) else sys.argv[1:2]
 		print("write_conf.py: %s: %s" % ("".join(args), e), file=sys.stderr)
 		sys.exit(1)

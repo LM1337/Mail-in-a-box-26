@@ -35,9 +35,14 @@ db_path=$STORAGE_ROOT/mail/users.sqlite
 # mail, dkim: opendkim, postgrey, spamassassin: spampd, roundcube: www-data),
 # so the directory itself is root:root 755: www-data can no longer rename,
 # replace or remove anything in it. Through descriptors (tools/write_conf.py
-# --own), refusing a symbolic link (B147).
+# --own), refusing a symbolic link (B147). Only a directory of root's is
+# taken: the storage user owns $STORAGE_ROOT and can rename mail/ and put a
+# directory of its own there (with a users.sqlite of its choice); --own would
+# make that root's, so setup stops instead (--own-root-only). Dovecot, Postfix
+# and the management daemon still open users.sqlite by path (README-fork.md,
+# "Known issues").
 if [ -d "$STORAGE_ROOT/mail" ]; then
-	tools/write_conf.py --own "$STORAGE_ROOT/mail" root root 755
+	tools/write_conf.py --own-root-only "$STORAGE_ROOT/mail" root root 755
 fi
 
 # Create an empty database if it doesn't yet exist. It is made in a directory
@@ -59,7 +64,7 @@ fi
 # Owner and mode of the database (B210): root:root 0600, the password hashes
 # are no longer readable by every local account. Changing them does not touch
 # the open descriptors of Dovecot and Postfix, so no lookup fails.
-tools/write_conf.py --own "$db_path" root root 600
+tools/write_conf.py --own-root-only "$db_path" root root 600
 
 # The rollback journal, not WAL: in WAL mode every reader must be able to
 # write the -shm file next to the database, and Postfix's daemons, which read

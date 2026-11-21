@@ -29,7 +29,10 @@ ssl_certificates and mailconfig are replaced by stand-ins (YAML as JSON).
     missing file gives no records, the file is written through the
     directory with its read bits kept; web_update.py (the web configuration,
     the TLS certificates, the status checks) goes on without the records
-    of a replaced dns/ and says why, instead of failing.
+    of a replaced dns/ and says why, instead of failing;
+  * tools/write_conf.py --own-root-only (setup's owner of $STORAGE_ROOT/mail
+    and users.sqlite) refuses a directory that root does not own already,
+    where --own would take it over.
 
   tests/fork/storage-dirs.py
 
@@ -229,6 +232,27 @@ for how in ("link", "group-writable"):
 	check("dns %s: web and TLS go on without the records, with the reason" % how, (got, "not used" in err.getvalue()), (set(), True))
 fresh()
 check("dns: web_update reads the custom A records", web_update.get_domains_with_a_records(WEB_ENV), {"www.example.com"})
+
+# tools/write_conf.py --own-root-only ($STORAGE_ROOT/mail and users.sqlite):
+# only what root owns already is taken, not a directory or database that the
+# storage user put in place of them.
+import importlib.util  # noqa: E402
+spec = importlib.util.spec_from_file_location("write_conf", os.path.join(MGMT, "..", "tools", "write_conf.py"))
+write_conf = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(write_conf)
+me, mygid = os.getuid(), os.getgid()
+d = os.path.join(tmp, "mail")
+os.makedirs(d, exist_ok=True)
+os.chmod(d, 0o775)
+write_conf.ROOT_UID = me + 1
+check("--own-root-only: another owner's directory refused", raises(write_conf.own, d, me, mygid, 0o755, True), "OSError")
+check("--own-root-only: refused, mode unchanged", oct(os.stat(d).st_mode & 0o777), "0o775")
+write_conf.own(d, me, mygid, 0o755)
+check("--own takes it (the old behaviour)", oct(os.stat(d).st_mode & 0o777), "0o755")
+write_conf.ROOT_UID = me
+os.chmod(d, 0o775)
+write_conf.own(d, me, mygid, 0o755, True)
+check("--own-root-only: root's own directory taken", oct(os.stat(d).st_mode & 0o777), "0o755")
 
 shutil.rmtree(tmp)
 if failures:

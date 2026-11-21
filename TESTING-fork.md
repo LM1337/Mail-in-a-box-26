@@ -333,8 +333,11 @@ report. The groups:
   replaced without touching its target), backup.py and dns_update.py with
   the directory replaced by a link or a group-writable copy with another
   account's settings (not used, nothing written there, the nightly backup
-  stops with the reason), with `custom.yaml` a link, and web_update.py
-  without the records of a replaced `dns/`; group admin runs it
+  stops with the reason), with `custom.yaml` a link, web_update.py
+  without the records of a replaced `dns/`, and
+  `tools/write_conf.py --own-root-only` (setup's owner of
+  `$STORAGE_ROOT/mail` and `users.sqlite`) refusing a directory that root
+  does not own already; group admin runs it
   (`admin-storage-dirs-unit`).
   `tests/fork/update-check-compare.py` (B201; no box needed) runs the
   comparison of `tools/update-check.sh after` on states in a temporary

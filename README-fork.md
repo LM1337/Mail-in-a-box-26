@@ -860,6 +860,17 @@ fixed)" lists a few more.
   listing nor say that they could not check. Check the hostname and the
   address on https://check.spamhaus.org/; once the box runs, its status
   checks ask through its own resolver.
+* **The storage user can still replace $STORAGE_ROOT/mail (B210).**
+  `$STORAGE_ROOT` is the storage user's home, so that account can rename
+  `mail/` there and put a directory of its own in its place, with a
+  `users.sqlite` of its choice (accounts, password hashes, the admin
+  privilege) and links back to the mailboxes. Dovecot, Postfix and the
+  management daemon open the database by its path and would use that
+  copy. It needs code running as the storage user, which no service of the
+  box runs; the real accounts then no longer work, so it does not go
+  unnoticed. Setup stops at such a directory or database instead of
+  making it root's ("not taken over"). The same holds for `ssl/` (the
+  private keys).
 
 ### Deutsch
 
@@ -923,6 +934,18 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   sehen noch melden, dass sie nicht prüfen konnten. Hostname und Adresse
   auf https://check.spamhaus.org/ selbst prüfen; sobald die Box läuft,
   fragen ihre Statusprüfungen über ihren eigenen Resolver.
+* **Der Speicherbenutzer kann $STORAGE_ROOT/mail noch ersetzen (B210).**
+  `$STORAGE_ROOT` ist das Heimatverzeichnis des Speicherbenutzers; dieses
+  Konto kann `mail/` dort umbenennen und ein eigenes Verzeichnis an seine
+  Stelle setzen, mit einer `users.sqlite` nach seiner Wahl (Konten,
+  Passwort-Hashes, Administratorrechte) und Links zurück auf die Postfächer.
+  Dovecot, Postfix und der Management-Dienst öffnen die Datenbank über
+  ihren Pfad und nähmen diese Kopie. Dafür muss Code als Speicherbenutzer
+  laufen, und kein Dienst der Box läuft so; die echten Konten funktionieren
+  dann nicht mehr, es bleibt also nicht unbemerkt. setup bricht bei einem
+  solchen Verzeichnis oder einer solchen Datenbank ab, statt sie root zu
+  geben („not taken over“). Dasselbe gilt für `ssl/` (die privaten
+  Schlüssel).
 
 Security updates and Ubuntu Pro / Sicherheitsupdates und Ubuntu Pro
 -------------------------------------------------------------------

@@ -424,7 +424,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * **User database root's only; webmail password changes via the daemon (B210)**\
   Setup gives `$STORAGE_ROOT/mail` to root:root 755 and `users.sqlite` to
-  root:root 0600 (through descriptors), and switches Roundcube's password
+  root:root 0600 (through descriptors, and only when root owns them
+  already: setup stops with "not taken over" otherwise; check such a
+  directory and give it to root with `chown root:root`), and switches
+  Roundcube's password
   plugin to the fork's driver. Mail is not interrupted: Dovecot and Postfix
   keep their open database, and new lookups open it as root. Between
   setup's Roundcube step and the restart of the management daemon a few
@@ -507,6 +510,15 @@ v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add 
   from critical from one back from warning, nor see one that drops from
   critical to warning. README-fork.md (Munin alerts) says so. A fix would
   need munin-notify to keep the critical values of the last run itself.
+* **The storage user can still replace $STORAGE_ROOT/mail and ssl/**\
+  The storage user owns `$STORAGE_ROOT` and can rename `mail/` and `ssl/`
+  in it and put directories of its own there: Dovecot, Postfix and the
+  management daemon open `users.sqlite` by path, and the services read the
+  private keys by path. Setup no longer makes such a `mail/` or database
+  root's (it stops), but the services would use them. A fix needs both in
+  a directory of root's outside `$STORAGE_ROOT` (or a bind mount), which
+  changes the paths of the backups and the tools; README-fork.md, "Known
+  issues" (seen in the review of B210 to B213).
 * **www-data is still in the group dovecot**\
   Setup adds www-data to the group dovecot, as upstream did "so PHP can use
   doveadm, for the password changing plugin". No version of this fork uses
