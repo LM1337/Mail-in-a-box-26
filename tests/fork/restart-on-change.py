@@ -19,7 +19,11 @@ restart_on_change runs with stand-ins for the service commands and a
 temporary record directory: the first call restarts and records, a second
 one with the same files does nothing, a change restarts again, a service
 that does not run (or runs an older package) is restarted although nothing
-changed, and a failed restart records nothing.
+changed, and a failed restart records nothing. load_php_fpm, the same way:
+a reload when the configuration changed, nothing when it did not, a
+restart when the reload brings no "ready to handle connections", when
+php-fpm -t refuses the configuration, when PHP-FPM does not run afterwards
+or did not run before.
 
 It also checks that the services of the planned item are no longer
 restarted with restart_service.
@@ -156,6 +160,61 @@ restart_on_change svc svc-pkg {args}
 	with open(os.path.join(rec, "svc-config.sha256"), encoding="utf-8") as f:
 		after = f.read()
 	check("failed restart: setup stops, nothing recorded", rc != 0 and before == after, "rc=%d" % rc)
+
+# load_php_fpm with stand-ins: the record and PHP-FPM's log in temporary
+# files, "systemctl reload" appends "ready to handle connections" to the log
+# when READY=yes, "service ... restart" is counted.
+with tempfile.TemporaryDirectory() as t:
+	rec = os.path.join(t, "state")
+	log = os.path.join(t, "fpm.log")
+	calls = os.path.join(t, "calls")
+	write(log, "old line\n")
+	stub = """
+PHP_VER=8.5
+enable_service() { :; }
+sleep() { :; }
+service_runs_current_package() { [ "$RUNS" = yes ]; }
+php-fpm8.5() { [ "$FPMTEST" = ok ]; }
+systemctl() {
+	case "$1" in
+	reload) echo reload >> {calls}; [ "$READY" = yes ] && echo "NOTICE: ready to handle connections" >> {log}; return 0 ;;
+	is-active) [ "$ACTIVE" = yes ] ;;
+	esac
+}
+service() { echo "$*" >> {calls}; }
+eval "$(declare -f load_php_fpm | sed -e 's|/var/lib/mailinabox|{rec}|g' -e 's|log=/var/log/php$PHP_VER-fpm.log|log={log}|')"
+load_php_fpm
+""".replace("{calls}", shlex.quote(calls)).replace("{log}", log).replace("{rec}", rec)
+
+	def fpm(**env):
+		e = {"RUNS": "yes", "FPMTEST": "ok", "READY": "yes", "ACTIVE": "yes"}
+		e.update(env)
+		if os.path.exists(calls):
+			os.unlink(calls)
+		rc, out, err = bash(stub, e)
+		try:
+			with open(calls, encoding="utf-8") as f:
+				c = f.read().split("\n")
+		except FileNotFoundError:
+			c = []
+		return rc, [x for x in c if x], out
+
+	rc, c, out = fpm()
+	check("PHP-FPM, no record yet: a reload, no restart", rc == 0 and c == ["reload"], repr((rc, c, out)))
+	rc, c, out = fpm()
+	check("PHP-FPM, configuration unchanged: nothing", rc == 0 and c == [], repr((rc, c, out)))
+	with open(os.path.join(rec, "php-fpm-config.sha256"), "w", encoding="utf-8") as f:
+		f.write("changed\n")
+	rc, c, out = fpm(READY="no")
+	check("PHP-FPM, no ready line after the reload: restart", rc == 0 and c == ["reload", "php8.5-fpm restart"], repr((rc, c, out)))
+	os.unlink(os.path.join(rec, "php-fpm-config.sha256"))
+	rc, c, out = fpm(FPMTEST="bad")
+	check("PHP-FPM, configuration refused by php-fpm -t: restart, no reload", rc == 0 and c == ["php8.5-fpm restart"], repr((rc, c, out)))
+	rc, c, out = fpm(RUNS="no")
+	check("PHP-FPM not running or an older package: restart", rc == 0 and c == ["php8.5-fpm restart"], repr((rc, c, out)))
+	os.unlink(os.path.join(rec, "php-fpm-config.sha256"))
+	rc, c, out = fpm(ACTIVE="no")
+	check("PHP-FPM stopped after the reload: restart", rc == 0 and c == ["reload", "php8.5-fpm restart"], repr((rc, c, out)))
 
 for script, unit in (("setup/dkim.sh", "opendkim"), ("setup/dkim.sh", "opendmarc"), ("setup/spamassassin.sh", "spampd"),
 		("setup/mail-postfix.sh", "postgrey"), ("setup/system.sh", "named"), ("setup/system.sh", "systemd-resolved"),

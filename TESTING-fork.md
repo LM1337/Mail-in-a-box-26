@@ -297,7 +297,11 @@ report. The groups:
   `__pycache__` does not, missing files give no error; and, with stand-ins
   for the service commands, a restart on the first call, on a change and
   for a service that does not run, none without a change, and nothing
-  recorded after a failed restart.
+  recorded after a failed restart. The same for PHP-FPM (B122): nothing
+  without a change of its configuration, a reload on a change, a restart
+  when the reload brings no "ready to handle connections", when
+  `php-fpm8.5 -t` refuses the configuration, or when PHP-FPM does not run
+  before or after the reload.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also
