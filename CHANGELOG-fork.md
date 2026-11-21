@@ -104,7 +104,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   management daemon restarts it; Munin's plugin links; the management
   daemon's code, start script, `/etc/mailinabox.conf` and the packages of
   its virtualenv), or when it
-  does not run or runs the program of an older package, or when something
+  does not run or runs the program of an older package (for spampd,
+  postgrey and munin-node also of the Perl modules they read, which no
+  "(deleted)" mapping shows: `spamassassin`, `libnet-server-perl`,
+  `munin-common`, so that a SpamAssassin update still restarts spampd as
+  the restart on every run did), or when something
   else restarted it after setup recorded the checksum (not at boot). The
   last one covers a downgrade to v78-r2604.4, whose setup restarts them
   with its own code and keeps no checksum, and the way back up: the

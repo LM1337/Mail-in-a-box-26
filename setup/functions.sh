@@ -245,16 +245,28 @@ function service_runs_current_package {
 	# python3), which the restarts of earlier versions picked up on every
 	# run: the kernel shows a replaced file of a process's mappings as
 	# "(deleted)" in /proc/PID/maps (what needrestart looks at, too).
-	local unit=$1 pkg=$2 started installed pid
+	#
+	# PACKAGE may name more packages after the unit's own, separated by
+	# spaces: libraries that the program reads rather than maps, such as the
+	# Perl modules of spampd, postgrey and munin-node (an update of
+	# SpamAssassin's modules changes nothing in spampd's package and shows no
+	# "(deleted)" mapping). These others count only when they are installed.
+	local unit=$1 pkg=$2 started installed pid p first=1
+	local pkgs=()
 	systemctl is-active --quiet "$unit" || return 1
 	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
 	[ -n "$started" ] || return 1
 	started=$(date -d "$started" +%s 2> /dev/null) || return 1
-	if [ -n "$pkg" ]; then # empty: a service of no package of its own
-		installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
-		[[ $installed =~ ^[0-9]+$ ]] || return 1
-		[ "$installed" -le "$started" ] || return 1
-	fi
+	read -r -a pkgs <<< "$pkg" # empty: a service of no package of its own
+	for p in "${pkgs[@]}"; do
+		installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$p" 2> /dev/null || true)
+		if [[ ! $installed =~ ^[0-9]+$ ]]; then
+			[ -z "$first" ] || return 1
+		elif [ "$installed" -gt "$started" ]; then
+			return 1
+		fi
+		first=
+	done
 	pid=$(systemctl show -P MainPID "$unit" 2> /dev/null || true)
 	[[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
 	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
@@ -320,7 +332,7 @@ function config_checksum {
 }
 
 function restart_on_change {
-	# restart_on_change UNIT PACKAGE ARG...
+	# restart_on_change UNIT "PACKAGE [LIBRARY-PACKAGE...]" ARG...
 	# Setup restarted OpenDKIM, OpenDMARC, spampd, postgrey, named,
 	# systemd-resolved, munin-node and the management daemon on every run,
 	# also when nothing had changed. While OpenDKIM restarts, Postfix passes

@@ -28,6 +28,11 @@ php-fpm -t refuses the configuration, when PHP-FPM does not run afterwards
 or did not run before, and a reload when something else restarted it after
 the record was written.
 
+service_runs_current_package with stand-ins for systemctl and dpkg-query:
+the unit's own package and the library packages after it (an update of
+SpamAssassin's Perl modules counts for spampd; a library package that is
+not installed does not count).
+
 It also checks that the services of the planned item are no longer
 restarted with restart_service.
 
@@ -246,6 +251,37 @@ load_php_fpm
 	check("PHP-FPM started after the record at boot: nothing", rc == 0 and c == [], repr((rc, c, out)))
 	rc, c, out = fpm(STARTED="@1700000100", BOOTED="@1700000050")
 	check("PHP-FPM restarted by something else after the record: a reload", rc == 0 and c == ["reload"], repr((rc, c, out)))
+
+# service_runs_current_package with stand-ins: the unit started at 1000,
+# dpkg-query answers the Last-Modified time of each package from PKGTIMES
+# ("name=time ..."; a package not listed is not installed).
+stub = r'''
+systemctl() {
+	case "$*" in
+	"is-active --quiet svc.service") return 0 ;;
+	"show -P ActiveEnterTimestamp svc.service") echo "@1000" ;;
+	"show -P MainPID svc.service") echo "$$" ;;
+	esac
+}
+dpkg-query() {
+	local p=${!#} kv
+	for kv in $PKGTIMES; do
+		if [ "${kv%%=*}" = "$p" ]; then printf %s "${kv#*=}"; return 0; fi
+	done
+	return 1
+}
+service_runs_current_package svc.service "$PKGS"
+'''
+for name, pkgs, times, want in (
+		("own package older than the start: current", "spampd", "spampd=900", 0),
+		("own package newer: not current", "spampd", "spampd=1100", 1),
+		("own package missing: not current", "spampd", "", 1),
+		("no package: current", "", "", 0),
+		("a library package updated after the start: not current", "spampd spamassassin libnet-server-perl", "spampd=900 spamassassin=1100 libnet-server-perl=800", 1),
+		("library packages older: current", "spampd spamassassin libnet-server-perl", "spampd=900 spamassassin=950 libnet-server-perl=800", 0),
+		("a library package not installed: ignored", "spampd spamassassin", "spampd=900", 0)):
+	rc, out, err = bash(stub, {"PKGS": pkgs, "PKGTIMES": times})
+	check("service_runs_current_package: " + name, rc == want, "rc=%d %s" % (rc, err))
 
 for script, unit in (("setup/dkim.sh", "opendkim"), ("setup/dkim.sh", "opendmarc"), ("setup/spamassassin.sh", "spampd"),
 		("setup/mail-postfix.sh", "postgrey"), ("setup/system.sh", "named"), ("setup/system.sh", "systemd-resolved"),

@@ -232,7 +232,9 @@ tools/write_conf.py --own-tree "$STORAGE_ROOT/mail/spamassassin" spampd spampd 6
 # waits for it while it restarts. Dovecot reloads only if the settings above
 # changed its configuration (mail_access_groups on the first run), see
 # load_dovecot (B122).
-restart_on_change spampd spampd /etc/spampd.cfg /etc/default/spampd tree:/etc/spamassassin \
+# SpamAssassin's Perl modules (package spamassassin) and Net::Server are read,
+# not mapped: their updates count too (service_runs_current_package).
+restart_on_change spampd "spampd spamassassin libnet-server-perl" /etc/spampd.cfg /etc/default/spampd tree:/etc/spamassassin \
 	tree:/etc/systemd/system/spampd.service.d
 rm -rf /run/spampd
 load_dovecot

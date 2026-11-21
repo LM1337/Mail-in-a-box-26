@@ -61,7 +61,9 @@ install_unit munin.service
 
 # Restart services.
 restart_service munin
-restart_on_change munin-node munin-node /etc/munin/munin-node.conf tree:/etc/munin/plugin-conf.d \
+# Its Perl modules (munin-common, Net::Server) are read, not mapped: their
+# updates count too.
+restart_on_change munin-node "munin-node munin-common libnet-server-perl" /etc/munin/munin-node.conf tree:/etc/munin/plugin-conf.d \
 	dir:/etc/munin/plugins tree:/etc/systemd/system/munin-node.service.d
 
 # generate initial statistics so the directory isn't empty

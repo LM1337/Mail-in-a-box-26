@@ -384,5 +384,6 @@ if [ "$(postconf -h inet_interfaces inet_protocols)" != "$postfix_listen_before"
 else
 	reload_postfix
 fi
-restart_on_change postgrey postgrey /etc/default/postgrey tree:/etc/postgrey \
+# Its Perl modules (Net::Server) are read, not mapped: their updates count too.
+restart_on_change postgrey "postgrey libnet-server-perl" /etc/default/postgrey tree:/etc/postgrey \
 	tree:/etc/systemd/system/postgrey.service.d

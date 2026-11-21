@@ -385,7 +385,9 @@ report. The groups:
   restart by something else, a restart
   when the reload brings no "ready to handle connections", when
   `php-fpm8.5 -t` refuses the configuration, or when PHP-FPM does not run
-  before or after the reload.
+  before or after the reload. The package check counts the unit's own
+  package and the library packages after it (an update of SpamAssassin's
+  Perl modules for spampd; one that is not installed does not count).
   `tests/fork/status-dns.py` (B181; no box needed) runs the status
   checks' `query_dns()` against a stand-in for dnspython: records,
   NXDOMAIN and NoAnswer, a failed lookup, a timeout, YXDOMAIN and a name
