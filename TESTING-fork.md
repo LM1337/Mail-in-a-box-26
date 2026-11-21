@@ -1523,6 +1523,32 @@ web server cannot read, so phase verify's warning about it (B186) was
 checked only offline, where the tools' call of it was not covered (see
 "After the review" below).
 
+After the review, `b0242e9` (B186's verify read its list of plugin
+directories twice, B191, bootstrap.sh's message for a failed first clone,
+B188): the offline tests pass (22), and the cases added for B186, B191
+and B188 fail on the commits before. On the copy of a production box from
+its start snapshot at the published v78-r2604.4: `update-check.sh before`
+exit 0; the update to `b0242e9` non-interactive (`TAG=<full commit id>`)
+exit 0 in 86 s with the end line, 37 of 37 marked mails accepted during
+it; the keys' hash in the zone files unchanged by the update; a forced DNS
+update exit 0, all 3 zones signed again, `ldns-verify-zone` "Zone is
+verified and complete" for each, nsd answers with DNSKEY and RRSIG. B191:
+with `custom.yaml` read through the checked `dns/` and then `dns/` swapped
+by the storage user for one of its own whose `.conf` names
+`../../etc/logrotate.d/...`, the DNS update was refused with "... is not a
+directory of root's own", nothing was written to `/etc/logrotate.d`, the
+zones stayed unchanged; with that name in root's own `.conf` the update
+was refused (exit 22, "names no KSK key file"), the zones unchanged;
+restored, the update exit 0 with the same hash. B186: phase verify of both
+installed tools, called as the tools call it, named a local plugin of mode
+0700/0600 (exit 0, `local-changes.json` written) and nothing once it was
+readable. B188: bootstrap.sh's first clone with a short commit id and an
+unknown tag exit 1 with the message (and the hint for the short id), no
+directory left. Smoke 121/121 with `--fail2ban`; log audit since `before`
+0 unknown (76 allowed). Not run after the review: T1 to T4, `after` and
+`mailcheck`, client load, a reboot; the in-place and migration tools'
+phase verify ran on its own, not in a whole run of a tool.
+
 ### Production use
 
 rc3 was used to upgrade a production box in place: Ubuntu 24.04 (release-
