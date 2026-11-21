@@ -99,6 +99,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   with Ubuntu Pro (`esm-apps`); what that means for a box, and how to turn
   it on (`pro attach`, a free personal subscription).
 
+* **Postfix's smtpd_tls_dh1024_param_file warning explained in the README (B59)**\
+  The planned item "postconf warns that smtpd_tls_dh1024_param_file will
+  be removed" is closed without a code change: a fresh install and an
+  updated box of the current branch print no such warning (`postconf`,
+  `postconf -d`, `postfix check`, the journal; the parameter is set in
+  neither `main.cf` nor `master.cf`). The warnings in the test runs came
+  from boxes on rc3 (before B59, which comments the parameter out) and
+  from the in-place upgrade, while the release upgrade installs Postfix
+  3.10 and `main.cf` of the old box still sets it, before setup runs.
+  README-fork.md lists the line under "Setup output".
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -228,8 +238,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
 * **Control panel asks for a favicon.ico that is not installed**\
   The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
   not installed (nginx 404).
-* **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
-  `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
 * **Upstream code still writes custom.yaml in user-owned storage (B87, B117)**\
   Upstream code below `$STORAGE_ROOT`, which the user-data account owns:
   `management/backup.py` and `management/dns_update.py` still write

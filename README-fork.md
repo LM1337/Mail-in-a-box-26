@@ -580,6 +580,12 @@ harmless; setup goes on and ends with "Your Mail-in-a-Box is running.":
   name...": setup fixing a provider's host name (B60, B68).
 * "Cleaning up legacy php version": setup removing PHP 8.2, which it only
   needs for the step-by-step upgrade of an old Nextcloud.
+* `postconf: warning: /etc/postfix/main.cf: support for parameter
+  "smtpd_tls_dh1024_param_file" will be removed`, in the output of the
+  in-place upgrade (while the release upgrade installs Postfix 3.10) and of
+  a box on rc3 or older: their `main.cf` still sets the parameter, which
+  setup comments out (B59, since rc4). It is gone after setup's run; a box
+  on a current release prints no such warning.
 
 ### Deutsch
 
@@ -607,6 +613,13 @@ is running.“:
   name...“: setup ersetzt den Hostnamen eines Anbieters (B60, B68).
 * „Cleaning up legacy php version“: setup entfernt PHP 8.2, das es nur für
   das schrittweise Upgrade einer alten Nextcloud braucht.
+* `postconf: warning: /etc/postfix/main.cf: support for parameter
+  "smtpd_tls_dh1024_param_file" will be removed` in der Ausgabe des
+  In-place-Upgrades (während das Release-Upgrade Postfix 3.10 installiert)
+  und einer Box auf rc3 oder älter: Deren `main.cf` setzt den Parameter
+  noch, den setup auskommentiert (B59, seit rc4). Nach dem Lauf von setup
+  ist sie verschwunden; eine Box auf einem aktuellen Release gibt keine
+  solche Warnung aus.
 
 
 Known issues / Bekannte Einschränkungen
