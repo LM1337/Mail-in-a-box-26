@@ -16,7 +16,11 @@ rules of tools/expected-changes/. This test runs its Python part
   * a changed value of a key that both records have is still judged
     (unexpected without a rule, expected with one);
   * in other files a new line is still unexpected;
-  * without anything new the RESULT line is the same as before.
+  * without anything new the RESULT line is the same as before;
+  * every systemd drop-in that setup writes (a literal path in setup/*.sh
+    that is not only removed there) is accepted as new by a "dropins.txt +"
+    rule of tools/expected-changes/ (T5b of v78-r2604.5: the drop-in of
+    spampd's restart record was missing, so "after" ended "CHANGED").
 
   tests/fork/update-check-compare.py
 
@@ -114,6 +118,31 @@ def main():
 	write(a, "postconf.txt", pc_after_new)
 	rc, out, err = run(code, b, a)
 	check("nothing changed: RESULT line unchanged", rc == 0 and "RESULT: OK - 0 unexpected, 0 expected changes\n" in out, out)
+
+	# 5. Every drop-in that setup writes is in a list of expected changes.
+	root = os.path.join(HERE, "..", "..")
+	lists = os.path.join(root, "tools", "expected-changes")
+	plus = []
+	for n in sorted(os.listdir(lists)):
+		for line in open(os.path.join(lists, n), encoding="utf-8"):
+			m = re.match(r"dropins\.txt \+ (\S+) # ", line)
+			if m:
+				plus.append(re.compile(m.group(1)))
+	written = set()
+	setup = os.path.join(root, "setup")
+	rx = re.compile(r"/etc/systemd/system/[A-Za-z0-9@._-]+\.d/[A-Za-z0-9._-]+\.conf")
+	for n in sorted(os.listdir(setup)):
+		if not n.endswith(".sh"):
+			continue
+		for line in open(os.path.join(setup, n), encoding="utf-8"):
+			if line.lstrip().startswith("#"):
+				continue
+			for p in rx.findall(line):
+				if not re.search(r"\brm -f\b|^\s*if \[ -e ", line):
+					written.add(p)
+	check("setup writes drop-ins (found in setup/*.sh)", len(written) >= 3, repr(sorted(written)))
+	for p in sorted(written):
+		check("drop-in %s is an expected new file" % p, any(r.search(p) for r in plus))
 
 	print()
 	print("%d failed" % len(FAILED) if FAILED else "all passed")

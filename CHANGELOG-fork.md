@@ -130,7 +130,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   cost one more restart at the next run. The same holds for
   PHP-FPM (B122, a reload then). The first run of
   this release restarts each of them once more. New offline test
-  `tests/fork/restart-on-change.py`.
+  `tests/fork/restart-on-change.py`. `tools/update-check.sh after` accepts
+  the new drop-in of `spamassassin-maintenance.service`
+  (`expected-changes/unreleased.txt`; without it, every update to this
+  release ended "RESULT: CHANGED", found in its test runs), and
+  `tests/fork/update-check-compare.py` checks that every drop-in that setup
+  writes is in a list of expected changes.
 * **Setup removes old Nextcloud backup copies, keeps the newest three**\
   `$STORAGE_ROOT/owncloud-backup` grew with every update of Nextcloud and of
   its pinned apps: each leaves a copy of the database, `config.php` and the
