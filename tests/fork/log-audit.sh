@@ -298,7 +298,8 @@ RE_SESS = re.compile(r"<[A-Za-z0-9+/=:]{12,}>")
 RE_HEX = re.compile(r"(?<![0-9A-Za-z])(?=[0-9a-fA-F]*\d)(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{6,}(?![0-9A-Za-z])")
 RE_B64 = re.compile(r"(?<![\w/+.])(?=[A-Za-z0-9+/]*\d)(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])[A-Za-z0-9+/]{24,}={0,2}")
 RE_RRD = re.compile(r"/var/lib/munin/\S+?\.rrd")
-RE_MAILDIR = re.compile(r"(mailboxes/<domain>/)[^/\s']+")
+# A mailbox path names the domain, then the local part (also under the box's own name).
+RE_MAILDIR = re.compile(r"(mailboxes/(?:<domain>|<hostname>)/)[^/\s']+")
 RE_NUM = re.compile(r"(?<![A-Za-z])\d+|\d+(?![A-Za-z])")
 RE_WS = re.compile(r"\s+")
 

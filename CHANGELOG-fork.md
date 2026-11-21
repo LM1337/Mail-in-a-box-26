@@ -78,6 +78,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   snapshot, also before any update (T5b of v78-r2604.3). A snapshot
   prepared with the new script works with the original manifest
   (TESTING-fork.md, "Test environment").
+* **Tests: log audit allowlists from the test runs of this release**\
+  `tests/fork/log-audit.sh` also names the local part of a mailbox path
+  under the box's own name `<user>` (the mailboxes of the box's name, such
+  as postmaster@, kept their local part and missed the rules of
+  fts-xapian's notes). New or wider rules, each with its reason: a report
+  recipient at another provider in System > Notifications; Roundcube's
+  CardDAV migration race of two first logins (a known issue); Z-Push's
+  "could not stat folder" at setup's Dovecot reload; fail2ban's note on the
+  first match of `miab-munin` after its start; the in-place and migration
+  tools' own notices of local Roundcube changes; the first start of the
+  slow-login jails on a box upgraded in place; dbus, systemd-tmpfiles,
+  AppArmor (named) and containerd notes of the release upgrades; and in
+  `log-audit-allow-old-box.txt` Dovecot 2.3's anvil note at the old box's
+  stop.
 * **Checks that the control panel's icons and scripts are installed**\
   The planned item "Control panel asks for a favicon.ico that is not
   installed" (an nginx 404 for `/admin/assets/branding/favicon.ico`, noted
