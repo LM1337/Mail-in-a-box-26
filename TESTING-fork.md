@@ -276,6 +276,12 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `tests/fork/owncloud-backup-prune.py` (no box needed) checks the removal
+  of old Nextcloud backup copies in a temporary `STORAGE_ROOT`: the three
+  newest copies stay, older ones go with everything in them, other names
+  and a file or link with a copy's name stay, a symbolic link in the place
+  of `owncloud-backup` or inside an old copy is not followed, a directory
+  that others may write is left alone, and bad arguments are refused.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

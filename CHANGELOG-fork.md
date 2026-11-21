@@ -36,6 +36,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
+* **Setup removes old Nextcloud backup copies, keeps the newest three**\
+  `$STORAGE_ROOT/owncloud-backup` grew with every update of Nextcloud and of
+  its pinned apps: each leaves a copy of the database, `config.php` and the
+  replaced code, nothing removed them (one box had 2.5 GB there), and the
+  directory is not in the box's backup. setup/nextcloud.sh now keeps the
+  three newest copies (named by setup's date and time, the one of the run
+  among them) and removes the older ones; other names in the directory
+  stay. It works through one descriptor of the directory, which must be
+  root's own and not writable by others (B177), and does not follow a
+  symbolic link (the storage user owns `$STORAGE_ROOT`); a problem is
+  reported and setup goes on. New tool `tools/owncloud_backup_prune.py`,
+  offline test `tests/fork/owncloud-backup-prune.py`.
 * **README: known issues (B122, B121, B137)**\
   README-fork.md has a new section "Known issues / Bekannte
   Einschränkungen" (English and German) with three issues from the list of
@@ -72,18 +84,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
 
+### Upgrade note
+
+* **The update removes all but the three newest Nextcloud backup copies**\
+  The first setup run of this release removes every copy in
+  `$STORAGE_ROOT/owncloud-backup` but the three newest. To keep an older
+  one, move it out of that directory before the update (to a name that is
+  not a date and time, or elsewhere).
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
 v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open findings in TESTING-fork.md):
 
-* **Old Nextcloud backup copies are never removed**\
-  `$STORAGE_ROOT/owncloud-backup` grows with every update of Nextcloud and,
-  since B176, with every new pin of one of its apps: each keeps a copy of
-  the database, `config.php` and the replaced code, and nothing removes old
-  copies (one box had 2.5 GB there; the directory is not in the box's
-  backup). Setup could keep the newest few copies and remove older ones
-  (seen in the review of v78-r2604.4).
 * **In-place upgrade does not warn about local Roundcube changes**\
   The in-place upgrade (tools/upgrade-in-place-to-2604.sh) does not see
   local changes to Roundcube: the upgrade moves Roundcube to a new version,
