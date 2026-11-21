@@ -282,6 +282,13 @@ report. The groups:
   and a file or link with a copy's name stay, a symbolic link in the place
   of `owncloud-backup` or inside an old copy is not followed, a directory
   that others may write is left alone, and bad arguments are refused.
+  `tests/fork/update-check-hint.py` (no box needed) runs setup's hint at
+  `tools/update-check.sh` against temporary record directories: the
+  commands `after` and `mailcheck` with the stamp when the newest record
+  has a `before` but no `after`, the general tip otherwise (no records,
+  a complete newest record, a link in the place of a record or of the
+  directory), exit code 0 always; and that setup/start.sh shows it only
+  without `FIRST_TIME_SETUP` and `MIAB_SETUP_TOOL`, which both tools set.
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

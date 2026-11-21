@@ -4107,7 +4107,7 @@ run_setup() {
 	fi
 	local -A C=()
 	load_kv C < <(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=/\1=/p' /etc/mailinabox.conf)
-	local envs=(NONINTERACTIVE=1 SKIP_NETWORK_CHECKS=1
+	local envs=(NONINTERACTIVE=1 SKIP_NETWORK_CHECKS=1 MIAB_SETUP_TOOL=upgrade-in-place-to-2604.sh
 		"PRIMARY_HOSTNAME=${C[PRIMARY_HOSTNAME]:-}"
 		"PUBLIC_IP=${C[PUBLIC_IP]:-}" "PUBLIC_IPV6=${C[PUBLIC_IPV6]:-}"
 		"STORAGE_USER=${C[STORAGE_USER]:-user-data}" "STORAGE_ROOT=${C[STORAGE_ROOT]:-$STORAGE_ROOT}")

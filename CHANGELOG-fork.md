@@ -33,6 +33,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   The menu entry opens Munin in a new tab without leaving the page shown
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
+* **Setup points to tools/update-check.sh at the end of a run**\
+  At the end of a setup run on an existing box, setup prints a short hint
+  at `tools/update-check.sh`, without stopping: when the newest record in
+  `/root/update-check/` has a state from before an update but none from
+  after it, the commands `after` and `mailcheck` with that record
+  (`--dir STAMP`); otherwise that `before` and `backup` can be run before
+  the next update and `after` and `mailcheck` after it (optional). Not on
+  a first install, and not when the in-place upgrade or the migration tool
+  runs setup (they have their own reports and now set `MIAB_SETUP_TOOL`
+  for their setup run). New offline test `tests/fork/update-check-hint.py`.
 
 ### Changed
 
@@ -127,15 +137,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   of the tool) goes into a section "newly recorded (not judged)" of
   `changes.txt` and is counted in its RESULT line, but is no unexpected
   change. Output stays on the console and in `/root/update-check/`.
-* **Setup does not point to update-check.sh**\
-  Setup does not mention tools/update-check.sh. Planned: at the end of a
-  setup run on an existing box (not the first install, and not when the
-  in-place or migration tool runs setup, which have their own reports),
-  setup prints a short hint, without stopping: if the newest record in
-  `/root/update-check/` has a "before" but no "after", the commands
-  `after` and `mailcheck` with that record; otherwise that `before` and
-  `backup` can be run before the next update and `after` and `mailcheck`
-  after it, optionally (README-fork.md, "Updating the fork").
 * **Smoke check mig-pop3-uidl-alice fails on the T5b lab snapshot**\
   The smoke check `mig-pop3-uidl-alice` fails on every run from the lab
   snapshot of T5b: the lab preparation (spamlearn.py) moved a seeded INBOX

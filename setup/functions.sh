@@ -415,6 +415,40 @@ function reload_nginx {
 	hide_output service nginx reload
 }
 
+function update_check_hint {
+	# A short hint at tools/update-check.sh at the end of a setup run on an
+	# existing box (setup/start.sh; not on a first install, and not when the
+	# in-place upgrade or the migration tool runs setup: they have their own
+	# reports). When the newest record in /root/update-check (as the tool,
+	# UPDATE_CHECK_DIR) has a state from before an update but none from after
+	# it, this run is most likely that update: name "after" and "mailcheck"
+	# with that record. Otherwise the general tip. It never stops setup.
+	local root=${UPDATE_CHECK_DIR:-/root/update-check} d newest='' tool
+	tool="$(pwd)/tools/update-check.sh"
+	if [ -d "$root" ] && [ ! -L "$root" ]; then
+		for d in "$root"/[0-9]*-[0-9]*; do
+			[ -d "$d" ] && [ ! -L "$d" ] || continue
+			[[ ${d##*/} =~ ^[0-9]{8}-[0-9]{6}$ ]] || continue
+			newest=$d # the glob is sorted, the last one is the newest
+		done
+	fi
+	echo
+	if [ -n "$newest" ] && [ -f "$newest/before/time.txt" ] && [ ! -e "$newest/after" ]; then
+		echo "tools/update-check.sh recorded the state of this box before an update"
+		echo "($newest), but not yet after it. To compare the state and"
+		echo "to test the mail round trip now:"
+		echo
+		echo "  sudo $tool after --dir ${newest##*/}"
+		echo "  sudo $tool mailcheck --dir ${newest##*/}"
+	else
+		echo "Tip: tools/update-check.sh can check an update of this box: \"before\" and"
+		echo "\"backup\" before the next update, \"after\" and \"mailcheck\" after it"
+		echo "(optional; see \"Updating the fork\" in README-fork.md)."
+	fi
+	echo
+	return 0
+}
+
 ## Dialog Functions ##
 function message_box {
 	dialog --title "$1" --msgbox "$2" 0 0

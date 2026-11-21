@@ -236,6 +236,11 @@ step that failed.
 
 Everything lands in `/root/update-check/<stamp>/` (only root can read it).
 `--help` lists the options.
+At the end of a setup run on an existing box (not a first install, not
+the run of the in-place upgrade or the migration tool), setup points to
+the tool: when the newest record has a `before` but no `after`, it prints
+the `after` and `mailcheck` commands for that record, otherwise a short
+tip. It does not stop.
 
 **From rc7 to v78-r2604.0, step by step.** The steps of the release's
 upgrade note, in the order in which they were tested (TESTING-fork.md,
@@ -465,6 +470,11 @@ scheiterte.
 
 Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
 `--help` zeigt die Optionen.
+Am Ende eines Setup-Laufs auf einer bestehenden Box (keine
+Neuinstallation, nicht der Lauf des In-place-Upgrades oder des
+Umzugswerkzeugs) weist setup auf das Werkzeug hin: Hat der neueste Eintrag
+ein `before`, aber kein `after`, nennt es die Befehle `after` und
+`mailcheck` für diesen Eintrag, sonst einen kurzen Tipp. Es hält nicht an.
 
 **Von rc7 auf v78-r2604.0, Schritt für Schritt.** Die Schritte des
 Upgrade-Hinweises des Releases, in der getesteten Reihenfolge

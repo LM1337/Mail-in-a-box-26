@@ -2767,7 +2767,7 @@ run_setup() {
 		say "SQLite database). Depending on the size of the database this takes from"
 		say "minutes to more than an hour. A copy of the database goes to owncloud-backup/."
 	fi
-	local envs=(NONINTERACTIVE=1 SKIP_NETWORK_CHECKS=1
+	local envs=(NONINTERACTIVE=1 SKIP_NETWORK_CHECKS=1 MIAB_SETUP_TOOL=migrate-to-2604.sh
 		"PRIMARY_HOSTNAME=$NEW_PRIMARY_HOSTNAME"
 		"PUBLIC_IP=$NEW_PUBLIC_IP" "PUBLIC_IPV6=$NEW_PUBLIC_IPV6"
 		"STORAGE_USER=$STORAGE_USER" "STORAGE_ROOT=$STORAGE_ROOT")

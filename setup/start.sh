@@ -343,3 +343,10 @@ else
 	echo "Then you can confirm the security exception and continue."
 	echo
 fi
+
+# On an existing box, point to tools/update-check.sh (not on a first install,
+# and not when tools/upgrade-in-place-to-2604.sh or tools/migrate-to-2604.sh
+# run setup: they set MIAB_SETUP_TOOL and have their own reports).
+if [ -z "${FIRST_TIME_SETUP:-}" ] && [ -z "${MIAB_SETUP_TOOL:-}" ]; then
+	update_check_hint
+fi
