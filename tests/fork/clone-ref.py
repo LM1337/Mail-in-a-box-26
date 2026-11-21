@@ -17,7 +17,8 @@ checks with file:// URLs:
     to give the full one) and for a commit id that the source does not
     have, without leaving the directory behind;
   * the clone block of bootstrap.sh does the same for a full commit id and
-    a tag, and stops with a message for an unknown commit id;
+    a tag, and stops with a message for an unknown commit id, a short
+    commit id (with the hint) and an unknown tag, leaving no directory;
   * neither tool clones with "git clone -b $tag" any more.
 
   tests/fork/clone-ref.py
@@ -99,6 +100,13 @@ def main():
 			got = (r.returncode, git("log", "-1", "--format=%s", cwd=d) if os.path.isdir(os.path.join(d, ".git")) else None)
 			check("bootstrap.sh: fresh clone of %s" % ("an unknown commit id" if ref.startswith("000") else "a commit id" if ref == head else ref),
 				got, want)
+		for ref, hint in ((head[:7], True), ("no-such-tag", False)):
+			home = tempfile.mkdtemp(dir=t)
+			r = subprocess.run(["bash", "-c", m.group(1)], capture_output=True, text=True,
+				env=dict(env, HOME=home, TAG=ref, SOURCE=url))
+			check("bootstrap.sh: %s fails with the message%s, no directory left" % ("a short commit id" if hint else "an unknown tag", ", the hint" if hint else ""),
+				(r.returncode, "Could not download" in r.stdout, "full commit id" in r.stdout, os.path.exists(os.path.join(home, "mailinabox"))),
+				(1, True, hint, False))
 	shutil.rmtree(t)
 	print()
 	print("%d failed" % len(FAILED) if FAILED else "all passed")
