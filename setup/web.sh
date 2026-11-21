@@ -105,7 +105,10 @@ fi
 # Nextcloud's PHP only with that secret (conf/nginx-primaryonly.conf); PHP
 # never sees the secret itself. Two maps in a file that only root may read
 # (nginx reads its configuration as root); the secret is made once and kept
-# on later runs, so that the configuration does not change.
+# on later runs, so that the configuration does not change. The secret is
+# compared as a regular expression: as a plain string of 64 characters it
+# goes into the map's hash, which nginx then refuses ("could not build
+# map_hash, you should increase map_hash_bucket_size: 64").
 nc_proxy_conf=/etc/nginx/conf.d/miab-nextcloud-proxy.conf
 nc_proxy_secret=$(sed -n 's/^[[:space:]]*default "\([0-9a-f]\{64\}\)";$/\1/p' "$nc_proxy_conf" 2> /dev/null | head -n 1 || true)
 if [ -z "$nc_proxy_secret" ]; then
@@ -120,7 +123,7 @@ map \$scheme \$miab_nextcloud_proxy_secret {
 }
 map \$http_x_miab_nextcloud_proxy \$miab_nextcloud_forwarded_for {
 	default "";
-	"$nc_proxy_secret" \$http_x_forwarded_for;
+	"~^$nc_proxy_secret\$" \$http_x_forwarded_for;
 }
 EOF
 tools/write_conf.py --own "$nc_proxy_conf" root root 600
