@@ -2934,6 +2934,55 @@ echo "reset=$?"
     return "remoteAddr %s, attempts %s (reset)" % (remote, attempts)
 
 
+def c_nc_forwarded_for_local(ctx):
+    # Only nginx's own proxy may pass X-Forwarded-For to Nextcloud (B213): a
+    # request from 127.0.0.1 straight to /cloud with a forged X-Forwarded-For
+    # (and a forged proof header) must be logged as 127.0.0.1, which fail2ban
+    # ignores, and count nothing for the forged address. One failed login of
+    # a user that does not exist; the attempts of both addresses are reset.
+    occ = "sudo -n -u www-data php /usr/local/lib/owncloud/occ"
+    script = r"""
+set -u
+. /etc/mailinabox.conf
+cd /
+log="$STORAGE_ROOT/owncloud/nextcloud.log"
+before=$(sudo -n stat -c %%s "$log" 2> /dev/null || echo 0)
+code=$(curl -sk -o /dev/null -w '%%{http_code}' --max-time 60 --resolve "$PRIMARY_HOSTNAME:443:127.0.0.1" \
+    -H 'X-Forwarded-For: %(fake)s' -H 'X-Miab-Nextcloud-Proxy: 0000000000000000000000000000000000000000000000000000000000000000' \
+    -u '%(user)s:not-the-password' -X PROPFIND -H 'Depth: 0' "https://$PRIMARY_HOSTNAME/cloud/remote.php/webdav/")
+echo "http=$code"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    line=$(sudo -n tail -c +$((before + 1)) "$log" | grep -F "Login failed: '%(user)s'" | tail -1)
+    [ -n "$line" ] && break
+    sleep 1
+done
+echo "log=$line"
+echo "fake=$(%(occ)s security:bruteforce:attempts %(fake)s --output=json 2>&1 | tail -1)"
+%(occ)s security:bruteforce:reset %(fake)s > /dev/null 2>&1
+%(occ)s security:bruteforce:reset 127.0.0.1 > /dev/null 2>&1
+echo "reset=$?"
+""" % {"user": XFF_USER, "occ": occ, "fake": "192.0.2.213"}
+    if not ctx.remote.available():
+        raise Skip("needs --ssh")
+    rc, so, se = ctx.remote.run("bash -c %s" % shlex.quote(script), timeout=300)
+    vals = dict(l.split("=", 1) for l in so.splitlines() if "=" in l)
+    if vals.get("http") != "401":
+        raise Fail("PROPFIND /cloud/remote.php/webdav/ from 127.0.0.1 with a wrong login: HTTP %s (expected 401)" % vals.get("http"))
+    try:
+        remote = json.loads(vals.get("log", "")).get("remoteAddr")
+    except ValueError:
+        raise Fail("no 'Login failed' line for the test login in nextcloud.log")
+    try:
+        attempts = json.loads(vals.get("fake", "")).get("attempts")
+    except (ValueError, AttributeError):
+        raise Fail("occ security:bruteforce:attempts 192.0.2.213: %s" % vals.get("fake", "")[:200])
+    if remote != "127.0.0.1":
+        raise Fail("Nextcloud took the forged X-Forwarded-For of a local request: remoteAddr %s" % remote)
+    if attempts:
+        raise Fail("Nextcloud counted %s attempts for the forged address" % attempts)
+    return "a local request with a forged X-Forwarded-For was logged as %s, 0 attempts for the forged address" % remote
+
+
 def _load_eas():
     # tests/fork/eas.py, next to this script (also when run with python3 -I)
     here = os.path.dirname(os.path.abspath(__file__))
@@ -4928,6 +4977,7 @@ def main():
         print("== activesync (calendars and contacts through Z-Push and Nextcloud)")
         run_check("nextcloud-bruteforce-loopback", c_nc_bruteforce_loopback, ctx)
         run_check("nextcloud-forwarded-for", c_nc_forwarded_for, ctx)
+        run_check("nextcloud-forwarded-for-local", c_nc_forwarded_for_local, ctx)
         run_check("zpush-sync", c_zpush_sync, ctx)
         run_check("zpush-ping", c_zpush_ping, ctx)
         run_check("zpush-patches", c_zpush_patches, ctx)

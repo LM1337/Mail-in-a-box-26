@@ -341,7 +341,11 @@ report. The groups:
   exist) from the box's public address through the `/webdav` proxy, which
   connects to Nextcloud from 127.0.0.1, is logged and counted by Nextcloud
   for that address, not for 127.0.0.1 (B121; its attempts are reset
-  afterwards); `zpush-sync`: an ActiveSync account as a phone sets it
+  afterwards); `nextcloud-forwarded-for-local` (B213, with `--ssh`): a
+  failed login from the box itself straight to
+  `/cloud/remote.php/webdav/` with a forged `X-Forwarded-For` and a forged
+  proof header is logged by Nextcloud as 127.0.0.1, and nothing is counted
+  for the forged address; `zpush-sync`: an ActiveSync account as a phone sets it
   up (`tests/fork/eas.py`: Provision, FolderSync, Sync of all calendar and
   contact folders), and a marked event and two marked contacts put into
   alice's Nextcloud over DAV just before arrive, one of the cards with a

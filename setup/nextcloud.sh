@@ -630,6 +630,9 @@ fi
 #   Without it Nextcloud saw every client of these paths as 127.0.0.1, which
 #   is on its brute-force bypass list (B121, see below). Another header in
 #   that list would let a client name its own address through the proxy.
+#   nginx passes X-Forwarded-For to Nextcloud's PHP only from that proxy,
+#   which proves itself with a secret header (setup/web.sh), so another
+#   process on the box cannot name an address from 127.0.0.1 (B213).
 # Use PHP to read the settings file, modify it, and write out the new settings array.
 # This runs as www-data, which owns config.php and its directory, and replaces the
 # file atomically (a new file in the same directory, renamed over it). Up to rc7
@@ -794,11 +797,12 @@ hide_output sudo -u www-data php"$PHP_VER" -f /usr/local/lib/owncloud/occ config
 #   path that reaches Nextcloud through a connection of the box itself, the
 #   proxy of /caldav, /carddav and /webdav in conf/nginx-primaryonly.conf,
 #   passes the client's address in X-Forwarded-For, which Nextcloud takes
-#   from 127.0.0.1 only (trusted_proxies, set above): a client on the
-#   Internet keeps its own address there, the throttle and the miab-owncloud
-#   jail. An administrator's own proxy in front of /cloud (www/custom.yaml)
-#   adds the client's address to X-Forwarded-For as well (web_update), and
-#   Nextcloud takes the last address that is not a trusted proxy.
+#   from 127.0.0.1 only (trusted_proxies, set above), and nginx passes it to
+#   PHP only from that proxy (B213): a client on the Internet keeps its own
+#   address there, the throttle and the miab-owncloud jail. A proxy of an
+#   administrator's own (www/custom.yaml) to the box's own /cloud is seen as
+#   127.0.0.1 since B213; one that runs on another host and connects to the
+#   box's public address is not 127.0.0.1 at all.
 # * Z-Push checks each password against Dovecot (IMAP) before it calls
 #   Nextcloud, so Nextcloud's throttle of 127.0.0.1 never slowed down a
 #   password guesser there; it only stopped the sync of everyone. A local

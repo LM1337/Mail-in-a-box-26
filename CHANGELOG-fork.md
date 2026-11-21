@@ -121,6 +121,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   now written with mode 0600 (it can hold the target's credentials). New
   offline test `tests/fork/storage-dirs.py`.
 
+* **Nextcloud takes X-Forwarded-For only from nginx's own proxy (B213)**\
+  Nextcloud takes the client's address from `X-Forwarded-For` on every
+  connection from 127.0.0.1 (`trusted_proxies`, B121), so any local account
+  or service could make it log a failed login under another address, which
+  the `miab-owncloud` jail then banned. nginx's proxy of `/caldav`,
+  `/carddav` and `/webdav` now proves itself to `/cloud` with a secret
+  header (from `/etc/nginx/conf.d/miab-nextcloud-proxy.conf`, root's only,
+  made once by setup and kept), and nginx passes `X-Forwarded-For` to
+  Nextcloud's PHP only with that secret; PHP never sees the secret. Clients
+  on the Internet keep their own address through the proxy (throttle and
+  jail as before), Z-Push stays 127.0.0.1, and another local request is
+  logged as 127.0.0.1, which fail2ban ignores. New smoke check
+  `nextcloud-forwarded-for-local`.
+
 ### Upgrade note
 
 * **User database root's only; webmail password changes via the daemon (B210)**\
@@ -147,6 +161,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   or `secret_key.txt` in it is not a regular file of root's, backups (and
   DNS updates) stop with the reason. Put them right with `chown root:root`
   and `chmod 755` (and check the files in them).
+
+* **A proxy of your own to the box's /cloud is seen as 127.0.0.1 (B213)**\
+  A proxy that you set up in `www/custom.yaml` to the box's own `/cloud`
+  (`https://127.0.0.1/cloud/...`) no longer passes the client's address to
+  Nextcloud: Nextcloud sees 127.0.0.1, which is on its brute-force bypass
+  list, so its clients skip Nextcloud's throttle and the `miab-owncloud`
+  jail. The box's own paths (`/caldav`, `/carddav`, `/webdav`, `/cloud`)
+  are not affected.
 
 * **Restoring an older backup on the same box: remove the migration record (B211)**\
   The first setup run of this version records the box's migration number
@@ -246,19 +268,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   to put such networks on the allowlist; nothing finds them on its own.
   Leaving `miab-zpush` out of recidive would let an attacker guess 20
   passwords every few minutes for good, so it still counts there.
-* **Nextcloud trusts X-Forwarded-For on every local connection (B121)**\
-  Nextcloud takes the client's address from `X-Forwarded-For` on every
-  connection from 127.0.0.1 (`trusted_proxies`, B121), not only on those
-  of nginx's `/caldav`, `/carddav` and `/webdav` proxy, which sets the
-  header itself. A local account or a compromised service can make
-  Nextcloud log a failed login under another address, which
-  `miab-owncloud` bans; before, such a login was logged as 127.0.0.1,
-  which fail2ban ignores. Local accounts could already write such lines
-  into the logs that fail2ban reads (logger(1); www-data owns Nextcloud's
-  log), so this is a second way to an existing one; clients on the
-  Internet cannot do it (the proxy replaces the header). A fix: the proxy
-  proves itself to the `/cloud` location with a secret header from a
-  root-only include, and nginx passes `X-Forwarded-For` to PHP only then.
 * **Setup restarts several services on every run**\
   Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
   postgrey, named, systemd-resolved, munin-node and the management daemon

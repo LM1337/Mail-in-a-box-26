@@ -95,6 +95,36 @@ else
                 pm.max_spare_servers=18
 fi
 
+# The proof of nginx's own /caldav, /carddav and /webdav proxy to Nextcloud
+# (B213). The proxy connects to /cloud from 127.0.0.1 and passes the client's
+# address in X-Forwarded-For, which Nextcloud takes from 127.0.0.1
+# (trusted_proxies, setup/nextcloud.sh, B121). Any other process on the box
+# could send that header too, from 127.0.0.1, and make Nextcloud log a failed
+# login under another address, which the miab-owncloud jail then bans. So the
+# proxy also sends a secret header, and nginx gives X-Forwarded-For to
+# Nextcloud's PHP only with that secret (conf/nginx-primaryonly.conf); PHP
+# never sees the secret itself. Two maps in a file that only root may read
+# (nginx reads its configuration as root); the secret is made once and kept
+# on later runs, so that the configuration does not change.
+nc_proxy_conf=/etc/nginx/conf.d/miab-nextcloud-proxy.conf
+nc_proxy_secret=$(sed -n 's/^[[:space:]]*default "\([0-9a-f]\{64\}\)";$/\1/p' "$nc_proxy_conf" 2> /dev/null | head -n 1 || true)
+if [ -z "$nc_proxy_secret" ]; then
+	nc_proxy_secret=$(openssl rand -hex 32)
+fi
+tools/write_conf.py "$nc_proxy_conf" 600 << EOF;
+# Written by Mail-in-a-Box setup (setup/web.sh, B213). Do not edit.
+# The secret header of the proxy of /caldav, /carddav and /webdav, and the
+# X-Forwarded-For that Nextcloud gets: only from that proxy.
+map \$scheme \$miab_nextcloud_proxy_secret {
+	default "$nc_proxy_secret";
+}
+map \$http_x_miab_nextcloud_proxy \$miab_nextcloud_forwarded_for {
+	default "";
+	"$nc_proxy_secret" \$http_x_forwarded_for;
+}
+EOF
+tools/write_conf.py --own "$nc_proxy_conf" root root 600
+
 # Other nginx settings will be configured by the management service
 # since it depends on what domains we're serving, which we don't know
 # until mail accounts have been created.
