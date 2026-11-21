@@ -201,23 +201,34 @@ def resolve(env, address=None):
 			return
 		dests = _lookup(addr, users, manual, auto)
 		if dests is None:
-			domain = addr.rsplit("@", 1)[-1]
-			if domain in local_domains:
-				problems.append(f"{addr} (via {' → '.join(path)}) is an address of this box, but no mailbox or alias. Mail to it is rejected.")
-			elif (addr, "external") not in seen:
-				seen.add((addr, "external"))
-				targets.append({ "address": addr, "kind": "external", "via": path })
-			return
-		if dests == [addr]:
-			if (addr, "mailbox") not in seen:
-				seen.add((addr, "mailbox"))
-				targets.append({ "address": addr, "kind": "mailbox", "via": path })
+			final(addr, path, "no mailbox or alias")
 			return
 		for d in dests:
 			if d.startswith("@"):
 				# A domain alias: the local part stays.
 				d = addr.rsplit("@", 1)[0] + d
-			walk(d, path + [addr])
+			if d == addr:
+				# Postfix does not expand an address again that its own
+				# expansion contains ("ops@ → ops@, me@elsewhere" keeps a copy
+				# in the mailbox): it is delivered as it is (a mailbox is
+				# "itself" in _lookup too).
+				final(addr, path, "no mailbox (its alias names itself)")
+			else:
+				walk(d, path + [addr])
+
+	def final(addr, path, what):
+		# An address that is not expanded further: a mailbox of the box, an
+		# address of another provider, or one of the box that Postfix rejects.
+		if addr in users:
+			if (addr, "mailbox") not in seen:
+				seen.add((addr, "mailbox"))
+				targets.append({ "address": addr, "kind": "mailbox", "via": path })
+		elif addr.rsplit("@", 1)[-1] in local_domains:
+			via = f" (via {' → '.join(path)})" if path else ""
+			problems.append(f"{addr}{via} is an address of this box, but {what}. Mail to it is rejected.")
+		elif (addr, "external") not in seen:
+			seen.add((addr, "external"))
+			targets.append({ "address": addr, "kind": "external", "via": path })
 
 	walk(start, [])
 	return { "targets": targets, "problems": problems }

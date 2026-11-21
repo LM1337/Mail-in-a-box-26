@@ -7,7 +7,8 @@ python3 stdlib only, no box needed.
     (an alias set by hand before a mailbox before an automatic alias, then
     the catch-all of the domain, a domain alias keeps the local part): a
     mailbox, an outside address, a loop, an address of the box that does
-    not exist, several destinations;
+    not exist, several destinations, an alias that names itself (not a
+    loop: a copy for its mailbox);
   * the report recipient: standard, custom, invalid values refused, a
     broken stored value falls back to the standard address;
   * Munin's standard recipient follows the reports (munin-notify --to only
@@ -126,6 +127,17 @@ with tempfile.TemporaryDirectory() as root:
 	# Outside the box, and several destinations.
 	make_db(root, users=["me@example.com"], aliases=[(A, "me@example.com, ops@other.example")], auto=AUTO)
 	check("mailbox and outside", targets(env), ([("me@example.com", "mailbox"), ("ops@other.example", "external")], 0))
+
+	# An alias that names itself keeps a copy in the mailbox (Postfix does
+	# not expand an address again that its own expansion contains); without
+	# the mailbox that copy is rejected; no loop either way.
+	O = "ops@example.com"
+	make_db(root, users=["me@example.com", O], aliases=[(A, O), (O, O + ", me@gmail.example")], auto=AUTO)
+	check("alias naming itself, a mailbox", targets(env), ([("me@gmail.example", "external"), (O, "mailbox")], 0))
+	make_db(root, users=["me@example.com"], aliases=[(A, O), (O, O + ", me@gmail.example")], auto=AUTO)
+	got = admin_mail.resolve(env)
+	check("alias naming itself, no mailbox", (targets(env)[0], "Loop" in " ".join(got["problems"]), "names itself" in " ".join(got["problems"])),
+		([("me@gmail.example", "external")], False, True))
 
 	# An alias set by hand wins over a mailbox of the same name.
 	make_db(root, users=["me@example.com", "postmaster@" + HOST], aliases=[(A, "postmaster@" + HOST), ("postmaster@" + HOST, "me@example.com")], auto=AUTO)

@@ -283,7 +283,8 @@ report. The groups:
   `tests/fork/admin-mail.py` (System > Notifications; no box needed)
   checks how administrator@ is followed through the aliases (mailbox,
   outside address, loop, unknown address of the box, catch-all, domain
-  alias), the report recipient and its invalid values, that Munin's
+  alias, an alias that names itself, which Postfix delivers to its
+  mailbox and does not take for a loop), the report recipient and its invalid values, that Munin's
   standard recipient follows, the list of deliveries and the test mail.
   `tests/fork/nginx-hsts.py` (B180; no box needed) builds the nginx
   configuration of the box's name and of another domain with
