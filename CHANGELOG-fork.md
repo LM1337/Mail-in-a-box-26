@@ -193,6 +193,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
+* **No status change mail every night with nc's "succeeded!" line (B184)**\
+  The status checks test outbound port 25 with nc, and the nc of Ubuntu
+  26.04 prints "Connection to aspmx.l.google.com ... succeeded!" on
+  standard error. The nightly job mails everything that the status checks
+  print, so a "Status Checks Change Notice" with only that line went out
+  every night, also when nothing had changed (now also to a report
+  recipient at another provider). nc's output is now discarded. New cases
+  in `tests/fork/status-dns.py`.
 * **System Status "show more" and TLS result are shown again (B178)**\
   System Status shows the extra lines of its checks again: the "show more"
   link under a check was missing since rc4, so for example the DS records

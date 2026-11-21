@@ -27,6 +27,8 @@ whose resolver answers from a table:
     cannot be read through the checked dns/ (B183), the DS records to set
     are still suggested, without the key and with the reason.
 
+The test of outbound port 25 discards the output of nc (B184).
+
 The modules that status_checks.py imports and that are not in the standard
 library, or need a box, are replaced by stand-ins.
 
@@ -326,9 +328,40 @@ def case_dnssec():
 		sm.check_dnssec = real_check_dnssec
 
 
+# --- the test of outbound port 25 prints nothing (B184): nc's "Connection
+# to ... succeeded!" on standard error made the nightly status mail go out
+# every night.
+
+def case_port25():
+	import tempfile
+	d = tempfile.mkdtemp()
+	nc = os.path.join(d, "nc")
+	for code in (0, 1):
+		with open(nc, "w") as f:
+			f.write("#!/bin/sh\necho 'Connection to aspmx.l.google.com 25 port [tcp/smtp] succeeded!' >&2\necho out\nexit %d\n" % code)
+		os.chmod(nc, 0o755)
+		sm.NC = nc
+		cap = os.path.join(d, "cap")
+		saved = [os.dup(1), os.dup(2)]
+		fd = os.open(cap, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+		sys.stdout.flush(); sys.stderr.flush()
+		os.dup2(fd, 1); os.dup2(fd, 2)
+		try:
+			got = sm.outbound_port25_open()
+		finally:
+			sys.stdout.flush(); sys.stderr.flush()
+			os.dup2(saved[0], 1); os.dup2(saved[1], 2)
+			os.close(fd); os.close(saved[0]); os.close(saved[1])
+		check("port 25 test (nc exit %d): %s, nc's output discarded (B184)" % (code, "open" if code == 0 else "blocked"),
+			(got, open(cap).read()), (code == 0, ""))
+	sm.NC = os.path.join(d, "missing")
+	check("port 25 test: nc missing counts as blocked", sm.outbound_port25_open(), False)
+
+
 case_query_dns()
 case_dbl()
 case_dnssec()
+case_port25()
 
 if FAILED:
 	print(f"{len(FAILED)} case(s) failed")

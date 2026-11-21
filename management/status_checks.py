@@ -162,6 +162,22 @@ def run_system_checks(rounded_values, env, output):
 	check_backup(rounded_values, env, output)
 	check_failed_logins(rounded_values, env, output)
 
+# The netcat that tests outbound port 25. Its output is discarded: the nc of
+# Ubuntu 26.04 says "Connection to ... succeeded!" on standard error for -z,
+# and the nightly job (daily_tasks.sh) mails everything that
+# "status_checks.py --show-changes 2>&1" prints, so that line alone sent a
+# "Status Checks Change Notice" every night (B184).
+NC = "/bin/nc"
+
+def outbound_port25_open():
+	import subprocess
+	try:
+		return subprocess.run([NC, "-z", "-w5", "aspmx.l.google.com", "25"], stdin=subprocess.DEVNULL,
+			stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={"PATH": "/sbin:/bin:/usr/sbin:/usr/bin"},
+			timeout=30, check=False).returncode == 0
+	except (OSError, subprocess.TimeoutExpired):
+		return False
+
 def check_ufw(env, output):
 	if not os.path.isfile('/usr/sbin/ufw'):
 		output.print_warning("""The ufw program was not installed. If your system is able to run iptables, rerun the setup.""")
@@ -321,8 +337,7 @@ def run_network_checks(env, output):
 	# Stop if we cannot make an outbound connection on port 25. Many residential
 	# networks block outbound port 25 to prevent their network from sending spam.
 	# See if we can reach one of Google's MTAs with a 5-second timeout.
-	_code, ret = shell("check_call", ["/bin/nc", "-z", "-w5", "aspmx.l.google.com", "25"], trap=True)
-	if ret == 0:
+	if outbound_port25_open():
 		output.print_ok("Outbound mail (SMTP port 25) is not blocked.")
 	else:
 		output.print_error("""Outbound mail (SMTP port 25) seems to be blocked by your network. You
