@@ -29,7 +29,10 @@ ssl_certificates and mailconfig are replaced by stand-ins (YAML as JSON).
     missing file gives no records, the file is written through the
     directory with its read bits kept; web_update.py (the web configuration,
     the TLS certificates, the status checks) goes on without the records
-    of a replaced dns/ and says why, instead of failing;
+    of a replaced dns/ and says why, instead of failing; the KSK's public
+    key that the status checks show with the DS records is read only
+    through a checked dns/ and dns/dnssec/, a replaced one or a link there
+    gives ValueError (B183);
   * tools/write_conf.py --own-root-only (setup's owner of $STORAGE_ROOT/mail
     and users.sqlite) refuses a directory that root does not own already,
     where --own would take it over; --check-own-root-only (setup/start.sh's
@@ -235,6 +238,46 @@ for how in ("link", "group-writable"):
 	check("dns %s: web and TLS go on without the records, with the reason" % how, (got, "not used" in err.getvalue()), (set(), True))
 fresh()
 check("dns: web_update reads the custom A records", web_update.get_domains_with_a_records(WEB_ENV), {"www.example.com"})
+
+# The status checks' DNSSEC check reads the KSK's public key only through
+# the checked dns/ and dns/dnssec/ (B183).
+def dnssec_keys():
+	k = os.path.join(ROOT, "dns", "dnssec")
+	os.makedirs(k, exist_ok=True)
+	os.chmod(k, 0o755)
+	write(os.path.join(k, "ECDSAP256SHA256.conf"), "KSK=K_domain_.+013+11111\nZSK=K_domain_.+013+22222\n", 0o644)
+	write(os.path.join(k, "K_domain_.+013+11111.key"), "_domain_.\tIN\tDNSKEY\t257 3 13 GOODKEY\n", 0o600)
+fresh()
+dnssec_keys()
+check("dnssec key: read through the checked directories", dns_update.read_dnssec_ksk_pubkey(ENV, "ECDSAP256SHA256"), "GOODKEY")
+check("dnssec key: an algorithm without a .conf", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "RSASHA256"), "ValueError")
+for how in ("link", "group-writable", "own directory without dnssec/"):
+	fresh()
+	dnssec_keys()
+	if how == "own directory without dnssec/":
+		shutil.rmtree(os.path.join(ROOT, "dns"))
+		os.makedirs(os.path.join(ROOT, "dns"))
+		os.chmod(os.path.join(ROOT, "dns"), 0o755)
+	else:
+		swap("dns", how)
+	check("dnssec key, dns/ replaced (%s): ValueError, no other exception" % how,
+		raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
+fresh()
+dnssec_keys()
+k = os.path.join(ROOT, "dns", "dnssec")
+os.makedirs(os.path.join(OUTSIDE, "dnssec"))
+write(os.path.join(OUTSIDE, "dnssec", "ECDSAP256SHA256.conf"), "KSK=K_domain_.+013+33333\n", 0o644)
+write(os.path.join(OUTSIDE, "dnssec", "K_domain_.+013+33333.key"), "_domain_.\tIN\tDNSKEY\t257 3 13 EVILKEY\n", 0o644)
+shutil.rmtree(k)
+os.symlink(os.path.join(OUTSIDE, "dnssec"), k)
+check("dnssec key, dnssec/ a link: refused", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
+os.unlink(k)
+dnssec_keys()
+os.unlink(os.path.join(k, "K_domain_.+013+11111.key"))
+os.symlink(os.path.join(OUTSIDE, "dnssec", "K_domain_.+013+33333.key"), os.path.join(k, "K_domain_.+013+11111.key"))
+check("dnssec key, the .key a link: refused", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
+write(os.path.join(k, "ECDSAP256SHA256.conf"), "KSK=../../outside/x\n", 0o644)
+check("dnssec key, a KSK name with a path: refused", raises(dns_update.read_dnssec_ksk_pubkey, ENV, "ECDSAP256SHA256"), "ValueError")
 
 # tools/write_conf.py --own-root-only ($STORAGE_ROOT/mail and users.sqlite):
 # only what root owns already is taken, not a directory or database that the

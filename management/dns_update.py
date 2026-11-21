@@ -888,6 +888,47 @@ def read_custom_dns_yaml(env):
 	finally:
 		os.close(dfd)
 
+def read_dnssec_ksk_pubkey(env, alg_name):
+	# The public key (the key data of its DNSKEY record) of the KSK of the
+	# algorithm, for the DS records that the status checks suggest. Read
+	# only through the checked dns/ and its dnssec/, which must be root's own
+	# as well, and only regular files of root's (B183): the storage user can
+	# replace dns/, and the status checks read these files as root.
+	# ValueError with the reason when they cannot be trusted or read.
+	path = os.path.join(env['STORAGE_ROOT'], 'dns', 'dnssec')
+	try:
+		dfd = open_root_dir(os.path.join(env['STORAGE_ROOT'], 'dns'))
+	except OSError as e:
+		raise ValueError(str(e)) from e
+	try:
+		kfd = open_root_dir('dnssec', dir_fd=dfd)
+	except OSError as e:
+		raise ValueError(str(e).replace("dnssec", path, 1)) from e
+	finally:
+		os.close(dfd)
+
+	def read(name, limit):
+		try:
+			return read_root_file(kfd, name, limit=limit).decode("utf-8", "replace")
+		except FileNotFoundError as e:
+			raise ValueError(f"{path}/{name} does not exist") from e
+		except OSError as e:
+			raise ValueError(f"{path}/{e}") from e
+
+	try:
+		ksk = None
+		for line in read(f"{alg_name}.conf", 4096).splitlines():
+			if line.startswith("KSK="):
+				ksk = line[4:].strip()
+		if not ksk or not re.match(r"^K[A-Za-z0-9._+-]+$", ksk):
+			raise ValueError(f"{path}/{alg_name}.conf names no KSK")
+		fields = read(ksk + ".key", 65536).split("\t")
+		if len(fields) < 4 or len(fields[3].split(" ")) < 4:
+			raise ValueError(f"{path}/{ksk}.key is not a DNSKEY record")
+		return fields[3].split(" ")[3].strip()
+	finally:
+		os.close(kfd)
+
 def get_custom_dns_config(env, only_real_records=False):
 	text = read_custom_dns_yaml(env)
 	try:

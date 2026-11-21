@@ -23,7 +23,9 @@ whose resolver answers from a table:
     one as before; the checks of a zone look its DS records up once, check
     them first when they are set or the lookup failed, and suggest DNSSEC
     last only when no DS record is set; the box's own name checks the DS
-    records of its zone only when they are set.
+    records of its zone only when they are set; when the KSK's public key
+    cannot be read through the checked dns/ (B183), the DS records to set
+    are still suggested, without the key and with the reason.
 
 The modules that status_checks.py imports and that are not in the standard
 library, or need a box, are replaced by stand-ins.
@@ -245,6 +247,7 @@ def case_dnssec():
 	sm.os = FakeOs()
 	sm.open = fake_open
 	sm.load_env_vars_from_file = lambda fn: {"KSK": "Kexample"}
+	sm.read_dnssec_ksk_pubkey = lambda env, alg_name: "PUBKEYDATA"
 
 	ANSWERS.clear()
 	ANSWERS[("a.example.com", "DS")] = ["12345 13 2 ABCDEF0123"]
@@ -269,6 +272,23 @@ def case_dnssec():
 	check("check_dnssec: wrong DS record: incorrect, with the current one",
 		(got[0][0], got[0][1][:46], got[-1][1]),
 		("print_error", "This domain's DNSSEC DS record is incorrect. T", "Key Tag: 11111, Algorithm: 13, Digest Type: 2, Digest: 0000"))
+	check("check_dnssec: the KSK's public key with the DS records to set",
+		any(t == "PUBKEYDATA" for _, t in ds_messages(None)), True)
+
+	# B183: the key cannot be read through a checked dns/ (the storage user
+	# replaced it): the DS records to set without the key, no exception.
+	def refused(env, alg_name):
+		raise ValueError("/storage/dns is not a directory of root's own")
+	sm.read_dnssec_ksk_pubkey = refused
+	try:
+		got = ds_messages(None)
+	except Exception as e:
+		got = [("exception", repr(e))]
+	check("check_dnssec: key not readable (B183): no exception, DS records still suggested, the reason named",
+		(got[0][0], any("ABCDEF0123" in t for _, t in got[1:]), any(t == "PUBKEYDATA" for _, t in got),
+			any(t.startswith("Public Key: not shown, the key cannot be read: /storage/dns is not") for _, t in got)),
+		("print_warning", True, False, True))
+	sm.read_dnssec_ksk_pubkey = lambda env, alg_name: "PUBKEYDATA"
 
 	# Which DNSSEC checks the checks of a zone and of the box's name make.
 	seen = []

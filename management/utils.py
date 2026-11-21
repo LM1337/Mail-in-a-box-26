@@ -68,16 +68,21 @@ def write_settings(config, env):
 
 ROOT_DIR_OWNER = 0 # root (the offline tests run as another user)
 
-def open_root_dir(path):
-    # The descriptor of the directory `path`, or OSError (FileNotFoundError
-    # when it does not exist) with the reason.
+def open_root_dir(path, dir_fd=None):
+    # The descriptor of the directory `path` (relative to the directory
+    # dir_fd, when given), or OSError (FileNotFoundError when it does not
+    # exist) with the reason.
     import stat
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
     except FileNotFoundError:
         raise
     except OSError as e:
-        if os.path.islink(path):
+        try:
+            is_link = stat.S_ISLNK(os.lstat(path, dir_fd=dir_fd).st_mode)
+        except OSError:
+            is_link = False
+        if is_link:
             raise OSError(f"{path} is a symbolic link") from e
         raise OSError(f"{path} cannot be opened as a directory: {e.strerror}") from e
     st = os.fstat(fd)

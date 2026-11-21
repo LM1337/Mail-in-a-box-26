@@ -429,6 +429,19 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   now written with mode 0600 (it can hold the target's credentials). New
   offline test `tests/fork/storage-dirs.py`.
 
+* **Status checks read the DNSSEC key only through a checked dns/ (B183)**\
+  The DNSSEC check of the status checks read `dns/dnssec/<algorithm>.conf`
+  and the KSK's `.key` file by path for the public key that it shows with
+  the DS records to set. With a `dns/` of the storage user's own in place
+  of the box's (B212), System Status answered HTTP 500 and the status
+  checks ended with a traceback, also in the nightly status mail, and with
+  a `dnssec/` of its own the key shown came from its files. The key is now
+  read only through the checked `dns/` and `dnssec/` (root's own, not
+  writable by others, regular files of root's); when that fails, the DS
+  records to set are shown without the key, with the reason, and the other
+  checks go on. New cases in `tests/fork/storage-dirs.py` and
+  `tests/fork/status-dns.py`.
+
 * **Nextcloud takes X-Forwarded-For only from nginx's own proxy (B213)**\
   Nextcloud takes the client's address from `X-Forwarded-For` on every
   connection from 127.0.0.1 (`trusted_proxies`, B121), so any local account

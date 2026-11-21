@@ -13,7 +13,7 @@ import idna
 import psutil
 import postfix_mta_sts_resolver.resolver
 
-from dns_update import get_dns_zones, build_tlsa_record, get_custom_dns_config, get_secondary_dns, get_custom_dns_records
+from dns_update import get_dns_zones, build_tlsa_record, get_custom_dns_config, get_secondary_dns, get_custom_dns_records, read_dnssec_ksk_pubkey
 from web_update import get_web_domains, get_domains_with_a_records
 from ssl_certificates import get_ssl_certificates, get_domain_ssl_files, check_certificate
 from mailconfig import get_mail_domains, get_mail_aliases
@@ -709,6 +709,7 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False, 
 
 	# Read in the pre-generated DS records
 	expected_ds_records = { }
+	pubkeys = { }
 	ds_file = '/etc/nsd/zones/' + dns_zonefiles[domain] + '.ds'
 	if not os.path.exists(ds_file): return # Domain is in our database but DNS has not yet been updated.
 	with open(ds_file, encoding="utf-8") as f:
@@ -718,10 +719,16 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False, 
 
 			# Some registrars may want the public key so they can compute the digest. The DS
 			# record that we suggest using is for the KSK (and that's how the DS records were generated).
-			# We'll also give the nice name for the key algorithm.
-			dnssec_keys = load_env_vars_from_file(os.path.join(env['STORAGE_ROOT'], f'dns/dnssec/{alg_name_map[ds_alg]}.conf'))
-			with open(os.path.join(env['STORAGE_ROOT'], 'dns/dnssec/' + dnssec_keys['KSK'] + '.key'), encoding="utf-8") as f:
-				dnsssec_pubkey = f.read().split("\t")[3].split(" ")[3]
+			# We'll also give the nice name for the key algorithm. The key is read only
+			# through the checked dns/ directory (B212, B183); when it cannot be trusted
+			# or read, the DS records are suggested without it (they come from nsd's
+			# zone directory, not from $STORAGE_ROOT), and the status checks go on.
+			if ds_alg not in pubkeys:
+				try:
+					pubkeys[ds_alg] = (read_dnssec_ksk_pubkey(env, alg_name_map[ds_alg]), None)
+				except ValueError as e:
+					pubkeys[ds_alg] = (None, str(e))
+			dnsssec_pubkey, pubkey_error = pubkeys[ds_alg]
 
 			expected_ds_records[ ds_keytag, ds_alg, ds_digalg, ds_digest ] = {
 				"record": rr_ds,
@@ -732,6 +739,7 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False, 
 				"digalg_name": digalg_name_map[ds_digalg],
 				"digest": ds_digest,
 				"pubkey": dnsssec_pubkey,
+				"pubkey_error": pubkey_error,
 			}
 
 	# Query public DNS for the DS record at the registrar, unless the caller
@@ -798,8 +806,11 @@ def check_dnssec(domain, env, output, dns_zonefiles, is_checking_primary=False, 
 		output.print_line("Algorithm: {} / {}".format(ds_suggestion['alg'], ds_suggestion['alg_name']))
 		output.print_line("Digest Type: {} / {}".format(ds_suggestion['digalg'], ds_suggestion['digalg_name']))
 		output.print_line("Digest: " + ds_suggestion['digest'])
-		output.print_line("Public Key: ")
-		output.print_line(ds_suggestion['pubkey'], monospace=True)
+		if ds_suggestion['pubkey'] is not None:
+			output.print_line("Public Key: ")
+			output.print_line(ds_suggestion['pubkey'], monospace=True)
+		else:
+			output.print_line("Public Key: not shown, the key cannot be read: " + ds_suggestion['pubkey_error'])
 		output.print_line("")
 		output.print_line("Bulk/Record Format:")
 		output.print_line(ds_suggestion['record'], monospace=True)
