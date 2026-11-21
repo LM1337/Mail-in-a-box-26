@@ -118,8 +118,15 @@ tools/editconf.py /etc/postfix/main.cf \
 # We need to explicitly enable the opendmarc service, or it will not start
 hide_output systemctl enable opendmarc
 
-# Restart services. Postfix only reads the milter settings again (B122).
-restart_service opendkim
-restart_service opendmarc
+# Restart OpenDKIM and OpenDMARC only when their configuration (or package)
+# changed: while OpenDKIM restarts, Postfix passes mail unsigned. The key and
+# signing tables are not part of it: the management daemon restarts OpenDKIM
+# when it writes them (management/dns_update.py). Postfix only reads the
+# milter settings again (B122).
+restart_on_change opendkim opendkim /etc/opendkim.conf /etc/default/opendkim \
+	/etc/opendkim/TrustedHosts "stat:$STORAGE_ROOT/mail/dkim/mail.private" \
+	tree:/etc/systemd/system/opendkim.service.d
+restart_on_change opendmarc opendmarc /etc/opendmarc.conf /etc/default/opendmarc \
+	tree:/etc/systemd/system/opendmarc.service.d
 reload_postfix
 

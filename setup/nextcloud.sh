@@ -538,6 +538,16 @@ if [ -e "$STORAGE_ROOT/owncloud/owncloud.db" ]; then
 	fi
 fi
 
+# Each update of Nextcloud or of one of its apps leaves a copy in
+# $STORAGE_ROOT/owncloud-backup (the database, config.php and the replaced
+# code, up to a few hundred MB each), and nothing removed them; the directory
+# is not in the box's backup. Keep the three newest (the one of this run, if
+# any, among them) and remove the older ones, through a descriptor of the
+# directory and without following a symbolic link (the storage user owns
+# $STORAGE_ROOT). A problem is reported, and setup goes on.
+tools/owncloud_backup_prune.py "$STORAGE_ROOT" 3 \
+	|| echo "Old Nextcloud backup copies in $STORAGE_ROOT/owncloud-backup were not removed (see above); setup goes on."
+
 # ### Configuring Nextcloud
 
 # With NEXTCLOUD_SHARE_SCOPE=domain (the default, see tools/nextcloud-share-scope.sh)

@@ -161,5 +161,12 @@ cat > /etc/cron.d/mailinabox-nightly << EOF;
 $minute 1 * * *	root	(cd $PWD && management/daily_tasks.sh)
 EOF
 
-# Start the management server.
-restart_service mailinabox
+# Start the management server, or restart it when its code, its start script
+# and unit, /etc/mailinabox.conf (read when it starts) or the packages of its
+# virtualenv changed (restart_on_change; its own replaced library files are
+# checked too). A restart makes the control panel answer 502 for a moment.
+venv_packages=()
+for d in "$venv"/lib/python3*/site-packages; do venv_packages+=("dir:$d"); done
+restart_on_change mailinabox "" "tree:$PWD/management" "$inst_dir/start" \
+	/lib/systemd/system/mailinabox.service tree:/etc/systemd/system/mailinabox.service.d \
+	/etc/mailinabox.conf "stat:$venv/bin/python3" "dir:$venv/bin" "${venv_packages[@]}"

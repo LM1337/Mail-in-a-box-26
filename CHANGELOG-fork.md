@@ -33,6 +33,16 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   The menu entry opens Munin in a new tab without leaving the page shown
   (the tab is opened in the click, so pop-up blockers let it through). The
   old address `#munin` still works.
+* **Setup points to tools/update-check.sh at the end of a run**\
+  At the end of a setup run on an existing box, setup prints a short hint
+  at `tools/update-check.sh`, without stopping: when the newest record in
+  `/root/update-check/` has a state from before an update but none from
+  after it, the commands `after` and `mailcheck` with that record
+  (`--dir STAMP`); otherwise that `before` and `backup` can be run before
+  the next update and `after` and `mailcheck` after it (optional). Not on
+  a first install, and not when the in-place upgrade or the migration tool
+  runs setup (they have their own reports and now set `MIAB_SETUP_TOOL`
+  for their setup run). New offline test `tests/fork/update-check-hint.py`.
 
 ### Changed
 
@@ -46,7 +56,76 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   snapshot, also before any update (T5b of v78-r2604.3). A snapshot
   prepared with the new script works with the original manifest
   (TESTING-fork.md, "Test environment").
-
+* **Setup restarts OpenDKIM, spampd and others only on a change**\
+  Setup restarted OpenDKIM and OpenDMARC, spampd, postgrey, named,
+  systemd-resolved, munin-node and the management daemon on every run,
+  also when nothing had changed; while OpenDKIM restarts, Postfix passes
+  mail unsigned (`milter_default_action`), while spampd or postgrey
+  restart, deliveries wait or are deferred, and while named restarts, the
+  box's lookups fail. Each of them is now restarted only when what it
+  reads at its start changed since setup last restarted it (a checksum in
+  `/var/lib/mailinabox/<unit>-config.sha256`, as for Dovecot since B122:
+  its configuration files and drop-ins; for OpenDKIM also `TrustedHosts`
+  and the DKIM key file, not `KeyTable` and `SigningTable`, for which the
+  management daemon restarts it; Munin's plugin links; the management
+  daemon's code, start script, `/etc/mailinabox.conf` and the packages of
+  its virtualenv), or when it
+  does not run or runs the program of an older package. The first run of
+  this release restarts each of them once more. New offline test
+  `tests/fork/restart-on-change.py`.
+* **Setup removes old Nextcloud backup copies, keeps the newest three**\
+  `$STORAGE_ROOT/owncloud-backup` grew with every update of Nextcloud and of
+  its pinned apps: each leaves a copy of the database, `config.php` and the
+  replaced code, nothing removed them (one box had 2.5 GB there), and the
+  directory is not in the box's backup. setup/nextcloud.sh now keeps the
+  three newest copies (named by setup's date and time, the one of the run
+  among them) and removes the older ones; other names in the directory
+  stay. It works through one descriptor of the directory, which must be
+  root's own and not writable by others (B177), and does not follow a
+  symbolic link (the storage user owns `$STORAGE_ROOT`); a problem is
+  reported and setup goes on. New tool `tools/owncloud_backup_prune.py`,
+  offline test `tests/fork/owncloud-backup-prune.py`.
+* **README: known issues (B122, B121, B137)**\
+  README-fork.md has a new section "Known issues / Bekannte
+  Einschränkungen" (English and German) with three issues from the list of
+  planned work: a Dovecot reload ends the open IMAP sessions (B122); it
+  still causes two client-visible failures, a login handed to the new auth
+  process at that moment and a Z-Push answer that cannot connect again
+  (B122, B121, B137); and a race in the migration of Roundcube's CardDAV
+  plugin when two sessions log in at once after its upgrade (to be
+  reported to the plugin project).
+* **Setup's comment on Spamhaus and public resolvers corrected (B136)**\
+  The comment in setup/network-checks.sh no longer names 8.8.8.8 among the
+  resolvers whose queries Spamhaus refuses with 127.255.255.254: through
+  8.8.8.8 Spamhaus answers NXDOMAIN, also for its own test entries, so
+  setup's checks can neither see a listing there nor say that they could
+  not check. This stays a known issue (README-fork.md, "Known issues").
+* **README: PHP 8.5 in universe, security updates with Ubuntu Pro**\
+  README-fork.md has a new section "Security updates and Ubuntu Pro /
+  Sicherheitsupdates und Ubuntu Pro" (English and German): `php8.5-fpm`
+  and some PHP modules of the box (and `nsd`, `opendkim`, `opendmarc`,
+  `spampd`, `postgrey`, `fail2ban`, `munin`, `certbot`) are in Ubuntu's
+  universe component, whose security updates Canonical guarantees only
+  with Ubuntu Pro (`esm-apps`); what that means for a box, and how to turn
+  it on (`pro attach`, a free personal subscription).
+* **Postfix's smtpd_tls_dh1024_param_file warning explained in the README (B59)**\
+  The planned item "postconf warns that smtpd_tls_dh1024_param_file will
+  be removed" is closed without a code change: a fresh install and an
+  updated box of the current branch print no such warning (`postconf`,
+  `postconf -d`, `postfix check`, the journal; the parameter is set in
+  neither `main.cf` nor `master.cf`). The warnings in the test runs came
+  from boxes on rc3 (before B59, which comments the parameter out) and
+  from the in-place upgrade, while the release upgrade installs Postfix
+  3.10 and `main.cf` of the old box still sets it, before setup runs.
+  README-fork.md lists the line under "Setup output".
+* **README: Nextcloud on SQLite and HTTP 500 during cron, a known issue**\
+  The planned item "Nextcloud on SQLite answers CardDAV writes with HTTP
+  500 during cron" moves to README-fork.md, "Known issues": Nextcloud's
+  SQLite database is in WAL mode already (Nextcloud's default
+  `sqlite.journal_mode`) and PHP waits up to 60 s for a lock (pdo_sqlite's
+  default), checked on a test box; the immediate "database is locked" of a
+  transaction that read first and then writes after another connection
+  wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
 * **System Status "show more" and TLS result are shown again (B178)**\
@@ -143,6 +222,44 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   group and other access away from everything in the directory at its
   start, after each phase and at its end, also from the files of a
   migration that an older version of the tool started.
+* **Setup leaves PHP-FPM alone when its configuration is unchanged (B122)**\
+  Setup restarted PHP-FPM once per run (B122), which ended every running
+  request: ActiveSync's Pings and Syncs, CalDAV and CardDAV, webmail and
+  Nextcloud got HTTP 502. Now setup does nothing when PHP-FPM runs the
+  current package and its configuration (`/etc/php/8.5/fpm` with the
+  pools and the modules of `conf.d`, `mods-available`) is the one it
+  loaded last (a checksum in `/var/lib/mailinabox/php-fpm-config.sha256`),
+  so an update that changes nothing there no longer disturbs the clients.
+  When it changed, setup reloads PHP-FPM instead of restarting it: the
+  reload reads php.ini, the pools and the modules anew as a restart does
+  (checked with a module turned off and `memory_limit` changed), keeps the
+  listening socket, and lets the running requests finish for up to 5 s
+  (`process_control_timeout`, new in `php-fpm.conf`). A request that runs
+  longer, such as a Ping, is still ended then (502, as before), and new
+  requests wait up to those 5 s; so the plan's idea that a reload would
+  keep the long polls does not hold. Setup checks the configuration
+  (`php-fpm8.5 -t`) first and restarts PHP-FPM when it does not run (after
+  an upgrade of Nextcloud), runs an older package or replaced module, or
+  has not logged "ready to handle connections" within 30 s of the reload.
+* **Failed ActiveSync logins no longer take 10 to 50 seconds (B126)**\
+  A wrong password over ActiveSync or Autodiscover took 13 to 26 s (seen
+  up to 50 s), and a few failed logins of one client, below the ban
+  threshold of `miab-zpush`, slowed the correct logins of all other users
+  down to 15 s (measured on a test box: one wrong password every 3 s).
+  Z-Push checks each password with up to three IMAP logins from
+  127.0.0.1, and Dovecot delayed each failed login by 2 s and raised a
+  penalty of 127.0.0.1 that delayed all later logins from there, of every
+  user, by up to 15 s; Roundcube's and Nextcloud's IMAP logins come from
+  127.0.0.1 too. Dovecot now answers failed logins from 127.0.0.1 and ::1
+  at once and raises no penalty for them (the passdb field `nodelay` in a
+  `remote` filter, and a static passdb without a password after the SQL
+  one, so that unknown users are covered too; it can accept no
+  password). These logins all come from services that fail2ban protects
+  with the client's own address (`miab-zpush`, `miab-roundcube`,
+  `miab-owncloud` and Nextcloud's throttle); logins from other addresses
+  keep Dovecot's delay and penalty. The remaining risk, a local process
+  that tries IMAP passwords on 127.0.0.1 without delay, is in
+  README-fork.md, "Known issues".
 
 ### Security
 
@@ -271,27 +388,25 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   new box has no record). A downgrade to v78-r2604.4 ignores the record
   and leaves the number as it is, so the way back up works too.
 
+* **The update removes all but the three newest Nextcloud backup copies**\
+  The first setup run of this release removes every copy in
+  `$STORAGE_ROOT/owncloud-backup` but the three newest. To keep an older
+  one, move it out of that directory before the update (to a name that is
+  not a date and time, or elsewhere).
+* **The update reloads Dovecot and PHP-FPM once and restarts a few services**\
+  The first setup run of this release reloads Dovecot (its new auth
+  configuration, B126: the open IMAP sessions end, and their clients log
+  in again) and PHP-FPM (its new `process_control_timeout`, B122: a Ping
+  that is open then gets HTTP 502 after 5 s), and restarts OpenDKIM,
+  OpenDMARC, spampd, postgrey, named, systemd-resolved, munin-node and the
+  management daemon once more, as it has no checksums of them yet. Later
+  runs leave them alone unless their configuration changes.
+
 ### Planned
 
 Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
 v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open findings in TESTING-fork.md):
 
-* **Old Nextcloud backup copies are never removed**\
-  `$STORAGE_ROOT/owncloud-backup` grows with every update of Nextcloud and,
-  since B176, with every new pin of one of its apps: each keeps a copy of
-  the database, `config.php` and the replaced code, and nothing removes old
-  copies (one box had 2.5 GB there; the directory is not in the box's
-  backup). Setup could keep the newest few copies and remove older ones
-  (seen in the review of v78-r2604.4).
-* **Setup does not point to update-check.sh**\
-  Setup does not mention tools/update-check.sh. Planned: at the end of a
-  setup run on an existing box (not the first install, and not when the
-  in-place or migration tool runs setup, which have their own reports),
-  setup prints a short hint, without stopping: if the newest record in
-  `/root/update-check/` has a "before" but no "after", the commands
-  `after` and `mailcheck` with that record; otherwise that `before` and
-  `backup` can be run before the next update and `after` and `mailcheck`
-  after it, optionally (README-fork.md, "Updating the fork").
 * **The in-place and migration tools trust a local tag of the release name**\
   `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
   `update_fork_dir`) and `tools/migrate-to-2604.sh` (`resolve_miab_dir`)
@@ -300,16 +415,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   name on another commit keeps the old code. The same comparison with the
   commit of the tag at the source (`git ls-remote`) would find it (seen in
   the work on B202).
-* **Setup restarts PHP-FPM, ending ActiveSync long polls (B122)**\
-  Setup restarts PHP-FPM once per run (B122), which ends ActiveSync long
-  polls; a reload with a `process_control_timeout` would keep them.
-* **Failed ActiveSync or Autodiscover logins take 10 to 50 seconds (B126)**\
-  A failed ActiveSync or Autodiscover login takes 10 to 50 s (seen in the
-  test of B126): Z-Push tries the IMAP login three times, and Dovecot
-  delays failed logins, possibly more for an address with many failures,
-  which for Z-Push is 127.0.0.1 for all users. Whether an attack below the
-  `miab-zpush` threshold slows down the ActiveSync logins of other users
-  is not measured.
 * **`miab-zpush` can ban all users behind shared cloud servers (B126)**\
   `miab-zpush` counts failures per address, like the other jails, and is
   always on: behind the shared servers of a mail app that syncs through its
@@ -320,50 +425,15 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   to put such networks on the allowlist; nothing finds them on its own.
   Leaving `miab-zpush` out of recidive would let an attacker guess 20
   passwords every few minutes for good, so it still counts there.
-* **Setup restarts several services on every run**\
-  Setup still restarts OpenDKIM and OpenDMARC (setup/dkim.sh), spampd,
-  postgrey, named, systemd-resolved, munin-node and the management daemon
-  on every run; while OpenDKIM restarts, Postfix lets mail pass unsigned
-  (`milter_default_action`). Candidates for a reload or a restart only on a
-  change.
-* **A Dovecot reload still causes two client-visible failures (B122, B121, B137)**\
-  A Dovecot reload (B122) still has two client-visible moments: a login
-  that the old login process hands to the new auth process at that moment
-  fails as an internal failure (Nextcloud's `user_external` counts it as a
-  failed login of the client; harmless for 127.0.0.1 after B121), and a
-  FolderSync or Ping that Z-Push answers during the reload gets a server
-  error if Z-Push cannot connect again (B137).
-* **Roundcube CardDAV plugin migration race after an upgrade**\
-  Roundcube's CardDAV plugin can log "duplicate column name: account_id",
-  "no such column: active" or "UNIQUE constraint failed:
-  carddav_migrations.filename" when two sessions log in at the same moment
-  for the first time after an upgrade of the plugin (a race in its schema
-  migration; one of the logins fails once). After an update from rc7 or
-  earlier, `update-check.sh after` accepts the last form.
 * **nginx sends no HSTS header on /admin/**\
   nginx sets no HSTS header on `/admin/`: the headers of that location
   replace the server's (upstream). Browsers that visited another page of
   the box have the header already.
-* **Nextcloud on SQLite answers CardDAV writes with HTTP 500 during cron**\
-  Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
-  locked") while its `cron.php` holds the database (seen once in T1); the
-  client writes again later.
-* **Spamhaus gives no answer through some public resolvers (B136)**\
-  Through some public resolvers (8.8.8.8 in the test of B136) Spamhaus
-  gives no answer at all, also for its own test entries, so setup's checks
-  can neither see a listing nor say that they could not check; the comment
-  in setup/network-checks.sh names 8.8.8.8 among the resolvers that get
-  127.255.255.254.
-* **A Dovecot reload ends open IMAP sessions (B122)**\
-  A Dovecot reload ends the open IMAP sessions (their clients log in
-  again); setup reloads Dovecot only when its configuration changed (B122).
 * **Munin critical-only alerts never mail the return to normal**\
   Critical only (Munin's alerts) never mails the return to normal.
 * **Control panel asks for a favicon.ico that is not installed**\
   The admin panel asks for `/admin/assets/branding/favicon.ico`, which is
   not installed (nginx 404).
-* **postconf warns that smtpd_tls_dh1024_param_file will be removed**\
-  `postconf` warns that `smtpd_tls_dh1024_param_file` will be removed.
 * **www-data is still in the group dovecot**\
   Setup adds www-data to the group dovecot, as upstream did "so PHP can use
   doveadm, for the password changing plugin". No version of this fork uses

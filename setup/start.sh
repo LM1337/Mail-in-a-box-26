@@ -222,9 +222,9 @@ elif [ -n "$PROBE_ADDRESS" ]; then
 	echo "PROBE_ADDRESS=$PROBE_ADDRESS is not a plain mail address; it is left out of /etc/mailinabox.conf."
 fi
 
-# Start service configuration. PHP-FPM is restarted once, after zpush.sh, not
-# by each script that changes its configuration (restart_php_fpm in
-# setup/functions.sh).
+# Start service configuration. PHP-FPM loads its configuration once, after
+# zpush.sh, not for each script that changes it (restart_php_fpm and
+# load_php_fpm in setup/functions.sh).
 PHP_FPM_RESTART=later
 source setup/system.sh
 source setup/ssl.sh
@@ -345,4 +345,11 @@ else
 	echo
 	echo "Then you can confirm the security exception and continue."
 	echo
+fi
+
+# On an existing box, point to tools/update-check.sh (not on a first install,
+# and not when tools/upgrade-in-place-to-2604.sh or tools/migrate-to-2604.sh
+# run setup: they set MIAB_SETUP_TOOL and have their own reports).
+if [ -z "${FIRST_TIME_SETUP:-}" ] && [ -z "${MIAB_SETUP_TOOL:-}" ]; then
+	update_check_hint
 fi

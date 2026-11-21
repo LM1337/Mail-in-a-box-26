@@ -57,6 +57,14 @@ tools/editconf.py /etc/php/"$PHP_VER"/fpm/php.ini -c ';' \
 tools/editconf.py /etc/php/"$PHP_VER"/fpm/pool.d/www.conf -c ';' \
 	env[PATH]=/usr/local/bin:/usr/bin:/bin \
 
+# A reload of PHP-FPM (load_php_fpm in setup/functions.sh) lets the running
+# requests finish for up to 5 seconds before it ends them; with the
+# package's 0 it ends them at once, as a restart does (B122). New requests
+# wait meanwhile, so the time is short. (The line goes in the [global]
+# section, after the package's commented ";process_control_timeout = 0".)
+tools/editconf.py /etc/php/"$PHP_VER"/fpm/php-fpm.conf -c ';' \
+	process_control_timeout=5s
+
 # Configure php-fpm based on the amount of memory the machine has
 # This is based on the nextcloud manual for performance tuning: https://docs.nextcloud.com/server/17/admin_manual/installation/server_tuning.html
 # Some synchronisation issues can occur when many people access the site at once.

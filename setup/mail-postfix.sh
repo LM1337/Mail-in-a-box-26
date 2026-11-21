@@ -384,4 +384,5 @@ if [ "$(postconf -h inet_interfaces inet_protocols)" != "$postfix_listen_before"
 else
 	reload_postfix
 fi
-restart_service postgrey
+restart_on_change postgrey postgrey /etc/default/postgrey tree:/etc/postgrey \
+	tree:/etc/systemd/system/postgrey.service.d

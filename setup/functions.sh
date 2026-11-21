@@ -250,12 +250,74 @@ function service_runs_current_package {
 	started=$(systemctl show -P ActiveEnterTimestamp "$unit" 2> /dev/null || true)
 	[ -n "$started" ] || return 1
 	started=$(date -d "$started" +%s 2> /dev/null) || return 1
-	installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
-	[[ $installed =~ ^[0-9]+$ ]] || return 1
-	[ "$installed" -le "$started" ] || return 1
+	if [ -n "$pkg" ]; then # empty: a service of no package of its own
+		installed=$(dpkg-query -W -f='${db-fsys:Last-Modified}' "$pkg" 2> /dev/null || true)
+		[[ $installed =~ ^[0-9]+$ ]] || return 1
+		[ "$installed" -le "$started" ] || return 1
+	fi
 	pid=$(systemctl show -P MainPID "$unit" 2> /dev/null || true)
 	[[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
 	! grep -qE ' /(usr/)?(lib|lib64|libexec|bin|sbin)/[^ ]* \(deleted\)$' "/proc/$pid/maps" 2> /dev/null
+}
+
+function config_checksum {
+	# The SHA-256 of what a service reads when it starts, for restart_on_change.
+	# Each argument is
+	#   FILE       its content ("missing" when it does not exist);
+	#   tree:DIR   the names and contents of the regular files below DIR
+	#              (without Python's __pycache__ directories);
+	#   dir:DIR    the names in DIR, with their types and the targets of the
+	#              symbolic links (Munin's plugins), not their contents;
+	#   stat:FILE  its name, inode, size and time, read without following a
+	#              symbolic link and without opening it (a file of another
+	#              account, such as the DKIM key, which root does not read).
+	# All of them are in directories of root's own, except the stat: ones.
+	local a
+	for a in "$@"; do
+		case "$a" in
+		tree:*)
+			echo "$a"
+			find "${a#tree:}" -name __pycache__ -prune -o -type f -print0 2> /dev/null | LC_ALL=C sort -z | xargs -0r sha256sum 2> /dev/null || true ;;
+		dir:*)
+			echo "$a"
+			find "${a#dir:}" -mindepth 1 -maxdepth 1 -printf '%f %y %l\n' 2> /dev/null | LC_ALL=C sort || true ;;
+		stat:*)
+			stat -c '%n %i %s %Y' -- "${a#stat:}" 2> /dev/null || echo "${a#stat:} missing" ;;
+		*)
+			if [ -f "$a" ]; then
+				echo "$a $(sha256sum < "$a" 2> /dev/null || echo unreadable)"
+			else
+				echo "$a missing"
+			fi ;;
+		esac
+	done | sha256sum | cut -d' ' -f1
+}
+
+function restart_on_change {
+	# restart_on_change UNIT PACKAGE ARG...
+	# Setup restarted OpenDKIM, OpenDMARC, spampd, postgrey, named,
+	# systemd-resolved, munin-node and the management daemon on every run,
+	# also when nothing had changed. While OpenDKIM restarts, Postfix passes
+	# mail unsigned (milter_default_action=accept); while OpenDMARC, spampd
+	# or postgrey restart, mail waits or is deferred. This restarts UNIT only
+	# when what it reads at its start (ARG..., see config_checksum) is not
+	# what it read at the last restart by setup (the checksum is kept in
+	# /var/lib/mailinabox/UNIT-config.sha256, as for Dovecot, see
+	# load_dovecot), or when it does not run or runs the program of an older
+	# PACKAGE (service_runs_current_package; empty PACKAGE: only the
+	# replaced files are checked). A box updated to this version restarts
+	# each of them once more, as it has no checksums yet.
+	local unit=$1 pkg=$2 sum record
+	shift 2
+	record=/var/lib/mailinabox/$unit-config.sha256
+	sum=$(config_checksum "$@")
+	enable_service "$unit"
+	if service_runs_current_package "$unit.service" "$pkg" && [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+		return 0
+	fi
+	hide_output service "$unit" restart
+	mkdir -p /var/lib/mailinabox
+	echo "$sum" > "$record"
 }
 
 function reload_fail2ban {
@@ -295,17 +357,78 @@ function reload_postfix {
 
 function restart_php_fpm {
 	# setup/web.sh, webmail.sh, nextcloud.sh and zpush.sh each change PHP-FPM's
-	# configuration (php.ini, the pool, PHP modules). A restart ends the running
-	# requests, ActiveSync's long polls among them, and nginx answers 502 for
-	# a moment. setup/start.sh sets PHP_FPM_RESTART=later and restarts PHP-FPM
-	# once, after the last of them; a script run on its own restarts it at
-	# once. Not a reload: with process_control_timeout at 0 (the package's
-	# default) a reload ends the running requests just the same, and a reload
-	# that fails leaves PHP-FPM stopped.
+	# configuration (php.ini, the pool, PHP modules). setup/start.sh sets
+	# PHP_FPM_RESTART=later and loads it once, after the last of them; a
+	# script run on its own loads it at once (load_php_fpm).
 	if [ "${PHP_FPM_RESTART:-}" = later ]; then
 		return 0
 	fi
-	restart_service php"$PHP_VER"-fpm
+	load_php_fpm
+}
+
+function load_php_fpm {
+	# Setup restarted PHP-FPM once per run (B122). A restart ends every
+	# running request, ActiveSync's long polls among them, and nginx answers
+	# 502 for them and, for a second, for new ones (ActiveSync, CalDAV and
+	# CardDAV, webmail, Nextcloud).
+	#
+	# Now nothing is done when PHP-FPM runs the program of the current
+	# package and its configuration is the one it loaded last: the files in
+	# /etc/php/VER/fpm (php.ini, php-fpm.conf, the pools, the modules in
+	# conf.d) and mods-available, as a checksum in
+	# /var/lib/mailinabox/php-fpm-config.sha256 (config_checksum). PHP code
+	# that setup replaces needs nothing: opcache checks the files' times
+	# (opcache.revalidate_freq=1, setup/nextcloud.sh).
+	#
+	# Otherwise a reload: PHP-FPM runs its program again in the same process
+	# (SIGUSR2), which reads php-fpm.conf, the pools, php.ini and the modules
+	# (conf.d) anew, as a restart does, and keeps the listening socket, so no
+	# connection is refused: new requests wait in its queue until the new
+	# workers take them. First the old workers finish their running
+	# requests, for up to process_control_timeout (setup/web.sh sets 5 s;
+	# with the package's 0 a reload ends them at once); a longer request,
+	# such as an ActiveSync Ping, is ended then (nginx answers it with 502,
+	# as at a restart), and new requests wait that long. php-fpm -t first: a
+	# reload with a configuration that PHP-FPM refuses would stop it, so the
+	# restart below shows the error then. The reload is asynchronous: setup
+	# waits until PHP-FPM logs that it is ready again ("ready to handle
+	# connections" in its log after the reload), and restarts it if it has
+	# not within 30 s or no longer runs.
+	#
+	# A restart also when PHP-FPM does not run (setup/nextcloud.sh stopped it
+	# for an upgrade of Nextcloud) or runs the program of an older package or
+	# a replaced module (service_runs_current_package).
+	local unit=php$PHP_VER-fpm log=/var/log/php$PHP_VER-fpm.log sum size i
+	local record=/var/lib/mailinabox/php-fpm-config.sha256
+	sum=$(config_checksum "tree:/etc/php/$PHP_VER/fpm" "dir:/etc/php/$PHP_VER/fpm/conf.d" \
+		"tree:/etc/php/$PHP_VER/mods-available" "tree:/etc/systemd/system/$unit.service.d")
+	enable_service "$unit"
+	if service_runs_current_package "$unit.service" "$unit"; then
+		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+			return 0
+		fi
+		if "php-fpm$PHP_VER" -t > /dev/null 2>&1; then
+			size=$(stat -c %s "$log" 2> /dev/null || echo 0)
+			if systemctl reload "$unit" > /dev/null 2>&1; then
+				for i in $(seq 300); do
+					if [[ $(tail -c "+$((size + 1))" "$log" 2> /dev/null || true) == *"ready to handle connections"* ]]; then
+						if systemctl is-active --quiet "$unit"; then
+							mkdir -p /var/lib/mailinabox
+							echo "$sum" > "$record"
+							return 0
+						fi
+						break
+					fi
+					systemctl is-active --quiet "$unit" || break
+					sleep 0.1
+				done
+			fi
+		fi
+		echo "PHP-FPM did not load its new configuration with a reload; restarting it."
+	fi
+	hide_output service "$unit" restart
+	mkdir -p /var/lib/mailinabox
+	echo "$sum" > "$record"
 }
 
 function stop_php_fpm {
@@ -413,6 +536,40 @@ function reload_nginx {
 	fi
 	hide_output nginx -t
 	hide_output service nginx reload
+}
+
+function update_check_hint {
+	# A short hint at tools/update-check.sh at the end of a setup run on an
+	# existing box (setup/start.sh; not on a first install, and not when the
+	# in-place upgrade or the migration tool runs setup: they have their own
+	# reports). When the newest record in /root/update-check (as the tool,
+	# UPDATE_CHECK_DIR) has a state from before an update but none from after
+	# it, this run is most likely that update: name "after" and "mailcheck"
+	# with that record. Otherwise the general tip. It never stops setup.
+	local root=${UPDATE_CHECK_DIR:-/root/update-check} d newest='' tool
+	tool="$(pwd)/tools/update-check.sh"
+	if [ -d "$root" ] && [ ! -L "$root" ]; then
+		for d in "$root"/[0-9]*-[0-9]*; do
+			[ -d "$d" ] && [ ! -L "$d" ] || continue
+			[[ ${d##*/} =~ ^[0-9]{8}-[0-9]{6}$ ]] || continue
+			newest=$d # the glob is sorted, the last one is the newest
+		done
+	fi
+	echo
+	if [ -n "$newest" ] && [ -f "$newest/before/time.txt" ] && [ ! -e "$newest/after" ]; then
+		echo "tools/update-check.sh recorded the state of this box before an update,"
+		echo "but not yet after it ($newest)."
+		echo "To compare the state and to test the mail round trip now:"
+		echo
+		echo "  sudo $tool after --dir ${newest##*/}"
+		echo "  sudo $tool mailcheck --dir ${newest##*/}"
+	else
+		echo "Tip: tools/update-check.sh can check an update of this box: \"before\" and"
+		echo "\"backup\" before the next update, \"after\" and \"mailcheck\" after it"
+		echo "(optional; see \"Updating the fork\" in README-fork.md)."
+	fi
+	echo
+	return 0
 }
 
 ## Dialog Functions ##

@@ -16,7 +16,8 @@ Main differences from upstream v78 (Ubuntu 22.04):
 
 * Dovecot 2.4, Postfix and the rest of the mail stack from Ubuntu 26.04.
 * PHP 8.5 from Ubuntu. packages.sury.org is pinned to what Ubuntu lacks
-  (php8.2 for the Nextcloud upgrade chain, php8.5-imap, php-common).
+  (php8.2 for the Nextcloud upgrade chain, php8.5-imap, php-common). Some of
+  PHP's packages are in universe, see "Security updates and Ubuntu Pro".
 * Nextcloud 34.0.6. Existing installations are upgraded step by step from
   Nextcloud 26; older versions are refused.
 * Roundcube 1.7.6, Z-Push 2.7.7.
@@ -245,6 +246,11 @@ step that failed.
 
 Everything lands in `/root/update-check/<stamp>/` (only root can read it).
 `--help` lists the options.
+At the end of a setup run on an existing box (not a first install, not
+the run of the in-place upgrade or the migration tool), setup points to
+the tool: when the newest record has a `before` but no `after`, it prints
+the `after` and `mailcheck` commands for that record, otherwise a short
+tip. It does not stop.
 
 **From rc7 to v78-r2604.0, step by step.** The steps of the release's
 upgrade note, in the order in which they were tested (TESTING-fork.md,
@@ -483,6 +489,11 @@ scheiterte.
 
 Alles landet in `/root/update-check/<Zeitstempel>/` (nur für root lesbar).
 `--help` zeigt die Optionen.
+Am Ende eines Setup-Laufs auf einer bestehenden Box (keine
+Neuinstallation, nicht der Lauf des In-place-Upgrades oder des
+Umzugswerkzeugs) weist setup auf das Werkzeug hin: Hat der neueste Eintrag
+ein `before`, aber kein `after`, nennt es die Befehle `after` und
+`mailcheck` für diesen Eintrag, sonst einen kurzen Tipp. Es hält nicht an.
 
 **Von rc7 auf v78-r2604.0, Schritt für Schritt.** Die Schritte des
 Upgrade-Hinweises des Releases, in der getesteten Reihenfolge
@@ -742,6 +753,12 @@ harmless; setup goes on and ends with "Your Mail-in-a-Box is running.":
   name...": setup fixing a provider's host name (B60, B68).
 * "Cleaning up legacy php version": setup removing PHP 8.2, which it only
   needs for the step-by-step upgrade of an old Nextcloud.
+* `postconf: warning: /etc/postfix/main.cf: support for parameter
+  "smtpd_tls_dh1024_param_file" will be removed`, in the output of the
+  in-place upgrade (while the release upgrade installs Postfix 3.10) and of
+  a box on rc3 or older: their `main.cf` still sets the parameter, which
+  setup comments out (B59, since rc4). It is gone after setup's run; a box
+  on a current release prints no such warning.
 
 ### Deutsch
 
@@ -769,7 +786,204 @@ is running.“:
   name...“: setup ersetzt den Hostnamen eines Anbieters (B60, B68).
 * „Cleaning up legacy php version“: setup entfernt PHP 8.2, das es nur für
   das schrittweise Upgrade einer alten Nextcloud braucht.
+* `postconf: warning: /etc/postfix/main.cf: support for parameter
+  "smtpd_tls_dh1024_param_file" will be removed` in der Ausgabe des
+  In-place-Upgrades (während das Release-Upgrade Postfix 3.10 installiert)
+  und einer Box auf rc3 oder älter: Deren `main.cf` setzt den Parameter
+  noch, den setup auskommentiert (B59, seit rc4). Nach dem Lauf von setup
+  ist sie verschwunden; eine Box auf einem aktuellen Release gibt keine
+  solche Warnung aus.
 
+
+Known issues / Bekannte Einschränkungen
+---------------------------------------
+
+### English
+
+These issues of the current release are known and not fixed. The fixed bugs
+are in [BUGS-fork.md](BUGS-fork.md), whose section "Known limitations (not
+fixed)" lists a few more.
+
+* **A Dovecot reload ends open IMAP sessions (B122).** Setup reloads
+  Dovecot only when its configuration changed, which most updates do not
+  do. A reload keeps the listening sockets, so no connection is refused,
+  but Dovecot ends the open IMAP sessions, and their clients log in again.
+* **A Dovecot reload still causes two client-visible failures (B122, B121,
+  B137).** A login that the old login process hands to the new auth
+  process at that moment fails as an internal failure; Nextcloud's IMAP
+  login (`user_external`) counts it as a failed login of the client
+  (harmless for 127.0.0.1 since B121). A FolderSync or Ping that Z-Push
+  answers during the reload gets a server error when Z-Push cannot
+  connect to Dovecot again (B137); the phone tries again.
+* **A race in the migration of Roundcube's CardDAV plugin after an
+  upgrade.** When two sessions log in at the same moment for the first
+  time after an upgrade of the plugin, its schema migration runs twice and
+  logs "duplicate column name: account_id", "no such column: active" or
+  "UNIQUE constraint failed: carddav_migrations.filename", and one of the
+  logins fails once. After an update from rc7 or earlier,
+  `update-check.sh after` accepts the last form. To be reported to the
+  plugin project.
+* **Nextcloud on SQLite answers a CardDAV write with HTTP 500 now and
+  then while its cron job runs.** Nextcloud logs "database is locked",
+  and the client writes again later (seen once in the tests). Nextcloud
+  already keeps its SQLite database in WAL mode (its default), and PHP
+  waits up to 60 s for a lock (pdo_sqlite's default timeout), so no
+  setting of Nextcloud or SQLite helps here: the likely cause is a
+  transaction that read first and then wants to write after another
+  connection wrote meanwhile, which SQLite refuses at once, whatever the
+  timeout. Setup supports only SQLite for Nextcloud.
+* **No delay for failed IMAP logins from the box itself (B126).** Dovecot
+  answers a failed login from 127.0.0.1 or ::1 at once and does not slow
+  down later logins from there: those logins come from Z-Push, Roundcube
+  and Nextcloud, which fail2ban protects with the client's own address, and
+  the delay made a wrong ActiveSync password take up to 50 s and slowed
+  down every other user. The other side: a process on the box (any local
+  account) can try IMAP passwords on 127.0.0.1 as fast as Dovecot answers,
+  and fail2ban does not ban 127.0.0.1. Logins from other addresses keep
+  Dovecot's delay.
+* **Spamhaus checks of a fresh install through some public resolvers
+  (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
+  answers NXDOMAIN, also for its own test entries. That looks like "not
+  listed", so setup's network checks of a fresh install can neither see a
+  listing nor say that they could not check. Check the hostname and the
+  address on https://check.spamhaus.org/; once the box runs, its status
+  checks ask through its own resolver.
+
+### Deutsch
+
+Diese Einschränkungen des aktuellen Releases sind bekannt und nicht behoben.
+Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
+„Known limitations (not fixed)“ nennt noch einige mehr.
+
+* **Ein Reload von Dovecot beendet offene IMAP-Sitzungen (B122).** setup
+  lädt Dovecot nur neu, wenn sich seine Konfiguration geändert hat, was bei
+  den meisten Updates nicht der Fall ist. Beim Reload bleiben die
+  Listening-Sockets offen, keine Verbindung wird abgewiesen, aber Dovecot
+  beendet die offenen IMAP-Sitzungen, und ihre Clients melden sich neu an.
+* **Ein Reload von Dovecot führt noch zu zwei Fehlern, die Clients sehen
+  (B122, B121, B137).** Eine Anmeldung, die der alte Login-Prozess genau in
+  diesem Moment an den neuen Auth-Prozess übergibt, scheitert als interner
+  Fehler; die IMAP-Anmeldung von Nextcloud (`user_external`) zählt das als
+  fehlgeschlagene Anmeldung des Clients (für 127.0.0.1 seit B121 harmlos).
+  Ein FolderSync oder Ping, den Z-Push während des Reloads beantwortet,
+  bekommt einen Serverfehler, wenn Z-Push keine neue Verbindung zu Dovecot
+  bekommt (B137); das Telefon versucht es erneut.
+* **Eine Wettlaufsituation in der Migration des CardDAV-Plugins von
+  Roundcube nach einem Upgrade.** Melden sich nach einem Upgrade des
+  Plugins zwei Sitzungen im selben Moment zum ersten Mal an, läuft seine
+  Schema-Migration zweimal und protokolliert „duplicate column name:
+  account_id“, „no such column: active“ oder „UNIQUE constraint failed:
+  carddav_migrations.filename“, und eine der Anmeldungen scheitert einmal.
+  Nach einem Update von rc7 oder älter akzeptiert `update-check.sh after`
+  die letzte Form. Eine Meldung an das Plugin-Projekt steht noch aus.
+* **Nextcloud mit SQLite beantwortet gelegentlich einen CardDAV-Schreibzugriff
+  mit HTTP 500, während sein Cron-Job läuft.** Nextcloud protokolliert
+  „database is locked“, und der Client schreibt später erneut (einmal in den
+  Tests gesehen). Nextcloud führt seine SQLite-Datenbank bereits im
+  WAL-Modus (seine Voreinstellung), und PHP wartet bis zu 60 s auf eine
+  Sperre (die Voreinstellung von pdo_sqlite); keine Einstellung von
+  Nextcloud oder SQLite hilft hier also: Die wahrscheinliche Ursache ist eine
+  Transaktion, die zuerst gelesen hat und dann schreiben will, nachdem eine
+  andere Verbindung inzwischen geschrieben hat; das lehnt SQLite sofort ab,
+  unabhängig von der Wartezeit. setup unterstützt für Nextcloud nur SQLite.
+* **Keine Verzögerung fehlgeschlagener IMAP-Anmeldungen von der Box selbst
+  (B126).** Dovecot beantwortet eine fehlgeschlagene Anmeldung von
+  127.0.0.1 oder ::1 sofort und bremst spätere Anmeldungen von dort nicht:
+  Diese Anmeldungen kommen von Z-Push, Roundcube und Nextcloud, die fail2ban
+  mit der eigenen Adresse des Clients schützt, und die Verzögerung ließ ein
+  falsches ActiveSync-Passwort bis zu 50 s dauern und bremste alle anderen
+  Benutzer. Die Kehrseite: Ein Prozess auf der Box (jedes lokale Konto) kann
+  IMAP-Passwörter auf 127.0.0.1 so schnell durchprobieren, wie Dovecot
+  antwortet, und fail2ban sperrt 127.0.0.1 nicht. Anmeldungen von anderen
+  Adressen behalten die Verzögerung von Dovecot.
+* **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
+  Resolver (B136).** Über manche öffentliche Resolver (in den Tests
+  8.8.8.8) antwortet Spamhaus mit NXDOMAIN, auch für seine eigenen
+  Testeinträge. Das sieht aus wie „nicht gelistet“; die Netzwerkprüfungen
+  von setup bei einer Neuinstallation können dort also weder einen Eintrag
+  sehen noch melden, dass sie nicht prüfen konnten. Hostname und Adresse
+  auf https://check.spamhaus.org/ selbst prüfen; sobald die Box läuft,
+  fragen ihre Statusprüfungen über ihren eigenen Resolver.
+
+Security updates and Ubuntu Pro / Sicherheitsupdates und Ubuntu Pro
+-------------------------------------------------------------------
+
+### English
+
+PHP 8.5 from Ubuntu 26.04 runs the webmail (Roundcube), Nextcloud and
+Z-Push. Some of its packages are in Ubuntu's "universe" component,
+among them `php8.5-fpm`, which runs all PHP code of the box, and some of
+the modules setup installs (such as `php8.5-intl`); others, such as
+`php8.5-cli`, are in "main". Other packages of the box are in universe
+too: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`, `fail2ban`,
+`munin` and `certbot`. Canonical guarantees security updates during the
+standard support of an LTS release only for "main" (and "restricted"); for
+"universe" they are guaranteed only with Ubuntu Pro, service `esm-apps`
+(Expanded Security Maintenance for Applications). Without it, an update
+of a universe package comes when someone in the Ubuntu community provides
+it, or not at all. So far PHP's security updates reached `php8.5-fpm`
+together with `php8.5-cli` (both come from the source package `php8.5`),
+but that is not promised. `php8.5-imap` comes from packages.sury.org, not
+from Ubuntu; Ubuntu Pro does not cover it.
+
+For a box this means: without Ubuntu Pro, a security hole in PHP-FPM, one
+of the PHP modules or one of the other universe packages may stay open on
+the box. With Ubuntu Pro, these updates come through apt like the others,
+and the box's automatic security updates (unattended-upgrades, which
+setup turns on) install them: their standard sources include those of
+`esm-apps`.
+
+To turn it on, get a token at <https://ubuntu.com/pro> (Canonical offers a
+free personal subscription for a few machines; the conditions are on that
+page), then:
+
+	sudo pro attach TOKEN
+	sudo pro status            # esm-apps: enabled
+	sudo pro enable esm-apps   # only if it is not
+	sudo apt update && sudo apt upgrade
+
+`pro status` before the attach shows what the machine could use. Setup
+does not change the attachment; the box stays attached through setup runs
+and updates of the fork.
+
+### Deutsch
+
+PHP 8.5 aus Ubuntu 26.04 betreibt das Webmail (Roundcube), Nextcloud und
+Z-Push. Ein Teil seiner Pakete liegt in der Ubuntu-Komponente „universe“,
+darunter `php8.5-fpm`, das den gesamten PHP-Code der Box ausführt, und
+einige der Module, die setup installiert (etwa `php8.5-intl`); andere wie
+`php8.5-cli` liegen in „main“. Auch weitere Pakete der Box liegen in
+universe: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`,
+`fail2ban`, `munin` und `certbot`. Canonical garantiert
+Sicherheitsupdates während der Standardunterstützung eines LTS-Releases
+nur für „main“ (und „restricted“); für „universe“ sind sie nur mit Ubuntu
+Pro garantiert, Dienst `esm-apps` (Expanded Security Maintenance for
+Applications). Ohne ihn kommt ein Update eines universe-Pakets, wenn
+jemand aus der Ubuntu-Gemeinschaft es bereitstellt, oder gar nicht. Bisher
+erreichten die Sicherheitsupdates von PHP `php8.5-fpm` zusammen mit
+`php8.5-cli` (beide entstehen aus dem Quellpaket `php8.5`), zugesagt ist
+das aber nicht. `php8.5-imap` stammt von packages.sury.org, nicht von
+Ubuntu; Ubuntu Pro deckt es nicht ab.
+
+Für eine Box heißt das: Ohne Ubuntu Pro kann eine Sicherheitslücke in
+PHP-FPM, in einem der PHP-Module oder in einem der anderen universe-Pakete
+auf der Box offen bleiben. Mit Ubuntu Pro kommen diese Updates wie die
+anderen über apt, und die automatischen Sicherheitsupdates der Box
+(unattended-upgrades, die setup einschaltet) spielen sie ein: Deren
+Standardquellen enthalten die von `esm-apps`.
+
+Zum Einschalten auf <https://ubuntu.com/pro> ein Token holen (Canonical
+bietet ein kostenloses persönliches Abonnement für einige Maschinen an; die
+Bedingungen stehen auf dieser Seite), dann:
+
+	sudo pro attach TOKEN
+	sudo pro status            # esm-apps: enabled
+	sudo pro enable esm-apps   # nur falls nicht
+	sudo apt update && sudo apt upgrade
+
+`pro status` vor dem Attach zeigt, was die Maschine nutzen könnte. setup
+ändert die Anbindung nicht; die Box bleibt über Setup-Läufe und Updates des
+Forks hinweg angebunden.
 
 Greylisting exceptions / Ausnahmen vom Greylisting
 --------------------------------------------------
