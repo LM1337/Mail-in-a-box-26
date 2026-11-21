@@ -73,6 +73,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   8.8.8.8 Spamhaus answers NXDOMAIN, also for its own test entries, so
   setup's checks can neither see a listing there nor say that they could
   not check. This stays a known issue (README-fork.md, "Known issues").
+* **README: PHP 8.5 in universe, security updates with Ubuntu Pro**\
+  README-fork.md has a new section "Security updates and Ubuntu Pro /
+  Sicherheitsupdates und Ubuntu Pro" (English and German): `php8.5-fpm`
+  and some PHP modules of the box (and `nsd`, `opendkim`, `opendmarc`,
+  `spampd`, `postgrey`, `fail2ban`, `munin`, `certbot`) are in Ubuntu's
+  universe component, whose security updates Canonical guarantees only
+  with Ubuntu Pro (`esm-apps`); what that means for a box, and how to turn
+  it on (`pro attach`, a free personal subscription).
 
 ### Fixed
 

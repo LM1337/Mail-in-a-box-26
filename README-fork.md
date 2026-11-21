@@ -16,7 +16,8 @@ Main differences from upstream v78 (Ubuntu 22.04):
 
 * Dovecot 2.4, Postfix and the rest of the mail stack from Ubuntu 26.04.
 * PHP 8.5 from Ubuntu. packages.sury.org is pinned to what Ubuntu lacks
-  (php8.2 for the Nextcloud upgrade chain, php8.5-imap, php-common).
+  (php8.2 for the Nextcloud upgrade chain, php8.5-imap, php-common). Some of
+  PHP's packages are in universe, see "Security updates and Ubuntu Pro".
 * Nextcloud 34.0.6. Existing installations are upgraded step by step from
   Nextcloud 26; older versions are refused.
 * Roundcube 1.7.6, Z-Push 2.7.7.
@@ -679,6 +680,86 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   sehen noch melden, dass sie nicht prüfen konnten. Hostname und Adresse
   auf https://check.spamhaus.org/ selbst prüfen; sobald die Box läuft,
   fragen ihre Statusprüfungen über ihren eigenen Resolver.
+
+Security updates and Ubuntu Pro / Sicherheitsupdates und Ubuntu Pro
+-------------------------------------------------------------------
+
+### English
+
+PHP 8.5 from Ubuntu 26.04 runs the webmail (Roundcube), Nextcloud and
+Z-Push. Some of its packages are in Ubuntu's "universe" component,
+among them `php8.5-fpm`, which runs all PHP code of the box, and some of
+the modules setup installs (such as `php8.5-intl`); others, such as
+`php8.5-cli`, are in "main". Other packages of the box are in universe
+too: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`, `fail2ban`,
+`munin` and `certbot`. Canonical guarantees security updates during the
+standard support of an LTS release only for "main" (and "restricted"); for
+"universe" they are guaranteed only with Ubuntu Pro, service `esm-apps`
+(Expanded Security Maintenance for Applications). Without it, an update
+of a universe package comes when someone in the Ubuntu community provides
+it, or not at all. So far PHP's security updates reached `php8.5-fpm`
+together with `php8.5-cli` (both come from the source package `php8.5`),
+but that is not promised. `php8.5-imap` comes from packages.sury.org, not
+from Ubuntu; Ubuntu Pro does not cover it.
+
+For a box this means: without Ubuntu Pro, a security hole in PHP-FPM, one
+of the PHP modules or one of the other universe packages may stay open on
+the box. With Ubuntu Pro, these updates come through apt like the others,
+and the box's automatic security updates (unattended-upgrades, which
+setup turns on) install them: their standard sources include those of
+`esm-apps`.
+
+To turn it on, get a token at <https://ubuntu.com/pro> (Canonical offers a
+free personal subscription for a few machines; the conditions are on that
+page), then:
+
+	sudo pro attach TOKEN
+	sudo pro status            # esm-apps: enabled
+	sudo pro enable esm-apps   # only if it is not
+	sudo apt update && sudo apt upgrade
+
+`pro status` before the attach shows what the machine could use. Setup
+does not change the attachment; the box stays attached through setup runs
+and updates of the fork.
+
+### Deutsch
+
+PHP 8.5 aus Ubuntu 26.04 betreibt das Webmail (Roundcube), Nextcloud und
+Z-Push. Ein Teil seiner Pakete liegt in der Ubuntu-Komponente „universe“,
+darunter `php8.5-fpm`, das den gesamten PHP-Code der Box ausführt, und
+einige der Module, die setup installiert (etwa `php8.5-intl`); andere wie
+`php8.5-cli` liegen in „main“. Auch weitere Pakete der Box liegen in
+universe: `nsd`, `opendkim`, `opendmarc`, `spampd`, `postgrey`,
+`fail2ban`, `munin` und `certbot`. Canonical garantiert
+Sicherheitsupdates während der Standardunterstützung eines LTS-Releases
+nur für „main“ (und „restricted“); für „universe“ sind sie nur mit Ubuntu
+Pro garantiert, Dienst `esm-apps` (Expanded Security Maintenance for
+Applications). Ohne ihn kommt ein Update eines universe-Pakets, wenn
+jemand aus der Ubuntu-Gemeinschaft es bereitstellt, oder gar nicht. Bisher
+erreichten die Sicherheitsupdates von PHP `php8.5-fpm` zusammen mit
+`php8.5-cli` (beide entstehen aus dem Quellpaket `php8.5`), zugesagt ist
+das aber nicht. `php8.5-imap` stammt von packages.sury.org, nicht von
+Ubuntu; Ubuntu Pro deckt es nicht ab.
+
+Für eine Box heißt das: Ohne Ubuntu Pro kann eine Sicherheitslücke in
+PHP-FPM, in einem der PHP-Module oder in einem der anderen universe-Pakete
+auf der Box offen bleiben. Mit Ubuntu Pro kommen diese Updates wie die
+anderen über apt, und die automatischen Sicherheitsupdates der Box
+(unattended-upgrades, die setup einschaltet) spielen sie ein: Deren
+Standardquellen enthalten die von `esm-apps`.
+
+Zum Einschalten auf <https://ubuntu.com/pro> ein Token holen (Canonical
+bietet ein kostenloses persönliches Abonnement für einige Maschinen an; die
+Bedingungen stehen auf dieser Seite), dann:
+
+	sudo pro attach TOKEN
+	sudo pro status            # esm-apps: enabled
+	sudo pro enable esm-apps   # nur falls nicht
+	sudo apt update && sudo apt upgrade
+
+`pro status` vor dem Attach zeigt, was die Maschine nutzen könnte. setup
+ändert die Anbindung nicht; die Box bleibt über Setup-Läufe und Updates des
+Forks hinweg angebunden.
 
 Greylisting exceptions / Ausnahmen vom Greylisting
 --------------------------------------------------
