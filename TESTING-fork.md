@@ -276,6 +276,20 @@ report. The groups:
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
+  `api-self-password` (B210): a test user (`smokepw-<token>`) changes their
+  own password through `POST /me/password`: a wrong current password gets
+  403 (one failed login), a short new one 400, no credentials 401; the
+  change and the change back work and IMAP takes only the new password;
+  then the same through Roundcube's Settings > Password (Roundcube's own
+  "Current password incorrect." for a wrong current password, the change
+  and the change back, checked with IMAP). The user, its archived mailbox
+  and (with `--ssh`) its Roundcube record are removed.
+  `tests/fork/self-password.py` (B210; no box needed) checks the endpoint's
+  logic with stand-ins for the login check and the password change: HTTP
+  Basic credentials in UTF-8 and Latin-1, only the caller's password
+  changed, the policy, two-factor authentication (no code: 403 and not
+  counted; a wrong code: counted), the limits per account and per address
+  and their expiry; group admin runs it (`admin-self-password-unit`).
   `tests/fork/ban-reasons.py` (v78-r2604.4; no box needed) checks that the
   reasons of bans in System > Intrusion Protection show no user name that
   is not an account of the box: the log lines of each jail's filter, also

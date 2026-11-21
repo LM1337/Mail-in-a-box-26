@@ -1469,7 +1469,7 @@ def c_mig_dkim(ctx):
     return "DKIM key unchanged"
 
 
-def roundcube_login(ctx, user):
+def roundcube_login(ctx, user, pw=None):
     """Returns cookie jar dict after a successful login, raises Fail otherwise."""
     jar = {}
 
@@ -1490,7 +1490,7 @@ def roundcube_login(ctx, user):
         raise Fail("no login token on /mail/")
     r = http_req(ctx, "POST", "/mail/?_task=login", headers={"Cookie": cookie()}, form={
         "_token": m.group(1), "_task": "login", "_action": "login", "_timezone": "Europe/Berlin",
-        "_url": "", "_user": user, "_pass": ctx.user_pw})
+        "_url": "", "_user": user, "_pass": ctx.user_pw if pw is None else pw})
     eat(r)
     loc = (r.header("Location") or [""])[0]
     if r.status not in (301, 302) or "_task=login" in loc:
@@ -4021,6 +4021,7 @@ API_WRITES = [
     ("POST", "/system/backup/status/refresh"),
     ("POST", "/login"),
     ("POST", "/logout"),
+    ("POST", "/me/password"),
     ("POST", "/mail/users/add"),
     ("POST", "/mail/users/password"),
     ("POST", "/mail/users/quota"),
@@ -4420,6 +4421,90 @@ def c_api_write_roundtrip(ctx):
     return "%s; users, aliases, custom records and privacy the same afterwards" % ", ".join(steps)
 
 
+def imap_works(ctx, user, pw):
+    M = ctx.net.imap()
+    try:
+        M.login(user, pw)
+    except imaplib.IMAP4.error:
+        return False
+    M.logout()
+    return True
+
+
+def roundcube_password_save(ctx, cookie, cur, new):
+    # Roundcube's Settings > Password: the form's token, then its POST; returns
+    # the text of the message that Roundcube shows.
+    r = http_req(ctx, "GET", "/mail/?_task=settings&_action=plugin.password", headers={"Cookie": cookie()})
+    m = re.search(r'name="_token" value="([^"]+)"', r.text())
+    _need(r.status == 200 and m, "Roundcube password page: HTTP %d, token %s" % (r.status, bool(m)))
+    r = http_req(ctx, "POST", "/mail/?_task=settings&_action=plugin.password-save", headers={"Cookie": cookie()}, form={
+        "_token": m.group(1), "_task": "settings", "_action": "plugin.password-save",
+        "_curpasswd": cur, "_newpasswd": new, "_confpasswd": new})
+    _need(r.status == 200, "Roundcube password save: HTTP %d" % r.status)
+    m = re.search(r'display_message\("((?:[^"\\]|\\.)*)","(confirmation|error)"', r.text())
+    return (m.group(2) + ": " + m.group(1)) if m else "(no message)"
+
+
+def c_api_self_password(ctx):
+    # POST /me/password (B210): a user changes their own password with the
+    # current one, as Roundcube's password plugin now does (its driver calls
+    # the daemon on 127.0.0.1). A wrong current password (one failed login,
+    # far below the miab-management jail), a password that the policy refuses,
+    # the change and the change back, the old password no longer working; then
+    # the same through Roundcube's Settings > Password, with Roundcube's own
+    # message for a wrong current password.
+    if not ctx.user_pw or not ctx.admin_auth:
+        raise Skip("TEST_USER_PW or the admin session missing")
+    user = "smokepw-%s@%s" % (ctx.tok, ctx.domain)
+    pw2 = "Smk-%s" % uuid.uuid4().hex
+    pw3 = "Smk-%s" % uuid.uuid4().hex
+    SECRETS.update((pw2, pw3))
+    steps = []
+    api_expect(admin_api(ctx, "POST", "mail/users/add", form={"email": user, "password": ctx.user_pw}), 200, "text/html", "users/add")
+    try:
+        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, "wrong-%s" % ctx.tok), form={"password": pw2})
+        api_expect(r, 403, "text/plain", "wrong current password")
+        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, ctx.user_pw), form={"password": "short"})
+        api_expect(r, 400, "text/plain", "short new password")
+        r = http_req(ctx, "POST", "/admin/me/password", form={"password": pw2})
+        api_expect(r, 401, "text/plain", "no credentials")
+        steps.append("wrong current 403, short 400, none 401")
+        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, ctx.user_pw), form={"password": pw2})
+        api_expect(r, 200, "text/plain", "change")
+        _need(r.text().strip() == "OK", "change: %s" % r.text()[:80])
+        _need(imap_works(ctx, user, pw2) and not imap_works(ctx, user, ctx.user_pw), "IMAP after the change: new or old password wrong")
+        r = http_req(ctx, "POST", "/admin/me/password", auth=(user, pw2), form={"password": ctx.user_pw})
+        api_expect(r, 200, "text/plain", "change back")
+        _need(imap_works(ctx, user, ctx.user_pw), "IMAP after the change back")
+        steps.append("changed and back (IMAP checked)")
+        _jar, cookie = roundcube_login(ctx, user)
+        msg = roundcube_password_save(ctx, cookie, "wrong-%s" % ctx.tok, pw3)
+        _need(msg.startswith("error:") and "incorrect" in msg.lower(), "Roundcube, wrong current password: %s" % msg)
+        msg = roundcube_password_save(ctx, cookie, ctx.user_pw, pw3)
+        _need(msg.startswith("confirmation:"), "Roundcube, change: %s" % msg)
+        _need(imap_works(ctx, user, pw3), "IMAP after the change in Roundcube")
+        msg = roundcube_password_save(ctx, cookie, pw3, ctx.user_pw)
+        _need(msg.startswith("confirmation:"), "Roundcube, change back: %s" % msg)
+        _need(imap_works(ctx, user, ctx.user_pw), "IMAP after the change back in Roundcube")
+        steps.append("Roundcube: wrong current refused, changed and back")
+    finally:
+        r = admin_api(ctx, "POST", "mail/users/remove", form={"email": user})
+        try:
+            mailbox = remove_test_mailbox(ctx, user)
+        except Exception as e:
+            mailbox = e
+        if ctx.remote.available():
+            # Roundcube's own record of the test user (its login made it).
+            cmd = ('root=$(sed -n "s/^STORAGE_ROOT=//p" /etc/mailinabox.conf | tail -n 1); '
+                   'sudo -n -u www-data sqlite3 "$root/mail/roundcube/roundcube.sqlite" %s'
+                   % shlex.quote("PRAGMA foreign_keys=ON; DELETE FROM users WHERE username='%s';" % user))
+            ctx.remote.run("bash -c %s" % shlex.quote(cmd), timeout=60)
+    api_expect(r, 200, "text/html", "users/remove")
+    if isinstance(mailbox, Exception):
+        raise mailbox
+    return "; ".join(steps) + "; user removed, " + mailbox + " (1 failed login)"
+
+
 def munin_conf_contact(ctx):
     # (contact lines before the host tree, "contacts" of the host tree)
     rc, out, err = ctx.remote.run("cat /etc/munin/munin.conf", sudo=True, timeout=60)
@@ -4803,6 +4888,7 @@ def main():
         run_check("admin-notifications-unit", c_local_test, ctx, "admin-mail.py")
         run_check("admin-status-changes-unit", c_local_test, ctx, "status-changes.py")
         run_check("admin-panel-fragments", c_local_test, ctx, "panel-fragments.py")
+        run_check("admin-self-password-unit", c_local_test, ctx, "self-password.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)
         run_check("admin-nextcloud-backup-private", c_nc_backup_private, ctx)
     if want("api"):
@@ -4810,6 +4896,7 @@ def main():
         run_check("api-auth", c_api_auth, ctx)
         run_check("api-read-only", c_api_read_only, ctx)
         run_check("api-write-roundtrip", c_api_write_roundtrip, ctx)
+        run_check("api-self-password", c_api_self_password, ctx)
         run_check("api-munin-alerts", c_api_munin_alerts, ctx)
         run_check("api-notifications", c_api_notifications, ctx)
     if want("admin") or want("api"):

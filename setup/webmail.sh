@@ -257,25 +257,26 @@ sudo -u www-data touch /var/log/roundcubemail/errors.log
 cp "${RCM_PLUGIN_DIR}/password/config.inc.php.dist" \
 	"${RCM_PLUGIN_DIR}/password/config.inc.php"
 
+# The fork's driver (conf/roundcube-password-mailinabox.php): a password is
+# changed through the management daemon, which checks the current password
+# and applies the box's password policy and hash (POST /me/password, B210).
+# Up to v78-r2604.4 the plugin's sql driver wrote users.sqlite itself as
+# www-data ("UPDATE users SET password=%P WHERE email=%u"), so the user
+# database and its directory had to be writable by www-data, and any code
+# running as www-data could rewrite every account (setup/mail-users.sh).
+# Roundcube itself still checks the current password against the session's
+# and the length of the new one, with its own messages, before the driver
+# runs.
+install -m 644 conf/roundcube-password-mailinabox.php "${RCM_PLUGIN_DIR}/password/drivers/mailinabox.php"
 tools/editconf.py "${RCM_PLUGIN_DIR}/password/config.inc.php" \
-	"\$config['password_minimum_length']=8;" \
-	"\$config['password_db_dsn']='sqlite:///$STORAGE_ROOT/mail/users.sqlite';" \
-	"\$config['password_query']='UPDATE users SET password=%P WHERE email=%u';" \
-	"\$config['password_algorithm']='sha512-crypt';" \
-	"\$config['password_algorithm_prefix']='{SHA512-CRYPT}';"
+	"\$config['password_driver']='mailinabox';" \
+	"\$config['password_confirm_current']=true;" \
+	"\$config['password_minimum_length']=8;"
 
 # so PHP can use doveadm, for the password changing plugin
+# (upstream, for the plugin's password_algorithm "dovecot", which no version
+# of this fork uses; kept for now, see "Planned" in CHANGELOG-fork.md)
 usermod -a -G dovecot www-data
-
-# set permissions so that PHP can use users.sqlite
-# could use dovecot instead of www-data, but not sure it matters
-# Through a descriptor (tools/write_conf.py --own), not chown and chmod by
-# path: www-data may write in $STORAGE_ROOT/mail (this very mode) and the
-# storage user in $STORAGE_ROOT, so either could have put a symbolic link
-# there, which chown and chmod follow. users.sqlite as a link to /etc/shadow
-# made that file writable for www-data at the next setup run (B147).
-tools/write_conf.py --own "$STORAGE_ROOT/mail" root www-data 775
-tools/write_conf.py --own "$STORAGE_ROOT/mail/users.sqlite" root www-data 664
 
 # Fix Carddav permissions: root's, read-only for everyone else (directories 755,
 # files 644). Upstream (#1029, 2017) gave the plugin to root:www-data with mode
@@ -317,7 +318,7 @@ if [ -e "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" ]; then
 	tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
 fi
 (cd "$RCM_DIR" && sudo -u www-data php"$PHP_VER" ${RCM_DIR}/bin/updatedb.sh --dir ${RCM_DIR}/SQL --package roundcube)
-# www-data owns the directory of roundcube.sqlite, see users.sqlite above (B147).
+# www-data owns the directory of roundcube.sqlite, which it may write (B147).
 tools/write_conf.py --own "$STORAGE_ROOT/mail/roundcube/roundcube.sqlite" www-data www-data 664
 
 # Because Roundcube wants to set the PRAGMA we just deleted from the source, we apply it here

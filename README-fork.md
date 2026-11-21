@@ -542,6 +542,94 @@ Gleich nach dem Update:
   wie jeden anderen Kontakt ab (B128), er kann bleiben oder gelöscht werden.
 
 
+Security / Sicherheit
+---------------------
+
+### English
+
+**The user database belongs to root (B210).** `$STORAGE_ROOT/mail/users.sqlite`
+holds every mail account with its password hash, its privileges and its
+aliases. Upstream (and this fork up to v78-r2604.4) gave it to root:www-data
+with mode 0664, in a directory that www-data could write, because Roundcube's
+password plugin wrote the new password into it with SQL. Any code running as
+www-data, the account of Roundcube, Nextcloud, Z-Push and PHP, could therefore
+set the password of any account (also an administrator's), give itself the
+admin privilege, or add an alias that forwards a user's mail to the outside;
+and every local account could read all password hashes.
+
+That needs code running as www-data first, but such holes are real and
+recent: the PHP security releases of October 2026 ("PHP2Shell",
+CVE-2026-109618 and CVE-2026-109619, remote code execution, fixed in PHP
+8.5.12, 8.4.27, 8.3.36 and 8.2.35) and of 19 November 2026 (PHP 8.5.13 and
+others, several remote code execution issues), and Roundcube's
+post-authentication remote code execution CVE-2025-49113 (fixed in 1.6.11 and
+1.5.10, exploited in the wild). Each of them gives code as www-data on a
+Mail-in-a-Box. Before this release that code could take over every mail
+account; now it reaches the user database only through the management
+daemon, with an account's current password.
+
+Since this release:
+
+* `users.sqlite` is root:root 0600 and `$STORAGE_ROOT/mail` root:root 755.
+  Dovecot, Postfix, the management daemon, the backup and the tools all open
+  the database as root. The path is the same, so backups and the migration
+  and in-place tools work as before.
+* Roundcube's Settings > Password calls the management daemon
+  (`POST /me/password` on 127.0.0.1, see api/mailinabox.yml) through the
+  fork's password driver. The daemon checks the current password, applies
+  the same password rules as the control panel and changes only that
+  account's password. Failed attempts are logged for fail2ban
+  (`miab-management`), and after 5 for an account or 10 for an address
+  within 10 minutes, more are refused for a while. An account with two-factor
+  authentication changes its password in the control panel.
+* Going back to v78-r2604.4 works: its setup gives the database and the
+  directory back to www-data and Roundcube's plugin back to its SQL driver.
+
+### Deutsch
+
+**Die Benutzerdatenbank gehört root (B210).**
+`$STORAGE_ROOT/mail/users.sqlite` enthält alle Mailkonten mit ihren
+Passwort-Hashes, Rechten und Aliasen. Upstream (und dieser Fork bis
+v78-r2604.4) gab sie root:www-data mit dem Modus 0664, in einem Verzeichnis,
+in das www-data schreiben durfte, weil das Passwort-Plugin von Roundcube das
+neue Passwort per SQL selbst hineinschrieb. Jeder Code, der als www-data
+läuft, dem Konto von Roundcube, Nextcloud, Z-Push und PHP, konnte deshalb das
+Passwort jedes Kontos setzen (auch das eines Administrators), sich selbst
+Administratorrechte geben oder einen Alias anlegen, der die Mails eines
+Benutzers nach außen weiterleitet; und jedes lokale Konto konnte alle
+Passwort-Hashes lesen.
+
+Dafür muss zuerst Code als www-data laufen, aber solche Lücken gibt es, und
+sie sind neu: die PHP-Sicherheitsupdates vom Oktober 2026 („PHP2Shell“,
+CVE-2026-109618 und CVE-2026-109619, Ausführung von Code aus der Ferne,
+behoben in PHP 8.5.12, 8.4.27, 8.3.36 und 8.2.35) und vom 19. November 2026
+(PHP 8.5.13 und weitere, mehrere Lücken dieser Art) sowie die Lücke
+CVE-2025-49113 in Roundcube (Ausführung von Code nach der Anmeldung, behoben in
+1.6.11 und 1.5.10, aktiv ausgenutzt). Jede davon bringt Code als www-data auf
+eine Mail-in-a-Box. Vor diesem Release konnte dieser Code jedes Mailkonto
+übernehmen; jetzt kommt er an die Benutzerdatenbank nur noch über den
+Management-Dienst und nur mit dem aktuellen Passwort eines Kontos.
+
+Seit diesem Release:
+
+* `users.sqlite` ist root:root 0600, `$STORAGE_ROOT/mail` root:root 755.
+  Dovecot, Postfix, der Management-Dienst, die Sicherung und die Werkzeuge
+  öffnen die Datenbank alle als root. Der Pfad ist derselbe, Sicherungen und
+  die Werkzeuge für Umzug und Upgrade an Ort und Stelle funktionieren wie
+  bisher.
+* Einstellungen > Passwort in Roundcube ruft über den Passwort-Treiber des
+  Forks den Management-Dienst auf (`POST /me/password` auf 127.0.0.1, siehe
+  api/mailinabox.yml). Der Dienst prüft das aktuelle Passwort, wendet
+  dieselben Passwortregeln an wie das Control Panel und ändert nur das
+  Passwort dieses Kontos. Fehlversuche werden für fail2ban protokolliert
+  (`miab-management`); nach 5 für ein Konto oder 10 für eine Adresse innerhalb
+  von 10 Minuten werden weitere eine Zeit lang abgewiesen. Ein Konto mit
+  Zwei-Faktor-Anmeldung ändert sein Passwort im Control Panel.
+* Der Weg zurück zu v78-r2604.4 funktioniert: Dessen setup gibt Datenbank
+  und Verzeichnis wieder www-data und das Plugin von Roundcube wieder seinem
+  SQL-Treiber.
+
+
 Setup output / Ausgaben von setup
 ---------------------------------
 
