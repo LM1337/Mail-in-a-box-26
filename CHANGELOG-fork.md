@@ -403,7 +403,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   `/carddav` and `/webdav` now proves itself to `/cloud` with a secret
   header (from `/etc/nginx/miab-nextcloud-proxy.conf`, root's only,
   made once by setup and kept), and nginx passes `X-Forwarded-For` to
-  Nextcloud's PHP only with that secret; PHP never sees the secret. Clients
+  Nextcloud's PHP only with that secret; PHP never sees the secret. Until
+  setup has made the file (a setup run that stopped early), nginx's
+  configuration still loads, and the proxy's clients are seen as
+  127.0.0.1. Clients
   on the Internet keep their own address through the proxy (throttle and
   jail as before), Z-Push stays 127.0.0.1, and another local request is
   logged as 127.0.0.1, which fail2ban ignores. A downgrade to
