@@ -207,11 +207,16 @@ def make_domain_config(domain, templates, ssl_certificates, env):
 			# override the HSTS directive type
 			hsts = yaml.get("hsts", hsts)
 
-	# Add the HSTS header.
+	# Add the HSTS header. A location with add_header directives of its own
+	# (/admin/ in nginx-primaryonly.conf) inherits none of the server's, so
+	# the same line goes in its placeholder "# HSTS HEADER HERE" (B180).
+	hsts_header = None
 	if hsts == "yes":
-		nginx_conf_extra += '\tadd_header Strict-Transport-Security "max-age=15768000" always;\n'
+		hsts_header = 'add_header Strict-Transport-Security "max-age=15768000" always;'
 	elif hsts == "preload":
-		nginx_conf_extra += '\tadd_header Strict-Transport-Security "max-age=15768000; includeSubDomains; preload" always;\n'
+		hsts_header = 'add_header Strict-Transport-Security "max-age=15768000; includeSubDomains; preload" always;'
+	if hsts_header:
+		nginx_conf_extra += "\t" + hsts_header + "\n"
 
 	# Add in any user customizations in the includes/ folder.
 	nginx_conf_custom_include = os.path.join(env["STORAGE_ROOT"], "www", safe_domain_name(domain) + ".conf")
@@ -224,6 +229,10 @@ def make_domain_config(domain, templates, ssl_certificates, env):
 	nginx_conf = "# ADDITIONAL DIRECTIVES HERE\n"
 	for t in [*templates, nginx_conf_extra]:
 		nginx_conf = re.sub("[ \t]*# ADDITIONAL DIRECTIVES HERE *\n", t, nginx_conf)
+	# The HSTS header in the locations that set headers of their own, with the
+	# indentation of the placeholder; nothing when HSTS is off (B180).
+	nginx_conf = re.sub(r"^([ \t]*)# HSTS HEADER HERE *\n",
+		lambda m: m.group(1) + hsts_header + "\n" if hsts_header else "", nginx_conf, flags=re.M)
 
 	# Replace substitution strings in the template & return.
 	nginx_conf = nginx_conf.replace("$STORAGE_ROOT", env['STORAGE_ROOT'])

@@ -53,6 +53,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   DNSSEC messages say that the DS records are listed below the message,
   in the control panel under "show more", instead of "see below". New
   offline test `tests/fork/status-changes.py`.
+* **The control panel sends the HSTS header of the box (B180)**\
+  nginx answers `/admin/` (the control panel, its API and Munin's pages)
+  with the same HSTS header (`Strict-Transport-Security`) as the other
+  pages of the box's name, or with none when HSTS is off for it in
+  `$STORAGE_ROOT/www/custom.yaml`: the location's own headers had replaced
+  the server's (B180, upstream). New offline test
+  `tests/fork/nginx-hsts.py` and smoke check `web-hsts-admin`.
 
 ### Planned
 
@@ -175,10 +182,6 @@ v78-r2604.3 and v78-r2604.4, not done (the certification runs add their open fin
   for the first time after an upgrade of the plugin (a race in its schema
   migration; one of the logins fails once). After an update from rc7 or
   earlier, `update-check.sh after` accepts the last form.
-* **nginx sends no HSTS header on /admin/**\
-  nginx sets no HSTS header on `/admin/`: the headers of that location
-  replace the server's (upstream). Browsers that visited another page of
-  the box have the header already.
 * **Nextcloud on SQLite answers CardDAV writes with HTTP 500 during cron**\
   Nextcloud on SQLite answers a CardDAV write with HTTP 500 ("database is
   locked") while its `cron.php` holds the database (seen once in T1); the

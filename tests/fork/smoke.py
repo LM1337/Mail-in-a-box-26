@@ -2495,6 +2495,23 @@ def c_dns_custom_roundtrip(ctx):
 # checks: web (Nextcloud, Roundcube, Z-Push)
 # ---------------------------------------------------------------------------
 
+def c_web_hsts_admin(ctx):
+    # The control panel (/admin/) sends the same HSTS header as the other
+    # pages of the box's name: its location sets headers of its own, which
+    # replace the server's in nginx (B180). /admin/assets/ has none of its
+    # own and inherits the server's.
+    ref = http_req(ctx, "GET", "/").header("Strict-Transport-Security")
+    bad = []
+    for path in ("/admin/", "/admin/assets/branding/favicon.ico"):
+        r = http_req(ctx, "GET", path)
+        got = r.header("Strict-Transport-Security")
+        if got != ref:
+            bad.append("%s: %r (HTTP %d), / has %r" % (path, got, r.status, ref))
+    if bad:
+        raise Fail("; ".join(bad))
+    return "HSTS %s" % (ref[0] if ref else "off (custom.yaml)")
+
+
 def c_nc_status(ctx):
     r = http_req(ctx, "GET", "/cloud/status.php")
     if r.status != 200:
@@ -4825,6 +4842,8 @@ def main():
     if want("web"):
         print("== web")
         run_check("nextcloud-status", c_nc_status, ctx)
+        run_check("web-hsts-admin", c_web_hsts_admin, ctx)
+        run_check("web-nginx-hsts-unit", c_local_test, ctx, "nginx-hsts.py")
         run_check("nextcloud-caldav-propfind", c_nc_dav, ctx, "caldav")
         run_check("nextcloud-carddav-propfind", c_nc_dav, ctx, "carddav")
         run_check("nextcloud-webdav-propfind", c_nc_dav, ctx, "webdav")

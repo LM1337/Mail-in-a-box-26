@@ -273,6 +273,13 @@ report. The groups:
   outside address, loop, unknown address of the box, catch-all, domain
   alias), the report recipient and its invalid values, that Munin's
   standard recipient follows, the list of deliveries and the test mail.
+  `tests/fork/nginx-hsts.py` (B180; no box needed) builds the nginx
+  configuration of the box's name and of another domain with
+  `management/web_update.py` for each HSTS setting of `custom.yaml`
+  (`yes`, the default, `preload`, off) and checks that every block of the
+  HTTPS server with `add_header` lines of its own has the server's HSTS
+  line (nginx inherits a server's `add_header` only into blocks that have
+  none), and none when HSTS is off.
   `tests/fork/status-changes.py` (B179; no box needed) checks that the
   daily status change notice shows a changed check with all of its lines
   and leaves unchanged checks out.
@@ -303,7 +310,10 @@ report. The groups:
   (after rc7): Roundcube's `/mail/config/` still answers 403, while a
   missing static page under `/<name>/mail/config/` answers 404 and a
   Nextcloud file below a folder `mail/config` is read through
-  `/cloud/remote.php` and `/webdav` (B134).
+  `/cloud/remote.php` and `/webdav` (B134); `web-hsts-admin`: the control
+  panel (`/admin/`) and its assets send the same HSTS header as `/` of the
+  box's name, or none when HSTS is off for it (B180), and
+  `web-nginx-hsts-unit` runs `tests/fork/nginx-hsts.py` (described under **admin**).
 * **activesync** (after rc7): `nextcloud-bruteforce-loopback`: 127.0.0.1
   is on Nextcloud's brute-force bypass list, and no entry is there twice
   (B121; a check of the list: Nextcloud counts no attempts for a listed
