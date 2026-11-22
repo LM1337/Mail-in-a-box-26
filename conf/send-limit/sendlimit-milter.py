@@ -9,14 +9,18 @@
 # ::1 on port 25, which Postfix lets relay as mynetworks). Mail that other
 # servers send to the box is not counted.
 #
-# Up to RATE mails go out at once. A mail that does not fit waits a moment
-# (SHORT_WAIT); if it still does not fit, Postfix accepts it and puts it on
-# hold (its hold queue), and sendlimit-release.py (service miab-sendlimit-release)
-# releases the held mails at RATE per PER seconds, taking the senders in
-# turn, so that one sender with many mails does not hold back the others.
-# While mail is on hold, all new mail goes on hold behind it. The sender
-# never sees an error, and the administrator can delete held mail (an
-# account that was taken over) before it goes out.
+# Up to RATE mails go out at once, then RATE per PER seconds. The first mail
+# that does not fit sets off the brake: Postfix accepts it and puts it on
+# hold (its hold queue), and from then on all counted mail is held. The
+# release service (sendlimit-release.py, miab-sendlimit-release) mails the
+# administrator at once and, as set, releases nothing until the
+# administrator ends the brake ("stop"), or releases held mail very slowly
+# (BRAKE_RATE per BRAKE_PER seconds, the senders in turn) and ends the brake
+# by itself once nothing is held and nothing was held for a while. So an
+# account that was taken over gets a few dozen mails out, not thousands, and
+# the administrator can delete the rest. The sender never sees an error.
+# Mail to administrator@ of the box alone (the box's own reports) is never
+# held.
 #
 # Without sendlimit-release.py (its flag in /run/miab-sendlimit is missing or old),
 # nothing is put on hold, as nothing would release it: a mail waits at most
@@ -45,9 +49,10 @@ import sendlimit_common as common # noqa: E402
 
 STATE_DIR = os.environ.get("STATE_DIRECTORY", common.STATE_DIR)
 EVENTS = os.path.join(STATE_DIR, "events")
-HELD = os.path.join(STATE_DIR, "held")
+HELD_DIR = os.path.join(STATE_DIR, "held.d")
+PASSED = os.path.join(STATE_DIR, "passed")
 SOCKET = "inet:8895@127.0.0.1"
-SHORT_WAIT = 2 # seconds a mail waits before it is put on hold
+SHORT_WAIT = 0 # seconds a mail waits for room before it is put on hold
 MAX_WAIT = 20 # seconds an SMTP mail waits at most without the release service: mail programs and
 	# webmail give up after about 60 s, and a mail that Postfix accepts after they gave up is sent twice
 MAX_WAIT_LOCAL = 60 # through sendmail nobody waits for the answer (Postfix waits 300 s for a milter)
@@ -57,9 +62,10 @@ log = common.log
 
 
 class Flag:
-	# sendlimit-release.py's flag, looked at once a second: (it runs, mails on hold).
+	# The release service's flag, looked at once a second: (it runs, mails
+	# on hold, the brake is on).
 	def __init__(self):
-		self.value = (False, None)
+		self.value = (False, None, None)
 		self.checked = 0
 		self.lock = threading.Lock()
 		self.held_here = 0 # put on hold since the last look
@@ -71,7 +77,8 @@ class Flag:
 				self.checked = now
 				self.value = common.read_flag()
 				self.held_here = 0
-			return self.value[0], (self.value[1] or 0) + self.held_here
+			running, held, brake = self.value
+			return running, (held or 0) + self.held_here, bool(brake) or self.held_here > 0
 
 	def held(self):
 		with self.lock:
@@ -137,7 +144,56 @@ def append(path, line):
 		return False
 
 
+def record_held(qid, n, who):
+	# A file per held mail, written under a temporary name and renamed, so
+	# that the release service reads it whole or not at all.
+	try:
+		os.makedirs(HELD_DIR, mode=0o700, exist_ok=True)
+		tmp = os.path.join(HELD_DIR, f".{qid}.tmp")
+		fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+		try:
+			os.write(fd, f"{int(time.time())} {n} {who}\n".encode("utf-8"))
+		finally:
+			os.close(fd)
+		os.rename(tmp, os.path.join(HELD_DIR, qid))
+		return True
+	except OSError as e:
+		log(f"a held mail could not be recorded ({e}); it is not held", 4)
+		return False
+
+
+class Passed:
+	# Recipients let through at once, for the release service's bucket.
+	def __init__(self):
+		self.lock = threading.Lock()
+		self.total = 0
+		self.written = -1
+
+	def add(self, n):
+		with self.lock:
+			self.total += n
+
+	def write(self):
+		with self.lock:
+			total = self.total
+		if total == self.written:
+			return
+		try:
+			tmp = PASSED + ".tmp"
+			fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+			try:
+				os.write(fd, f"{os.getpid()} {total}\n".encode("ascii"))
+			finally:
+				os.close(fd)
+			os.rename(tmp, PASSED)
+			self.written = total
+		except OSError as e:
+			log(f"{PASSED} could not be written: {e}", 4)
+
+
 settings = common.Settings()
+passed = Passed()
+ADMIN = common.admin_address()
 limiter = common.Limiter()
 stats = Stats()
 flag = Flag()
@@ -153,6 +209,7 @@ class SendLimit(Milter.Base):
 		self.sender = None
 		self.auth = None
 		self.rcpts = 0
+		self.to_admin = True
 
 	@Milter.noreply
 	def connect(self, hostname, family, hostaddr):
@@ -171,6 +228,8 @@ class SendLimit(Milter.Base):
 	@Milter.noreply
 	def envrcpt(self, to, *args):
 		self.rcpts += 1
+		if (to or "").strip().strip("<>").lower() not in (ADMIN, settings.get().get("report")) or not (self.loopback and not self.auth):
+			self.to_admin = False # only SMTP from the box itself without a login, as management/email_administrator.py sends
 		return Milter.CONTINUE
 
 	def eom(self):
@@ -179,15 +238,17 @@ class SendLimit(Milter.Base):
 			return Milter.ACCEPT
 		if not (self.auth or self.local or self.loopback):
 			return Milter.ACCEPT # from another server, without a login
+		if self.rcpts and self.to_admin:
+			return Milter.ACCEPT # the box's mail to its administrator alone
 		n = max(1, self.rcpts)
 		who = common.sender_name(self.auth) if self.auth else ("sendmail:" if self.local else "smtp:") + common.sender_name(self.sender)
-		running, held = flag.get()
+		running, held, brake = flag.get()
 		qid = self.getsymval("i")
-		if running and qid and common.parse_held(f"0 {qid} 1 x"):
-			wait = None if held else limiter.reserve(n, v["rate"], v["per"], SHORT_WAIT)
+		if running and qid and common.QID_ONLY.match(qid) and held < common.MAX_HELD:
+			wait = None if (brake or held) else limiter.reserve(n, v["rate"], v["per"], SHORT_WAIT)
 			if wait is None:
 				# On hold behind the others; sendlimit-release.py releases it.
-				if append(HELD, f"{int(time.time())} {qid} {n} {who}"):
+				if record_held(qid, n, who):
 					self.quarantine("miab-sendlimit: the box's sending limit, released by miab-sendlimit-release")
 					flag.held()
 					stats.add(who, n, "held")
@@ -200,6 +261,7 @@ class SendLimit(Milter.Base):
 			self.setreply("451", "4.7.1", "The box sends too much mail at the moment, try again later")
 			return Milter.TEMPFAIL
 		stats.add(who, n, "delayed" if wait > 0 else "passed", wait)
+		passed.add(n)
 		if wait > 0:
 			time.sleep(wait)
 		return Milter.ACCEPT
@@ -207,6 +269,12 @@ class SendLimit(Milter.Base):
 	def abort(self):
 		self.reset()
 		return Milter.CONTINUE
+
+
+def passed_writer():
+	while True:
+		time.sleep(0.5)
+		passed.write()
 
 
 def flusher():
@@ -220,6 +288,7 @@ def flusher():
 
 def main():
 	threading.Thread(target=flusher, daemon=True).start()
+	threading.Thread(target=passed_writer, daemon=True).start()
 	Milter.factory = SendLimit
 	Milter.set_flags(Milter.QUARANTINE) # it changes nothing in the mail, it only puts it on hold
 	v = settings.get()

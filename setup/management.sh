@@ -183,6 +183,19 @@ tools/write_conf.py /etc/cron.d/mailinabox-send-limit << EOF;
 # The sending limit of the box: mail the minutes in which mail had to wait.
 */5 * * * *	root	(cd $PWD && test -x management/send_limit.py && management/send_limit.py --notify)
 EOF
+# When the brake of the sending limit goes on, its release service starts
+# this unit, so the administrator is mailed at once, not at the next cron run.
+tools/write_conf.py /etc/systemd/system/miab-sendlimit-notify.service << EOF;
+# Mail-in-a-Box --- Do not edit / will be overwritten on update.
+[Unit]
+Description=Mail-in-a-Box sending limit: mail the administrator (management/send_limit.py --notify)
+
+[Service]
+Type=oneshot
+WorkingDirectory=$PWD
+ExecStart=$PWD/management/send_limit.py --notify
+EOF
+hide_output systemctl daemon-reload
 management/send_limit.py --apply
 
 # Start the management server, or restart it when its code, its start script

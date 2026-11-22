@@ -58,10 +58,18 @@ SUBJECT = "Sending of mail was slowed down by the sending limit"
 SERVICE = "miab-sendlimit"
 RELEASE_SERVICE = "miab-sendlimit-release"
 HELD_JSON = "/run/miab-sendlimit/held.json"
+END = "/run/miab-sendlimit/end"
+RECHECK = "/run/miab-sendlimit/recheck"
 FLAG = "/run/miab-sendlimit/release"
 
-DEFAULTS = { "enabled": True, "rate": 30, "per": 1 }
-RANGES = { "rate": [1, 100000], "per": [1, 3600] }
+# rate/per: the limit, which sets off the brake. While the brake is on, all
+# counted mail is held; "stop" releases nothing until the administrator ends
+# it, otherwise held mail goes out at brake_rate per brake_per seconds and
+# the brake ends by itself after "calm" minutes without held mail.
+DEFAULTS = { "enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30 }
+RANGES = { "rate": [1, 100000], "per": [1, 3600], "brake_rate": [1, 100000], "brake_per": [1, 86400], "calm": [1, 1440] }
+NUMBERS = ("rate", "per", "brake_rate", "brake_per", "calm")
+FLAGS = ("enabled", "stop")
 
 EVENT_RE = re.compile(r"^([0-9]{1,12}) ([0-9]{1,6}) ([0-9]{1,5}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,4}) ([0-9]{1,9}) ([0-9]{1,9})((?: [^\s=]{1,210}=[0-9]{1,9}/[0-9]{1,9}){0,10})$")
 QID_RE = re.compile(r"^[0-9A-Za-z]{6,24}$")
@@ -78,20 +86,23 @@ def validate_settings(values, strict=True):
 	out, warnings = dict(DEFAULTS), []
 	if not isinstance(values, dict):
 		values = {}
-	if "enabled" in values and values["enabled"] not in (None, ""):
-		v = values["enabled"]
+	for k in FLAGS:
+		if k not in values or values[k] in (None, ""):
+			continue
+		v = values[k]
 		if isinstance(v, bool):
-			out["enabled"] = v
+			out[k] = v
 		elif str(v).strip().lower() in ("1", "true", "yes", "on"):
-			out["enabled"] = True
+			out[k] = True
 		elif str(v).strip().lower() in ("0", "false", "no", "off"):
-			out["enabled"] = False
+			out[k] = False
 		else:
 			if strict:
-				raise SendLimitError("enabled must be 1 or 0.")
-			warnings.append("send_limit enabled in settings.yaml is not valid, the default applies.")
-	names = { "rate": "The number of mails", "per": "The number of seconds" }
-	for k in ("rate", "per"):
+				raise SendLimitError(f"{k} must be 1 or 0.")
+			warnings.append(f"send_limit {k} in settings.yaml is not valid, the default applies.")
+	names = { "rate": "The number of mails", "per": "The number of seconds", "brake_rate": "The number of mails while the brake is on",
+		"brake_per": "The number of seconds while the brake is on", "calm": "The number of minutes" }
+	for k in NUMBERS:
 		if k not in values or values[k] in (None, ""):
 			continue
 		v = values[k]
@@ -127,29 +138,32 @@ def save_settings(env, values):
 	utils.write_settings(config, env)
 
 
-def render_settings_file(values):
-	return ("# Mail-in-a-Box --- Do not edit / will be overwritten on update.\n"
-		"# The sending limit of the box, from settings.yaml (System > Intrusion Detection and Prevention;\n"
-		"# management/send_limit.py), read by conf/send-limit/sendlimit-milter.py when it changes.\n"
-		f"enabled {1 if values['enabled'] else 0}\n"
-		f"rate {values['rate']}\n"
-		f"per {values['per']}\n")
+def render_settings_file(values, report=None):
+	# report: the report recipient (System > Notifications), whose mail from
+	# the box itself the milter never holds.
+	lines = ["# Mail-in-a-Box --- Do not edit / will be overwritten on update.",
+		"# The sending limit of the box, from settings.yaml (System > Intrusion Detection and Prevention;",
+		"# management/send_limit.py), read by conf/send-limit/sendlimit-milter.py and sendlimit-release.py when it changes."]
+	lines += [f"{k} {1 if values[k] else 0}" for k in FLAGS] + [f"{k} {values[k]}" for k in NUMBERS]
+	if report and re.fullmatch(r"[^\s@=]{1,64}@[A-Za-z0-9.-]{1,253}", report):
+		lines.append(f"report {report.lower()}")
+	return "\n".join(lines) + "\n"
 
 
 def read_settings_file(path=None):
-	# The values the milter uses (its defaults without the file).
-	out = { "enabled": DEFAULTS["enabled"], "rate": DEFAULTS["rate"], "per": DEFAULTS["per"] }
+	# The values the milter uses (its defaults without the file; as
+	# sendlimit_common.Settings.read).
+	out = dict(DEFAULTS)
+	limits = { "rate": 100000, "per": 86400, "brake_rate": 100000, "brake_per": 86400, "calm": 1440 }
 	try:
 		with open(path or SETTINGS_FILE, encoding="utf-8") as f:
 			for line in f:
 				p = line.split()
 				if len(p) == 2 and p[1].isdigit():
-					if p[0] == "enabled":
-						out["enabled"] = p[1] != "0"
-					elif p[0] == "rate":
-						out["rate"] = min(max(int(p[1]), 1), 100000)
-					elif p[0] == "per":
-						out["per"] = min(max(int(p[1]), 1), 86400)
+					if p[0] in FLAGS:
+						out[p[0]] = p[1] != "0"
+					elif p[0] in limits:
+						out[p[0]] = min(max(int(p[1]), 1), limits[p[0]])
 	except OSError:
 		pass
 	return out
@@ -188,10 +202,18 @@ def write_settings_file(text, path=None):
 		os.close(dfd)
 
 
+def report_recipient(env):
+	try:
+		import admin_mail
+		return admin_mail.report_address(env)
+	except Exception:
+		return None
+
+
 def apply_config(env, values=None, path=None):
 	if values is None:
 		values, _ = get_settings(env)
-	return write_settings_file(render_settings_file(values), path)
+	return write_settings_file(render_settings_file(values, report_recipient(env)), path)
 
 
 def update_settings(env, values, reset=False, path=None):
@@ -258,10 +280,10 @@ def load_state(path=NOTIFY_STATE):
 			s = json.load(f)
 		if isinstance(s, dict) and isinstance(s.get("pending"), list) and isinstance(s.get("kept"), list):
 			return { "last_sent": int(s.get("last_sent", 0)), "pending": s["pending"][-MAX_PENDING:], "dropped": int(s.get("dropped", 0)),
-				"kept": s["kept"][-MAX_KEPT:] }
+				"kept": s["kept"][-MAX_KEPT:], "brake_mailed": s.get("brake_mailed") if isinstance(s.get("brake_mailed"), int) else None }
 	except (OSError, ValueError, TypeError):
 		pass
-	return { "last_sent": 0, "pending": [], "dropped": 0, "kept": [] }
+	return { "last_sent": 0, "pending": [], "dropped": 0, "kept": [], "brake_mailed": None }
 
 
 def save_state(state, path=NOTIFY_STATE):
@@ -302,17 +324,24 @@ def message(events, dropped=0, held=None):
 		lines.append(f"... and {dropped} more minutes")
 	top = summary(events)[:15]
 	senders = "\n".join(f"  {s['recipients']:7d} recipients in {s['mails']:6d} mails  {describe_sender(s['sender'])}" for s in top)
+	brake = ""
+	if held and held.get("brake"):
+		since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(held.get("brake_since") or 0))
+		brake = (f"THE BRAKE IS ON since {since}: the box sent more than its limit allows, so it holds all outgoing mail now"
+			+ (" and sends nothing until you end the brake.\n\n" if held.get("stop") else
+				f" and sends only {held.get('brake_rate')} mails in {held.get('brake_per')} seconds; the brake ends by itself"
+				f" after {held.get('calm')} minutes without held mail.\n\n"))
 	now_held = ""
 	if held and held.get("held"):
 		now_held = (f"On hold now: {held['held']} mails to {held['recipients']} recipients. They go out at the limit, the senders in turn:\n\n"
 			+ "\n".join(f"  {x['recipients']:7d} recipients in {x['mails']:6d} mails  {describe_sender(x['sender'])}" for x in held["senders"][:15]) + "\n\n")
-	return ("The sending limit of the box slowed down outgoing mail in these minutes (each recipient counts as one mail). Mail"
-		" that did not fit was accepted and put on hold, and goes out at the limit; the senders got no error:\n\n"
-		+ "\n".join(lines) + "\n\nWho sent it:\n\n" + (senders or "  (not recorded)") + "\n\n" + now_held +
+	return (brake + "The sending limit of the box acted in these minutes (each recipient counts as one mail). Mail"
+		" that did not fit was accepted and put on hold; the senders got no error:\n\n"
+		+ ("\n".join(lines) or "  (the first minute is not over yet)") + "\n\nWho sent it:\n\n" + (senders or "  (see the held mail below)") + "\n\n" + now_held +
 		"If you did not expect this much mail from the box, an account may have been taken over, or a program on the box sends"
 		" spam: change the password of the account named above and end its sessions, and delete its held mail before it goes"
 		" out: in the control panel, System > Intrusion Detection and Prevention, \"Delete\" next to the sender (or on the box:"
-		" management/send_limit.py --delete SENDER).\n\n"
+		" management/send_limit.py --delete SENDER), and then end the brake there (\"End the brake\", or send_limit.py --end).\n\n"
 		"The limit, the held mail and a list of these minutes: the control panel, System > Intrusion Detection and Prevention.\n")
 
 
@@ -323,7 +352,7 @@ def send_mail(text):
 		raise RuntimeError("email_administrator.py: " + (p.stderr.strip() or p.stdout.strip())[-300:])
 
 
-def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE):
+def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE, held=None):
 	now = int(time.time()) if now is None else now
 	events = take()
 	state = load_state(state_path)
@@ -338,13 +367,18 @@ def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE):
 	if events:
 		save_state(state, state_path)
 	sent = False
-	if state["pending"] and now - state["last_sent"] >= NOTIFY_INTERVAL:
+	held = read_held() if held is None else held
+	brake_since = (held or {}).get("brake_since") if (held or {}).get("brake") else None
+	new_brake = brake_since is not None and brake_since != state.get("brake_mailed")
+	if (state["pending"] or new_brake) and (new_brake or now - state["last_sent"] >= NOTIFY_INTERVAL):
 		try:
-			send(message(state["pending"], state["dropped"], read_held()))
+			send(message(state["pending"], state["dropped"], held))
 		except Exception as e:
 			print(f"send_limit.py: the mail to the administrator could not be sent, it is tried again next time: {e}", file=sys.stderr)
 			return False
 		state.update({ "last_sent": now, "pending": [], "dropped": 0 })
+		if brake_since is not None:
+			state["brake_mailed"] = brake_since
 		save_state(state, state_path)
 		sent = True
 	return sent
@@ -385,18 +419,31 @@ def held_qids(sender=None, held=None):
 
 def act_on_held(action, sender=None, run=subprocess.run, held=None):
 	# action "release" (now, past the limit) or "delete"; sender None: all.
+	if action == "end":
+		# The release service ends the brake when it sees this file (within a second).
+		fd = os.open(END, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+		os.close(fd)
+		return { "action": action, "sender": None, "mails": 0 }
 	if action not in ("release", "delete"):
-		raise SendLimitError("action must be release or delete.")
+		raise SendLimitError("action must be release, delete or end.")
 	qids = held_qids(sender, held)
 	if sender is not None and not qids:
 		raise SendLimitError("No held mail of this sender (it may have gone out already).")
 	if qids:
-		p = run(["postsuper", "-d" if action == "delete" else "-H", "-"], input="".join(q + "\n" for q in qids), capture_output=True, text=True, timeout=300)
+		# Only in the hold queue (delete also in the deferred queue, where a
+		# mail that was just released waits for its delivery).
+		queues = ["hold", "deferred"] if action == "delete" else ["hold"]
+		p = run(["postsuper", "-d" if action == "delete" else "-H", "-"] + queues, input="".join(q + "\n" for q in qids), capture_output=True, text=True, timeout=300)
 		if p.returncode != 0:
 			raise RuntimeError("postsuper: " + (p.stderr or "").strip()[-300:])
 		if action == "release":
 			for q in qids:
 				run(["postqueue", "-i", q], capture_output=True, timeout=60)
+		# The release service forgets them at once (not at its next look at the queue).
+		try:
+			os.close(os.open(RECHECK, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600))
+		except OSError:
+			pass
 	return { "action": action, "sender": sender, "mails": len(qids) }
 
 
@@ -425,6 +472,7 @@ def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, sett
 	events.sort(key=lambda e: -e["time"])
 	return { "settings": values, "defaults": DEFAULTS, "ranges": RANGES, "applied": applied, "warnings": warnings,
 		"running": running, "release_running": release_running, "events": events[:200], "more": max(0, len(events) - 200),
+		"brake": { "on": bool((held or {}).get("brake")), "since": (held or {}).get("brake_since"), "stop": values["stop"] },
 		"held": { "mails": (held or {}).get("held", 0), "recipients": (held or {}).get("recipients", 0),
 			"senders": [{ k: x.get(k) for k in ("sender", "mails", "recipients", "oldest") } for x in (held or {}).get("senders", [])[:200]] },
 		"day": { "minutes": len(events), "delayed": sum(e["delayed"] for e in events), "deferred": sum(e["deferred"] for e in events),
@@ -433,8 +481,8 @@ def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, sett
 
 
 def main(argv):
-	if not (len(argv) == 2 and argv[1] in ("--notify", "--status", "--apply", "--release")) and not (len(argv) == 3 and argv[1] in ("--release", "--delete")):
-		print("usage: send_limit.py --notify | --status | --apply | --release [SENDER] | --delete SENDER|--all", file=sys.stderr)
+	if not (len(argv) == 2 and argv[1] in ("--notify", "--status", "--apply", "--release", "--end")) and not (len(argv) == 3 and argv[1] in ("--release", "--delete")):
+		print("usage: send_limit.py --notify | --status | --apply | --release [SENDER] | --delete SENDER|--all | --end", file=sys.stderr)
 		return 2
 	if os.geteuid() != 0:
 		print("send_limit.py: run it as root (sudo).", file=sys.stderr)
@@ -451,6 +499,10 @@ def main(argv):
 	if argv[1] == "--notify":
 		notify()
 		return 0
+	if argv[1] == "--end":
+		act_on_held("end")
+		print("The brake ends within a second; held mail then goes out at the limit.")
+		return 0
 	if argv[1] in ("--release", "--delete"):
 		sender = None if len(argv) == 2 or argv[2] == "--all" else argv[2]
 		try:
@@ -465,6 +517,9 @@ def main(argv):
 		print(w)
 	a = st["applied"]
 	print(f"Sending limit: {a['rate']} mails in {a['per']} s" + ("" if a["enabled"] else " (turned off)"))
+	if st["brake"]["on"]:
+		print("THE BRAKE IS ON since " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st["brake"]["since"] or 0))
+			+ (": nothing is sent until it is ended (--end)." if st["brake"]["stop"] else ": held mail goes out very slowly; --end ends it."))
 	h = st["held"]
 	if h["mails"]:
 		print(f"On hold now: {h['mails']} mails to {h['recipients']} recipients:")

@@ -13,7 +13,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### New
 
-* **Sending limit: at most 30 mails a second leave the box (B221)**\
+* **Sending limit with an emergency brake: a flood of mail from the box is stopped (B221)**\
   All mail that the users and the box itself send now passes a small
   Postfix milter (`conf/send-limit/sendlimit-milter.py`, service
   `miab-sendlimit`, package `python3-milter` from universe): mail programs
@@ -21,25 +21,29 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Nextcloud, Sieve redirects, cron and other programs on the box
   (sendmail), and SMTP from the box itself without a login (127.0.0.1 and
   ::1 on port 25, which Postfix lets relay). Up to 30 mails go out at
-  once, then 30 a second; each recipient counts as one mail. A mail that
-  does not fit is accepted and put on hold in Postfix's queue, so no
-  sender ever gets an error; the new service `miab-sendlimit-release`
-  releases the held mail at the limit, the senders in turn, so that one
-  sender with thousands of mails does not hold back the others' mail.
-  System > Intrusion Detection and Prevention (the page's new name) sets
-  the limit (mails and seconds, or off), lists the held mail by sender
-  with "Release now" and "Delete" (mail of an account that was taken over
-  can be deleted before it goes out), and the minutes of the last 24 hours
-  in which the limit acted; API `/system/send-limit` and
+  once, then 30 a second; each recipient counts as one mail. The first
+  mail more sets off the brake: from then on all outgoing mail is accepted
+  and put on hold in Postfix's queue (no sender gets an error, nothing is
+  lost), the recipient of the box's reports is mailed at once, and the new
+  service `miab-sendlimit-release` lets held mail go out only at 10 mails a
+  minute, the senders in turn, or, if so set, nothing at all until the
+  administrator ends the brake. Without the stop the brake ends by itself
+  once nothing is held and no more than the limit came for 30 minutes. An
+  account that was taken over so gets a few dozen mails out instead of
+  thousands (in a test 6 to 7 of 120 at a limit of 5 a second), and its
+  held mail can be deleted before it goes out. System > Intrusion
+  Detection and Prevention (the page's new name) sets the limit and the
+  brake, shows the brake with "End the brake", lists the held mail by
+  sender with "Release now" and "Delete", and the minutes of the last 24
+  hours in which the limit acted; API `/system/send-limit` and
   `/system/send-limit/held`, command line `management/send_limit.py
-  --status`, `--release`, `--delete`. Each such minute is logged with the
-  senders and mailed to the recipient of the box's reports (System >
-  Notifications), at most one mail an hour. Mail from other servers is not
-  counted. The milter runs as a dynamic user without privileges and reads
-  its setting again when it changes; Postfix passes mail on when it does
-  not answer, and without the release service it holds nothing (a mail
-  then waits at most 60 seconds and is deferred with `451 4.7.1`). Before,
-  an account that was taken over or a program on the box could send any
+  --status`, `--release`, `--delete`, `--end`. The box's own mail to
+  administrator@ and to the report recipient is never held. Mail from
+  other servers is not counted. The milter runs as a dynamic user without
+  privileges; Postfix passes mail on when it does not answer, and without
+  the release service nothing is held (a mail then waits at most 20
+  seconds, sendmail 60, and is deferred with `451 4.7.1`). Before, an
+  account that was taken over or a program on the box could send any
   amount of mail in the box's name before anyone noticed, and ruin the
   reputation of its address with other mail providers. New offline test
   `tests/fork/send-limit.py`, smoke checks `admin-send-limit` and the

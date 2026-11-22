@@ -4411,7 +4411,8 @@ def api_shape(ctx, path, r):
         # The sending limit of the box (B221).
         _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("enabled"), bool) and all(isinstance(j[k].get(x), int) for x in ("rate", "per"))
                   for k in ("settings", "defaults", "applied")), "send-limit: settings missing")
-        _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1}, "send-limit: defaults %s" % j["defaults"])
+        _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30}, "send-limit: defaults %s" % j["defaults"])
+        _need(isinstance(j.get("brake"), dict) and j["brake"].get("on") is False, "send-limit: the brake is on (%s)" % j.get("brake"))
         _need(isinstance(j.get("events"), list) and isinstance(j.get("day"), dict) and isinstance(j.get("more"), int)
               and isinstance(j.get("warnings"), list), "send-limit: keys missing")
         _need(j.get("running") is True, "send-limit: the milter does not run (%s)" % j.get("running"))
@@ -4886,7 +4887,9 @@ def c_send_limit(ctx):
         while not held_of_alice():
             _need(time.time() < deadline, "the second mail is not listed as held after 20 s")
             time.sleep(2)
-        steps.append("1 per hour: both accepted, the second held")
+        st = admin_api(ctx, "GET", "system/send-limit").json()
+        _need(st.get("brake", {}).get("on") is True, "the held mail did not set off the brake: %s" % st.get("brake"))
+        steps.append("1 per hour: both accepted, the second held, the brake on")
         r = admin_api(ctx, "POST", "system/send-limit/held", form={"action": "delete", "sender": held_of_alice()[0]["sender"]})
         api_expect(r, 200, "application/json", "POST system/send-limit/held")
         _need(r.json().get("mails", 0) >= 1, "delete: %s" % r.text()[:200])
@@ -4895,6 +4898,13 @@ def c_send_limit(ctx):
             _need(time.time() < deadline, "the held mail is still listed 20 s after it was deleted")
             time.sleep(2)
         steps.append("deleted through the API")
+        r = admin_api(ctx, "POST", "system/send-limit/held", form={"action": "end", "sender": ""})
+        api_expect(r, 200, "application/json", "POST system/send-limit/held end")
+        deadline = time.time() + 15
+        while admin_api(ctx, "GET", "system/send-limit").json()["brake"]["on"]:
+            _need(time.time() < deadline, "the brake is still on 15 s after it was ended")
+            time.sleep(2)
+        steps.append("brake ended through the API")
         deadline = time.time() + 75
         while True:
             day = admin_api(ctx, "GET", "system/send-limit").json()["day"]
@@ -4904,7 +4914,15 @@ def c_send_limit(ctx):
             time.sleep(5)
         steps.append("its minute listed with its sender")
     finally:
-        admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1" if before["enabled"] else "0", "rate": str(before["rate"]), "per": str(before["per"])})
+        admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1" if before["enabled"] else "0", "rate": str(before["rate"]), "per": str(before["per"]),
+                                                           "stop": "1" if before["stop"] else "0", "brake_rate": str(before["brake_rate"]),
+                                                           "brake_per": str(before["brake_per"]), "calm": str(before["calm"])})
+        # Never leave the box braked (later checks send mail): delete what the
+        # test left held and end the brake.
+        for x in admin_api(ctx, "GET", "system/send-limit").json()["held"]["senders"]:
+            if x["sender"].lower() == ctx.alice.lower():
+                admin_api(ctx, "POST", "system/send-limit/held", form={"action": "delete", "sender": x["sender"]})
+        admin_api(ctx, "POST", "system/send-limit/held", form={"action": "end", "sender": ""})
     time.sleep(2)
     third = send(3)
     _need(third == "ok", "a mail after the setting was restored: %s" % third)

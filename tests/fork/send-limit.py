@@ -98,12 +98,16 @@ check("the next is deferred (would wait ~166 s)", L.reserve(1, 30, 1, 60, now=10
 check("after the bucket refilled it goes", L.reserve(1, 30, 1, 60, now=10.0 + 5000 / 30), 0.0)
 L = common.Limiter()
 L.reserve(5000, 30, 1, 60, now=10.0)
-check("its debt is capped: a small mail 40 s later waits about 20 s", round(L.reserve(1, 30, 1, 60, now=50.0), 1), 20.0)
+check("it pays in full: a small mail 40 s later does not fit within 60 s", L.reserve(1, 30, 1, 60, now=50.0), None)
+check("it fits once its recipients are paid for", L.reserve(1, 30, 1, 60, now=10.0 + 5000 / 30 - 0.5), 0.0)
 L = common.Limiter()
 for i in range(100): # a trickle of other mail at 500 an hour: one every 30 s
 	L.reserve(1, 500, 3600, 60, now=i * 30.0)
 check("a big mail behind a trickle goes at once (no starvation)", L.reserve(600, 500, 3600, 60, now=3000.0), 0.0)
-check("and holds back the next mail by at most MAX_DEBT", L.reserve(1, 500, 3600, 120, now=3000.0) <= 60 + 3600 / 500, True)
+check("and the next mail waits until it is paid for", L.reserve(1, 500, 3600, 120, now=3000.0), None)
+L = common.Limiter()
+L.charge(30, 30, 1, now=0.0)
+check("charge(): passes elsewhere take from the bucket", round(L.reserve(1, 30, 1, 60, now=0.0), 4), round(1 / 30, 4))
 L = common.Limiter()
 check("1 per hour: first goes", L.reserve(1, 1, 3600, 60, now=0.0), 0.0)
 check("1 per hour: second deferred", L.reserve(1, 1, 3600, 60, now=1.0), None)
@@ -119,7 +123,7 @@ check("loopback", [common.is_loopback(x) for x in ("127.0.0.1", "127.9.8.7", "::
 	[True, True, True, True, False, False, False, False, False])
 milter.settings.values, milter.settings.checked = {"enabled": 1, "rate": 1, "per": 3600}, 10 ** 12
 milter.stats = milter.Stats()
-milter.flag.value, milter.flag.checked = (False, None), 10 ** 12 # sendlimit-release.py does not run
+milter.flag.value, milter.flag.checked = (False, None, None), 10 ** 12 # sendlimit-release.py does not run
 
 
 QUARANTINED = []
@@ -152,26 +156,55 @@ check("nothing put on hold without sendlimit-release.py", QUARANTINED, [])
 
 # With sendlimit-release.py running: what does not fit is accepted and held.
 with tempfile.TemporaryDirectory() as d:
-	milter.HELD = os.path.join(d, "held")
+	milter.HELD_DIR = os.path.join(d, "held.d")
+	milter.PASSED = os.path.join(d, "passed")
+	milter.passed = milter.Passed()
 	milter.settings.values = {"enabled": 1, "rate": 2, "per": 3600}
 	milter.limiter = common.Limiter()
-	milter.flag.value, milter.flag.checked = (True, 0), 10 ** 12
+	milter.flag.value, milter.flag.checked = (True, 0, False), 10 ** 12
 	r = [session(("127.0.0.1", 0), qid="AAAA%06d" % i) for i in range(4)]
 	check("fits: accepted at once, then held (accepted)", r, ["accept"] * 4)
 	check("the two that did not fit are held", QUARANTINED, ["AAAA000002", "AAAA000003"])
-	lines = open(milter.HELD).read().splitlines()
-	check("held lines for sendlimit-release.py", [common.parse_held(l)["qid"] for l in lines], ["AAAA000002", "AAAA000003"])
-	check("held line names the sender", common.parse_held(lines[0])["sender"], "sendmail:a@example.com")
+	check("a file per held mail for the release service", sorted(os.listdir(milter.HELD_DIR)), ["AAAA000002", "AAAA000003"])
+	got = release.take_held(d)
+	check("the release service reads and removes them", ([h["qid"] for h in sorted(got, key=lambda h: h["qid"])], os.listdir(milter.HELD_DIR)), (["AAAA000002", "AAAA000003"], []))
+	check("held record names the sender", got[0]["sender"], "sendmail:a@example.com")
+	milter.passed.write()
+	check("passed: the two that went at once", release.take_passed(d), (os.getpid(), 2))
 	QUARANTINED.clear()
 	milter.limiter = common.Limiter() # room again, but mail is on hold: new mail goes behind it
-	milter.flag.value, milter.flag.held_here = (True, 3), 0
+	milter.flag.value, milter.flag.held_here = (True, 3, False), 0
 	check("while mail is held, new mail is held too", (session(("127.0.0.1", 41010), qid="BBBB000001"), QUARANTINED), ("accept", ["BBBB000001"]))
 	QUARANTINED.clear()
-	milter.flag.value = (True, 0)
+	milter.limiter = common.Limiter()
+	milter.flag.value, milter.flag.held_here = (True, 0, True), 0
+	check("brake on: even mail that fits is held", (session(("127.0.0.1", 41020), qid="EEEE000001"), QUARANTINED), ("accept", ["EEEE000001"]))
+	QUARANTINED.clear()
+	milter.ADMIN = "administrator@box.example.com"
+	milter.settings.values = dict(milter.settings.values, report="reports@example.net")
+
+	def to(addr, rcpt, auth=None, qid="FFFF000001"):
+		m = milter.SendLimit()
+		m.getsymval = lambda k: auth if k == "{auth_authen}" else (qid if k == "i" else None)
+		m.setreply = lambda *a: None
+		m.quarantine = lambda reason: QUARANTINED.append(qid)
+		m.connect("host", 2, addr)
+		m.envfrom("<administrator@box.example.com>")
+		for r in rcpt:
+			m.envrcpt("<%s>" % r)
+		return m.eom()
+	check("brake on: the box's mail to administrator@ goes", (to(("127.0.0.1", 41021), ["Administrator@box.example.com"]), QUARANTINED), ("accept", []))
+	check("brake on: ... and to the report recipient", (to(("127.0.0.1", 41022), ["reports@example.net"]), QUARANTINED), ("accept", []))
+	check("brake on: to the admin and someone else is held", (to(("127.0.0.1", 41023), ["administrator@box.example.com", "x@example.org"], qid="FFFF000002"), QUARANTINED), ("accept", ["FFFF000002"]))
+	QUARANTINED.clear()
+	check("brake on: to the admin with a login (a user) is held", (to(("203.0.113.5", 41024), ["administrator@box.example.com"], auth="u@box.example.com", qid="FFFF000003"), QUARANTINED), ("accept", ["FFFF000003"]))
+	QUARANTINED.clear()
+	milter.flag.value = (True, 0, False)
 	check("without a queue id it is not held (waits or is deferred)", (session(("127.0.0.1", 41011), qid=None), QUARANTINED), ("accept", []))
 	check("a strange queue id is not held", (session(("127.0.0.1", 41012), qid="x y"), QUARANTINED), ("accept", []))
 	check("another server is never held", (session(("203.0.113.9", 41013), qid="CCCC000001"), QUARANTINED), ("accept", []))
-	os.unlink(milter.HELD)
+	import shutil
+	shutil.rmtree(milter.HELD_DIR)
 	os.chmod(d, 0o500)
 	if os.geteuid() != 0:
 		milter.limiter = common.Limiter()
@@ -182,12 +215,14 @@ with tempfile.TemporaryDirectory() as d:
 # sendlimit-release.py's flag.
 with tempfile.TemporaryDirectory() as d:
 	f = os.path.join(d, "release")
-	check("no flag", common.read_flag(f, now=1000), (False, None))
+	check("no flag", common.read_flag(f, now=1000), (False, None, None))
+	open(f, "w").write("1000 7 1\n")
+	check("fresh flag", common.read_flag(f, now=1005), (True, 7, True))
+	check("old flag", common.read_flag(f, now=1100), (False, None, None))
 	open(f, "w").write("1000 7\n")
-	check("fresh flag", common.read_flag(f, now=1005), (True, 7))
-	check("old flag", common.read_flag(f, now=1100), (False, None))
+	check("flag without the brake field", common.read_flag(f, now=1000), (False, None, None))
 	open(f, "w").write("junk\n")
-	check("broken flag", common.read_flag(f, now=1000), (False, None))
+	check("broken flag", common.read_flag(f, now=1000), (False, None, None))
 
 # sendlimit-release.py: the senders in turn, the rate kept.
 held = [{"time": 1, "qid": "SPAM%06d" % i, "rcpts": 1, "sender": "spammer@example.com"} for i in range(100)]
@@ -203,22 +238,37 @@ out2, turn = release.pick([h for h in held if h not in out], L, 10, 1, turn, now
 check("half a second later: 5 more", len(out2), 5)
 big = [{"time": 1, "qid": "BIGG000001", "rcpts": 500, "sender": "list@example.com"}]
 check("a mail bigger than the bucket goes when it is full", len(release.pick(big, common.Limiter(), 10, 1, "", now=0.0)[0]), 1)
+ids = {"GOOD000001": 50, "SPAM000001": 1, "HAND000001": 1}
+check("verified: in the hold queue and arrived when recorded",
+	[release.verified(h, ids) for h in ({"qid": "GOOD000001", "time": 55}, {"qid": "GOOD000002", "time": 60}, {"qid": "HAND000001", "time": 5000})], [True, False, False])
 sm = release.summary(held, 100)
 check("summary by sender, most recipients first", (sm["held"], sm["senders"][0]["sender"], sm["senders"][0]["mails"], len(sm["senders"][0]["qids"])),
 	(102, "spammer@example.com", 100, 100))
 
 with tempfile.TemporaryDirectory() as d:
-	open(os.path.join(d, "held"), "w").write("10 ABCDEF1234 3 alice@example.com\nbroken line\n20 ZZZZZZZZ99 1 sendmail:x@y\n")
+	hd = os.path.join(d, "held.d")
+	os.mkdir(hd)
+	open(os.path.join(hd, "ABCDEF1234"), "w").write("10 3 alice@example.com\n")
+	open(os.path.join(hd, "ZZZZZZZZ99"), "w").write("20 1 sendmail:x@y\n")
+	open(os.path.join(hd, "BROKEN0001"), "w").write("broken line\n")
+	open(os.path.join(hd, ".QQQQQQ0001.tmp"), "w").write("30 1 x\n")
+	open(os.path.join(hd, "../etc"[:0] + "not-a-qid!"), "w").write("30 1 x\n")
 	got = release.take_held(d)
-	check("take_held: lines read, broken dropped, file removed", ([h["qid"] for h in got], os.listdir(d)), (["ABCDEF1234", "ZZZZZZZZ99"], []))
+	check("take_held: records read, broken dropped and removed, others left",
+		(sorted(h["qid"] for h in got), sorted(os.listdir(hd))), (["ABCDEF1234", "ZZZZZZZZ99"], [".QQQQQQ0001.tmp", "not-a-qid!"]))
 	secret = os.path.join(d, "..", "secret-held-" + os.path.basename(d))
-	open(secret, "w").write("10 ABCDEF1234 3 alice@example.com\n")
-	os.symlink(secret, os.path.join(d, "held"))
+	open(secret, "w").write("10 3 alice@example.com\n")
+	os.symlink(secret, os.path.join(hd, "LINK000001"))
 	check("take_held: a link is not followed", release.take_held(d), [])
 	os.unlink(secret)
+	import shutil
+	shutil.rmtree(hd)
+	os.symlink(d, hd)
+	check("take_held: held.d as a link is not followed", release.take_held(d), [])
+	os.unlink(hd)
 	st = os.path.join(d, "state.json")
 	release.save_state({"held": got + [{"time": "x", "qid": "../etc", "rcpts": 1, "sender": "a"}], "released": 3, "turn": "a"}, st)
-	check("state saved and loaded, bad entries dropped", [h["qid"] for h in release.load_state(st)["held"]], ["ABCDEF1234", "ZZZZZZZZ99"])
+	check("state saved and loaded, bad entries dropped", sorted(h["qid"] for h in release.load_state(st)["held"]), ["ABCDEF1234", "ZZZZZZZZ99"])
 
 # send_limit.py: release or delete held mail.
 heldjson = {"held": 3, "recipients": 3, "senders": [{"sender": "spammer@example.com", "mails": 2, "recipients": 2, "oldest": 1, "qids": ["SPAM000001", "SPAM000002"]},
@@ -237,11 +287,11 @@ def run(argv, **kw):
 
 
 r = sl.act_on_held("delete", "spammer@example.com", run=run, held=heldjson)
-check("delete one sender", (r["mails"], calls), (2, [(["postsuper", "-d", "-"], "SPAM000001\nSPAM000002\n")]))
+check("delete one sender (hold and deferred queue only)", (r["mails"], calls), (2, [(["postsuper", "-d", "-", "hold", "deferred"], "SPAM000001\nSPAM000002\n")]))
 calls.clear()
 r = sl.act_on_held("release", None, run=run, held=heldjson)
 check("release all: bad ids dropped, then postqueue -i each", (r["mails"], [c[0] for c in calls]),
-	(3, [["postsuper", "-H", "-"], ["postqueue", "-i", "SPAM000001"], ["postqueue", "-i", "SPAM000002"], ["postqueue", "-i", "GOOD000001"]]))
+	(3, [["postsuper", "-H", "-", "hold"], ["postqueue", "-i", "SPAM000001"], ["postqueue", "-i", "SPAM000002"], ["postqueue", "-i", "GOOD000001"]]))
 bad = 0
 for a, snd in (("bounce", None), ("delete", "nobody@example.com"), ("delete", "a b"), ("delete", 5)):
 	try:
@@ -259,13 +309,15 @@ milter.settings = common.Settings()
 # The milter's settings file.
 with tempfile.TemporaryDirectory() as d:
 	SET = os.path.join(d, "settings")
-	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1})
+	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30})
 	open(SET, "w").write("# c\nenabled 0\nrate 0\nper 999999\nbogus 4\nrate x\n")
-	check("file: clamped, broken ignored", common.Settings.read(SET), {"enabled": 0, "rate": 1, "per": 86400})
-	open(SET, "w").write(sl.render_settings_file({"enabled": True, "rate": 120, "per": 60}))
-	check("written by send_limit.py", common.Settings.read(SET), {"enabled": 1, "rate": 120, "per": 60})
-	check("read back by send_limit.py", sl.read_settings_file(SET), {"enabled": True, "rate": 120, "per": 60})
-	check("send_limit.py without file", sl.read_settings_file(os.path.join(d, "none")), {"enabled": True, "rate": 30, "per": 1})
+	check("file: clamped, broken ignored", common.Settings.read(SET), dict({"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30}, enabled=0, rate=1, per=86400))
+	vals = dict(sl.DEFAULTS, rate=120, per=60, stop=True, brake_rate=5, brake_per=600, calm=90)
+	open(SET, "w").write(sl.render_settings_file(vals, "Admin@Example.org"))
+	check("written by send_limit.py", common.Settings.read(SET), {"enabled": 1, "rate": 120, "per": 60, "stop": 1, "brake_rate": 5, "brake_per": 600, "calm": 90, "report": "admin@example.org"})
+	check("read back by send_limit.py", sl.read_settings_file(SET), vals)
+	check("send_limit.py without file", sl.read_settings_file(os.path.join(d, "none")), sl.DEFAULTS)
+	check("a strange report address is left out", "report" in sl.render_settings_file(sl.DEFAULTS, "x y@z"), False)
 
 check("sender names", [common.sender_name(s) for s in ("<a@b.c>", "", "<>", "x y=z\n", "a" * 300)],
 	["a@b.c", "<>", "<>", "x?y?z", "a" * 200])
@@ -307,17 +359,19 @@ with tempfile.TemporaryDirectory() as d:
 	check("missing directory", sl.take_events(os.path.join(d, "none")), [])
 
 # The setting.
-check("defaults", sl.validate_settings({}), ({"enabled": True, "rate": 30, "per": 1}, []))
-check("values", sl.validate_settings({"enabled": "0", "rate": "100", "per": "60"})[0], {"enabled": False, "rate": 100, "per": 60})
+check("defaults", sl.validate_settings({}), (sl.DEFAULTS, []))
+check("values", sl.validate_settings({"enabled": "0", "rate": "100", "per": "60", "stop": "1", "brake_rate": "1", "brake_per": "3600", "calm": "5"})[0],
+	{"enabled": False, "rate": 100, "per": 60, "stop": True, "brake_rate": 1, "brake_per": 3600, "calm": 5})
 bad = 0
-for v in ({"rate": "0"}, {"rate": "100001"}, {"per": "0"}, {"per": "3601"}, {"rate": "1.5"}, {"rate": "x"}, {"enabled": "maybe"}, {"rate": True}):
+for v in ({"rate": "0"}, {"rate": "100001"}, {"per": "0"}, {"per": "3601"}, {"rate": "1.5"}, {"rate": "x"}, {"enabled": "maybe"}, {"rate": True},
+		{"stop": "2"}, {"brake_rate": "0"}, {"brake_per": "86401"}, {"calm": "0"}, {"calm": "1441"}):
 	try:
 		sl.validate_settings(v)
 	except sl.SendLimitError:
 		bad += 1
-check("strict errors", bad, 8)
+check("strict errors", bad, 13)
 out, warn = sl.validate_settings({"rate": "x", "per": 5}, strict=False)
-check("loose: default and warning", (out, len(warn)), ({"enabled": True, "rate": 30, "per": 5}, 1))
+check("loose: default and warning", (out, len(warn)), (dict(sl.DEFAULTS, per=5), 1))
 
 with tempfile.TemporaryDirectory() as d:
 	os.chmod(d, 0o755)
@@ -356,8 +410,18 @@ with tempfile.TemporaryDirectory() as d:
 		check("failed send: not sent", sl.notify(now=T + 9000, take=lambda: [ev(T + 8990)], send=failing, state_path=st2), False)
 	check("failed send: the minute stays pending", len(sl.load_state(st2)["pending"]), 1)
 	check("next run sends it", sl.notify(now=T + 9100, take=lambda: [], send=mails.append, state_path=st2), True)
+	st3 = os.path.join(d, "state3.json")
+	brake = dict(heldjson, brake=True, brake_since=T + 9500, stop=False, brake_rate=10, brake_per=60, calm=30)
+	sl.notify(now=T + 9400, take=lambda: [ev(T + 9390)], send=mails.append, state_path=st3)
+	n = len(mails)
+	check("a new brake is mailed at once, within the hour", sl.notify(now=T + 9501, take=lambda: [], send=mails.append, state_path=st3, held=brake), True)
+	check("the mail says the brake is on", "THE BRAKE IS ON" in mails[-1] and "10 mails in 60 seconds" in mails[-1], True)
+	check("the same brake is not mailed again", sl.notify(now=T + 9600, take=lambda: [ev(T + 9590)], send=mails.append, state_path=st3, held=brake), False)
+	check("stop: the mail says nothing is sent", "sends nothing until you end the brake" in sl.message([], 0, dict(brake, stop=True)), True)
+	sl.END = os.path.join(d, "end")
+	check("end: the request file is written", (sl.act_on_held("end")["action"], os.path.exists(sl.END)), ("end", True))
 	check("mail lists the held mail", "On hold now: 3 mails" in sl.message([ev(T)], 0, heldjson), True)
-	sl.get_settings = lambda env: ({"enabled": True, "rate": 30, "per": 1}, [])
+	sl.get_settings = lambda env: (dict(sl.DEFAULTS), [])
 	res = sl.status({}, now=T + 5000, take=lambda: [ev(T + 1995), ev(T + 4990, 7)], state_path=state, running=True,
 		settings_file=os.path.join(d, "none"))
 	check("status: kept + fresh, no duplicates, newest first", [e["time"] for e in res["events"]], [T + 4990, T + 1995, T + 1990, T + 990])
@@ -366,7 +430,7 @@ with tempfile.TemporaryDirectory() as d:
 	res = sl.status({}, now=T + 5000 + 86400, take=lambda: [], state_path=state, running=False, settings_file=os.path.join(d, "none"))
 	check("status: older than a day dropped", res["day"]["minutes"], 0)
 	check("status: not running warns", any("does not run" in w for w in res["warnings"]), True)
-	sl.get_settings = lambda env: ({"enabled": True, "rate": 50, "per": 1}, [])
+	sl.get_settings = lambda env: (dict(sl.DEFAULTS, rate=50), [])
 	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, running=True, settings_file=os.path.join(d, "none"))
 	check("status: other values warn", any("does not use this setting" in w for w in res["warnings"]), True)
 

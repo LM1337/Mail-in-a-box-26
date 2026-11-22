@@ -151,6 +151,10 @@ def update_settings(env, values):
 		with contextlib.suppress(Exception):
 			munin_admin.apply_config(env)
 		raise
+	# The sending limit never holds the box's reports to this address.
+	with contextlib.suppress(Exception):
+		import send_limit
+		send_limit.apply_config(env)
 	return { "settings": new, "changed": new != old }
 
 

@@ -973,7 +973,7 @@ def send_limit_set():
 	# enabled (1/0), rate (mails) and per (seconds); fields that are not sent
 	# keep their value. reset=1 restores the defaults.
 	import send_limit
-	values = { k: request.form[k] for k in ("enabled", "rate", "per") if k in request.form }
+	values = { k: request.form[k] for k in ("enabled", "rate", "per", "stop", "brake_rate", "brake_per", "calm") if k in request.form }
 	reset = request.form.get('reset') == '1'
 	try:
 		result = send_limit.update_settings(env, values, reset=reset)
@@ -982,16 +982,18 @@ def send_limit_set():
 	except Exception as e:
 		return (str(e), 500)
 	s = result["settings"]
-	app.logger.warning("send-limit: %s set the sending limit to %d mails in %d s%s",
-		request.user_email, s["rate"], s["per"], "" if s["enabled"] else " (turned off)")
+	app.logger.warning("send-limit: %s set the sending limit to %d mails in %d s%s, the brake to %s",
+		request.user_email, s["rate"], s["per"], "" if s["enabled"] else " (turned off)",
+		"stop" if s["stop"] else "%d mails in %d s, ending after %d calm minutes" % (s["brake_rate"], s["brake_per"], s["calm"]))
 	result["status"] = "ok"
 	return json_response(result)
 
 @app.route('/system/send-limit/held', methods=["POST"])
 @authorized_personnel_only
 def send_limit_held():
-	# action: release (now, past the limit) or delete; sender: one of the
-	# senders of GET /system/send-limit's "held", or empty for all held mail.
+	# action: release (now, past the limit), delete, or end (the brake);
+	# sender: one of the senders of GET /system/send-limit's "held", or empty
+	# for all held mail.
 	import send_limit
 	sender = request.form.get('sender', '') or None
 	try:
@@ -1000,8 +1002,11 @@ def send_limit_held():
 		return (str(e), 400)
 	except Exception as e:
 		return (str(e), 500)
-	app.logger.warning("send-limit: %s %s %d held mails of %s", request.user_email,
-		"released" if result["action"] == "release" else "deleted", result["mails"], sender or "all senders")
+	if result["action"] == "end":
+		app.logger.warning("send-limit: %s ended the brake", request.user_email)
+	else:
+		app.logger.warning("send-limit: %s %s %d held mails of %s", request.user_email,
+			"released" if result["action"] == "release" else "deleted", result["mails"], sender or "all senders")
 	result["status"] = "ok"
 	return json_response(result)
 

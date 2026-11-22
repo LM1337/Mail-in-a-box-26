@@ -2650,10 +2650,16 @@ paths:
         redirects, programs on the box, and SMTP from 127.0.0.1 and ::1)
         passes a milter that lets at most
         `rate` mails within `per` seconds go out; each recipient counts as one
-        mail. A mail that does not fit is accepted and put on hold; the release
-        service (`release_running`) sends held mail at the limit, the senders
-        in turn (`held`: by sender, most recipients first). Without the
-        release service a mail waits at most 60 seconds and is then deferred
+        mail. The first mail that does not fit sets off the brake (`brake`):
+        all counted mail is accepted and put on hold, the administrator is
+        mailed, and the release service (`release_running`) sends held mail
+        only at `brake_rate` mails in `brake_per` seconds, the senders in turn
+        (`held`: by sender, most recipients first), or nothing until the brake
+        is ended (`stop`). Without the stop the brake ends by itself after
+        `calm` minutes without held mail and without more mail than the
+        limit. The box's mail to administrator@ and to the report recipient
+        alone is never held. Without the release service nothing is held: an
+        SMTP mail waits at most 20 seconds (sendmail 60) and is then deferred
         with a temporary error (4.7.1). Mail that other servers send to the
         box is not counted. Returns the setting (`settings`, only values that differ from
         `defaults` are stored), the values the milter uses now (`applied`),
@@ -2689,10 +2695,14 @@ paths:
         - System
       summary: Change the sending limit of the box
       description: |
-        Form fields `enabled` (1 or 0), `rate` (mails, 1 to 100000) and `per`
-        (seconds, 1 to 3600); fields that are not sent keep their value,
-        `reset=1` restores the defaults (on, 30 mails in 1 second). The milter
-        reads the setting again when it changes: no restart.
+        Form fields `enabled` (1 or 0), `rate` (mails, 1 to 100000), `per`
+        (seconds, 1 to 3600), `stop` (1: send nothing while the brake is on),
+        `brake_rate` (1 to 100000), `brake_per` (seconds, 1 to 86400) and
+        `calm` (minutes, 1 to 1440); fields that are not sent keep their
+        value, `reset=1` restores the defaults (on, 30 mails in 1 second; the
+        brake 10 mails in 60 seconds, ending after 30 calm minutes). The
+        milter and the release service read the setting again when it
+        changes: no restart.
       operationId: setSendLimit
       requestBody:
         required: true
@@ -2758,12 +2768,13 @@ paths:
         - System
       summary: Release or delete the mail that the sending limit holds back
       description: |
-        Mail over the sending limit is accepted and put on hold; the release
-        service sends it at the limit, the senders in turn. Form fields
-        `action` (`release`: send it now, past the limit; `delete`: remove it
-        from the queue, it is never sent and its senders are not told) and
-        `sender` (one of the senders of `held` of `GET /system/send-limit`,
-        or empty for all held mail).
+        Mail over the sending limit is accepted and put on hold (the brake).
+        Form fields `action` (`release`: send it now, past the limit;
+        `delete`: remove it from the queue, it is never sent and its senders
+        are not told; `end`: end the brake, the held mail then goes out at
+        the limit) and `sender` (one of the senders of `held` of
+        `GET /system/send-limit`, or empty for all held mail; not used by
+        `end`).
       operationId: sendLimitHeld
       requestBody:
         required: true
@@ -2776,7 +2787,7 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [release, delete]
+                  enum: [release, delete, end]
                 sender:
                   type: string
                   example: user@example.com
@@ -4886,6 +4897,21 @@ components:
           type: integer
           description: Seconds
           example: 1
+        stop:
+          type: boolean
+          description: While the brake is on, send nothing until it is ended
+          example: false
+        brake_rate:
+          type: integer
+          description: While the brake is on, mails (recipients) that go out within `brake_per` seconds
+          example: 10
+        brake_per:
+          type: integer
+          example: 60
+        calm:
+          type: integer
+          description: Minutes without held mail and without more mail than the limit after which the brake ends by itself (not with `stop`)
+          example: 30
     SendLimitUpdateRequest:
       type: object
       properties:
@@ -4900,6 +4926,21 @@ components:
           type: integer
           minimum: 1
           maximum: 3600
+        stop:
+          type: integer
+          enum: [0, 1]
+        brake_rate:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        brake_per:
+          type: integer
+          minimum: 1
+          maximum: 86400
+        calm:
+          type: integer
+          minimum: 1
+          maximum: 1440
         reset:
           type: integer
           enum: [1]
@@ -4985,6 +5026,17 @@ components:
         release_running:
           type: boolean
           nullable: true
+        brake:
+          type: object
+          properties:
+            on:
+              type: boolean
+            since:
+              type: integer
+              nullable: true
+              description: When it went on (Unix time)
+            stop:
+              type: boolean
         held:
           type: object
           properties:

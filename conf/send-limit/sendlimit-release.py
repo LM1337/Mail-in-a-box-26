@@ -36,45 +36,61 @@ import sendlimit_common as common # noqa: E402
 STATE = "/var/lib/mailinabox/send-limit-held.json"
 LOOP = 0.5 # seconds
 CHECK_QUEUE = 5 # seconds between two looks at the hold queue while mail is held
-MAX_READ = 8 * 1024 * 1024
-MAX_HELD = 200000 # mails kept track of
 log = common.log
 
 
-def take_held(state_dir=common.STATE_DIR):
-	# The milter's new lines: renamed, read without following a link, removed.
+def take_held(state_dir=common.STATE_DIR, limit=5000):
+	# The milter's files held.d/<queue id> ("<time> <recipients> <sender>"),
+	# read without following a link and removed. Its temporary files (".*")
+	# are left for it.
+	out = []
 	try:
-		dfd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY)
+		dfd = os.open(os.path.join(state_dir, "held.d"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 	except OSError:
-		return []
+		return out
 	try:
-		try:
-			os.rename("held", "held.taken", src_dir_fd=dfd, dst_dir_fd=dfd)
-		except FileNotFoundError:
-			pass
-		try:
-			fd = os.open("held.taken", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
-		except OSError:
-			return []
-		try:
-			if not stat.S_ISREG(os.fstat(fd).st_mode):
-				return []
-			data = b""
-			while len(data) < MAX_READ:
-				chunk = os.read(fd, 1 << 20)
-				if not chunk:
-					break
-				data += chunk
-		finally:
-			os.close(fd)
-		os.unlink("held.taken", dir_fd=dfd)
+		for name in os.listdir(dfd)[:limit]:
+			if not common.QID_ONLY.match(name):
+				continue
+			try:
+				fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+			except OSError:
+				continue
+			try:
+				data = os.read(fd, 512).decode("utf-8", "replace") if stat.S_ISREG(os.fstat(fd).st_mode) else ""
+			finally:
+				os.close(fd)
+			try:
+				os.unlink(name, dir_fd=dfd)
+			except OSError:
+				pass
+			parts = data.strip().split(" ")
+			h = common.parse_held(f"{parts[0]} {name} {' '.join(parts[1:])}") if len(parts) == 3 else None
+			if h:
+				out.append(h)
 	finally:
 		os.close(dfd)
-	return [h for h in (common.parse_held(l) for l in data.decode("utf-8", "replace").splitlines()) if h]
+	return out
+
+
+def take_passed(state_dir=common.STATE_DIR):
+	# (pid, recipients) of the milter's "passed" file, or None.
+	try:
+		fd = os.open(os.path.join(state_dir, "passed"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+	except OSError:
+		return None
+	try:
+		if not stat.S_ISREG(os.fstat(fd).st_mode):
+			return None
+		m = common.PASSED_RE.match(os.read(fd, 64).decode("ascii", "replace").strip())
+	finally:
+		os.close(fd)
+	return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def hold_queue():
-	# The queue ids in Postfix's hold queue, or None when postqueue failed.
+	# {queue id: arrival time} of Postfix's hold queue, or None when
+	# postqueue failed.
 	try:
 		p = subprocess.run(["postqueue", "-j"], capture_output=True, text=True, timeout=120)
 	except (OSError, subprocess.SubprocessError) as e:
@@ -83,27 +99,40 @@ def hold_queue():
 	if p.returncode != 0:
 		log(f"postqueue -j failed: {p.stderr.strip()[:200]}", 4)
 		return None
-	ids = set()
+	ids = {}
 	for line in p.stdout.splitlines():
 		try:
 			j = json.loads(line)
 		except ValueError:
 			continue
-		if j.get("queue_name") == "hold" and isinstance(j.get("queue_id"), str):
-			ids.add(j["queue_id"])
+		if j.get("queue_name") == "hold" and isinstance(j.get("queue_id"), str) and isinstance(j.get("arrival_time"), int):
+			ids[j["queue_id"]] = j["arrival_time"]
 	return ids
+
+
+ARRIVAL_SLACK = 30 # seconds between a mail's arrival and the milter's record of it
+
+
+def verified(h, ids):
+	# The milter's record names a mail that is in the hold queue and arrived
+	# when the milter held it: so a record cannot make this service release
+	# mail that was held by hand (or anything else).
+	return h["qid"] in ids and abs(ids[h["qid"]] - h["time"]) <= ARRIVAL_SLACK
 
 
 def release(qids):
 	# Into the deferred queue (postsuper -H), then into the active queue at
-	# once (postqueue -i, one id per call).
+	# once (postqueue -i, one id per call). Returns how many were released
+	# (a mail deleted meanwhile is not).
 	if not qids:
-		return
-	p = subprocess.run(["postsuper", "-H", "-"], input="".join(q + "\n" for q in qids), capture_output=True, text=True, timeout=120)
+		return 0
+	p = subprocess.run(["postsuper", "-H", "-", "hold"], input="".join(q + "\n" for q in qids), capture_output=True, text=True, timeout=120)
 	if p.returncode != 0:
 		log(f"postsuper -H failed: {p.stderr.strip()[:300]}", 4)
-	for q in qids:
+	done = [q for q in qids if f"{q}: released from hold" in p.stderr]
+	for q in done:
 		subprocess.run(["postqueue", "-i", q], capture_output=True, timeout=60)
+	return len(done)
 
 
 def load_state(path=STATE):
@@ -111,9 +140,12 @@ def load_state(path=STATE):
 		with open(path, encoding="utf-8") as f:
 			s = json.load(f)
 		held = [h for h in s.get("held", []) if isinstance(h, dict) and common.parse_held(f"{h.get('time')} {h.get('qid')} {h.get('rcpts')} {h.get('sender')}")]
-		return { "held": held[:MAX_HELD], "released": int(s.get("released", 0)), "turn": str(s.get("turn", "")) }
+		since = s.get("brake_since")
+		return { "held": held, "released": int(s.get("released", 0)), "turn": str(s.get("turn", "")),
+			"brake": bool(s.get("brake")) and isinstance(since, int), "brake_since": since if isinstance(since, int) else None,
+			"last_held": int(s.get("last_held", 0)), "last_over": int(s.get("last_over", 0)) }
 	except (OSError, ValueError, TypeError, AttributeError):
-		return { "held": [], "released": 0, "turn": "" }
+		return { "held": [], "released": 0, "turn": "", "brake": False, "brake_since": None, "last_held": 0, "last_over": 0 }
 
 
 def save_state(state, path=STATE):
@@ -163,7 +195,16 @@ def pick(held, limiter, rate, per, turn, now=None):
 	return out, turn
 
 
-def summary(held, now):
+def notify_now():
+	# The administrator's mail about a new brake, at once (setup/management.sh
+	# writes this unit: management/send_limit.py --notify).
+	try:
+		subprocess.run(["systemctl", "start", "--no-block", "miab-sendlimit-notify.service"], capture_output=True, timeout=30)
+	except (OSError, subprocess.SubprocessError) as e:
+		log(f"the mail to the administrator could not be started: {e}", 4)
+
+
+def summary(held, now, state=None, v=None):
 	senders = {}
 	for h in held:
 		s = senders.setdefault(h["sender"], { "sender": h["sender"], "mails": 0, "recipients": 0, "oldest": h["time"], "qids": [] })
@@ -172,59 +213,140 @@ def summary(held, now):
 		s["oldest"] = min(s["oldest"], h["time"])
 		if len(s["qids"]) < 100000:
 			s["qids"].append(h["qid"])
-	return { "time": int(now), "held": len(held), "recipients": sum(h["rcpts"] for h in held),
+	out = { "time": int(now), "held": len(held), "recipients": sum(h["rcpts"] for h in held),
 		"senders": sorted(senders.values(), key=lambda s: (-s["recipients"], s["sender"])) }
+	if state is not None and v is not None:
+		out.update({ "brake": state["brake"], "brake_since": state["brake_since"], "stop": bool(v["stop"]),
+			"brake_rate": v["brake_rate"], "brake_per": v["brake_per"], "calm": v["calm"] })
+	return out
 
 
 def main():
 	settings = common.Settings()
 	limiter = common.Limiter()
+	brake_limiter = common.Limiter()
+	# The rate at which counted mail comes in (the milter's direct passes and
+	# the held mails): the brake goes on when it is above the limit, and ends
+	# by itself only after "calm" minutes below it. A held mail that waits
+	# behind others (after the administrator ended the brake) does not set
+	# it off again on its own.
+	arrivals = common.Limiter()
 	state = load_state()
 	known = { h["qid"] for h in state["held"] }
+	checked = set() # records verified against the hold queue
 	last_check = 0.0
 	last_log = time.time()
 	released_minute = 0
+	last_passed = take_passed() # the milter's count from before is not charged
+	last_v = None
 	os.makedirs(common.RUN_DIR, mode=0o755, exist_ok=True)
 	log(f"started, {len(state['held'])} mails on hold from before")
 	while True:
 		now = time.time()
 		changed = False
+		v = settings.get()
+		# What the milter let through at once is taken from this bucket too.
+		p = take_passed()
+		if p is not None:
+			if last_passed is not None and p[0] == last_passed[0] and p[1] >= last_passed[1]:
+				delta = p[1] - last_passed[1]
+			else:
+				delta = p[1] if last_passed is not None else 0 # a new milter process
+			if delta and v["enabled"]:
+				limiter.charge(delta, v["rate"], v["per"])
+				arrivals.charge(delta, v["rate"], v["per"])
+			last_passed = p
 		new = [h for h in take_held() if h["qid"] not in known]
 		if new:
-			state["held"].extend(new[:max(0, MAX_HELD - len(state["held"]))])
+			state["held"].extend(new)
 			known.update(h["qid"] for h in new)
+			state["last_held"] = int(now)
 			changed = True
-		if state["held"] and now - last_check >= CHECK_QUEUE:
+			over = []
+			for h in new:
+				if arrivals.reserve(h["rcpts"], v["rate"], v["per"], 0) is None:
+					arrivals.charge(h["rcpts"], v["rate"], v["per"])
+					over.append(h)
+			if over:
+				state["last_over"] = int(now)
+			if over and not state["brake"] and v["enabled"]:
+				# More mail than the limit: the brake is on, all mail is held.
+				state["brake"], state["brake_since"] = True, int(now)
+				brake_limiter = common.Limiter()
+				brake_limiter.charge(v["brake_rate"], v["brake_rate"], v["brake_per"]) # the first slow release after brake_per
+				log(f"THE BRAKE IS ON: more than {v['rate']} mails in {v['per']} s; all outgoing mail is held"
+					+ (" until the administrator ends the brake" if v["stop"] else f" and goes out at {v['brake_rate']} mails in {v['brake_per']} s")
+					+ "; senders: " + ", ".join(sorted({ h["sender"] for h in over }))[:500], 4)
+				notify_now()
+		if os.path.lexists(common.END):
+			try:
+				os.unlink(common.END)
+			except OSError:
+				pass
+			if state["brake"]:
+				state["brake"], state["brake_since"] = False, None
+				changed = True
+				log(f"the administrator ended the brake; {len(state['held'])} held mails go out at the limit", 4)
+		if state["brake"] and not v["stop"] and not state["held"] and now - state.get("last_over", 0) >= v["calm"] * 60:
+			state["brake"], state["brake_since"] = False, None
+			changed = True
+			log(f"the brake ended by itself: no held mail left, and no more mail than the limit for {v['calm']} minutes")
+		if not v["enabled"] and state["brake"]:
+			state["brake"], state["brake_since"] = False, None
+			changed = True
+		recheck = os.path.lexists(common.RECHECK)
+		if recheck:
+			try:
+				os.unlink(common.RECHECK)
+			except OSError:
+				pass
+		unchecked = [h for h in state["held"] if h["qid"] not in checked]
+		if state["held"] and (recheck or ((unchecked or now - last_check >= CHECK_QUEUE) and now - last_check >= 1)):
 			last_check = now
 			ids = hold_queue()
 			if ids is not None:
-				# A line the milter wrote just before Postfix moved its mail to
-				# the hold queue waits one more look.
-				keep = [h for h in state["held"] if h["qid"] in ids or now - h["time"] < 2 * CHECK_QUEUE]
+				# A record whose mail is not (yet) in the hold queue waits a
+				# little: the milter writes it just before Postfix holds the mail.
+				keep = []
+				for h in state["held"]:
+					if verified(h, ids):
+						checked.add(h["qid"])
+						keep.append(h)
+					elif h["qid"] not in ids and h["qid"] not in checked and now - h["time"] < ARRIVAL_SLACK:
+						keep.append(h)
+					elif h["qid"] in ids:
+						log(f"a record of the milter names {h['qid']}, which is held but did not arrive then; it is left alone", 4)
 				if len(keep) != len(state["held"]):
 					state["held"] = keep
 					known = { h["qid"] for h in keep }
+					checked &= known
 					changed = True
-		v = settings.get()
-		if state["held"]:
-			if v["enabled"]:
-				out, state["turn"] = pick(state["held"], limiter, v["rate"], v["per"], state["turn"])
+		ready = [h for h in state["held"] if h["qid"] in checked]
+		if ready:
+			if not v["enabled"]:
+				out = ready # turned off: everything goes
+			elif state["brake"] and v["stop"]:
+				out = [] # nothing until the administrator ends the brake
+			elif state["brake"]:
+				out, state["turn"] = pick(ready, brake_limiter, v["brake_rate"], v["brake_per"], state["turn"])
 			else:
-				out = list(state["held"]) # turned off: everything goes
+				out, state["turn"] = pick(ready, limiter, v["rate"], v["per"], state["turn"])
 			if out:
-				release([h["qid"] for h in out])
+				n_released = release([h["qid"] for h in out])
 				gone = { h["qid"] for h in out }
 				state["held"] = [h for h in state["held"] if h["qid"] not in gone]
 				known -= gone
-				state["released"] += len(out)
-				released_minute += len(out)
+				checked -= gone
+				state["released"] += n_released
+				released_minute += n_released
 				changed = True
 		if changed:
 			save_state(state)
 		try:
-			write_public(common.FLAG, f"{int(now)} {len(state['held'])}\n")
-			if changed or not os.path.exists(common.HELD_JSON):
-				write_public(common.HELD_JSON, json.dumps(summary(state["held"], now)), 0o600)
+			write_public(common.FLAG, f"{int(now)} {len(state['held'])} {1 if state['brake'] else 0}\n")
+			if changed or v != last_v or not os.path.exists(common.HELD_JSON):
+				write_public(common.HELD_JSON, json.dumps(summary(state["held"], now, state, v)), 0o600)
+				last_v = dict(v)
 		except OSError as e:
 			log(f"{common.RUN_DIR} could not be written: {e}", 4)
 		if now - last_log >= 60:
