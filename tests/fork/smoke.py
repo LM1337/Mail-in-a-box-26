@@ -4878,7 +4878,9 @@ def c_send_limit(ctx):
         steps.append("invalid values refused")
         r = admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1", "rate": "1", "per": "3600"})
         api_expect(r, 200, "application/json", "POST system/send-limit")
-        _need(r.json()["settings"] == {"enabled": True, "rate": 1, "per": 3600}, "setting: %s" % r.text()[:200])
+        got = r.json()["settings"]
+        _need({k: got.get(k) for k in ("enabled", "rate", "per", "stop")} == {"enabled": True, "rate": 1, "per": 3600, "stop": False},
+            "setting: %s" % r.text()[:200])
         time.sleep(2) # the milter looks at its settings file once a second
         first, second = send(1), send(2)
         _need(first == "ok", "first mail with 1 per hour: %s" % first)
