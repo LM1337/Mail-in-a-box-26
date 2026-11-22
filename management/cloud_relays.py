@@ -130,17 +130,18 @@ def dns_lookups():
 		return [r.to_text() for r in resolver.resolve(name + ".", rtype)]
 	return ptr_lookup, addr_lookup
 
-def relay_hints(ips, path=DATA_FILE, lookups=None):
+def relay_hints(ips, path=DATA_FILE, lookups=None, names=True):
 	# {ip: hint} for the addresses that are in the networks of the data file:
 	# the provider, the service, the network (for the allowlist button) and
-	# the forward-confirmed PTR name or None. Also the source of the list.
+	# the forward-confirmed PTR name or None (always None with names=False:
+	# no DNS lookups). Also the source of the list.
 	header, networks = load(path)
 	found = {}
 	for ip in sorted(set(ips)):
 		net = match(ip, networks)
 		if net is not None:
 			found[ip] = { "provider": PROVIDER, "service": SERVICE, "network": str(net), "name": None }
-	todo = sorted(found)[:MAX_LOOKUPS]
+	todo = sorted(found)[:MAX_LOOKUPS] if names else []
 	if todo:
 		if lookups is None:
 			try:

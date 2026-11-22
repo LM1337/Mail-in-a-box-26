@@ -1,15 +1,33 @@
 <style>
-#f2b-bans td, #f2b-jails td, #f2b-report-accounts td, #f2b-report-persistent td { vertical-align: top; }
-#f2b-bans .f2b-ip, #f2b-report-persistent .f2b-ip { font-family: monospace; white-space: nowrap; }
-#f2b-bans .f2b-ban { margin-bottom: 3px; }
+#f2b-jails td, #f2b-report-accounts td, #f2b-report-persistent td { vertical-align: top; }
+#f2b-report-persistent .f2b-ip { font-family: monospace; white-space: nowrap; }
+/* The banned addresses (B220): a fixed layout of the page's width, in which
+   long addresses, hints and log lines wrap instead of widening the page. */
+#f2b-bans { table-layout: fixed; width: 100%; margin-bottom: 6px; }
+#f2b-bans td, #f2b-bans th { vertical-align: top; white-space: normal; overflow-wrap: break-word; word-wrap: break-word; }
+#f2b-bans .f2b-col-ip { width: 30%; }
+#f2b-bans .f2b-col-jails { width: 24%; }
+#f2b-bans .f2b-col-since { width: 18%; }
+#f2b-bans .f2b-col-ends { width: 13%; }
+#f2b-bans .f2b-col-actions { width: 15%; }
+#f2b-bans .f2b-addr { font-family: monospace; word-break: break-all; }
+#f2b-bans .f2b-actions .btn { margin: 0 2px 2px 0; }
+#f2b-bans tr.f2b-detail > td { border-top: none; padding-top: 0; padding-left: 1.5em; }
+#f2b-bans .f2b-ban { margin-top: 4px; }
 #f2b-bans .f2b-ban a { font-size: 85%; margin-left: .5em; }
+#f2b-bans-tools { margin-bottom: 6px; }
+#f2b-bans-pager { margin-bottom: 1em; }
+#f2b-bans-pager .btn { margin: 0 .5em; }
+#f2b-networks { margin-bottom: 1em; overflow-wrap: anywhere; }
+#f2b-networks .f2b-net { display: inline-block; margin-right: 1em; }
+#f2b-networks .f2b-net a { font-family: monospace; }
 #f2b-jails td.num, #f2b-jails th.num, #f2b-report-accounts td.num, #f2b-report-persistent td.num { text-align: right; }
 #f2b-bans-filter { width: 16em; display: inline-block; }
 #fail2ban-settings .help-block { margin-bottom: 0; }
 #fail2ban-settings .f2b-section { font-weight: bold; }
 #f2b-allowlist { font-family: monospace; }
 #f2b-bans .f2b-reason { margin: 1px 0 4px 1em; }
-#f2b-bans .f2b-reason pre { font-size: 85%; white-space: pre-wrap; word-break: break-all; margin: 3px 0; max-width: 60em; }
+#f2b-bans .f2b-reason pre { font-size: 85%; white-space: pre-wrap; word-break: break-all; margin: 3px 0; max-height: 24em; overflow-y: auto; }
 #f2b-nc td { vertical-align: top; }
 #f2b-nc td.num, #f2b-nc th.num { text-align: right; }
 #f2b-nc .f2b-ip { font-family: monospace; white-space: nowrap; }
@@ -26,6 +44,7 @@
 <h3>Banned addresses</h3>
 
 <p id="f2b-summary" class="text-muted">Loading...</p>
+<div id="f2b-networks" class="small" style="display: none"></div>
 
 <form class="form-inline" role="form" onsubmit="f2b_unban_form(); return false;" style="margin-bottom: 1em">
   <div class="form-group">
@@ -41,27 +60,40 @@
   <button type="submit" class="btn btn-default">Unban</button>
 </form>
 
-<div class="form-group">
-  <label for="f2b-bans-filter" class="sr-only">Filter</label>
-  <input type="text" class="form-control input-sm" id="f2b-bans-filter" placeholder="Filter by address or jail" oninput="f2b_render_bans()">
+<div id="f2b-bans-tools" class="form-inline">
+  <div class="form-group">
+    <label for="f2b-bans-filter" class="sr-only">Filter</label>
+    <input type="text" class="form-control input-sm" id="f2b-bans-filter" maxlength="64" placeholder="Filter: address, jail or network" title="Part of an address or of a jail's name, or a network in CIDR notation (e.g. 192.0.2.0/24)" oninput="f2b_filter_changed()">
+  </div>
 </div>
 
-<div class="table-responsive">
-<table id="f2b-bans" class="table" style="width: auto; min-width: 50%">
+<table id="f2b-bans" class="table table-condensed">
+  <colgroup>
+    <col class="f2b-col-ip">
+    <col class="f2b-col-jails">
+    <col class="f2b-col-since">
+    <col class="f2b-col-ends">
+    <col class="f2b-col-actions">
+  </colgroup>
   <thead>
     <tr>
       <th scope="col">Address</th>
-      <th scope="col">Banned in, and why</th>
-      <th scope="col"></th>
+      <th scope="col">Jails</th>
+      <th scope="col">Banned since</th>
+      <th scope="col">Ends</th>
+      <th scope="col"><span class="sr-only">Actions</span></th>
     </tr>
   </thead>
   <tbody>
   </tbody>
 </table>
+<div id="f2b-bans-pager" class="small" style="display: none">
+  <button type="button" class="btn btn-default btn-xs" id="f2b-bans-prev" onclick="f2b_bans_page(-1)">&laquo; Previous</button>
+  <span id="f2b-bans-range"></span>
+  <button type="button" class="btn btn-default btn-xs" id="f2b-bans-next" onclick="f2b_bans_page(1)">Next &raquo;</button>
 </div>
-<p id="f2b-bans-more" class="small text-muted" style="display: none"></p>
 
-<p class="small text-muted">&ldquo;Unban&rdquo; releases the address in all jails, recidive included, and deletes its ban history, so a new ban starts again at the initial ban time. &ldquo;in this jail only&rdquo; releases only that jail&rsquo;s ban. Failures that other jails counted but did not ban yet stay counted: if a device keeps getting banned, fix its password or put its network on the allowlist below.</p>
+<p class="small text-muted">&ldquo;Unban&rdquo; releases the address in all jails, recidive included, and deletes its ban history, so a new ban starts again at the initial ban time. &ldquo;Why?&rdquo; shows the failures and log lines that fail2ban kept for each ban and the jail&rsquo;s rule; &ldquo;in this jail only&rdquo; there releases only that jail&rsquo;s ban. Failures that other jails counted but did not ban yet stay counted: if a device keeps getting banned, fix its password or put its network on the allowlist below.</p>
 
 <h3>Nextcloud throttle</h3>
 
@@ -290,7 +322,14 @@
 <script>
 var f2b_state = null;
 var f2b_settings_dirty = false; // the settings form has unsaved edits
-var F2B_MAX_ROWS = 300;
+// The banned addresses, page by page (/system/fail2ban/bans, B220).
+var F2B_PAGE = 50;
+var f2b_bans = null;         // the page shown
+var f2b_bans_offset = 0;
+var f2b_bans_seq = 0;        // the answers of older requests are dropped
+var f2b_filter_timer = null;
+var f2b_open = { };          // ip -> true: its "Why?" is open
+var f2b_reasons = { };       // ip -> answer of /system/fail2ban/ban-reason
 var F2B_INPUTS = ["bantime_max", "memory", "slow_maxretry", "slow_findtime", "slow_bantime", "spray_min_ips", "nc_max_attempts"];
 var F2B_JAIL_OPTIONS = ["maxretry", "findtime", "bantime"];
 var f2b_nc_state = null;
@@ -328,6 +367,16 @@ function f2b_time(t) {
   return new Date(t * 1000).toLocaleString();
 }
 
+function f2b_num(n) {
+  // 3214 -> "3,214"
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function f2b_short_jail(name) {
+  // "miab-slow-smtp" -> "slow-smtp"; the full names are in the title.
+  return name.replace(/^miab-/, "");
+}
+
 function f2b_api_error(title) {
   return function(text, xhr) {
     if (xhr && xhr.status == 403) return; // handled by api()
@@ -338,7 +387,13 @@ function f2b_api_error(title) {
 function show_fail2ban() {
   $('#f2b-summary').text("Loading...").addClass("text-muted");
   $('#f2b-alerts').html("");
+  $('#f2b-networks').hide().html("");
   $('#f2b-bans tbody').html("");
+  $('#f2b-bans-pager').hide();
+  f2b_bans = null;
+  f2b_bans_offset = 0;
+  f2b_open = { };
+  f2b_reasons = { };
   $('#f2b-jails tbody').html("");
   $('#f2b-report').html("<p class='text-muted'>Loading...</p>");
   $('#f2b-nc-summary').text("Loading...").addClass("text-muted");
@@ -346,6 +401,7 @@ function show_fail2ban() {
   f2b_settings_dirty = false;
   f2b_nc_state = null;
   f2b_load_status();
+  f2b_load_bans();
   f2b_load_nc();
   f2b_load_report();
   $('#ag-summary').text("Loading...").addClass("text-muted");
@@ -432,7 +488,8 @@ function f2b_load_status() {
     function(r) {
       f2b_state = r;
       f2b_render_alerts();
-      f2b_render_bans();
+      f2b_render_networks();
+      f2b_render_bans(); // your address, and the PTR names of relay hints
       f2b_render_jails();
       // Keep unsaved edits of the form (e.g. after an unban).
       if (!f2b_settings_dirty) f2b_render_settings();
@@ -441,22 +498,6 @@ function f2b_load_status() {
       if (xhr && xhr.status == 403) return;
       $('#f2b-summary').text("The status could not be loaded: " + text).removeClass("text-muted");
     });
-}
-
-// map of ip -> list of bans (with the jail name), newest first
-function f2b_bans_by_ip() {
-  var by_ip = { };
-  var latest = { };
-  f2b_state.jails.forEach(function(j) {
-    j.banned.forEach(function(b) {
-      if (!by_ip[b.ip]) { by_ip[b.ip] = []; latest[b.ip] = 0; }
-      by_ip[b.ip].push($.extend({ jail: j.name }, b));
-      latest[b.ip] = Math.max(latest[b.ip], b.start);
-    });
-  });
-  var ips = Object.keys(by_ip);
-  ips.sort(function(a, b) { return latest[b] - latest[a] || (a < b ? -1 : 1); });
-  return { ips: ips, by_ip: by_ip };
 }
 
 function f2b_render_alerts() {
@@ -484,10 +525,7 @@ function f2b_render_alerts() {
   // The address this page is used from.
   var c = r.client;
   if (c && !c.own) {
-    var jails = [];
-    r.jails.forEach(function(j) {
-      j.banned.forEach(function(b) { if (b.ip == c.ip) jails.push(j.name); });
-    });
+    var jails = c.banned_in || [];
     if (jails.length > 0) {
       var div = alert("alert-warning", $("<p/>").text("Your address " + c.ip + " is banned in " + jails.join(", ") + "."));
       div.append($('<button type="button" class="btn btn-default btn-sm">Unban it</button>').click(function() { f2b_unban(c.ip, null); }));
@@ -521,8 +559,8 @@ function f2b_render_alerts() {
   if (!r.running) {
     $('#f2b-summary').text("fail2ban is not running.").removeClass("text-muted");
   } else {
-    $('#f2b-summary').text(r.banned_ips + " address" + (r.banned_ips == 1 ? " is" : "es are") + " banned at the moment"
-      + (r.banned_entries != r.banned_ips ? " (" + r.banned_entries + " bans in " + r.jails.length + " jails)" : "") + ".").removeClass("text-muted");
+    $('#f2b-summary').text(f2b_num(r.banned_ips) + " address" + (r.banned_ips == 1 ? " is" : "es are") + " banned at the moment"
+      + (r.banned_entries != r.banned_ips ? " (" + f2b_num(r.banned_entries) + " bans in " + r.jails.length + " jails)" : "") + ".").removeClass("text-muted");
   }
 
   // jail selection of the unban form
@@ -535,63 +573,203 @@ function f2b_render_alerts() {
   sel.val(cur && sel.find('option').filter(function() { return this.value == cur; }).length ? cur : "");
 }
 
-function f2b_render_bans() {
-  if (!f2b_state) return;
-  var tbody = $('#f2b-bans tbody');
-  tbody.html("");
-  $('#f2b-bans-more').hide();
-  var data = f2b_bans_by_ip();
-  var filter = $('#f2b-bans-filter').val().trim().toLowerCase();
-  var ips = data.ips.filter(function(ip) {
-    if (!filter) return true;
-    if (ip.toLowerCase().indexOf(filter) >= 0) return true;
-    return data.by_ip[ip].some(function(b) { return b.jail.toLowerCase().indexOf(filter) >= 0; });
+function f2b_render_networks() {
+  // The networks with the most banned addresses (IPv4 /24, IPv6 /64); a
+  // click shows only the addresses of that network.
+  var div = $('#f2b-networks').html("");
+  var nets = f2b_state.top_networks || [];
+  if (!nets.length) { div.hide(); return; }
+  div.append($('<span class="text-muted"/>').text("Networks with the most banned addresses: "));
+  nets.forEach(function(n) {
+    var span = $('<span class="f2b-net"/>');
+    span.append($('<a href="#"/>').text(n.network).attr('title', "Show only the banned addresses of " + n.network)
+      .click(function() { f2b_filter_set(n.network); return false; }));
+    span.append($('<span class="text-muted"/>').text(" " + f2b_num(n.addresses) + " (" + n.jails.map(f2b_short_jail).join(", ") + ")"));
+    div.append(span);
   });
+  div.show();
+}
 
-  if (ips.length == 0) {
-    tbody.append($('<tr/>').append($('<td colspan="3" class="text-muted"/>').text(
-      data.ips.length == 0 ? "No address is banned." : "No banned address matches the filter.")));
+function f2b_load_bans(quiet) {
+  var seq = ++f2b_bans_seq;
+  var filter = $('#f2b-bans-filter').val().trim();
+  api(
+    "/system/fail2ban/bans",
+    "GET",
+    { filter: filter, offset: f2b_bans_offset, limit: F2B_PAGE },
+    function(r) {
+      if (seq != f2b_bans_seq) return;
+      // After an unban the page can be past the end: show the last one.
+      if (r.addresses.length == 0 && r.offset > 0 && r.matched > 0) {
+        f2b_bans_offset = Math.floor((r.matched - 1) / F2B_PAGE) * F2B_PAGE;
+        f2b_load_bans(quiet);
+        return;
+      }
+      f2b_bans = r;
+      f2b_reasons = { };
+      f2b_render_bans();
+    },
+    function(text, xhr) {
+      if (seq != f2b_bans_seq) return;
+      if (xhr && xhr.status == 403) return;
+      f2b_bans = null;
+      $('#f2b-bans-pager').hide();
+      $('#f2b-bans tbody').html("").append($('<tr/>').append($('<td colspan="5" class="text-danger"/>').text(
+        (xhr && xhr.status == 400 ? "" : "The banned addresses could not be loaded: ") + text)));
+    },
+    null,
+    { quiet: !!quiet });
+}
+
+function f2b_filter_changed() {
+  // The server filters: wait until the typing pauses.
+  clearTimeout(f2b_filter_timer);
+  f2b_filter_timer = setTimeout(function() { f2b_bans_offset = 0; f2b_load_bans(true); }, 300);
+}
+
+function f2b_filter_set(value) {
+  clearTimeout(f2b_filter_timer);
+  $('#f2b-bans-filter').val(value);
+  f2b_bans_offset = 0;
+  f2b_load_bans();
+}
+
+function f2b_bans_page(step) {
+  if (!f2b_bans) return;
+  f2b_bans_offset = Math.max(0, f2b_bans.offset + step * F2B_PAGE);
+  f2b_load_bans();
+}
+
+function f2b_ends(a) {
+  // When the address's last ban ends.
+  if (a.end == null) return $('<span/>').text("permanent");
+  return $('<span/>').text(a.remaining > 0 ? "in " + f2b_nice_duration(a.remaining) : "now").attr('title', f2b_time(a.end));
+}
+
+function f2b_render_bans() {
+  var tbody = $('#f2b-bans tbody');
+  var pager = $('#f2b-bans-pager');
+  var r = f2b_bans;
+  if (!r) return;
+  tbody.html("");
+  function message(text) {
+    tbody.append($('<tr/>').append($('<td colspan="5" class="text-muted"/>').text(text)));
+  }
+  if (!r.running) {
+    message("fail2ban is not running.");
+    pager.hide();
     return;
   }
+  if (r.addresses.length == 0)
+    message(r.total == 0 ? "No address is banned." : "No banned address matches the filter.");
+  if (r.jail_errors)
+    Object.keys(r.jail_errors).forEach(function(j) { tbody.append($('<tr/>').append($('<td colspan="5" class="small text-danger"/>').text(j + ": " + r.jail_errors[j]))); });
 
-  var client_ip = f2b_state.client ? f2b_state.client.ip : null;
-  ips.slice(0, F2B_MAX_ROWS).forEach(function(ip) {
+  var client_ip = f2b_state && f2b_state.client ? f2b_state.client.ip : null;
+  r.addresses.forEach(function(a) {
     var tr = $('<tr/>');
-    var td_ip = $('<td class="f2b-ip"/>').text(ip);
-    if (ip == client_ip) td_ip.append($('<div class="small text-danger"/>').text("your address"));
-    var nc = f2b_nc_entry(ip);
+    var td_ip = $('<td/>').append($('<span class="f2b-addr"/>').text(a.ip));
+    if (a.ip == client_ip) td_ip.append($('<div class="small text-danger"/>').text("your address"));
+    var nc = f2b_nc_entry(a.ip);
     if (nc && (nc.blocked || nc.delay_ms > 0)) {
       td_ip.append($('<div class="small text-warning"/>').text(nc.blocked ? "also blocked by Nextcloud (HTTP 429)" : "also delayed by Nextcloud"));
-      td_ip.append($('<button type="button" class="btn btn-default btn-xs">Reset Nextcloud</button>').click(function() { f2b_nc_reset(ip); }));
+      td_ip.append($('<button type="button" class="btn btn-default btn-xs">Reset Nextcloud</button>').click(function() { f2b_nc_reset(a.ip); }));
     }
-    var relay = f2b_state.relays ? f2b_state.relays[ip] : null;
+    // The status has the PTR name of a relay; the page has the hint only.
+    var relay = (f2b_state && f2b_state.relays && f2b_state.relays[a.ip]) || a.relay;
     if (relay) td_ip.append(f2b_relay_hint(relay));
     tr.append(td_ip);
+    var jails = a.bans.map(function(b) { return b.jail; });
+    tr.append($('<td/>').attr('title', jails.join(", ")).text(jails.map(f2b_short_jail).join(", ")));
+    tr.append($('<td class="small"/>').text(f2b_time(a.start)));
+    tr.append($('<td class="small"/>').append(f2b_ends(a)));
 
-    var td_bans = $('<td/>');
-    data.by_ip[ip].forEach(function(b) {
-      var div = $('<div class="f2b-ban"/>');
-      div.append($('<strong/>').text(b.jail));
-      var info;
-      if (b.end == null)
-        info = "permanent, since " + f2b_time(b.start);
-      else
-        info = f2b_nice_duration(b.remaining) + " left of " + f2b_nice_duration(b.bantime) + ", since " + f2b_time(b.start);
-      div.append($('<span class="text-muted"/>').text(" – " + info));
-      if (data.by_ip[ip].length > 1)
-        div.append($('<a href="#">in this jail only</a>').click(function() { f2b_unban(ip, b.jail); return false; }));
-      td_bans.append(div);
-      td_bans.append(f2b_reason(b));
+    var detail = $('<tr class="f2b-detail"/>').append($('<td colspan="5"/>'));
+    var why = $('<button type="button" class="btn btn-default btn-xs"/>').text("Why?").attr('aria-expanded', f2b_open[a.ip] ? "true" : "false");
+    why.click(function() {
+      if (f2b_open[a.ip]) {
+        delete f2b_open[a.ip];
+        detail.hide();
+      } else {
+        f2b_open[a.ip] = true;
+        detail.show();
+        f2b_show_reason(a, detail);
+      }
+      why.attr('aria-expanded', f2b_open[a.ip] ? "true" : "false");
     });
-    tr.append(td_bans);
-
-    tr.append($('<td/>').append(
-      $('<button type="button" class="btn btn-default btn-xs">Unban</button>').click(function() { f2b_unban(ip, null); })));
+    var unban = $('<button type="button" class="btn btn-default btn-xs">Unban</button>').click(function() { f2b_unban(a.ip, null); });
+    tr.append($('<td class="f2b-actions"/>').append(why).append(unban));
     tbody.append(tr);
+    tbody.append(detail);
+    if (f2b_open[a.ip]) f2b_show_reason(a, detail);
+    else detail.hide();
   });
 
-  if (ips.length > F2B_MAX_ROWS)
-    $('#f2b-bans-more').text("Showing " + F2B_MAX_ROWS + " of " + ips.length + " addresses (the most recently banned). Use the filter to find others.").show();
+  if (r.matched == 0) {
+    pager.hide();
+    return;
+  }
+  var to = r.offset + r.addresses.length;
+  $('#f2b-bans-range').text(f2b_num(r.offset + 1) + "–" + f2b_num(to) + " of " + f2b_num(r.matched)
+    + (r.filter ? " matching (" + f2b_num(r.total) + " banned)" : ""));
+  $('#f2b-bans-prev').prop('disabled', r.offset == 0).toggle(r.matched > F2B_PAGE || r.offset > 0);
+  $('#f2b-bans-next').prop('disabled', to >= r.matched).toggle(r.matched > F2B_PAGE || r.offset > 0);
+  pager.show();
+}
+
+function f2b_show_reason(a, detail) {
+  // The reasons of the address's bans, read when "Why?" is opened.
+  var td = detail.find('td').first().html("");
+  if (f2b_reasons[a.ip]) {
+    td.append(f2b_render_reason(a, f2b_reasons[a.ip]));
+    return;
+  }
+  td.append($('<span class="small text-muted"/>').text("Loading..."));
+  api(
+    "/system/fail2ban/ban-reason",
+    "GET",
+    { ip: a.ip },
+    function(r) {
+      f2b_reasons[a.ip] = r;
+      td.html("").append(f2b_render_reason(a, r));
+    },
+    function(text, xhr) {
+      if (xhr && xhr.status == 403) return;
+      td.html("").append($('<span class="small text-danger"/>').text("The reasons could not be read: " + text));
+    },
+    null,
+    { quiet: true });
+}
+
+function f2b_render_reason(a, r) {
+  // Per jail: the ban (from the page), "in this jail only", and why.
+  var div = $('<div class="small"/>');
+  if (r.error) div.append($('<div class="text-warning"/>').text(r.error));
+  var by_jail = { };
+  r.jails.forEach(function(j) { by_jail[j.jail] = j; });
+  var bans = a.bans.slice();
+  r.jails.forEach(function(j) {
+    // banned there since the page was loaded
+    if (!bans.some(function(b) { return b.jail == j.jail; })) bans.push({ jail: j.jail });
+  });
+  bans.forEach(function(b) {
+    var head = $('<div class="f2b-ban"/>');
+    head.append($('<strong/>').text(b.jail));
+    var info = null;
+    if (b.start == null) info = "banned since the list was loaded";
+    else if (b.end == null) info = "permanent, since " + f2b_time(b.start);
+    else info = f2b_nice_duration(b.remaining) + " left of " + f2b_nice_duration(b.bantime) + ", since " + f2b_time(b.start);
+    head.append($('<span class="text-muted"/>').text(" – " + info));
+    if (bans.length > 1 && by_jail[b.jail])
+      head.append($('<a href="#">in this jail only</a>').click(function() { f2b_unban(a.ip, b.jail); return false; }));
+    div.append(head);
+    if (by_jail[b.jail])
+      div.append(f2b_reason(by_jail[b.jail]));
+    else
+      div.append($('<div class="f2b-reason text-muted"/>').text("not banned in this jail any more"));
+  });
+  if (!bans.length) div.append($('<div class="text-muted"/>').text("Not banned any more."));
+  return div;
 }
 
 function f2b_relay_hint(relay) {
@@ -616,9 +794,8 @@ function f2b_relay_allow(relay) {
   show_modal_confirm("Intrusion Protection", q, "Put it on the allowlist", function() { f2b_allowlist_add(relay.network); });
 }
 
-function f2b_rule_text(name) {
+function f2b_rule_text(info) {
   // "failed ... logins: 20 failures within 30 s, banned for 10 min from the mail ports"
-  var info = (f2b_state.jail_info || {})[name];
   if (!info || !info.watches) return null;
   var t = info.watches;
   if (info.maxretry) t += ": " + info.maxretry + " failures within " + f2b_nice_duration(info.findtime) + ", banned for " + f2b_nice_duration(info.bantime);
@@ -626,12 +803,13 @@ function f2b_rule_text(name) {
   return t + ".";
 }
 
-function f2b_reason(b) {
-  // Why the address is banned in this jail: the failures and accounts of the
-  // log lines fail2ban kept (names that are no account here are replaced on
-  // the server), and the jail's rule.
-  var div = $('<div class="small f2b-reason"/>');
-  var r = b.reason;
+function f2b_reason(j) {
+  // Why the address is banned in this jail (an entry of
+  // /system/fail2ban/ban-reason): the failures and accounts of the log lines
+  // fail2ban kept (names that are no account here are replaced on the
+  // server), and the jail's rule.
+  var div = $('<div class="f2b-reason"/>');
+  var r = j.reason;
   var parts = [];
   if (r && r.manual) {
     parts.push("banned by hand (no log lines)");
@@ -648,7 +826,7 @@ function f2b_reason(b) {
     div.append(" ").append($('<a href="#"/>').text("log lines (" + r.lines.length + ")").click(function() { pre.toggle(); return false; }));
     div.append(pre);
   }
-  var rule = f2b_rule_text(b.jail);
+  var rule = f2b_rule_text(j.rule || (f2b_state && f2b_state.jail_info || {})[j.jail]);
   if (rule) div.append($('<div class="text-muted"/>').text("Rule: " + rule));
   return div;
 }
@@ -838,8 +1016,8 @@ function f2b_render_jails() {
     tr.append(num(j.currently_banned));
     tr.append(num(j.total_banned));
     var td_btn = $('<td/>');
-    if (j.banned.length > 0)
-      td_btn.append($('<button type="button" class="btn btn-default btn-xs"/>').text("Unban all (" + j.banned.length + ")").click(function() { f2b_unban_all(j.name, j.banned.length); }));
+    if (j.banned_count > 0)
+      td_btn.append($('<button type="button" class="btn btn-default btn-xs"/>').text("Unban all (" + f2b_num(j.banned_count) + ")").click(function() { f2b_unban_all(j.name, j.banned_count); }));
     tr.append(td_btn);
     tbody.append(tr);
   });
@@ -998,7 +1176,7 @@ function f2b_unban_result(r) {
     msg.append($("<p/>").text("Its ban history was deleted for the running jails; the history of jails that no longer run could not be deleted."));
   if (r.still_banned_in.length)
     msg.append($("<p/>").text("It is still banned in " + r.still_banned_in.join(", ") + "."));
-  show_modal_error("Unban " + r.ip, msg, function() { f2b_load_status(); f2b_load_nc(); f2b_load_report(); });
+  show_modal_error("Unban " + r.ip, msg, function() { f2b_load_status(); f2b_load_bans(); f2b_load_nc(); f2b_load_report(); });
 }
 
 function f2b_unban(ip, jail) {
@@ -1018,7 +1196,7 @@ function f2b_unban_form() {
 
 function f2b_unban_all(jail, count) {
   show_modal_confirm("Unban all",
-    "Unban all " + count + " address" + (count == 1 ? "" : "es") + " banned in " + jail + "? They stay banned in other jails, and their ban history in other jails is kept.",
+    "Unban all " + f2b_num(count) + " address" + (count == 1 ? "" : "es") + " banned in " + jail + "? They stay banned in other jails, and their ban history in other jails is kept.",
     "Unban all",
     function() {
       api(
@@ -1027,7 +1205,7 @@ function f2b_unban_all(jail, count) {
         { jail: jail },
         function(r) {
           show_modal_error("Unban all", $("<p/>").text(r.unbanned + " address" + (r.unbanned == 1 ? " was" : "es were") + " unbanned in " + r.jail + "."),
-            function() { f2b_load_status(); });
+            function() { f2b_load_status(); f2b_load_bans(); });
         },
         f2b_api_error("Unban all"));
     });

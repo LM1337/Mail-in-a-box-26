@@ -68,6 +68,23 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
+* **Intrusion Protection lists the banned addresses page by page (B220)**\
+  Under a larger attack System > Intrusion Protection loaded for a long
+  time or not at all, and its table "Banned in, and why" was wider than
+  the page (B220). The page now shows the networks with the most banned
+  addresses (a click filters by one) and a compact table, one row per
+  address: address, jails, since, end, "Why?" and "Unban". "Why?" loads
+  the failures, log lines and rule of each ban into a row below, with
+  "in this jail only"; long text wraps. The filter (part of an address or
+  jail, or a network such as `192.0.2.0/24`) is applied on the server, in
+  pages of 50 with previous and next. API: `GET /system/fail2ban` is an
+  overview without the bans (counters, `banned_count` per jail,
+  `top_networks`, `client.banned_in`, relay hints); new
+  `GET /system/fail2ban/bans` (`filter`, `offset`, `limit` up to 200) and
+  `GET /system/fail2ban/ban-reason?ip=`. A script that read `jails[].banned`
+  or `reason` from the status uses these now. New offline test
+  `tests/fork/ban-list.py` (10,000 synthetic bans), smoke checks
+  `admin-fail2ban-bans` and `admin-ban-list-unit`.
 * **Tests: the lab preparation leaves the seeded mails alone**\
   New `tests/fork/spam-move.py` for test boxes: it moves a marked test mail
   of its own into Spam and back, so that IMAPSieve runs sa-learn as for a
