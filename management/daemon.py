@@ -895,10 +895,11 @@ def auth_guard_get():
 @app.route('/system/auth-guard', methods=["POST"])
 @authorized_personnel_only
 def auth_guard_set():
-	# limit (different wrong passwords) and window (minutes); fields that are
+	# limit (different wrong passwords), window (minutes) and span (windows a
+	# burst counts against, 1 to 4); fields that are
 	# not sent keep their value. reset=1 restores the defaults.
 	import auth_guard
-	values = { k: request.form[k] for k in ("limit", "window") if k in request.form }
+	values = { k: request.form[k] for k in ("limit", "window", "span") if k in request.form }
 	reset = request.form.get('reset') == '1'
 	try:
 		result = auth_guard.update_settings(env, values, reset=reset)
@@ -906,8 +907,8 @@ def auth_guard_set():
 		return (str(e), 400)
 	except Exception as e:
 		return (str(e), 500)
-	app.logger.warning("auth-guard: %s set the limit of failed logins from the box itself to %d in %d minutes",
-		request.user_email, result["settings"]["limit"], result["settings"]["window"])
+	app.logger.warning("auth-guard: %s set the limit of failed logins from the box itself to %d in %d minutes, %d windows",
+		request.user_email, result["settings"]["limit"], result["settings"]["window"], result["settings"]["span"])
 	result["status"] = "ok"
 	return json_response(result)
 

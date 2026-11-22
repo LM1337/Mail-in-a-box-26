@@ -57,7 +57,7 @@ SUBJECT = "Logins refused after failed logins from the box itself"
 KEY_RE = re.compile(r"^(a-[a-z0-9@._+%-]{1,200}|h-[0-9a-f]{16}-[0-9]{1,4})$")
 EVENT_RE = re.compile(r"^([0-9]{1,12}) (locked|names|pool|list|addresses) ([0-9]{1,9}) (\S{1,210})$")
 LIST_PATH_HINT = "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts"
-SPAN = 4 # windows that a name's failures are kept for (guard.lua's M.SPAN)
+SPAN_KEEP = 4 # the most windows a name's file is kept for (guard.lua's M.SPAN_MAX)
 
 
 def lua_values(path=GUARD_LUA):
@@ -66,7 +66,8 @@ def lua_values(path=GUARD_LUA):
 	values = { "DIR": "/run/miab-auth-guard", "DEFAULT_LIMIT": 30, "DEFAULT_WINDOW": 1800, "MAX_NAMES": 10000,
 		"SETTINGS": "/usr/local/lib/mailinabox/dovecot-auth-guard/settings",
 		"ACCOUNTS": "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts",
-		"LIMIT_MIN": 3, "LIMIT_MAX": 1000, "WINDOW_MIN": 60, "WINDOW_MAX": 86400 }
+		"LIMIT_MIN": 3, "LIMIT_MAX": 1000, "WINDOW_MIN": 60, "WINDOW_MAX": 86400,
+		"DEFAULT_SPAN": 4, "SPAN_MIN": 1, "SPAN_MAX": 4 }
 	with open(path, encoding="utf-8") as f:
 		for line in f:
 			m = re.match(r'^M\.([A-Z_]+)(?:, M\.([A-Z_]+))? = (?:"([^"]*)"|([0-9]+)(?:, ([0-9]+))?)', line)
@@ -86,7 +87,7 @@ def settings(path=GUARD_LUA, settings_file=None):
 	# guard.lua's values plus the limit and the window that apply (LIMIT,
 	# WINDOW in seconds): read from the settings file as M.load() reads it.
 	cfg = lua_values(path)
-	cfg["LIMIT"], cfg["WINDOW"] = cfg["DEFAULT_LIMIT"], cfg["DEFAULT_WINDOW"]
+	cfg["LIMIT"], cfg["WINDOW"], cfg["SPAN"] = cfg["DEFAULT_LIMIT"], cfg["DEFAULT_WINDOW"], cfg["DEFAULT_SPAN"]
 	try:
 		with open(settings_file or cfg["SETTINGS"], encoding="ascii", errors="replace") as f:
 			text = f.read(4096)
@@ -101,12 +102,15 @@ def settings(path=GUARD_LUA, settings_file=None):
 			cfg["LIMIT"] = v
 		elif m.group(1) == "window" and cfg["WINDOW_MIN"] <= v <= cfg["WINDOW_MAX"]:
 			cfg["WINDOW"] = v
+		elif m.group(1) == "span" and cfg["SPAN_MIN"] <= v <= cfg["SPAN_MAX"]:
+			cfg["SPAN"] = v
 	return cfg
 
 
 # The setting of the control panel (System > Intrusion Protection), in
 # $STORAGE_ROOT/settings.yaml as "auth_guard" (only values that differ from
-# the defaults): "limit" (different wrong passwords) and "window" (minutes).
+# the defaults): "limit" (different wrong passwords), "window" (minutes) and
+# "span" (windows that a burst counts against, 1 to 4).
 
 class AuthGuardError(ValueError):
 	pass
@@ -114,12 +118,13 @@ class AuthGuardError(ValueError):
 
 def defaults(cfg=None):
 	cfg = cfg or lua_values()
-	return { "limit": cfg["DEFAULT_LIMIT"], "window": cfg["DEFAULT_WINDOW"] // 60 }
+	return { "limit": cfg["DEFAULT_LIMIT"], "window": cfg["DEFAULT_WINDOW"] // 60, "span": cfg["DEFAULT_SPAN"] }
 
 
 def ranges(cfg=None):
 	cfg = cfg or lua_values()
-	return { "limit": [cfg["LIMIT_MIN"], cfg["LIMIT_MAX"]], "window": [cfg["WINDOW_MIN"] // 60, cfg["WINDOW_MAX"] // 60] }
+	return { "limit": [cfg["LIMIT_MIN"], cfg["LIMIT_MAX"]], "window": [cfg["WINDOW_MIN"] // 60, cfg["WINDOW_MAX"] // 60],
+		"span": [cfg["SPAN_MIN"], cfg["SPAN_MAX"]] }
 
 
 def validate_settings(values, strict=True, cfg=None):
@@ -129,8 +134,9 @@ def validate_settings(values, strict=True, cfg=None):
 	out, warnings = dict(d), []
 	if not isinstance(values, dict):
 		values = {}
-	names = { "limit": "The number of different wrong passwords", "window": "The window in minutes" }
-	for k in ("limit", "window"):
+	names = { "limit": "The number of different wrong passwords", "window": "The window in minutes",
+		"span": "The number of windows" }
+	for k in ("limit", "window", "span"):
 		if k not in values or values[k] in (None, ""):
 			continue
 		v = values[k]
@@ -201,7 +207,7 @@ def box_addresses(env, interfaces=None):
 def render_settings_file(values, addresses=()):
 	return ("# Mail-in-a-Box: Dovecot's limit of failed logins from the box itself\n"
 		"# (System > Intrusion Protection; management/auth_guard.py). Do not edit.\n"
-		f"limit {values['limit']}\nwindow {values['window'] * 60}\n"
+		f"limit {values['limit']}\nwindow {values['window'] * 60}\nspan {values.get('span', 4)}\n"
 		+ "".join(f"local {a}\n" for a in addresses if ADDRESS_RE.match(a)))
 
 
@@ -306,24 +312,24 @@ def name_of(key):
 	return "".join(c if c.isprintable() and c not in "\r\n" else "?" for c in name)[:254]
 
 
-def _recent(text, now, window, limit=None):
-	# As guard.lua's M.recent(): lines "<time> <tag>", kept for SPAN windows.
+def _recent(text, now, window, limit=None, span=4):
+	# As guard.lua's M.recent(): lines "<time> <tag>", kept for span windows.
 	# Returns the different tags (wrong passwords) within the window and,
 	# with limit, whether the name is refused: the different tags of the
-	# last k windows reach k * limit, for k = 1 to SPAN.
+	# last k windows reach k * limit, for k = 1 to span.
 	newest = {}
 	for line in text.splitlines():
 		m = re.fullmatch(r"([0-9]{1,12}) ([0-9a-fA-F]{4})", line)
 		if m:
 			t = int(m.group(1))
-			if now - t < SPAN * window and t <= now + 60:
+			if now - t < span * window and t <= now + 60:
 				newest[m.group(2)] = max(t, newest.get(m.group(2), t))
-	counts = [sum(1 for t in newest.values() if now - t < k * window) for k in range(1, SPAN + 1)]
-	refused = limit is not None and any(counts[k - 1] >= k * limit for k in range(1, SPAN + 1))
+	counts = [sum(1 for t in newest.values() if now - t < k * window) for k in range(1, span + 1)]
+	refused = limit is not None and any(counts[k - 1] >= k * limit for k in range(1, span + 1))
 	return counts[0], refused, bool(newest)
 
 
-def scan(state_dir, window, now=None, consume=True, remove=None, limit=30):
+def scan(state_dir, window, now=None, consume=True, remove=None, limit=30, span=4):
 	# Runs as the account dovecot (see as_dovecot). Returns the names with
 	# failures within the window and, with consume, the new events; removes
 	# the files of names without failures within the window, and the file of
@@ -380,8 +386,8 @@ def scan(state_dir, window, now=None, consume=True, remove=None, limit=30):
 				os.unlink(name, dir_fd=dfd)
 				continue
 			text = read(name)
-			n, refused, kept = _recent(text or "", now, window, limit)
-			if not kept and now - est.st_mtime >= SPAN * window:
+			n, refused, kept = _recent(text or "", now, window, limit, span)
+			if not kept and now - est.st_mtime >= SPAN_KEEP * window:
 				os.unlink(name, dir_fd=dfd)
 				continue
 			if n or refused:
@@ -466,7 +472,7 @@ def message(events, accounts, cfg, dropped=0):
 		f"from many, or a process on the box that tries passwords (a phone with an old password sends the same one again and counts once). While an "
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
 		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
-		f"passwords in the last {minutes} minutes (after a burst of many at once, it lasts up to {SPAN} times as long).\n\n"
+		f"passwords in the last {minutes} minutes (after a burst of many at once, it lasts up to {cfg.get('SPAN', 4)} times as long).\n\n"
 		f"The current state, the setting and a button to end a lock: the control panel, System > Intrusion Protection\n"
 		f"(or sudo management/auth_guard.py --status, and --unlock ADDRESS).\n")
 
@@ -501,7 +507,7 @@ def send_mail(text):
 
 def notify(env, cfg, now=None, scan_func=None, send=send_mail, state_path=NOTIFY_STATE, problems=()):
 	now = int(time.time()) if now is None else now
-	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], now, limit=cfg["LIMIT"])))()
+	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], now, limit=cfg["LIMIT"], span=cfg["SPAN"])))()
 	state = load_state(state_path)
 	# A problem of this run is mailed once until it is gone again.
 	known = set(state.get("problems", []))
@@ -528,9 +534,9 @@ def status(env, scan_func=None):
 	# names with different wrong passwords from the box in the window.
 	cfg = settings()
 	values, warnings = get_settings(env)
-	if (cfg["LIMIT"], cfg["WINDOW"]) != (values["limit"], values["window"] * 60):
+	if (cfg["LIMIT"], cfg["WINDOW"], cfg["SPAN"]) != (values["limit"], values["window"] * 60, values["span"]):
 		warnings.append("Dovecot does not use this setting yet (its settings file differs); save it again, or run setup.")
-	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False, limit=cfg["LIMIT"])))()
+	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False, limit=cfg["LIMIT"], span=cfg["SPAN"])))()
 	accounts = known_accounts(env)
 	names = []
 	for n in sorted(res["names"], key=lambda n: (-n["failures"], n["key"])):
@@ -540,7 +546,7 @@ def status(env, scan_func=None):
 	if res["missing"]:
 		warnings.append(f"{cfg['DIR']} does not exist: Dovecot cannot count, failed logins from the box itself get its delay (run setup).")
 	return { "settings": values, "defaults": defaults(cfg), "ranges": ranges(cfg), "warnings": warnings,
-		"applied": { "limit": cfg["LIMIT"], "window": cfg["WINDOW"] // 60 }, "names": names[:500], "more": max(0, len(names) - 500) }
+		"applied": { "limit": cfg["LIMIT"], "window": cfg["WINDOW"] // 60, "span": cfg["SPAN"] }, "names": names[:500], "more": max(0, len(names) - 500) }
 
 
 def unlock(key, scan_func=None):

@@ -50,19 +50,19 @@ check("values of guard.lua", (lv["DIR"], lv["DEFAULT_WINDOW"], lv["DEFAULT_LIMIT
 check("accounts path", lv["ACCOUNTS"], "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts")
 cfg = ag.settings(settings_file="/nonexistent")
 check("defaults apply without a settings file", (cfg["LIMIT"], cfg["WINDOW"]), (30, 1800))
-check("panel defaults and ranges", (ag.defaults(), ag.ranges()), ({"limit": 30, "window": 30}, {"limit": [3, 1000], "window": [1, 1440]}))
-good, _ = ag.validate_settings({"limit": "50", "window": 60})
-check("valid setting", good, {"limit": 50, "window": 60})
+check("panel defaults and ranges", (ag.defaults(), ag.ranges()), ({"limit": 30, "window": 30, "span": 4}, {"limit": [3, 1000], "window": [1, 1440], "span": [1, 4]}))
+good, _ = ag.validate_settings({"limit": "50", "window": 60, "span": "2"})
+check("valid setting", good, {"limit": 50, "window": 60, "span": 2})
 bad = 0
-for v in ({"limit": "2"}, {"limit": "1001"}, {"limit": "3.5"}, {"limit": "-5"}, {"limit": "30\nwindow 1"}, {"window": "0"}, {"window": "1441"}, {"limit": True}):
+for v in ({"limit": "2"}, {"limit": "1001"}, {"limit": "3.5"}, {"limit": "-5"}, {"limit": "30\nwindow 1"}, {"window": "0"}, {"window": "1441"}, {"limit": True}, {"span": "0"}, {"span": "5"}):
 	try:
 		ag.validate_settings(v)
 	except ag.AuthGuardError:
 		bad += 1
-check("invalid settings refused", bad, 8)
+check("invalid settings refused", bad, 10)
 st, warn = ag.validate_settings({"limit": "x", "window": 10}, strict=False)
-check("stored bad value: default and a warning", (st, len(warn)), ({"limit": 30, "window": 10}, 1))
-check("settings file text", ag.render_settings_file({"limit": 50, "window": 60}).splitlines()[-2:], ["limit 50", "window 3600"])
+check("stored bad value: default and a warning", (st, len(warn)), ({"limit": 30, "window": 10, "span": 4}, 1))
+check("settings file text", ag.render_settings_file({"limit": 50, "window": 60, "span": 2}).splitlines()[-3:], ["limit 50", "window 3600", "span 2"])
 env_ips = {"PUBLIC_IP": "192.0.2.10", "PUBLIC_IPV6": "2001:DB8:0:0::10", "PRIVATE_IP": "192.0.2.10", "PRIVATE_IPV6": "", "OTHER": "x"}
 check("box addresses", ag.box_addresses(env_ips, interfaces=["127.0.0.1", "fe80::B8FC:1eff:fe60:6fe3", "198.51.100.7", "192.0.2.10"]),
 	["192.0.2.10", "2001:db8::10", "127.0.0.1", "fe80::b8fc:1eff:fe60:6fe3", "198.51.100.7"])
@@ -164,6 +164,8 @@ burst = "".join(f"{NOW - 10} {i:04x}\n" for i in range(100))  # a burst of 100 a
 check("burst: refused in its window", ag._recent(burst, NOW, W, 30)[:2], (100, True))
 check("burst: still refused 2 windows later", ag._recent(burst, NOW + 2 * W, W, 30)[:2], (0, True))
 check("burst: open after 4 windows", ag._recent(burst, NOW + 3 * W + 20, W, 30)[1], False)
+check("span 1: a burst locks one window only", (ag._recent(burst, NOW, W, 30, 1)[1], ag._recent(burst, NOW + W, W, 30, 1)[1]), (True, False))
+check("span 2: still refused in the next window", ag._recent(burst, NOW + W, W, 30, 2)[1], True)
 few = "".join(f"{NOW - 10} {i:04x}\n" for i in range(29))
 check("29 in a window: not refused", ag._recent(few, NOW, W, 30)[:2], (29, False))
 check("the same tag again counts once", ag._recent(f"{NOW - 5} beef\n{NOW - 1} beef\n", NOW, W, 30)[0], 1)
@@ -180,14 +182,14 @@ with tempfile.TemporaryDirectory() as root:
 	check("accounts unchanged not rewritten", ag.write_settings_file("a-x@example.com\n", af, group=os.getgid(), mode=0o640), False)
 	os.chmod(af, 0o644)
 	check("a changed mode is put back", (ag.write_settings_file("a-x@example.com\n", af, group=os.getgid(), mode=0o640), oct(os.stat(af).st_mode & 0o777)), (True, "0o640"))
-	check("file written", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), True)
-	check("unchanged file not rewritten", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60}), sf), False)
+	check("file written", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60, "span": 2}), sf), True)
+	check("unchanged file not rewritten", ag.write_settings_file(ag.render_settings_file({"limit": 50, "window": 60, "span": 2}), sf), False)
 	c = ag.settings(settings_file=sf)
-	check("Lua-side reading of the file", (c["LIMIT"], c["WINDOW"], oct(os.stat(sf).st_mode & 0o777)), (50, 3600, "0o644"))
+	check("Lua-side reading of the file", (c["LIMIT"], c["WINDOW"], c["SPAN"], oct(os.stat(sf).st_mode & 0o777)), (50, 3600, 2, "0o644"))
 	with open(sf, "w") as f:
-		f.write("limit 2\nwindow 999999\n")
+		f.write("limit 2\nwindow 999999\nspan 9\n")
 	c = ag.settings(settings_file=sf)
-	check("out of range: defaults", (c["LIMIT"], c["WINDOW"]), (30, 1800))
+	check("out of range: defaults", (c["LIMIT"], c["WINDOW"], c["SPAN"]), (30, 1800, 4))
 	os.chmod(root, 0o777)
 	try:
 		ag.write_settings_file("x", sf)
@@ -198,11 +200,11 @@ with tempfile.TemporaryDirectory() as root:
 
 	# status() and unlock() of the control panel.
 	ag.known_accounts = lambda env: {"alice@example.com"}
-	ag.get_settings = lambda env: ({"limit": 30, "window": 30}, [])
-	ag.settings = lambda *a, **k: dict(ag.lua_values(), LIMIT=30, WINDOW=1800)
+	ag.get_settings = lambda env: ({"limit": 30, "window": 30, "span": 4}, [])
+	ag.settings = lambda *a, **k: dict(ag.lua_values(), LIMIT=30, WINDOW=1800, SPAN=4)
 	res = ag.status({}, scan_func=lambda: {"names": [{"key": "a-alice@example.com", "failures": 31, "last": NOW}, {"key": "a-x%40y@example.com", "failures": 2, "last": NOW}], "events": [], "missing": False})
 	check("status", [(n["name"], n["refused"], n["account"]) for n in res["names"]], [("alice@example.com", True, True), ("x@y@example.com", False, False)])
-	check("status setting", (res["settings"], res["applied"], res["warnings"]), ({"limit": 30, "window": 30}, {"limit": 30, "window": 30}, []))
+	check("status setting", (res["settings"], res["applied"], res["warnings"]), ({"limit": 30, "window": 30, "span": 4}, {"limit": 30, "window": 30, "span": 4}, []))
 	removed = []
 	ag.unlock("a-alice@example.com", scan_func=lambda: removed.append(1))
 	refused = 0

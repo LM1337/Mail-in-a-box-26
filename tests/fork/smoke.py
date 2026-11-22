@@ -4330,9 +4330,9 @@ def api_shape(ctx, path, r):
         return "%s -> %s" % (j["recipient"], ", ".join(t["address"] for t in j["targets"]))
     if path == "/system/auth-guard":
         # Dovecot's limit of failed logins from the box itself (B126).
-        _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("limit"), int) and isinstance(j[k].get("window"), int)
+        _need(all(isinstance(j.get(k), dict) and all(isinstance(j[k].get(x), int) for x in ("limit", "window", "span"))
                   for k in ("settings", "defaults", "applied")), "auth-guard: settings missing")
-        _need(j["defaults"] == {"limit": 30, "window": 30}, "auth-guard: defaults %s" % j["defaults"])
+        _need(j["defaults"] == {"limit": 30, "window": 30, "span": 4}, "auth-guard: defaults %s" % j["defaults"])
         _need(isinstance(j.get("ranges"), dict) and isinstance(j.get("warnings"), list) and isinstance(j.get("names"), list)
               and isinstance(j.get("more"), int), "auth-guard: keys missing")
         _need(all({"key", "name", "failures", "last", "refused", "account"} <= set(n) for n in j["names"]), "auth-guard: names")
@@ -4706,9 +4706,11 @@ def c_login_auth_guard(ctx):
         r = auth_guard_on_box(ctx, {"user": other, "tok": ctx.tok, "same": 150, "right": [["other", other, ctx.user_pw]]})
         _need(r["same"] == 150 and r["other"][0] == "ok", "150 times the same wrong password, then the right one: %s" % r)
         steps.append("150 times the same wrong password: not locked")
-        r = admin_api(ctx, "POST", "system/auth-guard", form={"limit": "5", "window": "30"})
+        r = admin_api(ctx, "POST", "system/auth-guard", form={"limit": "5", "window": "30", "span": "4"})
         api_expect(r, 200, "application/json", "POST system/auth-guard")
-        _need(r.json()["settings"] == {"limit": 5, "window": 30}, "setting: %s" % r.text()[:200])
+        _need(r.json()["settings"] == {"limit": 5, "window": 30, "span": 4}, "setting: %s" % r.text()[:200])
+        r = admin_api(ctx, "POST", "system/auth-guard", form={"span": "5"})
+        _need(r.status == 400, "span 5: HTTP %d, not 400" % r.status)
         r = admin_api(ctx, "POST", "system/auth-guard", form={"limit": "2"})
         _need(r.status == 400, "limit 2: HTTP %d, not 400" % r.status)
         r = auth_guard_on_box(ctx, {"user": victim, "tok": ctx.tok, "wrong": 40})
@@ -4734,7 +4736,7 @@ def c_login_auth_guard(ctx):
         _need(r["victim"][0] == "ok", "after the unlock: %s" % r["victim"][0])
         steps.append("the API and --status name it, the API's unlock ends the lock")
     finally:
-        admin_api(ctx, "POST", "system/auth-guard", form={"limit": str(before["limit"]), "window": str(before["window"])})
+        admin_api(ctx, "POST", "system/auth-guard", form={"limit": str(before["limit"]), "window": str(before["window"]), "span": str(before["span"])})
         for u in (victim, other):
             ctx.remote.run(tool + " --unlock " + shlex.quote(u), sudo=True, timeout=120)
             admin_api(ctx, "POST", "mail/users/remove", form={"email": u})

@@ -54,6 +54,7 @@ M.MAX_EVENTS = 1048576  -- bytes of the events file
 -- The limit, the window and the box's own addresses: System > Intrusion
 -- Protection in the control panel sets the first two, setup the addresses
 -- (management/auth_guard.py writes SETTINGS: "limit N", "window SECONDS",
+-- "span N",
 -- "local ADDRESS" per address of the box, from /etc/mailinabox.conf). Read
 -- on every login from the box, so a change applies at once, without a
 -- reload of Dovecot. A missing file or a value out of range means the
@@ -61,10 +62,12 @@ M.MAX_EVENTS = 1048576  -- bytes of the events file
 M.SETTINGS = "/usr/local/lib/mailinabox/dovecot-auth-guard/settings"
 M.LIMIT_MIN, M.LIMIT_MAX = 3, 1000
 M.WINDOW_MIN, M.WINDOW_MAX = 60, 86400
-M.LIMIT, M.WINDOW, M.LOCAL = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, {}
+M.DEFAULT_SPAN = 4
+M.SPAN_MIN, M.SPAN_MAX = 1, 4
+M.LIMIT, M.WINDOW, M.SPAN, M.LOCAL = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, M.DEFAULT_SPAN, {}
 
 function M.load()
-	local limit, window, addrs = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, {}
+	local limit, window, span, addrs = M.DEFAULT_LIMIT, M.DEFAULT_WINDOW, M.DEFAULT_SPAN, {}
 	local f = io.open(M.SETTINGS, "r")
 	if f then
 		for line in f:lines() do
@@ -74,13 +77,15 @@ function M.load()
 				limit = n
 			elseif k == "window" and n and n >= M.WINDOW_MIN and n <= M.WINDOW_MAX then
 				window = n
+			elseif k == "span" and n and n >= M.SPAN_MIN and n <= M.SPAN_MAX and n == math.floor(n) then
+				span = math.floor(n)
 			elseif k == "local" and v:match("^[%x:.]+$") and #v <= 45 then
 				addrs[string.lower(v)] = true
 			end
 		end
 		f:close()
 	end
-	M.LIMIT, M.WINDOW, M.LOCAL = limit, window, addrs
+	M.LIMIT, M.WINDOW, M.SPAN, M.LOCAL = limit, window, span, addrs
 end
 
 -- A login from the box itself: any address of 127.0.0.0/8 (a process on the
@@ -178,14 +183,16 @@ function M.path(key)
 	return M.DIR .. "/" .. key
 end
 
--- The lines of a name's file are kept for SPAN windows. A burst of guesses
--- at the same moment is checked in parallel and can pass check.lua before
--- the first failure is recorded, so it can record more than LIMIT; such a
--- burst then counts against the following windows too: a name is refused
--- while the different wrong passwords of the last k windows reach k times
--- LIMIT, for k = 1 to SPAN. So over time no more than LIMIT per window get
--- through. Only wrong passwords count, a right one never.
-M.SPAN = 4
+-- The lines of a name's file are kept for SPAN windows (4 unless the
+-- control panel sets 1 to 4, see M.load). A burst of guesses at the same
+-- moment is checked in parallel and can pass check.lua before the first
+-- failure is recorded, so it can record more than LIMIT; such a burst then
+-- counts against the following windows too: a name is refused while the
+-- different wrong passwords of the last k windows reach k times LIMIT, for
+-- k = 1 to SPAN. So over time no more than LIMIT per window get through,
+-- for bursts up to SPAN times LIMIT; a lock after a normal attack (it stops
+-- at LIMIT) still ends one window after it. Only wrong passwords count, a
+-- right one never.
 
 local function parse(line, now)
 	local t, tag = line:match("^(%d+) (%x%x%x%x)$")
@@ -266,7 +273,7 @@ function M.add(path, now, tag)
 	if has then
 		return n, false, refused, refused
 	end
-	if all > 4 * M.SPAN * M.LIMIT + 20 then
+	if all > 4 * M.SPAN_MAX * M.LIMIT + 20 then
 		-- Drop the lines older than the SPAN windows.
 		local keep, seen = {}, {}
 		local f = io.open(path, "r")

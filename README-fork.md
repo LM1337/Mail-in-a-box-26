@@ -876,7 +876,9 @@ fixed)" lists a few more.
   code running as www-data after a hole in PHP or a web app) can try at
   most 30 passwords of each account per 30 minutes (a burst of many connections at the same moment can get more through
   in one window, as the passwords are checked in parallel, but then counts
-  against the next windows too, so over time no more than 30 per window). Such a process can still raise Dovecot's penalty of
+  against the next windows too, so over time no more than 30 per window;
+  the lock then lasts up to 4 windows, 2 hours, and the number of windows
+  can be set from 1 to 4 under System > Intrusion Protection). Such a process can still raise Dovecot's penalty of
   127.0.0.1 with a login whose authorization name differs from its login
   name (it fails before these checks) and so slow down the others. The
   other side: someone who tries the passwords of one account through
@@ -979,7 +981,9 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   durchprobieren (ein Schub sehr vieler gleichzeitiger Verbindungen kann in einem
   Fenster mehr durchbringen, weil die Passwörter parallel geprüft werden,
   zählt dann aber auch gegen die folgenden Fenster, sodass auf Dauer nicht
-  mehr als 30 pro Fenster durchkommen). Ein solcher
+  mehr als 30 pro Fenster durchkommen; die Sperre dauert dann bis zu 4
+  Fenster, also 2 Stunden, und die Zahl der Fenster lässt sich unter
+  System > Intrusion Protection von 1 bis 4 einstellen). Ein solcher
   Prozess kann den Strafzähler von Dovecot für 127.0.0.1 weiterhin mit
   einer Anmeldung erhöhen, deren Autorisierungsname vom Anmeldenamen
   abweicht (sie scheitert vor diesen Prüfungen), und so die anderen

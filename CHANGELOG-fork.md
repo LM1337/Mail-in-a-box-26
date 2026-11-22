@@ -461,7 +461,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   first failure is recorded, as the passwords are checked in parallel;
   such a burst then counts against the next windows as well (refused
   while the last k windows hold k times the limit, k = 1 to 4), so over
-  time no more than the limit per window get through; and `auth_username_chars` is empty, so that a user name with "+"
+  time no more than the limit per window get through. A lock after a
+  normal attack ends one window after it; after a burst it can last up to
+  4 windows (2 hours by default). The number of windows can be set from 1
+  to 4 as well (1: a lock never lasts longer than one window, but bursts
+  get more through); and `auth_username_chars` is empty, so that a user name with "+"
   or a space no longer fails before these checks with Dovecot's delay and
   the penalty of 127.0.0.1. The other accounts
   are not slowed down (no penalty of 127.0.0.1), and the account's own

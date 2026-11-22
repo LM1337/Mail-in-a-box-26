@@ -102,7 +102,12 @@
   <div class="form-group">
     <label for="ag-window">different wrong passwords within</label>
     <input type="number" class="form-control" id="ag-window" min="1" max="1440" style="width: 6em">
-    <span>minutes</span>
+    <span>minutes;</span>
+  </div>
+  <div class="form-group">
+    <label for="ag-span">a burst counts against</label>
+    <input type="number" class="form-control" id="ag-span" min="1" max="4" style="width: 5em">
+    <span>windows</span>
   </div>
   <button type="submit" class="btn btn-primary">Save</button>
   <button type="button" class="btn btn-default" onclick="ag_reset()">Restore defaults</button>
@@ -367,9 +372,12 @@ function ag_render() {
   $('.ag-window').text(r.applied.window);
   $('#ag-limit').val(s.limit).attr('min', r.ranges.limit[0]).attr('max', r.ranges.limit[1]);
   $('#ag-window').val(s.window).attr('min', r.ranges.window[0]).attr('max', r.ranges.window[1]);
+  $('#ag-span').val(s.span).attr('min', r.ranges.span[0]).attr('max', r.ranges.span[1]);
   $('#ag-help').text("Defaults: " + r.defaults.limit + " different wrong passwords within " + r.defaults.window
-    + " minutes. Allowed: " + r.ranges.limit[0] + " to " + r.ranges.limit[1] + ", within " + r.ranges.window[0] + " to " + r.ranges.window[1]
-    + " minutes. A lower number stops guessing sooner; it also lets someone who tries an account's passwords through these services lock that account out sooner. The change applies at once.");
+    + " minutes, " + r.defaults.span + " windows. Allowed: " + r.ranges.limit[0] + " to " + r.ranges.limit[1] + ", within " + r.ranges.window[0] + " to " + r.ranges.window[1]
+    + " minutes, " + r.ranges.span[0] + " to " + r.ranges.span[1] + " windows. A lower number stops guessing sooner; it also lets someone who tries an account's passwords through these services lock that account out sooner."
+    + " Windows: many guesses at the same moment are checked in parallel and can get more than the limit through in one window; they then count against the next windows as well, so that over time no more than the limit per window get through."
+    + " After a normal attack a lock ends one window after it; after such a burst it can last up to that many windows (1 = never longer than one window, but bursts then get more through). The change applies at once.");
   var w = $('#ag-warnings').html("");
   r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
   var tbody = $('#ag-names tbody').html("");
@@ -397,7 +405,7 @@ function ag_render() {
 }
 
 function ag_save() {
-  api("/system/auth-guard", "POST", { limit: $('#ag-limit').val(), window: $('#ag-window').val() },
+  api("/system/auth-guard", "POST", { limit: $('#ag-limit').val(), window: $('#ag-window').val(), span: $('#ag-span').val() },
     function(r) { ag_load(); },
     f2b_api_error("Logins through the box's own services"));
 }

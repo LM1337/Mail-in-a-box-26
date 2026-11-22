@@ -2555,9 +2555,11 @@ paths:
         - System
       summary: Change Dovecot's limit of failed logins from the box itself
       description: |
-        Form fields `limit` (different wrong passwords, 3 to 1000) and
-        `window` (minutes, 1 to 1440); fields that are not sent keep their
-        value, `reset=1` restores the defaults (30 in 30 minutes). Dovecot
+        Form fields `limit` (different wrong passwords, 3 to 1000),
+        `window` (minutes, 1 to 1440) and `span` (windows that a burst of
+        more than `limit` at once counts against, 1 to 4: the longest lock
+        is `span` windows); fields that are not sent keep their value,
+        `reset=1` restores the defaults (30 in 30 minutes, 4 windows). Dovecot
         reads the setting on every login from the box: no reload.
       operationId: setAuthGuard
       requestBody:
@@ -4346,6 +4348,7 @@ components:
       required:
         - limit
         - window
+        - span
       properties:
         limit:
           type: integer
@@ -4355,6 +4358,10 @@ components:
           type: integer
           description: Within this many minutes
           example: 30
+        span:
+          type: integer
+          description: Windows that a burst of more than `limit` at once counts against (a name is refused while the last k windows hold k times `limit`, k = 1 to `span`); 1 to 4
+          example: 4
     AuthGuardUpdateRequest:
       type: object
       properties:
@@ -4366,6 +4373,10 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
+        span:
+          type: integer
+          minimum: 1
+          maximum: 4
         reset:
           type: integer
           enum: [1]
