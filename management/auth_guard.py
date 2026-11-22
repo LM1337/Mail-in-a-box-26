@@ -55,7 +55,9 @@ MAX_FILE = 65536 # bytes read of a name's file
 SUBJECT = "Logins refused after failed logins from the box itself"
 
 KEY_RE = re.compile(r"^(a-[a-z0-9@._+%-]{1,200}|h-[0-9a-f]{16}-[0-9]{1,4})$")
-EVENT_RE = re.compile(r"^([0-9]{1,12}) (locked|names) ([0-9]{1,9}) (\S{1,210})$")
+EVENT_RE = re.compile(r"^([0-9]{1,12}) (locked|names|pool|list|addresses) ([0-9]{1,9}) (\S{1,210})$")
+LIST_PATH_HINT = "/usr/local/lib/mailinabox/dovecot-auth-guard/accounts"
+SPAN = 4 # windows that a name's failures are kept for (guard.lua's M.SPAN)
 
 
 def lua_values(path=GUARD_LUA):
@@ -304,20 +306,24 @@ def name_of(key):
 	return "".join(c if c.isprintable() and c not in "\r\n" else "?" for c in name)[:254]
 
 
-def _recent(text, now, window):
-	# The different tags (wrong passwords) within the window, as guard.lua's
-	# M.recent(): lines "<time> <tag>".
-	tags = set()
+def _recent(text, now, window, limit=None):
+	# As guard.lua's M.recent(): lines "<time> <tag>", kept for SPAN windows.
+	# Returns the different tags (wrong passwords) within the window and,
+	# with limit, whether the name is refused: the different tags of the
+	# last k windows reach k * limit, for k = 1 to SPAN.
+	newest = {}
 	for line in text.splitlines():
 		m = re.fullmatch(r"([0-9]{1,12}) ([0-9a-fA-F]{4})", line)
 		if m:
 			t = int(m.group(1))
-			if now - t < window and t <= now + 60:
-				tags.add(m.group(2))
-	return len(tags)
+			if now - t < SPAN * window and t <= now + 60:
+				newest[m.group(2)] = max(t, newest.get(m.group(2), t))
+	counts = [sum(1 for t in newest.values() if now - t < k * window) for k in range(1, SPAN + 1)]
+	refused = limit is not None and any(counts[k - 1] >= k * limit for k in range(1, SPAN + 1))
+	return counts[0], refused, bool(newest)
 
 
-def scan(state_dir, window, now=None, consume=True, remove=None):
+def scan(state_dir, window, now=None, consume=True, remove=None, limit=30):
 	# Runs as the account dovecot (see as_dovecot). Returns the names with
 	# failures within the window and, with consume, the new events; removes
 	# the files of names without failures within the window, and the file of
@@ -374,12 +380,12 @@ def scan(state_dir, window, now=None, consume=True, remove=None):
 				os.unlink(name, dir_fd=dfd)
 				continue
 			text = read(name)
-			n = _recent(text or "", now, window)
-			if n == 0 and now - est.st_mtime >= window:
+			n, refused, kept = _recent(text or "", now, window, limit)
+			if not kept and now - est.st_mtime >= SPAN * window:
 				os.unlink(name, dir_fd=dfd)
 				continue
-			if n:
-				names.append({ "key": name, "failures": n, "last": int(est.st_mtime) })
+			if n or refused:
+				names.append({ "key": name, "failures": n, "refused": refused, "last": int(est.st_mtime) })
 		return { "names": names, "events": events, "missing": False }
 	finally:
 		os.close(dfd)
@@ -441,19 +447,26 @@ def message(events, accounts, cfg, dropped=0):
 		when = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(e["time"]))
 		if e["kind"] == "locked":
 			lines.append(f"{when}  {describe(e['key'], accounts)}: {e['count']} different wrong passwords in {minutes} minutes")
+		elif e["kind"] == "pool":
+			lines.append(f"{when}  more than {e['count']} names that are no account of the box failed; such names are refused until there is room"
+				" (a real account that is missing from the list of accounts is refused too)")
+		elif e["kind"] == "list":
+			lines.append(f"{when}  the list of accounts could not be written ({LIST_PATH_HINT}); a new account is not counted on its own until it can be written")
+		elif e["kind"] == "addresses":
+			lines.append(f"{when}  the addresses of the box's interfaces could not be read (ip -o addr); logins from addresses missing from the settings file are not counted")
 		else:
-			lines.append(f"{when}  failed logins of more than {e['count']} account names in {minutes} minutes; the names with the fewest failures are no longer counted")
+			lines.append(f"{when}  failed logins of more than {e['count']} names; new names get Dovecot's delay")
 	if dropped:
 		lines.append(f"... and {dropped} more")
 	return (
-		f"Dovecot refused the logins from the box itself (ActiveSync, Autodiscover, webmail, Nextcloud) for these accounts "
-		f"after {cfg['LIMIT']} different wrong passwords in {minutes} minutes (a password sent again counts once):\n\n" + "\n".join(lines) + "\n\n"
+		f"Dovecot's limit of failed logins from the box itself (ActiveSync, Autodiscover, webmail, Nextcloud; {cfg['LIMIT']} "
+		f"different wrong passwords in {minutes} minutes, a password sent again counts once):\n\n" + "\n".join(lines) + "\n\n"
 		f"These logins come through services of the box, so fail2ban sees only each client's own failures. It may be someone who "
 		f"tries the account's passwords through ActiveSync, webmail or Nextcloud from one address below fail2ban's thresholds or "
 		f"from many, or a process on the box that tries passwords (a phone with an old password sends the same one again and counts once). While an "
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
 		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
-		f"passwords in the last {minutes} minutes.\n\n"
+		f"passwords in the last {minutes} minutes (after a burst of many at once, it lasts up to {SPAN} times as long).\n\n"
 		f"The current state, the setting and a button to end a lock: the control panel, System > Intrusion Protection\n"
 		f"(or sudo management/auth_guard.py --status, and --unlock ADDRESS).\n")
 
@@ -463,10 +476,11 @@ def load_state(path=NOTIFY_STATE):
 		with open(path, encoding="utf-8") as f:
 			s = json.load(f)
 		if isinstance(s, dict) and isinstance(s.get("pending"), list):
-			return { "last_sent": int(s.get("last_sent", 0)), "pending": s["pending"][:MAX_PENDING], "dropped": int(s.get("dropped", 0)) }
+			return { "last_sent": int(s.get("last_sent", 0)), "pending": s["pending"][:MAX_PENDING], "dropped": int(s.get("dropped", 0)),
+				"problems": [p for p in s.get("problems", []) if p in ("list", "addresses")] }
 	except (OSError, ValueError, TypeError):
 		pass
-	return { "last_sent": 0, "pending": [], "dropped": 0 }
+	return { "last_sent": 0, "pending": [], "dropped": 0, "problems": [] }
 
 
 def save_state(state, path=NOTIFY_STATE):
@@ -485,11 +499,14 @@ def send_mail(text):
 		raise RuntimeError("email_administrator.py: " + (p.stderr.strip() or p.stdout.strip())[-300:])
 
 
-def notify(env, cfg, now=None, scan_func=None, send=send_mail, state_path=NOTIFY_STATE):
+def notify(env, cfg, now=None, scan_func=None, send=send_mail, state_path=NOTIFY_STATE, problems=()):
 	now = int(time.time()) if now is None else now
-	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], now)))()
+	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], now, limit=cfg["LIMIT"])))()
 	state = load_state(state_path)
-	for e in res["events"]:
+	# A problem of this run is mailed once until it is gone again.
+	known = set(state.get("problems", []))
+	events = list(res["events"]) + [{ "time": now, "kind": k, "count": 0, "key": "-" } for k in problems if k not in known]
+	for e in events:
 		if len(state["pending"]) < MAX_PENDING:
 			state["pending"].append(e)
 		else:
@@ -499,7 +516,9 @@ def notify(env, cfg, now=None, scan_func=None, send=send_mail, state_path=NOTIFY
 		send(message(state["pending"], known_accounts(env), cfg, state["dropped"]))
 		state = { "last_sent": now, "pending": [], "dropped": 0 }
 		sent = True
-	if res["events"] or sent:
+	changed = set(problems) != known
+	state["problems"] = sorted(set(problems))
+	if events or sent or changed:
 		save_state(state, state_path)
 	return sent
 
@@ -511,12 +530,12 @@ def status(env, scan_func=None):
 	values, warnings = get_settings(env)
 	if (cfg["LIMIT"], cfg["WINDOW"]) != (values["limit"], values["window"] * 60):
 		warnings.append("Dovecot does not use this setting yet (its settings file differs); save it again, or run setup.")
-	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False)))()
+	res = (scan_func or (lambda: as_dovecot(scan, cfg["DIR"], cfg["WINDOW"], consume=False, limit=cfg["LIMIT"])))()
 	accounts = known_accounts(env)
 	names = []
 	for n in sorted(res["names"], key=lambda n: (-n["failures"], n["key"])):
 		names.append({ "key": n["key"], "name": name_of(n["key"]), "failures": n["failures"], "last": n["last"],
-			"refused": n["failures"] >= cfg["LIMIT"],
+			"refused": n.get("refused", n["failures"] >= cfg["LIMIT"]),
 			"account": None if accounts is None or not n["key"].startswith("a-") else name_of(n["key"]).lower() in accounts })
 	if res["missing"]:
 		warnings.append(f"{cfg['DIR']} does not exist: Dovecot cannot count, failed logins from the box itself get its delay (run setup).")
@@ -546,20 +565,28 @@ def main(argv):
 		values, warnings = get_settings(env)
 		for w in warnings:
 			print(w, file=sys.stderr)
+		if not interface_addresses():
+			print("auth_guard.py: the addresses of the box's interfaces could not be read (ip -o addr); only 127.0.0.0/8, ::1 and"
+				" the addresses of /etc/mailinabox.conf count as the box itself.", file=sys.stderr)
 		apply_config(env, values)
 		write_accounts(env)
 		return 0
 	cfg = settings()
 	if argv[1] == "--notify":
+		problems = []
 		try:
 			write_accounts(env)
 		except Exception as e:
 			print(f"auth_guard.py: the list of accounts could not be written: {e}", file=sys.stderr)
+			problems.append("list")
+		if not interface_addresses():
+			print("auth_guard.py: the addresses of the box's interfaces could not be read (ip -o addr).", file=sys.stderr)
+			problems.append("addresses")
 		try:
 			apply_config(env) # the box's addresses may have changed
 		except Exception as e:
 			print(f"auth_guard.py: the settings file could not be written: {e}", file=sys.stderr)
-		notify(env, cfg)
+		notify(env, cfg, problems=problems)
 		return 0
 	if argv[1] == "--unlock":
 		key = key_of(argv[2])

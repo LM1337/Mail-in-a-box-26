@@ -103,8 +103,8 @@ with tempfile.TemporaryDirectory() as root:
 	put("a-alice@example.com", [NOW - 10] * 120)                     # locked
 	put("a-bob@example.com", [NOW - W - 5] * 3 + [NOW - 100] * 2)   # 2 in the window
 	put("a-dave@example.com", [(NOW - 50, "beef")] * 30 + [(NOW - 40, "0001"), "junk"]) # an old password sent 30 times: 2 different
-	put("a-old@example.com", [NOW - W - 100] * 4, age=W + 50)       # none: removed
-	put("a-fresh@example.com", [NOW - W - 100], age=10)              # none, but just written: kept
+	put("a-old@example.com", [NOW - 4 * W - 100] * 4, age=4 * W + 50) # older than the 4 windows: removed
+	put("a-fresh@example.com", [NOW - W - 100], age=10)              # none in the window, kept for 4 windows
 	put("x.tmp", [], age=120)                                        # old tmp: removed
 	put("a-y@example.com.tmp", [], age=5)                            # new tmp: kept
 	os.symlink("/etc/passwd", os.path.join(d, "a-link@example.com"))
@@ -147,10 +147,28 @@ with tempfile.TemporaryDirectory() as root:
 	check("mail 1", ("alice@example.com: 100 different wrong passwords in 30 minutes" in mails[0], "no such account" in mails[0]), (True, False))
 	check("mail 2 marks unknown", "ghost@example.com (no such account)" in mails[1], True)
 	check("state after", ag.load_state(sp)["pending"], [])
+	sp2 = os.path.join(root, "notify2.json"); m2 = []
+	ag.notify({}, cfg, now=NOW, scan_func=scan_with([]), send=m2.append, state_path=sp2, problems=["list"])
+	ag.notify({}, cfg, now=NOW + 4000, scan_func=scan_with([]), send=m2.append, state_path=sp2, problems=["list"])
+	ag.notify({}, cfg, now=NOW + 8000, scan_func=scan_with([]), send=m2.append, state_path=sp2, problems=[])
+	ag.notify({}, cfg, now=NOW + 12000, scan_func=scan_with([]), send=m2.append, state_path=sp2, problems=["list"])
+	check("a problem is mailed once until it is gone", len(m2), 2)
 	many = [ev(NOW + 3800 + i, f"a-u{i}@example.com") for i in range(ag.MAX_PENDING + 5)]
 	ag.notify({}, cfg, now=NOW + 3800, scan_func=scan_with(many), send=mails.append, state_path=sp)
 	st = ag.load_state(sp)
 	check("pending capped", (len(st["pending"]), st["dropped"]), (ag.MAX_PENDING, 5))
+
+# The burst rule (as guard.lua): refused while the different wrong passwords
+# of the last k windows reach k * limit, k = 1..4.
+burst = "".join(f"{NOW - 10} {i:04x}\n" for i in range(100))  # a burst of 100 at once
+check("burst: refused in its window", ag._recent(burst, NOW, W, 30)[:2], (100, True))
+check("burst: still refused 2 windows later", ag._recent(burst, NOW + 2 * W, W, 30)[:2], (0, True))
+check("burst: open after 4 windows", ag._recent(burst, NOW + 3 * W + 20, W, 30)[1], False)
+few = "".join(f"{NOW - 10} {i:04x}\n" for i in range(29))
+check("29 in a window: not refused", ag._recent(few, NOW, W, 30)[:2], (29, False))
+check("the same tag again counts once", ag._recent(f"{NOW - 5} beef\n{NOW - 1} beef\n", NOW, W, 30)[0], 1)
+msg = ag.message([{ "time": NOW, "kind": k, "count": 500, "key": "-" } for k in ("pool", "list", "addresses")], set(), {"LIMIT": 30, "WINDOW": 1800})
+check("events pool, list, addresses in the mail", ("no account of the box" in msg, "list of accounts could not be written" in msg, "ip -o addr" in msg), (True, True, True))
 
 with tempfile.TemporaryDirectory() as root:
 	# The settings file: written through the directory's descriptor, read back

@@ -157,7 +157,10 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 # login with the right password never. The accounts on the list (written
 # by the management daemon whenever accounts change) are always counted;
 # other names share a pool of 500, so made-up names cannot crowd out the
-# count of an account. auth_username_chars is empty so that every failure
+# count of an account. A burst of guesses at the same moment, which can get
+# more than the limit checked in one window, counts against the next ones as
+# well (the last k windows may hold k times the limit, k = 1 to 4).
+# auth_username_chars is empty so that every failure
 # reaches these passdbs (Dovecot's list of allowed characters refused names
 # with "+" or a space before them, with its delay and the penalty of
 # 127.0.0.1).

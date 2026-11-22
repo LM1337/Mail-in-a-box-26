@@ -178,40 +178,66 @@ function M.path(key)
 	return M.DIR .. "/" .. key
 end
 
+-- The lines of a name's file are kept for SPAN windows. A burst of guesses
+-- at the same moment is checked in parallel and can pass check.lua before
+-- the first failure is recorded, so it can record more than LIMIT; such a
+-- burst then counts against the following windows too: a name is refused
+-- while the different wrong passwords of the last k windows reach k times
+-- LIMIT, for k = 1 to SPAN. So over time no more than LIMIT per window get
+-- through. Only wrong passwords count, a right one never.
+M.SPAN = 4
+
 local function parse(line, now)
 	local t, tag = line:match("^(%d+) (%x%x%x%x)$")
 	t = tonumber(t)
-	if t and now - t < M.WINDOW and t <= now + 60 then
+	if t and now - t < M.SPAN * M.WINDOW and t <= now + 60 then
 		return t, tag
 	end
 	return nil
 end
 
--- The different tags of a name within WINDOW (their number, whether tag is
--- one of them), the lines of its file, and the lines of the last second
--- (failures recorded since, for check.lua).
+-- The different tags of a name within WINDOW, whether tag is one of them
+-- within the SPAN windows, the lines of its file, and whether the name is
+-- refused (see above).
 function M.recent(path, now, tag)
 	local f = io.open(path, "r")
 	if not f then
-		return 0, false, 0, 0
+		return 0, false, 0, false
 	end
-	local seen, n, all, has, fresh = {}, 0, 0, false, 0
+	local first = {} -- tag -> its newest time
+	local all, has = 0, false
 	for line in f:lines() do
 		all = all + 1
 		local t, tg = parse(line, now)
-		if t and t >= now - 1 then
-			fresh = fresh + 1
-		end
-		if t and not seen[tg] then
-			seen[tg] = true
-			n = n + 1
+		if t then
+			if first[tg] == nil or t > first[tg] then
+				first[tg] = t
+			end
 			if tg == tag then
 				has = true
 			end
 		end
 	end
 	f:close()
-	return n, has, all, fresh
+	local counts = {}
+	for k = 1, M.SPAN do
+		counts[k] = 0
+	end
+	for _, t in pairs(first) do
+		local age = now - t
+		for k = 1, M.SPAN do
+			if age < k * M.WINDOW then
+				counts[k] = counts[k] + 1
+			end
+		end
+	end
+	local refused = false
+	for k = 1, M.SPAN do
+		if counts[k] >= k * M.LIMIT then
+			refused = true
+		end
+	end
+	return counts[1], has, all, refused
 end
 
 local function write_file(path, text)
@@ -230,16 +256,18 @@ local function write_file(path, text)
 end
 
 -- Records a failed login of a name with the tag of its password; returns
--- the number of different tags within WINDOW and whether this one is new,
--- or nil when the state cannot be written.
+-- the number of different tags within WINDOW, whether this one is new,
+-- whether the name is refused now and whether it was before, or nil when
+-- the state cannot be written.
 function M.add(path, now, tag)
-	-- A tag seen within the window is not written again: it counts once.
-	local n, has, all = M.recent(path, now, tag)
+	-- A tag seen within the SPAN windows is not written again: it counts
+	-- once.
+	local n, has, all, refused = M.recent(path, now, tag)
 	if has then
-		return n, false
+		return n, false, refused, refused
 	end
-	if all - n > 20 then
-		-- Drop the old lines.
+	if all > 4 * M.SPAN * M.LIMIT + 20 then
+		-- Drop the lines older than the SPAN windows.
 		local keep, seen = {}, {}
 		local f = io.open(path, "r")
 		if f then
@@ -265,13 +293,15 @@ function M.add(path, now, tag)
 	if not ok then
 		return nil
 	end
-	return n + 1, true
+	local n2, _, _, refused2 = M.recent(path, now, tag)
+	return n2, true, refused2, refused
 end
 
 -- count.lua's pool of names not on the list is full: a flag file with its
--- time, so that check.lua sees it. It holds for 60 seconds; count.lua writes
--- it again while the pool stays full (after the 60 seconds one such name
--- reaches it), so it can never stay behind once there is room.
+-- time, so that check.lua sees it. count.lua sets it when the pool fills
+-- and removes it when pruning frees room, and removes a flag left behind
+-- when it starts (its pool is empty then). A flag older than WINDOW does
+-- not count (if count.lua could not remove it).
 function M.pool_full(now)
 	local f = io.open(M.path("pool-full"), "r")
 	if not f then
@@ -279,16 +309,12 @@ function M.pool_full(now)
 	end
 	local t = tonumber(f:read("l") or "")
 	f:close()
-	return t ~= nil and now - t < 60 and t <= now + 60
+	return t ~= nil and now - t < M.WINDOW and t <= now + 60
 end
 
 function M.set_pool_full(full, now)
 	if full then
-		local f = io.open(M.path("pool-full"), "w")
-		if f then
-			f:write(now, "\n")
-			f:close()
-		end
+		write_file(M.path("pool-full"), tostring(now) .. "\n")
 	else
 		os.remove(M.path("pool-full"))
 	end

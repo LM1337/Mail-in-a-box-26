@@ -457,9 +457,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   127.0.0.0/8, ::1, every address of the box's interfaces (link-local ones
   included, written again every 10 minutes) and any connection from an
   address to itself, as a process on the box can use any of them. Many
-  connections at the same moment can get a few more guesses checked before
-  the first failure is recorded (32 instead of 30 with 200 connections in
-  a test), once per window, as the passwords are checked in parallel; and `auth_username_chars` is empty, so that a user name with "+"
+  connections at the same moment can get more guesses checked before the
+  first failure is recorded, as the passwords are checked in parallel;
+  such a burst then counts against the next windows as well (refused
+  while the last k windows hold k times the limit, k = 1 to 4), so over
+  time no more than the limit per window get through; and `auth_username_chars` is empty, so that a user name with "+"
   or a space no longer fails before these checks with Dovecot's delay and
   the penalty of 127.0.0.1. The other accounts
   are not slowed down (no penalty of 127.0.0.1), and the account's own

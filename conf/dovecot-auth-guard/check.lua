@@ -17,8 +17,8 @@ function auth_passdb_lookup(req)
 	local now = os.time()
 	local key = G.key(req.user)
 	local path = G.path(key)
-	local n = G.recent(path, now)
-	if n >= G.LIMIT then
+	local n, _, _, refused = G.recent(path, now)
+	if refused then
 		return dovecot.auth.PASSDB_RESULT_OK, {
 			nodelay = "yes",
 			reason = "Too many failed logins, try again later.",
@@ -26,7 +26,7 @@ function auth_passdb_lookup(req)
 	end
 	-- count.lua counts a name that is not on the list of accounts in a pool
 	-- of its own; when the pool is full, it cannot count a new one, so such
-	-- a name is refused here for a minute at a time (an account added while
+	-- a name is refused here while the pool is full (an account added while
 	-- the list could not be written waits for the next list, at most 10
 	-- minutes).
 	local accounts = G.accounts(now)

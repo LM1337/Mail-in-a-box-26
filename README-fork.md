@@ -874,9 +874,9 @@ fixed)" lists a few more.
   slowed down, and the account's own mail programs that log in from
   outside are not refused. So a process on the box (any local account, or
   code running as www-data after a hole in PHP or a web app) can try at
-  most 30 passwords of each account per 30 minutes (with very many
-  connections at the same moment a few more, once, as the passwords are
-  checked in parallel). Such a process can still raise Dovecot's penalty of
+  most 30 passwords of each account per 30 minutes (a burst of many connections at the same moment can get more through
+  in one window, as the passwords are checked in parallel, but then counts
+  against the next windows too, so over time no more than 30 per window). Such a process can still raise Dovecot's penalty of
   127.0.0.1 with a login whose authorization name differs from its login
   name (it fails before these checks) and so slow down the others. The
   other side: someone who tries the passwords of one account through
@@ -976,8 +976,10 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   abgewiesen. Ein Prozess auf der Box (jedes lokale Konto oder Code, der
   nach einer Lücke in PHP oder einer Web-Anwendung als www-data läuft)
   kann also höchstens 30 Passwörter pro Konto und 30 Minuten
-  durchprobieren (mit sehr vielen gleichzeitigen Verbindungen einmalig ein
-  paar mehr, weil die Passwörter parallel geprüft werden). Ein solcher
+  durchprobieren (ein Schub sehr vieler gleichzeitiger Verbindungen kann in einem
+  Fenster mehr durchbringen, weil die Passwörter parallel geprüft werden,
+  zählt dann aber auch gegen die folgenden Fenster, sodass auf Dauer nicht
+  mehr als 30 pro Fenster durchkommen). Ein solcher
   Prozess kann den Strafzähler von Dovecot für 127.0.0.1 weiterhin mit
   einer Anmeldung erhöhen, deren Autorisierungsname vom Anmeldenamen
   abweicht (sie scheitert vor diesen Prüfungen), und so die anderen
