@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the reasons of bans in management/fail2ban_admin.py (System > Intrusion Protection).
+"""Checks the reasons of bans in management/fail2ban_admin.py (System > Intrusion Detection and Prevention).
 
 No box needed. Each case is a log line of a kind that a jail's filter
 matches, with a user name that is an account of the box or not. A name that

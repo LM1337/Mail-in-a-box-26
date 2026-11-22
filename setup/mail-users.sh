@@ -140,7 +140,7 @@ sed -i "s/#\(\!include auth-sql.conf.ext\)/\1/"  /etc/dovecot/conf.d/10-auth.con
 #    addresses keep Dovecot's delay and penalty.
 #  * miab-auth-guard-check, the first one (deny = yes), refuses an account
 #    name with 30 different wrong passwords from the box within 30 minutes
-#    (System > Intrusion Protection sets both numbers; the Lua code reads
+#    (System > Intrusion Detection and Prevention sets both numbers; the Lua code reads
 #    them from a small file on every login from the box) for logins from the
 #    box, at once and before the password is checked, until it has fewer. Only the failures of the name itself count, so made-up names
 #    cannot lower the limit of a real account, and the other accounts are

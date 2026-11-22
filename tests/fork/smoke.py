@@ -1751,7 +1751,7 @@ def c_backup_saved(ctx):
 
 
 def c_fail2ban_api(ctx):
-    # Read-only: status of the adaptive fail2ban (intrusion protection).
+    # Read-only: status of the adaptive fail2ban (intrusion detection and prevention).
     r = admin_api(ctx, "GET", "system/fail2ban")
     if r.status != 200:
         raise Fail("HTTP %d %s" % (r.status, r.text()[:200]))
@@ -2464,15 +2464,15 @@ def c_fail2ban_filters(ctx):
 
 
 def c_fail2ban_panel(ctx):
-    # The control panel page (System > Intrusion Protection) is part of index.html.
+    # The control panel page (System > Intrusion Detection and Prevention) is part of index.html.
     r = http_req(ctx, "GET", "/admin/")
     if r.status != 200:
         raise Fail("HTTP %d" % r.status)
     page = r.text()
-    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(", "function f2b_load_bans(") if m not in page]
+    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(", "function f2b_load_bans(", "function sl_load(", "Intrusion Detection and Prevention") if m not in page]
     if missing:
         raise Fail("control panel lacks %s" % missing)
-    return "Intrusion Protection page present"
+    return "Intrusion Detection and Prevention page present"
 
 
 def c_panel_assets(ctx):

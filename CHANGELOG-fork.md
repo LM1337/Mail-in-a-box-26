@@ -70,8 +70,8 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   a first install, and not when the in-place upgrade or the migration tool
   runs setup (they have their own reports and now set `MIAB_SETUP_TOOL`
   for their setup run). New offline test `tests/fork/update-check-hint.py`.
-* **Intrusion Protection recognises banned Microsoft servers (B126)**\
-  System > Intrusion Protection shows a hint at a banned address of the
+* **Intrusion Detection and Prevention recognises banned Microsoft servers (B126)**\
+  System > Intrusion Detection and Prevention shows a hint at a banned address of the
   servers through which Outlook for iOS and Android syncs Exchange
   ActiveSync accounts: 20 wrong passwords there within two minutes get all
   users of the app banned, and anyone can cause it on purpose (B126;
@@ -95,8 +95,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### Changed
 
-* **Intrusion Protection lists the banned addresses page by page (B220)**\
-  Under a larger attack System > Intrusion Protection loaded for a long
+* **System > Intrusion Protection is now "Intrusion Detection and Prevention"**\
+  The page has a new name, in the menu, on the page and in the texts and
+  mails of the box that point to it: it detects attacks (fail2ban's jails,
+  the failed-login report, the limit of failed logins from the box itself)
+  and now also prevents a flood of mail from the box (the sending limit,
+  B221). Its link (`#fail2ban`) and the API paths stay the same. The
+  administrator's audit line for its settings now says "the intrusion
+  detection and prevention settings"; the log audit accepts both forms.
+
+* **Intrusion Detection and Prevention lists the banned addresses page by page (B220)**\
+  Under a larger attack System > Intrusion Detection and Prevention loaded for a long
   time or not at all, and its table "Banned in, and why" was wider than
   the page (B220). The page now shows the networks with the most banned
   addresses (a click filters by one) and a compact table, one row per
@@ -481,7 +490,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   per account name, with two small Lua passdbs around the SQL one
   (package `dovecot-auth-lua`, `conf/dovecot-auth-guard/`): an account
   with 30 different wrong passwords from the box within 30 minutes (both
-  numbers can be changed under System > Intrusion Protection, which also
+  numbers can be changed under System > Intrusion Detection and Prevention, which also
   lists the counted and refused accounts with a button to end a lock; the
   API `/system/auth-guard`) is refused for logins from the box until it
   has fewer, at once and before

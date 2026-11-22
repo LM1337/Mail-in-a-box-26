@@ -12,7 +12,7 @@ info:
 
     Requests without valid administrator credentials get `401 Unauthorized`, or `403 Forbidden` when they are sent with `X-Requested-With: XMLHttpRequest` as the control panel does. Each request with wrong credentials counts as a failed login for fail2ban.
 
-    The Ubuntu 26.04 fork adds the endpoints for the intrusion protection (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`), the notifications (`/system/notifications...`), Dovecot's limit of failed logins from the box itself (`/system/auth-guard...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
+    The Ubuntu 26.04 fork adds the endpoints for the intrusion detection and prevention (`/system/fail2ban...`), Munin's alerts (`/system/munin/alerts...`), the notifications (`/system/notifications...`), Dovecot's limit of failed logins from the box itself (`/system/auth-guard...`) and documents the quota endpoints (`/mail/users/quota`) and the Munin session (`/munin/`). `tests/fork/api-routes.py` checks that this file and the routes of `management/daemon.py` agree.
   contact:
     name: Mail-in-a-Box support
     url: https://mailinabox.email/
@@ -2002,7 +2002,7 @@ paths:
     get:
       tags:
         - System
-      summary: Get the status of the intrusion protection
+      summary: Get the status of the intrusion detection and prevention
       description: |
         Returns the overview of fail2ban (fork: adaptive fail2ban): its jails
         with their counters (`banned_count`: the addresses the jail bans now),
@@ -2169,7 +2169,7 @@ paths:
     get:
       tags:
         - System
-      summary: Get the intrusion protection settings
+      summary: Get the intrusion detection and prevention settings
       description: Returns the settings of the adaptive fail2ban, their defaults and warnings about stored values that were replaced.
       operationId: getFail2banSettings
       x-codeSamples:
@@ -2191,7 +2191,7 @@ paths:
     post:
       tags:
         - System
-      summary: Change the intrusion protection settings
+      summary: Change the intrusion detection and prevention settings
       description: |
         Form fields named like the settings (`adaptive`, `bantime_max`,
         `memory`, `slow_jails`, `slow_web_jails`, `slow_maxretry`,

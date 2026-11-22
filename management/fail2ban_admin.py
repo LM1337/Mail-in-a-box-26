@@ -1708,16 +1708,16 @@ def check_failed_logins(rounded_values, env, output):
 	for w in warnings:
 		output.print_warning(w)
 	if not config_is_current(env, settings):
-		output.print_warning("""The fail2ban configuration does not match the intrusion protection settings.
-			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
+		output.print_warning("""The fail2ban configuration does not match the intrusion detection and prevention settings.
+			Save the settings again in the control panel (System > Intrusion Detection and Prevention) or re-run setup.""")
 	try:
 		import nextcloud_throttle
 		nc_current = nextcloud_throttle.config_is_current(env, settings)
 	except Exception:
 		nc_current = True # Nextcloud not readable now; its own checks report that
 	if not nc_current:
-		output.print_warning("""Nextcloud's brute-force settings do not match the intrusion protection settings.
-			Save the settings again in the control panel (System > Intrusion Protection) or re-run setup.""")
+		output.print_warning("""Nextcloud's brute-force settings do not match the intrusion detection and prevention settings.
+			Save the settings again in the control panel (System > Intrusion Detection and Prevention) or re-run setup.""")
 	# With Nextcloud's protection off, the failures left in its database are
 	# stale but still delay logins for up to 12 hours (a login that was
 	# waiting in the throttle when it was turned off can add one after the
@@ -1754,7 +1754,7 @@ def check_failed_logins(rounded_values, env, output):
 		problems = True
 		if rounded_values:
 			output.print_warning(f"""Some IP addresses kept failing to log in for {report['persistent_min_hours']}
-				hours or more without ever being banned. See System > Intrusion Protection in the control panel.""")
+				hours or more without ever being banned. See System > Intrusion Detection and Prevention in the control panel.""")
 		else:
 			if settings["slow_jails"]:
 				hint = "If this keeps happening, lower the number of failures or lengthen the window of the slow jails."
@@ -1765,7 +1765,7 @@ def check_failed_logins(rounded_values, env, output):
 				count = "At least " + count
 			output.print_warning(f"""{count} IP address(es) kept failing to log in for {report['persistent_min_hours']}
 				hours or more within the last {report['scan_hours']} hours and were not banned once in that time (a slow
-				attack below the ban thresholds). {hint} (System > Intrusion Protection in the control panel)""")
+				attack below the ban thresholds). {hint} (System > Intrusion Detection and Prevention in the control panel)""")
 			for p in lurking[:5]:
 				output.print_line(f"{p['ip']}: {p['failures']} failures in {p['hours']} hours")
 	devices = report["banned_devices"]
@@ -1778,7 +1778,7 @@ def check_failed_logins(rounded_values, env, output):
 		else:
 			output.print_warning(f"""{len(devices)} banned IP address(es) failed to log in only as one or two existing
 				accounts. If one of them is a device of your own with an old password (e.g. a phone in the office),
-				unban it and put its network on the allowlist (System > Intrusion Protection in the control panel);
+				unban it and put its network on the allowlist (System > Intrusion Detection and Prevention in the control panel);
 				otherwise its bans get longer each time.""")
 			for d in devices[:5]:
 				output.print_line(f"{d['ip']}: {', '.join(d['accounts'])}, {d['failures']} failures, banned in {', '.join(d['banned_in'])}")

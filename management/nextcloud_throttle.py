@@ -1,6 +1,6 @@
 #!/usr/local/lib/mailinabox/env/bin/python3
 #
-# Nextcloud's brute-force throttle (fork), for System > Intrusion Protection.
+# Nextcloud's brute-force throttle (fork), for System > Intrusion Detection and Prevention.
 #
 # Nextcloud counts each failed login in its table bruteforce_attempts, under
 # the network of the client: an IPv4 address (stored as <address>/32) or the
@@ -31,7 +31,7 @@
 # www-data, which also works with the protection off or for an address on
 # the bypass list, where occ does nothing), and applies the settings
 # nc_protection, nc_max_attempts and nc_allowlist that fail2ban_admin.py
-# stores with the other intrusion protection settings: the first two are
+# stores with the other intrusion detection and prevention settings: the first two are
 # system settings in config.php (tools/nextcloud-bruteforce-config.php), the
 # last puts the allowlist on the bypass list. Turning the protection off also
 # deletes the failures counted so far. The entries this module adds to the
@@ -580,7 +580,7 @@ if __name__ == "__main__":
 			settings, _ = fail2ban_admin.get_settings(env)
 			settings, imported = import_hand_set(env, settings)
 			if imported:
-				print("Nextcloud: took over " + ", ".join(imported) + " from config.php into the intrusion protection settings (System > Intrusion Protection).")
+				print("Nextcloud: took over " + ", ".join(imported) + " from config.php into the intrusion detection and prevention settings (System > Intrusion Detection and Prevention).")
 			r = apply_settings(env, settings)
 		except Exception as e:
 			print("Nextcloud's brute-force settings were not applied:", e)

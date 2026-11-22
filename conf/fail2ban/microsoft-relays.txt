@@ -1,6 +1,6 @@
 # The servers through which Outlook for iOS and Android syncs Exchange
 # ActiveSync accounts (Microsoft's published IP ranges), for the hint of
-# System > Intrusion Protection at a banned address (management/cloud_relays.py).
+# System > Intrusion Detection and Prevention at a banned address (management/cloud_relays.py).
 # Made by tools/update-microsoft-relays.py; do not edit by hand: a file whose
 # networks do not match networks-sha256 is not used.
 #

@@ -26,7 +26,7 @@ Main differences from upstream v78 (Ubuntu 22.04):
 * fail2ban: repeat offenders get longer bans, slow jails catch slow attacks,
   an allowlist for own networks, a report of password spraying, the reason
   of each ban, and Nextcloud's own login throttle in the control panel (see
-  "Intrusion protection" below).
+  "Intrusion detection and prevention" below).
 
 Diese Abspaltung (Fork) von Mail-in-a-Box läuft auf Ubuntu 26.04 LTS. Die
 Unterschiede zu upstream v78 stehen oben und in CHANGELOG-fork.md, die behobenen Fehler einzeln in BUGS-fork.md.
@@ -303,7 +303,7 @@ Right after the update:
   `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
   Otherwise a single phone with an old password can get the whole office
   banned from the mail ports, for longer each time (up to a week). See
-  [Intrusion protection](#intrusion-protection-adaptive-fail2ban--schutz-vor-anmeldeangriffen).
+  [Intrusion detection and prevention](#intrusion-protection-adaptive-fail2ban--schutz-vor-anmeldeangriffen).
 * **The nightly job moves.** Setup picks a new random minute between 01:00
   and 01:59 (system time) for the nightly backup and status checks on every
   run, as upstream does (`/etc/cron.d/mailinabox-nightly`). Check the time
@@ -542,7 +542,7 @@ Gleich nach dem Update:
   Freigabeliste (allowlist), wenn die Box noch keine hatte (eine unter rc4
   oder später gespeicherte bleibt); einzuschalten ist nichts. Die Netze, aus denen
   die Benutzer arbeiten (Büro, VPN), sofort freigeben, unter System >
-  Intrusion Protection oder mit
+  Intrusion Detection and Prevention oder mit
   `sudo /root/mailinabox/management/fail2ban_admin.py --allow 192.0.2.0/24`.
   Sonst kann ein einziges Telefon mit altem Passwort das ganze Büro von den
   Mail-Ports aussperren, jedes Mal länger (bis zu einer Woche). Siehe
@@ -878,7 +878,7 @@ fixed)" lists a few more.
   in one window, as the passwords are checked in parallel, but then counts
   against the next windows too, so over time no more than 30 per window;
   the lock then lasts up to 4 windows, 2 hours, and the number of windows
-  can be set from 1 to 4 under System > Intrusion Protection). Such a process can still raise Dovecot's penalty of
+  can be set from 1 to 4 under System > Intrusion Detection and Prevention). Such a process can still raise Dovecot's penalty of
   127.0.0.1 with a login whose authorization name differs from its login
   name (it fails before these checks) and so slow down the others. The
   other side: someone who tries the passwords of one account through
@@ -886,13 +886,13 @@ fixed)" lists a few more.
   does not ban (fewer than 20 failures within 30 to 120 s each) locks that
   account's phones, webmail and Nextcloud out while they keep trying. The
   box mails each new lock to the report recipient (System > Notifications,
-  at most one mail an hour); System > Intrusion Protection lists the
+  at most one mail an hour); System > Intrusion Detection and Prevention lists the
   counted and refused accounts with a button to end a lock (also `sudo
   management/auth_guard.py --status` and `--unlock ADDRESS`). If Dovecot
   cannot write its counts (`/run/miab-auth-guard`), failed logins from the
   box get Dovecot's delay again. Logins from other addresses keep
   Dovecot's delay. Guesses through Microsoft's servers once they are on the
-  allowlist (System > Intrusion Protection): fail2ban no longer bans them,
+  allowlist (System > Intrusion Detection and Prevention): fail2ban no longer bans them,
   and only this limit per account remains.
 * **Spamhaus checks of a fresh install through some public resolvers
   (B136).** Through some public resolvers (8.8.8.8 in the tests) Spamhaus
@@ -964,7 +964,7 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   dem richtigen Passwort nie.
   Stattdessen zählt Dovecot diese Fehlversuche pro Konto: Ein Konto mit 30
   verschiedenen falschen Passwörtern von der Box innerhalb von 30 Minuten
-  (beide Zahlen lassen sich unter System > Intrusion Protection ändern)
+  (beide Zahlen lassen sich unter System > Intrusion Detection and Prevention ändern)
   wird für Anmeldungen von der Box (ActiveSync, Autodiscover, Webmail,
   Nextcloud sowie IMAP, POP3, ManageSieve oder SMTP-Versand von der Box)
   abgewiesen, bis es weniger hat, auch mit dem richtigen Passwort. Ein
@@ -983,7 +983,7 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   zählt dann aber auch gegen die folgenden Fenster, sodass auf Dauer nicht
   mehr als 30 pro Fenster durchkommen; die Sperre dauert dann bis zu 4
   Fenster, also 2 Stunden, und die Zahl der Fenster lässt sich unter
-  System > Intrusion Protection von 1 bis 4 einstellen). Ein solcher
+  System > Intrusion Detection and Prevention von 1 bis 4 einstellen). Ein solcher
   Prozess kann den Strafzähler von Dovecot für 127.0.0.1 weiterhin mit
   einer Anmeldung erhöhen, deren Autorisierungsname vom Anmeldenamen
   abweicht (sie scheitert vor diesen Prüfungen), und so die anderen
@@ -993,14 +993,14 @@ Die behobenen Fehler stehen in [BUGS-fork.md](BUGS-fork.md); dessen Abschnitt
   Fehlversuche in 30 bis 120 s), sperrt die Handys, das Webmail und
   Nextcloud dieses Kontos aus, solange er weitermacht. Die Box schickt jede
   neue Sperre an den Empfänger der Berichte (System > Notifications,
-  höchstens eine Mail pro Stunde); System > Intrusion Protection listet die
+  höchstens eine Mail pro Stunde); System > Intrusion Detection and Prevention listet die
   gezählten und abgewiesenen Konten mit einem Knopf, der eine Sperre beendet
   (auch `sudo management/auth_guard.py --status` und `--unlock ADRESSE`).
   Kann Dovecot seine Zähler nicht schreiben (`/run/miab-auth-guard`),
   bekommen fehlgeschlagene Anmeldungen von der Box wieder die Verzögerung
   von Dovecot. Anmeldungen von anderen Adressen behalten die Verzögerung
   von Dovecot. Versuche über die Server von Microsoft, sobald sie in der
-  Freigabeliste stehen (System > Intrusion Protection): fail2ban sperrt sie
+  Freigabeliste stehen (System > Intrusion Detection and Prevention): fail2ban sperrt sie
   nicht mehr, und es bleibt nur diese Grenze pro Konto.
 * **Spamhaus-Prüfungen einer Neuinstallation über manche öffentliche
   Resolver (B136).** Über manche öffentliche Resolver (in den Tests
@@ -1559,7 +1559,7 @@ der Box:
 	sudo /root/mailinabox/management/munin_admin.py --test    # eine Testmail
 
 
-Intrusion protection (adaptive fail2ban) / Schutz vor Anmeldeangriffen
+Intrusion detection and prevention (adaptive fail2ban) / Schutz vor Anmeldeangriffen
 ---------------------------------------------------------------------
 
 ### English
@@ -1636,7 +1636,7 @@ the following, on by default:
   account name and a wrong password entered in the app are enough. Repeated,
   such bans lead to recidive's one-week ban of these addresses on all ports.
   If your users sync that way, put those networks on the allowlist.
-  System > Intrusion Protection recognises a banned address of these
+  System > Intrusion Detection and Prevention recognises a banned address of these
   servers by Microsoft's published IP ranges of Exchange Online and of its
   AutoDetect service (shipped in `conf/fail2ban/microsoft-relays.txt`,
   refreshed with `tools/update-microsoft-relays.py` for a release; the box
@@ -1756,7 +1756,7 @@ the old files back if fail2ban rejects it, and reloads fail2ban only if a file
 changed. `--print` shows the files, `--allow 192.0.2.0/24` adds a network,
 `--report` prints the failed-login report.
 
-In the control panel, **System > Intrusion Protection** shows whether
+In the control panel, **System > Intrusion Detection and Prevention** shows whether
 fail2ban runs, the banned addresses (per address: the jails, time left, length
 and start of each ban and why, with the log lines; with a filter), the
 addresses that Nextcloud's own throttle counts (with a "Reset" button, and a
@@ -1881,7 +1881,7 @@ eingeschaltet:
   Ein Kontoname und ein falsches Passwort in der App genügen. Wiederholt
   führen solche Sperren zur einwöchigen recidive-Sperre dieser Adressen auf
   allen Ports. Wenn die Nutzer so synchronisieren, diese Netze in die
-  Freigabeliste setzen. System > Intrusion Protection erkennt eine
+  Freigabeliste setzen. System > Intrusion Detection and Prevention erkennt eine
   gesperrte Adresse dieser Server an Microsofts veröffentlichten
   IP-Bereichen von Exchange Online und seines AutoDetect-Dienstes
   (mitgeliefert in `conf/fail2ban/microsoft-relays.txt`, für ein Release
@@ -1992,7 +1992,7 @@ Dateien wieder her und lädt fail2ban nur neu, wenn sich eine Datei geändert
 hat. `--print` zeigt die Dateien, `--allow 192.0.2.0/24` fügt ein Netz hinzu,
 `--report` gibt den Bericht über Fehlanmeldungen aus.
 
-In der Admin-Oberfläche zeigt **System > Intrusion Protection**, ob fail2ban
+In der Admin-Oberfläche zeigt **System > Intrusion Detection and Prevention**, ob fail2ban
 läuft, die gesperrten Adressen (je Adresse die Jails mit Restdauer, Länge und
 Beginn jeder Sperre und ihrem Grund samt Logzeilen; mit Filter), die Adressen,
 die die eigene Drossel von Nextcloud zählt (mit Knopf „Reset“ und einem

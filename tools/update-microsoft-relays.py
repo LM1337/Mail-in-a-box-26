@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refresh conf/fail2ban/microsoft-relays.txt from Microsoft's published lists.
 
-The control panel (System > Intrusion Protection) recognises a banned
+The control panel (System > Intrusion Detection and Prevention) recognises a banned
 address of the servers through which Outlook for iOS and Android syncs an
 Exchange ActiveSync account (management/cloud_relays.py, B126). Microsoft
 names them for an on-premises ActiveSync endpoint ("Using Basic
@@ -102,7 +102,7 @@ def render(answer, version, retrieved):
 	head = [
 		"# The servers through which Outlook for iOS and Android syncs Exchange",
 		"# ActiveSync accounts (Microsoft's published IP ranges), for the hint of",
-		"# System > Intrusion Protection at a banned address (management/cloud_relays.py).",
+		"# System > Intrusion Detection and Prevention at a banned address (management/cloud_relays.py).",
 		"# Made by tools/update-microsoft-relays.py; do not edit by hand: a file whose",
 		"# networks do not match networks-sha256 is not used.",
 		"#",

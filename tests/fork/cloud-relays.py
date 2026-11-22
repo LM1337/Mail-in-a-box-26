@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks how System > Intrusion Protection recognises Microsoft's servers (B126).
+"""Checks how System > Intrusion Detection and Prevention recognises Microsoft's servers (B126).
 
 No box needed. management/cloud_relays.py tells a banned address of the
 servers through which Outlook for iOS and Android syncs Exchange ActiveSync

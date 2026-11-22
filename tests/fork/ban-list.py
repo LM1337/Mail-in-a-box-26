@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the list of banned addresses of System > Intrusion Protection (B220).
+"""Checks the list of banned addresses of System > Intrusion Detection and Prevention (B220).
 
 No box needed. fail2ban-client is replaced by a stand-in that answers from
 synthetic bans: 10,000 IPv4 addresses and some IPv6 ones in several jails,

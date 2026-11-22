@@ -812,7 +812,7 @@ def privacy_status_set():
 	utils.write_settings(config, env)
 	return "OK"
 
-# Intrusion protection (adaptive fail2ban, see fail2ban_admin.py)
+# Intrusion detection and prevention (adaptive fail2ban, see fail2ban_admin.py)
 
 @app.route('/system/fail2ban', methods=["GET"])
 @authorized_personnel_only
@@ -872,7 +872,7 @@ def fail2ban_settings_set():
 		return (str(e), 400)
 	except Exception as e:
 		return (str(e), 500)
-	app.logger.warning("fail2ban: %s %s the intrusion protection settings", request.user_email, "reset" if reset else "saved")
+	app.logger.warning("fail2ban: %s %s the intrusion detection and prevention settings", request.user_email, "reset" if reset else "saved")
 	result["status"] = "ok"
 	return json_response(result)
 
@@ -907,7 +907,7 @@ def fail2ban_unban_all():
 	return json_response(result)
 
 # Dovecot's limit of failed logins from the box itself (see auth_guard.py):
-# its setting (part of System > Intrusion Protection), the accounts it
+# its setting (part of System > Intrusion Detection and Prevention), the accounts it
 # counts or refuses, and the end of a lock.
 
 @app.route('/system/auth-guard', methods=["GET"])
@@ -997,7 +997,7 @@ def fail2ban_report():
 		return (str(e), 500)
 
 # Nextcloud's brute-force throttle (see nextcloud_throttle.py). Its settings
-# are part of the intrusion protection settings above.
+# are part of the intrusion detection and prevention settings above.
 
 @app.route('/system/nextcloud-throttle', methods=["GET"])
 @authorized_personnel_only

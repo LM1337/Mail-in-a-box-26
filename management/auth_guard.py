@@ -29,7 +29,7 @@
 # counted), which --notify and every change of the users write again.
 #
 # The limit (30 different wrong passwords) and the window (30 minutes) are
-# set in the control panel (System > Intrusion Protection, the API
+# set in the control panel (System > Intrusion Detection and Prevention, the API
 # /system/auth-guard); the Lua code reads them on every login from the box.
 #
 # root does nothing by path in the state directory, which the account dovecot
@@ -107,7 +107,7 @@ def settings(path=GUARD_LUA, settings_file=None):
 	return cfg
 
 
-# The setting of the control panel (System > Intrusion Protection), in
+# The setting of the control panel (System > Intrusion Detection and Prevention), in
 # $STORAGE_ROOT/settings.yaml as "auth_guard" (only values that differ from
 # the defaults): "limit" (different wrong passwords), "window" (minutes) and
 # "span" (windows that a burst counts against, 1 to 4).
@@ -206,7 +206,7 @@ def box_addresses(env, interfaces=None):
 
 def render_settings_file(values, addresses=()):
 	return ("# Mail-in-a-Box: Dovecot's limit of failed logins from the box itself\n"
-		"# (System > Intrusion Protection; management/auth_guard.py). Do not edit.\n"
+		"# (System > Intrusion Detection and Prevention; management/auth_guard.py). Do not edit.\n"
 		f"limit {values['limit']}\nwindow {values['window'] * 60}\nspan {values.get('span', 4)}\n"
 		+ "".join(f"local {a}\n" for a in addresses if ADDRESS_RE.match(a)))
 
@@ -473,7 +473,7 @@ def message(events, accounts, cfg, dropped=0):
 		f"account is refused, its own phones, webmail and Nextcloud are refused too; its mail programs that log in over IMAP "
 		f"or SMTP from outside are not. The lock ends when the account has had fewer than {cfg['LIMIT']} different wrong "
 		f"passwords in the last {minutes} minutes (after a burst of many at once, it lasts up to {cfg.get('SPAN', 4)} times as long).\n\n"
-		f"The current state, the setting and a button to end a lock: the control panel, System > Intrusion Protection\n"
+		f"The current state, the setting and a button to end a lock: the control panel, System > Intrusion Detection and Prevention\n"
 		f"(or sudo management/auth_guard.py --status, and --unlock ADDRESS).\n")
 
 
