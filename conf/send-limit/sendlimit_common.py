@@ -113,8 +113,12 @@ class Limiter:
 	def charge(self, n, rate, per, now=None):
 		# n recipients that went out elsewhere (the milter's direct passes,
 		# for the release service): taken from the bucket in full.
+		# The setting is taken first (a backlog of another setting capped),
+		# so that the next reserve() does not cap this debt away: a new
+		# bucket charged in advance stays in debt (the brake's first period).
 		now = time.monotonic() if now is None else now
 		with self.lock:
+			self._clamp(rate, per, now)
 			self.tat = max(self.tat, now) + n * per / rate
 
 	def _clamp(self, rate, per, now):

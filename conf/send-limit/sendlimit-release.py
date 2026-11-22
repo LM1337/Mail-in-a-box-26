@@ -295,7 +295,12 @@ def main():
 				state["brake"], state["brake_since"] = True, int(now)
 				state["brake_reason"] = " and ".join(common.describe_limit(r, per) for r, per in reasons) or common.describe_limit(v["rate"], v["per"])
 				brake_limiter = common.Limiter()
-				brake_limiter.charge(v["brake_rate"], v["brake_rate"], v["brake_per"]) # the first slow release after brake_per
+				# In debt by one period: the first slow release comes after
+				# about brake_per seconds, also for a mail of more recipients
+				# than brake_rate (which goes when the bucket is not in debt; with
+				# a bucket that was only full, it went out at once: the lab
+				# test saw 60 to 120 recipients out in the brake's first second).
+				brake_limiter.charge(2 * v["brake_rate"], v["brake_rate"], v["brake_per"])
 				log(f"THE BRAKE IS ON: more than {state['brake_reason']}; all outgoing mail is held"
 					+ (" until the administrator ends the brake" if v["stop"] else f" and goes out at {v['brake_rate']} mails in {v['brake_per']} s")
 					+ "; senders: " + ", ".join(sorted({ h["sender"] for h in over }))[:500], 4)

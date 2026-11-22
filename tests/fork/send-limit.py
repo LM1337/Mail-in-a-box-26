@@ -584,5 +584,15 @@ with tempfile.TemporaryDirectory() as d:
 			check("the direct passes are written before the held record", release.take_passed(d), (os.getpid(), 3))
 		release.take_held(d)
 
+# The brake's bucket starts in debt by one period (sendlimit-release.py):
+# nothing goes in the brake's first brake_per seconds, also no big mail.
+B = common.Limiter()
+B.charge(2 * 10, 10, 60, now=0.0)
+check("brake start: a mail of 40 waits", (B.reserve(40, 10, 60, 0, now=0.0), B.reserve(40, 10, 60, 0, now=59.0)), (None, None))
+check("brake start: it goes after one period", B.reserve(40, 10, 60, 0, now=60.0), 0.0)
+B = common.Limiter()
+B.charge(2 * 10, 10, 60, now=0.0)
+check("brake start: the first small mail after about brake_per", [t for t in range(0, 200) if B.reserve(1, 10, 60, 0, now=float(t)) is not None][:2], [66, 72])
+
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

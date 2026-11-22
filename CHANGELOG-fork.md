@@ -56,6 +56,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   --status`, `--release`, `--delete`, `--end`. While the brake is on,
   held mail goes out at the brake's rate on average; as a token bucket it
   may let up to that many go at once, so a minute can see a few more.
+  Nothing is released in the brake's first period (`brake_per`), also no
+  mail with more recipients than `brake_rate` (the first version let such
+  mail out at once: 60 to 120 recipients in the first second in the lab).
   The box's own mail to administrator@ and to the report recipient is
   never held. The release service releases only mail that is in the hold
   queue and had arrived when the milter held it (up to 5 days before, as
