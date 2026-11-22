@@ -96,9 +96,9 @@ POSTFIX = {
 # it, otherwise held mail goes out at brake_rate per brake_per seconds and
 # the brake ends by itself after "calm" minutes without held mail.
 # long_rate/long_per: the long limit (a steady flood below the short one,
-# by default 500 mails an hour), which can be turned off (long_enabled).
+# by default 1000 mails an hour), which can be turned off (long_enabled).
 DEFAULTS = { "enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30,
-	"long_enabled": True, "long_rate": 500, "long_per": 3600 }
+	"long_enabled": True, "long_rate": 1000, "long_per": 3600 }
 RANGES = { "rate": [1, 100000], "per": [1, 3600], "brake_rate": [1, 100000], "brake_per": [1, 86400], "calm": [1, 1440],
 	"long_rate": [1, 100000], "long_per": [60, 604800] }
 NUMBERS = ("rate", "per", "brake_rate", "brake_per", "calm", "long_rate", "long_per")

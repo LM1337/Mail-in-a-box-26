@@ -4412,7 +4412,7 @@ def api_shape(ctx, path, r):
         _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("enabled"), bool) and all(isinstance(j[k].get(x), int) for x in ("rate", "per"))
                   for k in ("settings", "defaults", "applied")), "send-limit: settings missing")
         _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30,
-                                "long_enabled": True, "long_rate": 500, "long_per": 3600}, "send-limit: defaults %s" % j["defaults"])
+                                "long_enabled": True, "long_rate": 1000, "long_per": 3600}, "send-limit: defaults %s" % j["defaults"])
         _need(isinstance(j.get("brake"), dict) and j["brake"].get("on") is False, "send-limit: the brake is on (%s)" % j.get("brake"))
         _need(isinstance(j.get("events"), list) and isinstance(j.get("day"), dict) and isinstance(j.get("more"), int)
               and isinstance(j.get("warnings"), list), "send-limit: keys missing")

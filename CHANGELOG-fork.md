@@ -101,7 +101,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   so the next mail within the following seconds sets off the brake; a box
   whose users send to many recipients at once should raise the limit.
   A second, long limit stops a steady flood below the first one: by
-  default at most 500 mails (recipients) an hour, set and turned off on the
+  default at most 1000 mails (recipients) an hour, set and turned off on the
   same page (`long_enabled`, `long_rate`, `long_per`); a mail must fit both,
   and more than either sets off the same brake, whose mail and log line say
   which limit it was. In the lab test of the first version, floods of 1000

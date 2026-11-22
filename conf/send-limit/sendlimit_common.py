@@ -34,10 +34,10 @@ FLAG_FRESH = 15 # seconds: an older flag means sendlimit-release.py does not run
 # brake_per seconds, and the brake ends by itself once nothing is held and
 # no mail was held for "calm" minutes.
 # rate/per: the short limit (a flood within seconds); long_rate/long_per: the
-# long one (a steady flood below the short limit, by default 500 mails an
+# long one (a steady flood below the short limit, by default 1000 mails an
 # hour), which can be turned off (long_enabled). Mail must fit both.
 DEFAULTS = { "enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30,
-	"long_enabled": 1, "long_rate": 500, "long_per": 3600 }
+	"long_enabled": 1, "long_rate": 1000, "long_per": 3600 }
 LIMITS = { "enabled": (0, 1), "rate": (1, 100000), "per": (1, 86400), "stop": (0, 1), "brake_rate": (1, 100000),
 	"brake_per": (1, 86400), "calm": (1, 1440), "long_enabled": (0, 1), "long_rate": (1, 100000), "long_per": (60, 604800) }
 

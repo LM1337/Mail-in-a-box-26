@@ -313,9 +313,9 @@ milter.settings = common.Settings()
 # The milter's settings file.
 with tempfile.TemporaryDirectory() as d:
 	SET = os.path.join(d, "settings")
-	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 500, "long_per": 3600})
+	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 1000, "long_per": 3600})
 	open(SET, "w").write("# c\nenabled 0\nrate 0\nper 999999\nbogus 4\nrate x\nlong_per 5\n")
-	check("file: clamped, broken ignored", common.Settings.read(SET), dict({"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 500, "long_per": 3600}, enabled=0, rate=1, per=86400, long_per=60))
+	check("file: clamped, broken ignored", common.Settings.read(SET), dict({"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 1000, "long_per": 3600}, enabled=0, rate=1, per=86400, long_per=60))
 	vals = dict(sl.DEFAULTS, rate=120, per=60, stop=True, brake_rate=5, brake_per=600, calm=90, long_enabled=False, long_rate=50, long_per=86400)
 	open(SET, "w").write(sl.render_settings_file(vals, "Admin@Example.org"))
 	check("written by send_limit.py", common.Settings.read(SET), {"enabled": 1, "rate": 120, "per": 60, "stop": 1, "brake_rate": 5, "brake_per": 600, "calm": 90, "long_enabled": 0, "long_rate": 50, "long_per": 86400, "report": "admin@example.org"})
