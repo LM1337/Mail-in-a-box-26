@@ -189,8 +189,10 @@ end
 -- failure is recorded, so it can record more than LIMIT; such a burst then
 -- counts against the following windows too: a name is refused while the
 -- different wrong passwords of the last k windows reach k times LIMIT, for
--- k = 1 to SPAN. So over time no more than LIMIT per window get through,
--- for bursts up to SPAN times LIMIT; a lock after a normal attack (it stops
+-- k = 1 to SPAN. So over time only a little more than LIMIT per window
+-- gets through: a burst that fills fewer than SPAN windows can be repeated
+-- as soon as it leaves them (bursts of 100 at a LIMIT of 30: 100 every 3
+-- windows, 33 a window); a lock after a normal attack (it stops
 -- at LIMIT) still ends one window after it. Only wrong passwords count, a
 -- right one never.
 

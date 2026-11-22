@@ -521,7 +521,7 @@ function ag_render() {
   $('#ag-help').text("Defaults: " + r.defaults.limit + " different wrong passwords within " + r.defaults.window
     + " minutes, " + r.defaults.span + " windows. Allowed: " + r.ranges.limit[0] + " to " + r.ranges.limit[1] + ", within " + r.ranges.window[0] + " to " + r.ranges.window[1]
     + " minutes, " + r.ranges.span[0] + " to " + r.ranges.span[1] + " windows. A lower number stops guessing sooner; it also lets someone who tries an account's passwords through these services lock that account out sooner."
-    + " Windows: many guesses at the same moment are checked in parallel and can get more than the limit through in one window; they then count against the next windows as well, so that over time no more than the limit per window get through."
+    + " Windows: many guesses at the same moment are checked in parallel and can get more than the limit through in one window; they then count against the next windows as well, so that over time only a little more than the limit per window gets through."
     + " After a normal attack a lock ends one window after it; after such a burst it can last up to that many windows (1 = never longer than one window, but bursts then get more through). The change applies at once.");
   var w = $('#ag-warnings').html("");
   r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });

@@ -523,7 +523,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   first failure is recorded, as the passwords are checked in parallel;
   such a burst then counts against the next windows as well (refused
   while the last k windows hold k times the limit, k = 1 to 4), so over
-  time no more than the limit per window get through. A lock after a
+  time only a little more than the limit per window gets through: a
+  burst that fills fewer than 4 windows can be repeated as soon as it
+  leaves them (in the lab, bursts of 100 every 30 seconds with a window
+  of 1 minute got 33 guesses a minute checked, not 30). A lock after a
   normal attack ends one window after it; after a burst it can last up to
   4 windows (2 hours by default). The number of windows can be set from 1
   to 4 as well (1: a lock never lasts longer than one window, but bursts
@@ -537,7 +540,9 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   account's phones, webmail and Nextcloud out while they keep trying.
   New locks are mailed to the report recipient (System > Notifications),
   at most one mail an hour (`management/auth_guard.py`, every 10
-  minutes); `sudo management/auth_guard.py --status` shows the counts and
+  minutes; the cron job does nothing when the program is missing, so a
+  downgrade to v78-r2604.4 does not mail an error every 10 minutes);
+  `sudo management/auth_guard.py --status` shows the counts and
   `--unlock ADDRESS` ends a lock as well. Dovecot reads the setting on
   every login from the box, so a change applies at once. If Dovecot cannot write its counts in
   `/run/miab-auth-guard`, failed logins from the box get Dovecot's delay
