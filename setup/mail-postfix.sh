@@ -102,8 +102,10 @@ tools/editconf.py /etc/postfix/main.cf \
 # writes the settings file, which both read again when it changes); the cron
 # job of setup/management.sh mails the minutes in which mail waited or was
 # held to the administrator. The milter runs as a dynamic user, its state in
-# /var/lib/miab-sendlimit; Postfix passes mail on when it does not answer
-# (milter_default_action=accept, dkim.sh). Both are started before the milter
+# /var/lib/miab-sendlimit; when it does not answer, Postfix refuses the mail
+# with a temporary error instead of passing it on without a limit
+# (default_action tempfail for this milter only, dkim.sh). Both are started
+# before the milter
 # is added to Postfix, and restarted only when their program, unit or
 # package changed.
 install -d -m 0755 -o root -g root /usr/local/lib/mailinabox/miab-sendlimit
@@ -123,7 +125,10 @@ restart_on_change miab-sendlimit-release "" /usr/local/lib/mailinabox/miab-sendl
 #   so we need to explicitly enable it here.
 # * Do not add the OpenDMAC Authentication-Results header. That should only be added
 #   on incoming mail. Omit the OpenDMARC milter by re-setting smtpd_milters to the
-#   OpenDKIM milter and the sending limit (above) only. See dkim.sh.
+#   OpenDKIM milter and the sending limit (above) only ($sendlimit_submission_milters,
+#   the sending limit with default_action tempfail, so that it fails closed), and
+#   smtpd_milter_maps (port 25's milters for mail from the box itself) to none.
+#   See dkim.sh.
 # * Even though we dont allow auth over non-TLS connections (smtpd_tls_auth_only below, and without auth the client cant
 #   send outbound mail), don't allow non-TLS mail submission on this port anyway to prevent accidental misconfiguration.
 #   Setting smtpd_tls_security_level=encrypt also triggers the use of the 'mandatory' settings below (but this is ignored with smtpd_tls_wrappermode=yes.)
@@ -132,17 +137,21 @@ restart_on_change miab-sendlimit-release "" /usr/local/lib/mailinabox/miab-sendl
 #   that filters out privacy-sensitive headers on mail being sent out by
 #   authenticated users.  By default Postfix also applies this to attached
 #   emails but we turn this off by setting nested_header_checks empty.
+tools/editconf.py /etc/postfix/main.cf \
+	"sendlimit_submission_milters=inet:127.0.0.1:8891 { inet:127.0.0.1:8895, default_action=tempfail }"
 tools/editconf.py /etc/postfix/master.cf -s -w \
 	"smtps=inet n       -       -       -       -       smtpd
 	  -o smtpd_tls_wrappermode=yes
 	  -o smtpd_sasl_auth_enable=yes
 	  -o syslog_name=postfix/submission
-	  -o smtpd_milters=inet:127.0.0.1:8891,inet:127.0.0.1:8895
+	  -o smtpd_milters=\$sendlimit_submission_milters
+	  -o smtpd_milter_maps=
 	  -o cleanup_service_name=authclean" \
 	"submission=inet n       -       -       -       -       smtpd
 	  -o smtpd_sasl_auth_enable=yes
 	  -o syslog_name=postfix/submission
-	  -o smtpd_milters=inet:127.0.0.1:8891,inet:127.0.0.1:8895
+	  -o smtpd_milters=\$sendlimit_submission_milters
+	  -o smtpd_milter_maps=
 	  -o smtpd_tls_security_level=encrypt
 	  -o cleanup_service_name=authclean" \
 	"authclean=unix  n       -       -       -       0       cleanup

@@ -2,6 +2,9 @@
 Description=Mail-in-a-Box sending limit: releases held mail at the limit (conf/send-limit/sendlimit-release.py)
 After=postfix.service miab-sendlimit.service
 
+# Never give up restarting: without the milter Postfix refuses outgoing mail.
+StartLimitIntervalSec=0
+
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 -I /usr/local/lib/mailinabox/miab-sendlimit/sendlimit-release.py

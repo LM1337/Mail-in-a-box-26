@@ -112,12 +112,27 @@ tools/editconf.py /etc/opendkim.conf -s \
 # (see mail-postfix.sh).
 #
 # The sending limit of the box (inet:127.0.0.1:8895, see mail-postfix.sh) comes
-# last: on port 25 it counts only mail from the box itself (127.0.0.0/8, ::1,
-# which mynetworks lets relay), through sendmail (non_smtpd_milters) all mail;
-# the submission ports list it in master.cf.
+# last, and it fails closed: when it does not answer (stopped, crashed, hung),
+# Postfix refuses the mail with a temporary error ("451 4.7.1"; default_action
+# tempfail for this milter only) instead of letting it out without a limit.
+# The sender sends it again; sendmail's mail waits in the maildrop queue until
+# the milter is back (systemd restarts it within seconds). OpenDKIM and
+# OpenDMARC keep milter_default_action=accept. On port 25 it is asked only for
+# mail from the box itself (127.0.0.0/8, ::1, which mynetworks lets relay),
+# through smtpd_milter_maps, so that mail from other servers never depends on
+# it; through sendmail (non_smtpd_milters) for all mail; the submission ports
+# list it in master.cf ($sendlimit_submission_milters of mail-postfix.sh).
+sendlimit_milter="{ inet:127.0.0.1:8895, default_action=tempfail }"
+tools/write_conf.py /etc/postfix/sendlimit-milters.cidr << EOF;
+# Mail-in-a-Box (setup/dkim.sh): the milters of mail from the box itself on port 25.
+127.0.0.0/8	inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter
+::ffff:127.0.0.0/104	inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter
+::1/128	inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter
+EOF
 tools/editconf.py /etc/postfix/main.cf \
-	"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893 inet:127.0.0.1:8895"\
-	non_smtpd_milters=\$smtpd_milters \
+	"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893" \
+	smtpd_milter_maps=cidr:/etc/postfix/sendlimit-milters.cidr \
+	"non_smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter" \
 	milter_default_action=accept
 
 # We need to explicitly enable the opendmarc service, or it will not start

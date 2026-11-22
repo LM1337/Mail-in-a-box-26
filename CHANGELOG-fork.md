@@ -40,7 +40,20 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   --status`, `--release`, `--delete`, `--end`. The box's own mail to
   administrator@ and to the report recipient is never held. Mail from
   other servers is not counted. The milter runs as a dynamic user without
-  privileges; Postfix passes mail on when it does not answer, and without
+  privileges, and it fails closed: when it does not answer (stopped,
+  crashed or hung), Postfix refuses outgoing mail with a temporary error
+  (`451 4.7.1`; `default_action=tempfail` for this milter only, OpenDKIM
+  and OpenDMARC keep `accept`) instead of letting it out without a limit;
+  mail programs send it again, sendmail's mail waits in Postfix's maildrop
+  queue until the milter is back, and systemd restarts it after 2 seconds
+  without ever giving up. Mail from other servers does not depend on it:
+  on port 25 Postfix asks it only for mail from the box itself
+  (`smtpd_milter_maps`, `/etc/postfix/sendlimit-milters.cidr`). The status
+  checks show the service; while it is down, their mails wait as well. A
+  downgrade to v78-r2604.4 keeps `smtpd_milter_maps` and the two services,
+  so mail from the box itself on port 25 still passes the limit (or, with the
+  services removed, is refused: remove the setting with `postconf -X
+  smtpd_milter_maps`). Without
   the release service nothing is held (a mail then waits at most 20
   seconds, sendmail 60, and is deferred with `451 4.7.1`; the minutes then
   count each new try of such a mail as deferred again). Limits: the

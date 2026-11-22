@@ -31,8 +31,10 @@
 # events file in the state directory, which management/send_limit.py
 # --notify mails to the administrator. Setup writes the settings file
 # (management/send_limit.py --apply) from settings.yaml (System > Intrusion
-# Detection and Prevention); it is read again when it changes. Postfix passes
-# mail on when this milter does not answer (milter_default_action=accept).
+# Detection and Prevention); it is read again when it changes. When this
+# milter does not answer, Postfix refuses the mail with a temporary error
+# (default_action tempfail for this milter only, setup/dkim.sh): it fails
+# closed, so a crash never lets mail out without the limit.
 #
 # It runs as a dynamic user without privileges (conf/miab-sendlimit.service).
 
