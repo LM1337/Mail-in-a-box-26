@@ -59,6 +59,10 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Nothing is released in the brake's first period (`brake_per`), also no
   mail with more recipients than `brake_rate` (the first version let such
   mail out at once: 60 to 120 recipients in the first second in the lab).
+  A changed limit keeps counting the mails that went out, up to the new
+  limit (a first version treated the bucket as full after a change: with
+  30 a second restored after a test with 1 an hour, the next mail set off
+  the brake).
   The box's own mail to administrator@ and to the report recipient is
   never held. The release service releases only mail that is in the hold
   queue and had arrived when the milter held it (up to 5 days before, as

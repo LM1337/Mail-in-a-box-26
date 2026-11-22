@@ -4931,6 +4931,14 @@ def c_send_limit(ctx):
     time.sleep(2)
     third = send(3)
     _need(third == "ok", "a mail after the setting was restored: %s" % third)
+    # Accepted is not enough (held mail is accepted too): it must not be
+    # held, and the brake must stay off.
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        st = admin_api(ctx, "GET", "system/send-limit").json()
+        _need(not held_of_alice(), "the mail after the setting was restored was put on hold")
+        _need(not st["brake"]["on"], "the mail after the setting was restored set off the brake")
+        time.sleep(2)
     now = admin_api(ctx, "GET", "system/send-limit").json()["settings"]
     _need(now == before, "setting not restored: %s, before %s" % (now, before))
     return "; ".join(steps) + "; setting restored, the next mail goes out"

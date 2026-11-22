@@ -120,6 +120,23 @@ L = common.Limiter()
 for _ in range(30 + 30 * 50):
 	L.reserve(1, 30, 1, 60, now=0.0)
 check("lower rate: the backlog is capped at once", L.reserve(1, 5, 1, 60, now=0.0) is not None, True)
+L = common.Limiter()
+check("1 per hour, then 30 a second: first goes", L.reserve(1, 1, 3600, 0, now=0.0), 0.0)
+check("1 per hour: second held", L.reserve(1, 1, 3600, 0, now=1.0), None)
+check("30 a second restored: the next mail goes at once (the mail counted, not a full bucket)",
+	L.reserve(1, 30, 1, 0, now=3.0), 0.0)
+check("and 28 more in the same second", [L.reserve(1, 30, 1, 0, now=3.0) for _ in range(28)], [0.0] * 28)
+check("the 31st in that second does not fit", L.reserve(1, 30, 1, 0, now=3.0), None)
+L = common.Limiter()
+for _ in range(600):
+	L.reserve(1, 1000, 3600, 0, now=0.0)
+check("long limit lowered below what went out: full at once", L.reserve(1, 500, 3600, 0, now=10.0), None)
+check("long limit raised: what went out still counts", L.reserve(1, 2000, 3600, 0, now=20.0), 0.0)
+L = common.Limiter()
+for _ in range(800):
+	L.reserve(1, 1000, 3600, 0, now=0.0)
+check("longer period: the 800 mails still count, 200 more fit", [L.reserve(1, 1000, 7200, 0, now=0.0) for _ in range(200)], [0.0] * 200)
+check("longer period: the 1001st does not", L.reserve(1, 1000, 7200, 0, now=0.0), None)
 
 # Which mail counts: SMTP with a login, sendmail (port 0) and SMTP from the
 # box itself (loopback); mail from other servers passes uncounted.

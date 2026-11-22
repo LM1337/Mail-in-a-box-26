@@ -122,10 +122,19 @@ class Limiter:
 			self.tat = max(self.tat, now) + n * per / rate
 
 	def _clamp(self, rate, per, now):
-		# A changed setting: the backlog is capped at once (under the lock).
+		# A changed setting (under the lock): the bucket keeps the mails it
+		# counts, at most a full bucket of the new setting (a backlog or debt
+		# is capped at once). The first version capped the time instead, and
+		# that left the bucket full: after 1 mail an hour was set and 30 a
+		# second restored, the next mail was held and set off the brake (found
+		# in the lab test).
 		if self.params != (rate, per):
+			if self.params is not None and self.tat > now:
+				used = (self.tat - now) * self.params[0] / self.params[1]
+				self.tat = now + min(used, rate) * per / rate
+			else:
+				self.tat = min(self.tat, now + per)
 			self.params = (rate, per)
-			self.tat = min(self.tat, now + per)
 
 	def _plan(self, n, rate, per, now):
 		# (seconds to wait, the bucket after this mail), changing nothing
