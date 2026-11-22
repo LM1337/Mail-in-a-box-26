@@ -78,6 +78,14 @@ class Limiter:
 	# RATE per PER seconds. A mail of n recipients takes n; reserve() says how
 	# long it has to wait for them. Each mail reserves its time under the lock,
 	# so waiting mails go out in the order they came.
+	#
+	# A mail with more recipients than the bucket holds would never fit: it
+	# goes as soon as the bucket is not in debt from an earlier such mail, and
+	# the debt it leaves is capped at MAX_DEBT seconds, so that it neither
+	# waits for ever behind a trickle of other mail nor holds back all mail
+	# for hours afterwards.
+	MAX_DEBT = 60
+
 	def __init__(self):
 		self.lock = threading.Lock()
 		self.tat = 0.0
@@ -93,16 +101,20 @@ class Limiter:
 				self.params = (rate, per)
 				self.tat = min(self.tat, now + rate * interval)
 			tat = max(self.tat, now)
-			wait = tat + n * interval - rate * interval - now
+			full = now + rate * interval # the bucket is empty, not in debt, while tat <= full
+			if n > rate:
+				# It goes when the debt is paid (at once if there is none),
+				# and leaves at most MAX_DEBT seconds of debt.
+				wait = max(0.0, tat - full)
+				if wait > max_wait:
+					return None
+				self.tat = min(tat + n * interval, max(tat, full) + self.MAX_DEBT)
+				return wait
+			wait = tat + n * interval - full
 			if wait <= 0:
 				self.tat = tat + n * interval
 				return 0.0
 			if wait > max_wait:
-				if tat <= now:
-					# More recipients than fit in max_wait, and nothing else
-					# waits: it goes now and the next mails wait for it.
-					self.tat = tat + n * interval
-					return 0.0
 				return None
 			self.tat = tat + n * interval
 			return wait

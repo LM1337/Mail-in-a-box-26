@@ -48,7 +48,9 @@ EVENTS = os.path.join(STATE_DIR, "events")
 HELD = os.path.join(STATE_DIR, "held")
 SOCKET = "inet:8895@127.0.0.1"
 SHORT_WAIT = 2 # seconds a mail waits before it is put on hold
-MAX_WAIT = 60 # seconds a mail waits at most without sendlimit-release.py (Postfix waits 300 s for a milter)
+MAX_WAIT = 20 # seconds an SMTP mail waits at most without the release service: mail programs and
+	# webmail give up after about 60 s, and a mail that Postfix accepts after they gave up is sent twice
+MAX_WAIT_LOCAL = 60 # through sendmail nobody waits for the answer (Postfix waits 300 s for a milter)
 MAX_STATE_FILE = 4 * 1024 * 1024 # bytes; send_limit.py and sendlimit-release.py empty them
 TOP_SENDERS = 10
 log = common.log
@@ -190,9 +192,9 @@ class SendLimit(Milter.Base):
 					flag.held()
 					stats.add(who, n, "held")
 					return Milter.ACCEPT
-				wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT)
+				wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT_LOCAL if self.local else MAX_WAIT)
 		else:
-			wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT)
+			wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT_LOCAL if self.local else MAX_WAIT)
 		if wait is None:
 			stats.add(who, n, "deferred")
 			self.setreply("451", "4.7.1", "The box sends too much mail at the moment, try again later")

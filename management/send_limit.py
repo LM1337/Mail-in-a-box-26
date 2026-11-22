@@ -333,13 +333,20 @@ def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE):
 			state["pending"].append(e)
 		else:
 			state["dropped"] += 1
+	# Saved before the mail is sent: the events file is already taken, and a
+	# failed send (the mail server busy, for example) keeps them pending.
+	if events:
+		save_state(state, state_path)
 	sent = False
 	if state["pending"] and now - state["last_sent"] >= NOTIFY_INTERVAL:
-		send(message(state["pending"], state["dropped"], read_held()))
+		try:
+			send(message(state["pending"], state["dropped"], read_held()))
+		except Exception as e:
+			print(f"send_limit.py: the mail to the administrator could not be sent, it is tried again next time: {e}", file=sys.stderr)
+			return False
 		state.update({ "last_sent": now, "pending": [], "dropped": 0 })
-		sent = True
-	if events or sent:
 		save_state(state, state_path)
+		sent = True
 	return sent
 
 

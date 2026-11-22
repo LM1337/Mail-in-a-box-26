@@ -97,6 +97,14 @@ check("mail of 5000 recipients, nothing waits: goes out", L.reserve(5000, 30, 1,
 check("the next is deferred (would wait ~166 s)", L.reserve(1, 30, 1, 60, now=10.0), None)
 check("after the bucket refilled it goes", L.reserve(1, 30, 1, 60, now=10.0 + 5000 / 30), 0.0)
 L = common.Limiter()
+L.reserve(5000, 30, 1, 60, now=10.0)
+check("its debt is capped: a small mail 40 s later waits about 20 s", round(L.reserve(1, 30, 1, 60, now=50.0), 1), 20.0)
+L = common.Limiter()
+for i in range(100): # a trickle of other mail at 500 an hour: one every 30 s
+	L.reserve(1, 500, 3600, 60, now=i * 30.0)
+check("a big mail behind a trickle goes at once (no starvation)", L.reserve(600, 500, 3600, 60, now=3000.0), 0.0)
+check("and holds back the next mail by at most MAX_DEBT", L.reserve(1, 500, 3600, 120, now=3000.0) <= 60 + 3600 / 500, True)
+L = common.Limiter()
 check("1 per hour: first goes", L.reserve(1, 1, 3600, 60, now=0.0), 0.0)
 check("1 per hour: second deferred", L.reserve(1, 1, 3600, 60, now=1.0), None)
 check("1 per hour: after an hour", L.reserve(1, 1, 3600, 60, now=3600.0), 0.0)
@@ -339,6 +347,15 @@ with tempfile.TemporaryDirectory() as d:
 	check("two mails", len(mails), 2)
 	check("second mail lists both minutes", mails[1].count("mails put on hold"), 2)
 	check("mail names the sender and how to delete", "alice@example.com" in mails[0] and "--delete" in mails[0], True)
+	st2 = os.path.join(d, "state2.json")
+
+	def failing(text):
+		raise RuntimeError("451 4.7.1")
+	import io, contextlib
+	with contextlib.redirect_stderr(io.StringIO()):
+		check("failed send: not sent", sl.notify(now=T + 9000, take=lambda: [ev(T + 8990)], send=failing, state_path=st2), False)
+	check("failed send: the minute stays pending", len(sl.load_state(st2)["pending"]), 1)
+	check("next run sends it", sl.notify(now=T + 9100, take=lambda: [], send=mails.append, state_path=st2), True)
 	check("mail lists the held mail", "On hold now: 3 mails" in sl.message([ev(T)], 0, heldjson), True)
 	sl.get_settings = lambda env: ({"enabled": True, "rate": 30, "per": 1}, [])
 	res = sl.status({}, now=T + 5000, take=lambda: [ev(T + 1995), ev(T + 4990, 7)], state_path=state, running=True,
