@@ -42,7 +42,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   other servers is not counted. The milter runs as a dynamic user without
   privileges; Postfix passes mail on when it does not answer, and without
   the release service nothing is held (a mail then waits at most 20
-  seconds, sendmail 60, and is deferred with `451 4.7.1`). Before, an
+  seconds, sendmail 60, and is deferred with `451 4.7.1`; the minutes then
+  count each new try of such a mail as deferred again). Limits: the
+  recipients are counted as the sender gave them, before Postfix expands
+  aliases, so a mail to an alias that forwards to many addresses counts
+  once (only administrators add aliases), and mail from other servers that
+  aliases forward on is not counted either. A single mail to more than 30
+  recipients sets off the brake as well; a box whose users send to many
+  recipients at once should raise the limit. Before, an
   account that was taken over or a program on the box could send any
   amount of mail in the box's name before anyone noticed, and ruin the
   reputation of its address with other mail providers. New offline test
