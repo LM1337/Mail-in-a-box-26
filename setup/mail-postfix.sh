@@ -42,7 +42,7 @@ source /etc/mailinabox.conf # load global vars
 # * `ca-certificates`: A trust store used to squelch postfix warnings about
 #   untrusted opportunistically-encrypted connections.
 echo "Installing Postfix (SMTP server)..."
-apt_install postfix postfix-sqlite postfix-pcre postgrey ca-certificates
+apt_install postfix postfix-sqlite postfix-pcre postgrey ca-certificates python3-milter
 
 # The listen settings as they were before this run: Postfix needs a restart
 # (not a reload) only when they change, see the end of this file.
@@ -87,13 +87,33 @@ tools/editconf.py /etc/postfix/main.cf \
 
 # ### Outgoing Mail
 
+# The sending limit of the box (fork, B221): the milter conf/send-limit/milter.py
+# (package python3-milter, universe) lets at most a number of mails within a
+# number of seconds go out (default 30 in 1 s, each recipient counts as one),
+# of all mail sent through the submission ports 465/587 (mail programs,
+# Roundcube) and through sendmail (Z-Push, Nextcloud, Sieve redirects, cron);
+# more wait, at most 60 s, and are then deferred (4.7.1) to be sent again
+# later. Mail from port 25 does not pass it. The limit is set in System >
+# Intrusion Detection and Prevention (management/send_limit.py writes the
+# settings file, which the milter reads again when it changes); the cron job
+# of setup/management.sh mails the minutes in which mail had to wait to the
+# administrator. It runs as a dynamic user, its state in
+# /var/lib/miab-sendlimit; Postfix passes mail on when it does not answer
+# (milter_default_action=accept, dkim.sh). Started before the milter is added
+# to Postfix, and restarted only when its program, unit or package changed.
+install -d -m 0755 -o root -g root /usr/local/lib/mailinabox/miab-sendlimit
+install -m 0755 -o root -g root conf/send-limit/milter.py /usr/local/lib/mailinabox/miab-sendlimit/milter.py
+install_unit miab-sendlimit.service
+restart_on_change miab-sendlimit "python3-milter libmilter1.0.1" /usr/local/lib/mailinabox/miab-sendlimit/milter.py \
+	/lib/systemd/system/miab-sendlimit.service
+
 # Enable the 'submission' ports 465 and 587 and tweak their settings.
 #
 # * Enable authentication. It's disabled globally so that it is disabled on port 25,
 #   so we need to explicitly enable it here.
 # * Do not add the OpenDMAC Authentication-Results header. That should only be added
 #   on incoming mail. Omit the OpenDMARC milter by re-setting smtpd_milters to the
-#   OpenDKIM milter only. See dkim.sh.
+#   OpenDKIM milter and the sending limit (above) only. See dkim.sh.
 # * Even though we dont allow auth over non-TLS connections (smtpd_tls_auth_only below, and without auth the client cant
 #   send outbound mail), don't allow non-TLS mail submission on this port anyway to prevent accidental misconfiguration.
 #   Setting smtpd_tls_security_level=encrypt also triggers the use of the 'mandatory' settings below (but this is ignored with smtpd_tls_wrappermode=yes.)
@@ -107,12 +127,12 @@ tools/editconf.py /etc/postfix/master.cf -s -w \
 	  -o smtpd_tls_wrappermode=yes
 	  -o smtpd_sasl_auth_enable=yes
 	  -o syslog_name=postfix/submission
-	  -o smtpd_milters=inet:127.0.0.1:8891
+	  -o smtpd_milters=inet:127.0.0.1:8891,inet:127.0.0.1:8895
 	  -o cleanup_service_name=authclean" \
 	"submission=inet n       -       -       -       -       smtpd
 	  -o smtpd_sasl_auth_enable=yes
 	  -o syslog_name=postfix/submission
-	  -o smtpd_milters=inet:127.0.0.1:8891
+	  -o smtpd_milters=inet:127.0.0.1:8891,inet:127.0.0.1:8895
 	  -o smtpd_tls_security_level=encrypt
 	  -o cleanup_service_name=authclean" \
 	"authclean=unix  n       -       -       -       0       cleanup

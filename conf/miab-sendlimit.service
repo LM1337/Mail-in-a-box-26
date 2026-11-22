@@ -1,0 +1,26 @@
+[Unit]
+Description=Mail-in-a-Box sending limit (Postfix milter, conf/send-limit/milter.py)
+Before=postfix.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/lib/mailinabox/miab-sendlimit/milter.py
+Restart=always
+RestartSec=2
+SyslogIdentifier=miab-sendlimit
+DynamicUser=yes
+StateDirectory=miab-sendlimit
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

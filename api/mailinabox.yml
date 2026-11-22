@@ -2511,6 +2511,115 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         403:
           $ref: '#/components/responses/Forbidden'
+  /system/send-limit:
+    get:
+      tags:
+        - System
+      summary: Get the sending limit of the box
+      description: |
+        All mail that the users and the box itself send (SMTP with login on
+        ports 465 and 587, and sendmail: ActiveSync, Nextcloud, Sieve
+        redirects, programs on the box) passes a milter that lets at most
+        `rate` mails within `per` seconds go out; each recipient counts as one
+        mail. More mail waits until it fits, at most 60 seconds, and is then
+        deferred with a temporary error (4.7.1). Mail from port 25 is not
+        limited. Returns the setting (`settings`, only values that differ from
+        `defaults` are stored), the values the milter uses now (`applied`),
+        the allowed `ranges`, whether the milter runs (`running`, null when
+        unknown), and the minutes of the last 24 hours in which mail had to
+        wait (`events`, newest first, at most 200; `more` counts the rest;
+        `day` sums them up).
+      operationId: getSendLimit
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/send-limit" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendLimitResponse'
+        500:
+          description: The state could not be read
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - System
+      summary: Change the sending limit of the box
+      description: |
+        Form fields `enabled` (1 or 0), `rate` (mails, 1 to 100000) and `per`
+        (seconds, 1 to 3600); fields that are not sent keep their value,
+        `reset=1` restores the defaults (on, 30 mails in 1 second). The milter
+        reads the setting again when it changes: no restart.
+      operationId: setSendLimit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SendLimitUpdateRequest'
+            examples:
+              stricter:
+                summary: 100 mails a minute
+                value:
+                  rate: 100
+                  per: 60
+              reset:
+                summary: Back to the defaults
+                value:
+                  reset: 1
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/send-limit" \
+              -d "rate=100" \
+              -d "per=60" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - settings
+                  - changed
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  settings:
+                    $ref: '#/components/schemas/SendLimitSettings'
+                  changed:
+                    type: boolean
+        400:
+          description: Invalid value (nothing was changed)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: The settings file could not be written (the previous setting was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
   /system/auth-guard:
     get:
       tags:
@@ -4434,6 +4543,138 @@ components:
                 nullable: true
         more:
           type: integer
+    SendLimitSettings:
+      type: object
+      required:
+        - enabled
+        - rate
+        - per
+      properties:
+        enabled:
+          type: boolean
+          example: true
+        rate:
+          type: integer
+          description: Mails (recipients) that may go out within `per` seconds
+          example: 30
+        per:
+          type: integer
+          description: Seconds
+          example: 1
+    SendLimitUpdateRequest:
+      type: object
+      properties:
+        enabled:
+          type: integer
+          enum: [0, 1]
+        rate:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        per:
+          type: integer
+          minimum: 1
+          maximum: 3600
+        reset:
+          type: integer
+          enum: [1]
+    SendLimitEvent:
+      type: object
+      properties:
+        time:
+          type: integer
+          description: End of the minute (Unix time)
+        rate:
+          type: integer
+        per:
+          type: integer
+        delayed:
+          type: integer
+          description: Mails that waited
+        deferred:
+          type: integer
+          description: Mails deferred with a temporary error (they would have waited longer than 60 s)
+        passed:
+          type: integer
+          description: Mails that went out at once in that minute
+        max_wait:
+          type: integer
+          description: Longest wait in seconds
+        others:
+          type: integer
+          description: Senders not listed (only the 10 with the most recipients are)
+        senders:
+          type: array
+          items:
+            $ref: '#/components/schemas/SendLimitSender'
+    SendLimitSender:
+      type: object
+      properties:
+        sender:
+          type: string
+          description: The account (SMTP with login), or "sendmail:" or "smtp:" and the envelope sender
+        mails:
+          type: integer
+        recipients:
+          type: integer
+    SendLimitResponse:
+      type: object
+      required:
+        - settings
+        - defaults
+        - ranges
+        - applied
+        - warnings
+        - running
+        - events
+        - more
+        - day
+      properties:
+        settings:
+          $ref: '#/components/schemas/SendLimitSettings'
+        defaults:
+          $ref: '#/components/schemas/SendLimitSettings'
+        applied:
+          $ref: '#/components/schemas/SendLimitSettings'
+        ranges:
+          type: object
+          properties:
+            rate:
+              type: array
+              items:
+                type: integer
+            per:
+              type: array
+              items:
+                type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        running:
+          type: boolean
+          nullable: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/SendLimitEvent'
+        more:
+          type: integer
+        day:
+          type: object
+          properties:
+            minutes:
+              type: integer
+            delayed:
+              type: integer
+            deferred:
+              type: integer
+            max_wait:
+              type: integer
+            senders:
+              type: array
+              items:
+                $ref: '#/components/schemas/SendLimitSender'
     NotificationsResponse:
       type: object
       required:

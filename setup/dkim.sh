@@ -110,9 +110,13 @@ tools/editconf.py /etc/opendkim.conf -s \
 # The OpenDMARC milter is skipped in the SMTP submission listener by
 # configuring smtpd_milters there to only list the OpenDKIM milter
 # (see mail-postfix.sh).
+#
+# Mail through sendmail (non_smtpd_milters) also passes the sending limit of
+# the box (inet:127.0.0.1:8895, see mail-postfix.sh); the submission ports list
+# it in master.cf. Port 25 (smtpd_milters here) does not.
 tools/editconf.py /etc/postfix/main.cf \
 	"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893"\
-	non_smtpd_milters=\$smtpd_milters \
+	"non_smtpd_milters=\$smtpd_milters inet:127.0.0.1:8895" \
 	milter_default_action=accept
 
 # We need to explicitly enable the opendmarc service, or it will not start

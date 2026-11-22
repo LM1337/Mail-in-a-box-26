@@ -4101,6 +4101,7 @@ API_READ_ONLY = [
     ("GET", "/system/munin/alerts", "application/json"),
     ("GET", "/system/notifications", "application/json"),
     ("GET", "/system/auth-guard", "application/json"),
+    ("GET", "/system/send-limit", "application/json"),
     ("GET", "/ssl/status", "application/json"),
     ("POST", "/ssl/csr/{domain}", "text/html"),
     ("GET", "/dns/zones", "application/json"),
@@ -4145,6 +4146,7 @@ API_WRITES = [
     ("POST", "/system/notifications/test"),
     ("POST", "/system/auth-guard"),
     ("POST", "/system/auth-guard/unlock"),
+    ("POST", "/system/send-limit"),
 ]
 
 # Not called: (method, documented path, reason).
@@ -4338,6 +4340,17 @@ def api_shape(ctx, path, r):
         _need(all({"key", "name", "failures", "last", "refused", "account"} <= set(n) for n in j["names"]), "auth-guard: names")
         _need(not j["warnings"], "auth-guard: %s" % "; ".join(j["warnings"])[:200])
         return "limit %d in %d min, %d names" % (j["applied"]["limit"], j["applied"]["window"], len(j["names"]))
+    if path == "/system/send-limit":
+        # The sending limit of the box (B221).
+        _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("enabled"), bool) and all(isinstance(j[k].get(x), int) for x in ("rate", "per"))
+                  for k in ("settings", "defaults", "applied")), "send-limit: settings missing")
+        _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1}, "send-limit: defaults %s" % j["defaults"])
+        _need(isinstance(j.get("events"), list) and isinstance(j.get("day"), dict) and isinstance(j.get("more"), int)
+              and isinstance(j.get("warnings"), list), "send-limit: keys missing")
+        _need(j.get("running") is True, "send-limit: the milter does not run (%s)" % j.get("running"))
+        _need(not j["warnings"], "send-limit: %s" % "; ".join(j["warnings"])[:200])
+        return "%d mails in %d s%s, %d minutes with waits in 24 h" % (j["applied"]["rate"], j["applied"]["per"],
+            "" if j["applied"]["enabled"] else " (off)", j["day"]["minutes"])
     if path == "/ssl/status":
         _need(_is_str_list(j.get("can_provision")) and isinstance(j.get("status"), list)
               and all({"domain", "status", "text"} <= set(e) for e in j["status"]), "ssl status: keys missing")
@@ -4749,6 +4762,65 @@ def c_login_auth_guard(ctx):
     return "; ".join(steps) + "; setting restored, users removed"
 
 
+def c_send_limit(ctx):
+    # The sending limit of the box (B221, conf/send-limit/milter.py,
+    # management/send_limit.py, System > Intrusion Detection and Prevention):
+    # invalid values get 400; with 1 mail per hour set through the API (the
+    # milter reads it at once), a first mail by SMTP AUTH on 587 is accepted
+    # and a second is deferred with 451 4.7.1 (it would wait longer than
+    # 60 s); GET /system/send-limit lists that minute once the milter wrote
+    # it (at the next full minute). With the setting restored, a third mail
+    # goes out at once. The test mails go to the test account itself.
+    if not ctx.user_pw or not ctx.admin_auth:
+        raise Skip("TEST_USER_PW or the admin session missing")
+    r = admin_api(ctx, "GET", "system/send-limit")
+    api_expect(r, 200, "application/json", "GET system/send-limit")
+    before = r.json()["settings"]
+    steps = []
+
+    def send(n):
+        s = ctx.net.smtp_starttls()
+        try:
+            s.login(ctx.alice, ctx.user_pw)
+            sid = "sendlimit-%s-%d" % (ctx.tok, n)
+            s.sendmail(ctx.alice, [ctx.alice], mkmsg(ctx.alice, ctx.alice, "send limit %d" % n, sid).encode())
+            return "ok"
+        except smtplib.SMTPResponseException as e:
+            return "%d %s" % (e.smtp_code, e.smtp_error.decode(errors="replace") if isinstance(e.smtp_error, bytes) else e.smtp_error)
+        finally:
+            try: s.quit()
+            except Exception: pass
+    try:
+        for form in ({"rate": "0"}, {"per": "3601"}, {"enabled": "maybe"}):
+            r = admin_api(ctx, "POST", "system/send-limit", form=form)
+            _need(r.status == 400, "%s: HTTP %d, not 400" % (form, r.status))
+        steps.append("invalid values refused")
+        r = admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1", "rate": "1", "per": "3600"})
+        api_expect(r, 200, "application/json", "POST system/send-limit")
+        _need(r.json()["settings"] == {"enabled": True, "rate": 1, "per": 3600}, "setting: %s" % r.text()[:200])
+        time.sleep(2) # the milter looks at its settings file once a second
+        first, second = send(1), send(2)
+        _need(first == "ok", "first mail with 1 per hour: %s" % first)
+        _need(second.startswith("451") and "4.7.1" in second, "second mail with 1 per hour: %s (not 451 4.7.1)" % second)
+        steps.append("1 per hour: first accepted, second deferred (451 4.7.1)")
+        deadline = time.time() + 75
+        while True:
+            day = admin_api(ctx, "GET", "system/send-limit").json()["day"]
+            if day["deferred"] >= 1 and any(x["sender"].lower() == ctx.alice.lower() for x in day["senders"]):
+                break
+            _need(time.time() < deadline, "GET system/send-limit does not list the deferred mail after 75 s: %s" % day)
+            time.sleep(5)
+        steps.append("listed with its sender")
+    finally:
+        admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1" if before["enabled"] else "0", "rate": str(before["rate"]), "per": str(before["per"])})
+    time.sleep(2)
+    third = send(3)
+    _need(third == "ok", "a mail after the setting was restored: %s" % third)
+    now = admin_api(ctx, "GET", "system/send-limit").json()["settings"]
+    _need(now == before, "setting not restored: %s, before %s" % (now, before))
+    return "; ".join(steps) + "; setting restored, the next mail goes out"
+
+
 def munin_conf_contact(ctx):
     # (contact lines before the host tree, "contacts" of the host tree)
     rc, out, err = ctx.remote.run("cat /etc/munin/munin.conf", sudo=True, timeout=60)
@@ -5139,6 +5211,8 @@ def main():
         run_check("admin-migration-record-unit", c_local_test, ctx, "migration-record.py")
         run_check("admin-storage-dirs-unit", c_local_test, ctx, "storage-dirs.py")
         run_check("admin-auth-guard-unit", c_local_test, ctx, "auth-guard.py")
+        run_check("admin-send-limit", c_send_limit, ctx)
+        run_check("admin-send-limit-unit", c_local_test, ctx, "send-limit.py")
         run_check("admin-panel-assets", c_panel_assets, ctx)
         run_check("admin-panel-assets-unit", c_local_test, ctx, "panel-assets.py")
         run_check("admin-nextcloud-app-versions", c_nc_app_versions, ctx)

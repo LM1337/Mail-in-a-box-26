@@ -927,6 +927,39 @@ def auth_guard_unlock():
 	result["status"] = "ok"
 	return json_response(result)
 
+# The sending limit of the box (see send_limit.py): its setting (part of
+# System > Intrusion Detection and Prevention) and the minutes in which
+# outgoing mail had to wait.
+
+@app.route('/system/send-limit', methods=["GET"])
+@authorized_personnel_only
+def send_limit_get():
+	import send_limit
+	try:
+		return json_response(send_limit.status(env))
+	except Exception as e:
+		return (str(e), 500)
+
+@app.route('/system/send-limit', methods=["POST"])
+@authorized_personnel_only
+def send_limit_set():
+	# enabled (1/0), rate (mails) and per (seconds); fields that are not sent
+	# keep their value. reset=1 restores the defaults.
+	import send_limit
+	values = { k: request.form[k] for k in ("enabled", "rate", "per") if k in request.form }
+	reset = request.form.get('reset') == '1'
+	try:
+		result = send_limit.update_settings(env, values, reset=reset)
+	except send_limit.SendLimitError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	s = result["settings"]
+	app.logger.warning("send-limit: %s set the sending limit to %d mails in %d s%s",
+		request.user_email, s["rate"], s["per"], "" if s["enabled"] else " (turned off)")
+	result["status"] = "ok"
+	return json_response(result)
+
 @app.route('/system/fail2ban/report', methods=["GET"])
 @authorized_personnel_only
 def fail2ban_report():

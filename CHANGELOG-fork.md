@@ -13,6 +13,31 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### New
 
+* **Sending limit: at most 30 mails a second leave the box (B221)**\
+  All mail that the users and the box itself send now passes a small
+  Postfix milter (`conf/send-limit/milter.py`, service `miab-sendlimit`,
+  package `python3-milter` from universe): mail programs and webmail (SMTP
+  with login on ports 465 and 587) and ActiveSync, Nextcloud, Sieve
+  redirects, cron and other programs on the box (sendmail). Up to 30 mails
+  go out at once, then 30 a second; each recipient counts as one mail.
+  More mail waits at the end of the message until it fits, at most 60
+  seconds, and is then deferred with a temporary error (`451 4.7.1`), so
+  its sender sends it again later: mail is slowed down, never lost. Mail
+  from other servers (port 25) is not limited. Each minute in which mail
+  had to wait is logged (`miab-sendlimit`, with the senders) and mailed to
+  the recipient of the box's reports (System > Notifications), at most one
+  mail an hour, with the accounts that sent the most. The limit (mails and
+  seconds, or off) is set in System > Intrusion Detection and Prevention,
+  which also lists these minutes of the last 24 hours; API
+  `/system/send-limit`, command line `management/send_limit.py --status`.
+  The milter reads its setting again when it changes, runs as a dynamic
+  user without privileges, and Postfix passes mail on when it does not
+  answer. Before, an account that was taken over or a program on the box
+  could send any amount of mail in the box's name before anyone noticed,
+  and ruin the reputation of its address with other mail providers. New
+  offline test `tests/fork/send-limit.py`, smoke checks `admin-send-limit`
+  and the `GET /system/send-limit` shape.
+
 * **New page System > Notifications: where reports and alerts go**\
   The control panel has a new page System > Notifications. It sets the
   recipient of the box's reports (status check changes, backup status, TLS

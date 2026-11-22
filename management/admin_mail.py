@@ -52,6 +52,7 @@ MAILS = [
 	{ "id": "usage", "title": "Mail-in-a-Box Usage Report", "when": "weekly, on Mondays", "to": "reports" },
 	{ "id": "munin", "title": "Munin alerts", "when": "on each change of state of a watched value", "to": "munin" },
 	{ "id": "auth-guard", "title": "Logins refused after failed logins from the box itself", "when": "when an account has had too many different wrong passwords through ActiveSync, webmail or Nextcloud (30 in 30 minutes unless System > Intrusion Protection sets others; at most one mail an hour)", "to": "reports" },
+	{ "id": "send-limit", "title": "Sending of mail was slowed down by the sending limit", "when": "when the box sent more mail than its sending limit allows (30 mails a second unless System > Intrusion Detection and Prevention sets another; at most one mail an hour)", "to": "reports" },
 	{ "id": "root", "title": "Mail to root and of cron jobs", "when": "when a program or a cron job mails root", "to": "alias" },
 	{ "id": "role", "title": "Mail to postmaster@, abuse@, admin@ and hostmaster@", "when": "of every mail domain, unless the address is set by hand under Aliases", "to": "alias" },
 ]

@@ -321,7 +321,7 @@ INFO_FILES="queue.txt munin-limits.txt packages.txt"
 STATUS_UNFINISHED="✖ status checks did not finish"
 
 # Units whose state is recorded (those that exist).
-UNITS="postfix dovecot nginx spampd opendkim opendmarc postgrey fail2ban nsd named munin-node cron
+UNITS="postfix dovecot nginx spampd opendkim opendmarc miab-sendlimit postgrey fail2ban nsd named munin-node cron
 chrony rsyslog ssh.service ssh.socket ufw docker containerd unattended-upgrades"
 
 php_fpm_units() {

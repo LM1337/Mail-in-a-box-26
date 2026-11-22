@@ -167,11 +167,23 @@ EOF
 tools/write_conf.py /etc/cron.d/mailinabox-auth-guard << EOF;
 # Mail-in-a-Box --- Do not edit / will be overwritten on update.
 # Dovecot's limit of failed logins from the box itself: mail new locks.
-*/10 * * * *	root	(cd $PWD && management/auth_guard.py --notify)
+*/10 * * * *	root	(cd $PWD && test -x management/auth_guard.py && management/auth_guard.py --notify)
 EOF
 # Its limit and window, as System > Intrusion Protection set them in
 # settings.yaml (also after a migration), for the Lua code of Dovecot.
 management/auth_guard.py --apply
+
+# The sending limit (management/send_limit.py, setup/mail-postfix.sh): mail
+# the minutes in which outgoing mail had to wait, and write the settings file
+# of its milter from settings.yaml. The jobs check that the program is there:
+# after a downgrade to a release without it, they stay quiet instead of
+# mailing an error to root every few minutes.
+tools/write_conf.py /etc/cron.d/mailinabox-send-limit << EOF;
+# Mail-in-a-Box --- Do not edit / will be overwritten on update.
+# The sending limit of the box: mail the minutes in which mail had to wait.
+*/5 * * * *	root	(cd $PWD && test -x management/send_limit.py && management/send_limit.py --notify)
+EOF
+management/send_limit.py --apply
 
 # Start the management server, or restart it when its code, its start script
 # and unit, /etc/mailinabox.conf (read when it starts) or the packages of its

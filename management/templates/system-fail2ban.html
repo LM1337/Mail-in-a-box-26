@@ -133,6 +133,47 @@
 </div>
 <p id="ag-more" class="small text-muted" style="display: none"></p>
 
+<h3>Sending limit</h3>
+
+<p>The box lets at most <span class="sl-rate">30</span> mails within <span class="sl-per">1</span> second(s) go out (each recipient counts as one mail), of all mail that its users and the box itself send: mail programs and webmail (SMTP with login on ports 465 and 587), and ActiveSync, Nextcloud, Sieve redirects and programs on the box (sendmail). More mail waits until it fits, at most 60 seconds, and is then deferred with a temporary error, so that its sender sends it again later: mail is slowed down, not lost. This keeps an account that was taken over, or a program that sends spam, from sending a flood of mail in the box&rsquo;s name before anyone notices, which would ruin the reputation of its address with other mail providers. Mail that comes in from other servers is not limited. The minutes in which mail had to wait are mailed to the recipient of the box&rsquo;s reports (System &gt; Notifications), at most one mail an hour.</p>
+
+<form class="form-inline" role="form" onsubmit="sl_save(); return false;" style="margin-bottom: 1em">
+  <div class="checkbox" style="margin-right: 1em">
+    <label><input type="checkbox" id="sl-enabled"> Limit sending to</label>
+  </div>
+  <div class="form-group">
+    <label for="sl-rate" class="sr-only">mails</label>
+    <input type="number" class="form-control" id="sl-rate" min="1" max="100000" style="width: 7em">
+    <span>mails within</span>
+  </div>
+  <div class="form-group">
+    <label for="sl-per" class="sr-only">seconds</label>
+    <input type="number" class="form-control" id="sl-per" min="1" max="3600" style="width: 6em">
+    <span>seconds</span>
+  </div>
+  <button type="submit" class="btn btn-primary">Save</button>
+  <button type="button" class="btn btn-default" onclick="sl_reset()">Restore defaults</button>
+</form>
+<p id="sl-help" class="help-block small"></p>
+<div id="sl-warnings"></div>
+
+<p id="sl-summary" class="text-muted">Loading...</p>
+<div class="table-responsive">
+<table id="sl-events" class="table" style="width: auto; min-width: 50%; display: none">
+  <thead>
+    <tr>
+      <th scope="col">Minute</th>
+      <th scope="col" class="num">Waited</th>
+      <th scope="col" class="num">Deferred</th>
+      <th scope="col" class="num">Longest wait</th>
+      <th scope="col">Senders</th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+</div>
+
 <h3>Jails</h3>
 
 <div class="table-responsive">
@@ -351,6 +392,9 @@ function show_fail2ban() {
   $('#ag-summary').text("Loading...").addClass("text-muted");
   $('#ag-names').hide().find('tbody').html("");
   ag_load();
+  $('#sl-summary').text("Loading...").addClass("text-muted");
+  $('#sl-events').hide().find('tbody').html("");
+  sl_load();
 }
 
 // Dovecot's limit of failed logins from the box itself (/system/auth-guard,
@@ -422,6 +466,71 @@ function ag_unlock(n) {
       show_modal_error("Logins through the box's own services", $("<p/>").text("The wrong passwords of " + r.name + " are forgotten; it can log in through these services again."), function() { ag_load(); });
     },
     f2b_api_error("Logins through the box's own services"));
+}
+
+// The sending limit of the box (/system/send-limit, management/send_limit.py).
+var sl_state = null;
+
+function sl_load() {
+  api("/system/send-limit", "GET", { },
+    function(r) { sl_state = r; sl_render(); },
+    function(text, xhr) {
+      if (xhr && xhr.status == 403) return;
+      $('#sl-summary').text("The sending limit could not be read: " + text).removeClass("text-muted");
+    });
+}
+
+function sl_sender(s) {
+  if (s.indexOf("sendmail:") == 0) return s.substring(9) + " (sendmail)";
+  if (s.indexOf("smtp:") == 0) return s.substring(5) + " (SMTP without login)";
+  return s;
+}
+
+function sl_render() {
+  var r = sl_state, s = r.settings, a = r.applied;
+  $('.sl-rate').text(a.rate);
+  $('.sl-per').text(a.per);
+  $('#sl-enabled').prop('checked', s.enabled);
+  $('#sl-rate').val(s.rate).attr('min', r.ranges.rate[0]).attr('max', r.ranges.rate[1]);
+  $('#sl-per').val(s.per).attr('min', r.ranges.per[0]).attr('max', r.ranges.per[1]);
+  $('#sl-help').text("Default: " + r.defaults.rate + " mails within " + r.defaults.per + " second(s). Allowed: " + r.ranges.rate[0] + " to " + r.ranges.rate[1]
+    + " mails within " + r.ranges.per[0] + " to " + r.ranges.per[1] + " seconds. Up to that many mails go out at once, more wait; a mail to more recipients than fit"
+    + " goes out when nothing else waits, and the next mails wait for it. The change applies at once.");
+  var w = $('#sl-warnings').html("");
+  if (!a.enabled) w.append($('<div class="alert alert-warning"/>').text("The sending limit is turned off: the box sends as much mail as it is given."));
+  r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
+  var d = r.day, tbody = $('#sl-events tbody').html("");
+  if (!d.minutes) {
+    $('#sl-summary').text("No mail had to wait in the last 24 hours.").addClass("text-muted");
+    $('#sl-events').hide();
+    return;
+  }
+  $('#sl-summary').text("In the last 24 hours mail had to wait in " + d.minutes + " minute" + (d.minutes == 1 ? "" : "s") + ": " + d.delayed + " mails waited (up to "
+    + d.max_wait + " s), " + d.deferred + " were deferred. Most recipients: "
+    + d.senders.slice(0, 3).map(function(x) { return sl_sender(x.sender) + " (" + x.recipients + ")"; }).join(", ") + ".").removeClass("text-muted");
+  r.events.forEach(function(e) {
+    var tr = $('<tr/>');
+    tr.append($('<td style="white-space: nowrap"/>').text(f2b_time(e.time)));
+    tr.append($('<td class="num"/>').text(e.delayed));
+    tr.append($('<td class="num"/>').text(e.deferred));
+    tr.append($('<td class="num"/>').text(e.max_wait + " s"));
+    tr.append($('<td class="small" style="word-break: break-all; max-width: 40em"/>').text(e.senders.map(function(x) { return sl_sender(x.sender) + " " + x.recipients; }).join(", ")
+      + (e.others ? " and " + e.others + " more" : "")));
+    tbody.append(tr);
+  });
+  $('#sl-events').show();
+}
+
+function sl_save() {
+  api("/system/send-limit", "POST", { enabled: $('#sl-enabled').prop('checked') ? "1" : "0", rate: $('#sl-rate').val(), per: $('#sl-per').val() },
+    function(r) { sl_load(); },
+    f2b_api_error("Sending limit"));
+}
+
+function sl_reset() {
+  api("/system/send-limit", "POST", { reset: "1" },
+    function(r) { sl_load(); },
+    f2b_api_error("Sending limit"));
 }
 
 function f2b_load_status() {
