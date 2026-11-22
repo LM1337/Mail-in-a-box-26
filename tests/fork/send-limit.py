@@ -242,9 +242,10 @@ out2, turn = release.pick([h for h in held if h not in out], L, 10, 1, turn, now
 check("half a second later: 5 more", len(out2), 5)
 big = [{"time": 1, "qid": "BIGG000001", "rcpts": 500, "sender": "list@example.com"}]
 check("a mail bigger than the bucket goes when it is full", len(release.pick(big, common.Limiter(), 10, 1, "", now=0.0)[0]), 1)
-ids = {"GOOD000001": 50, "SPAM000001": 1, "HAND000001": 1}
-check("verified: in the hold queue and arrived when recorded",
-	[release.verified(h, ids) for h in ({"qid": "GOOD000001", "time": 55}, {"qid": "GOOD000002", "time": 60}, {"qid": "HAND000001", "time": 5000})], [True, False, False])
+ids = {"GOOD000001": 50, "SPAM000001": 1, "HAND000001": 1, "LATE000001": 9000, "SLOW000001": 1000, "OLD0000001": 1}
+check("verified: in the hold queue and had arrived when recorded",
+	[release.verified(h, ids) for h in ({"qid": "GOOD000001", "time": 55}, {"qid": "GOOD000002", "time": 60}, {"qid": "LATE000001", "time": 5000},
+		{"qid": "SLOW000001", "time": 1000 + 3600}, {"qid": "OLD0000001", "time": 1 + release.MAX_AGE + 1})], [True, False, False, True, False])
 sm = release.summary(held, 100)
 check("summary by sender, most recipients first", (sm["held"], sm["senders"][0]["sender"], sm["senders"][0]["mails"], len(sm["senders"][0]["qids"])),
 	(102, "spammer@example.com", 100, 100))

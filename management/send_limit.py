@@ -423,13 +423,18 @@ def message(events, dropped=0, held=None):
 			+ (" and sends nothing until you end the brake.\n\n" if held.get("stop") else
 				f" and sends only {held.get('brake_rate')} mails in {held.get('brake_per')} seconds; the brake ends by itself"
 				f" after {held.get('calm')} minutes without held mail.\n\n"))
+	other = ""
+	if held and held.get("other_hold"):
+		other = (f"Postfix's hold queue also has {held['other_hold']} mails that are not on the list of the sending limit"
+			" (held by hand, or not recognised): sudo postqueue -p lists them (marked !), sudo postsuper -H ID releases one,"
+			" sudo postsuper -d ID deletes it.\n\n")
 	now_held = ""
 	if held and held.get("held"):
 		now_held = (f"On hold now: {held['held']} mails to {held['recipients']} recipients. They go out at the limit, the senders in turn:\n\n"
 			+ "\n".join(f"  {x['recipients']:7d} recipients in {x['mails']:6d} mails  {describe_sender(x['sender'])}" for x in held["senders"][:15]) + "\n\n")
 	return (brake + "The sending limit of the box acted in these minutes (each recipient counts as one mail). Mail"
 		" that did not fit was accepted and put on hold; the senders got no error:\n\n"
-		+ ("\n".join(lines) or "  (the first minute is not over yet)") + "\n\nWho sent it:\n\n" + (senders or "  (see the held mail below)") + "\n\n" + now_held +
+		+ ("\n".join(lines) or "  (the first minute is not over yet)") + "\n\nWho sent it:\n\n" + (senders or "  (see the held mail below)") + "\n\n" + now_held + other +
 		"If you did not expect this much mail from the box, an account may have been taken over, or a program on the box sends"
 		" spam: change the password of the account named above and end its sessions, and delete its held mail before it goes"
 		" out: in the control panel, System > Intrusion Detection and Prevention, \"Delete\" next to the sender (or on the box:"
@@ -657,7 +662,7 @@ def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, sett
 	return { "settings": values, "defaults": DEFAULTS, "ranges": RANGES, "applied": applied, "warnings": warnings,
 		"running": running, "release_running": release_running, "events": events[:200], "more": max(0, len(events) - 200),
 		"brake": { "on": bool((held or {}).get("brake")), "since": (held or {}).get("brake_since"), "stop": values["stop"] },
-		"held": { "mails": (held or {}).get("held", 0), "recipients": (held or {}).get("recipients", 0),
+		"held": { "mails": (held or {}).get("held", 0), "recipients": (held or {}).get("recipients", 0), "other_hold": (held or {}).get("other_hold", 0),
 			"senders": [{ k: x.get(k) for k in ("sender", "mails", "recipients", "oldest") } for x in (held or {}).get("senders", [])[:200]] },
 		"day": { "minutes": len(events), "delayed": sum(e["delayed"] for e in events), "deferred": sum(e["deferred"] for e in events),
 			"held": sum(e.get("held", 0) for e in events),

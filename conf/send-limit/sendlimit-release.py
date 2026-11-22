@@ -110,14 +110,25 @@ def hold_queue():
 	return ids
 
 
-ARRIVAL_SLACK = 30 # seconds between a mail's arrival and the milter's record of it
+ARRIVAL_SLACK = 30 # seconds a record may come before its mail is in the hold queue
+MAX_AGE = 5 * 86400 # a mail held at most this long after it arrived (Postfix's maximal_queue_lifetime)
+COUNT_HOLD = 300 # seconds between two counts of the mail held by others while none is held here
 
 
 def verified(h, ids):
-	# The milter's record names a mail that is in the hold queue and arrived
-	# when the milter held it: so a record cannot make this service release
-	# mail that was held by hand (or anything else).
-	return h["qid"] in ids and abs(ids[h["qid"]] - h["time"]) <= ARRIVAL_SLACK
+	# The milter's record names a mail that is in the hold queue and had
+	# arrived when the milter held it (not later, so a record cannot name
+	# mail that comes after it, and at most MAX_AGE before). Postfix's arrival
+	# time is when the mail entered its queue: for sendmail the time it was
+	# written to the maildrop, which can be long before the milter holds it
+	# (pickup busy with a flood, or the mail deferred while the release
+	# service did not run), and for SMTP the start of a slow transfer. The
+	# first version allowed 30 s either way, and such mail stayed on hold for
+	# ever, listed nowhere (found in the lab test).
+	if h["qid"] not in ids:
+		return False
+	arrival = ids[h["qid"]]
+	return arrival <= h["time"] + ARRIVAL_SLACK and h["time"] - arrival <= MAX_AGE
 
 
 def release(qids):
@@ -219,7 +230,8 @@ def summary(held, now, state=None, v=None):
 	out = { "time": int(now), "held": len(held), "recipients": sum(h["rcpts"] for h in held),
 		"senders": sorted(senders.values(), key=lambda s: (-s["recipients"], s["sender"])) }
 	if state is not None and v is not None:
-		out.update({ "brake": state["brake"], "brake_since": state["brake_since"], "brake_reason": state.get("brake_reason"), "stop": bool(v["stop"]),
+		out.update({ "brake": state["brake"], "brake_since": state["brake_since"], "brake_reason": state.get("brake_reason"),
+			"other_hold": state.get("other_hold", 0), "stop": bool(v["stop"]),
 			"brake_rate": v["brake_rate"], "brake_per": v["brake_per"], "calm": v["calm"] })
 	return out
 
@@ -240,6 +252,7 @@ def main():
 	known = { h["qid"] for h in state["held"] }
 	checked = set() # records verified against the hold queue
 	last_check = 0.0
+	last_count = 0.0
 	last_log = time.time()
 	released_minute = 0
 	last_passed = take_passed() # the milter's count from before is not charged
@@ -310,6 +323,7 @@ def main():
 			except OSError:
 				pass
 		unchecked = [h for h in state["held"] if h["qid"] not in checked]
+		ids = None
 		if state["held"] and (recheck or ((unchecked or now - last_check >= CHECK_QUEUE) and now - last_check >= 1)):
 			last_check = now
 			ids = hold_queue()
@@ -330,6 +344,17 @@ def main():
 					known = { h["qid"] for h in keep }
 					checked &= known
 					changed = True
+		elif recheck or now - last_count >= COUNT_HOLD:
+			ids = hold_queue()
+		if ids is not None:
+			# Mail in the hold queue that is not on this list (held by hand,
+			# or a record that could not be verified): the control panel and
+			# the administrator's mail say how many.
+			last_count = now
+			other = sum(1 for q in ids if q not in known)
+			if other != state.get("other_hold", 0):
+				state["other_hold"] = other
+				changed = True
 		ready = [h for h in state["held"] if h["qid"] in checked]
 		if ready:
 			if not v["enabled"]:

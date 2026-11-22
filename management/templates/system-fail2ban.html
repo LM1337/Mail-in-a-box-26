@@ -639,6 +639,8 @@ function sl_render() {
     + " A mail to more recipients than the limit goes out when nothing else waits and counts in full. A lower limit catches a flood sooner, and a higher one lets"
     + " mail to many recipients go out without the brake. The change applies at once.");
   var w = $('#sl-warnings').html("");
+  if (r.held && r.held.other_hold)
+    w.append($('<div class="alert alert-warning"/>').text("Postfix's hold queue also has " + r.held.other_hold + " mails that are not on the list below (held by hand, or not recognised by the sending limit). On the box: sudo postqueue -p lists them (marked !), sudo postsuper -H ID releases one, sudo postsuper -d ID deletes it."));
   if (!a.enabled) w.append($('<div class="alert alert-warning"/>').text("The sending limit is turned off: the box sends as much mail as it is given, and Postfix does not ask its milter at all."));
   r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
   var h = r.held, hb = $('#sl-held-table tbody').html("");

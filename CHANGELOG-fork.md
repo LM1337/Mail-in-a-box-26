@@ -57,7 +57,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   held mail goes out at the brake's rate on average; as a token bucket it
   may let up to that many go at once, so a minute can see a few more.
   The box's own mail to administrator@ and to the report recipient is
-  never held. Mail from
+  never held. The release service releases only mail that is in the hold
+  queue and had arrived when the milter held it (up to 5 days before, as
+  sendmail's mail enters Postfix's queue when it is written to the
+  maildrop, which can be long before pickup hands it to the milter); mail
+  in the hold queue that is not on its list (held by hand, or a record it
+  could not verify) is counted, and the control panel and the
+  administrator's mail say how many and how to release or delete it. Mail from
   other servers is not counted. The milter runs as a dynamic user without
   privileges, and it fails closed: when it does not answer (stopped,
   crashed or hung), Postfix refuses outgoing mail with a temporary error
