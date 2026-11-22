@@ -2004,14 +2004,17 @@ paths:
         - System
       summary: Get the status of the intrusion protection
       description: |
-        Returns the status of fail2ban (fork: adaptive fail2ban): its jails with
-        their counters and current bans, the settings, their defaults and
-        limits, whether the written jail files match the settings, and the
-        address of the calling client (for the allowlist hint of the control
-        panel). Each ban has a `reason`: the failures and the log lines that
-        fail2ban kept for it (user names that are no account of the box
-        replaced), the accounts of the box they name, and `manual` for a ban
-        without lines. `jail_info` gives each jail's thresholds and what it
+        Returns the overview of fail2ban (fork: adaptive fail2ban): its jails
+        with their counters (`banned_count`: the addresses the jail bans now),
+        how many addresses and bans there are, `top_networks` (the IPv4 /24
+        and IPv6 /64 networks with the most banned addresses, at least two,
+        up to 10, with their jails), the settings, their defaults and limits,
+        whether the written jail files match the settings, and the address of
+        the calling client (for the allowlist hint of the control panel) with
+        the jails that ban it (`banned_in`). The bans themselves are not
+        listed here (they can be thousands): `GET /system/fail2ban/bans` gives
+        them page by page, `GET /system/fail2ban/ban-reason` why an address is
+        banned. `jail_info` gives each jail's thresholds and what it
         watches. `relays` names the banned addresses that are in Microsoft's
         published IP ranges of Exchange Online, through which Outlook for iOS
         and Android syncs Exchange ActiveSync accounts (the list shipped in
@@ -2033,6 +2036,131 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Fail2banStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/bans:
+    get:
+      tags:
+        - System
+      summary: Get one page of the banned addresses
+      description: |
+        Returns the addresses that fail2ban bans now, newest ban first (ties
+        by address), each with its bans per jail (start, ban time, end,
+        remaining seconds; `end` and `remaining` are null for a permanent ban)
+        and, for an address in Microsoft's published ranges of Exchange
+        Online, its `relay` hint (without the PTR name, which
+        `GET /system/fail2ban` gives). `total` counts all banned addresses,
+        `matched` those that match the filter. No log lines: see
+        `GET /system/fail2ban/ban-reason`. With fail2ban not running,
+        `running` is false and `error` says why.
+      operationId: getFail2banBans
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          description: |
+            Part of an address or of a jail's name (case does not matter), or
+            a network in CIDR notation (`192.0.2.0/24`, `2001:db8::/48`; host
+            bits are ignored). Up to 64 letters, digits and `:` `.` `_` `/`
+            `-`.
+          schema:
+            type: string
+          example: 192.0.2.0/24
+        - name: offset
+          in: query
+          required: false
+          description: The number of matching addresses to skip (0 to 10000000).
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000000
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          description: The number of addresses to return (1 to 200).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/fail2ban/bans?filter=recidive&offset=0&limit=50" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banBansResponse'
+        400:
+          description: Invalid filter, offset or limit
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: fail2ban answered with something unexpected
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/fail2ban/ban-reason:
+    get:
+      tags:
+        - System
+      summary: Get why an address is banned
+      description: |
+        Returns, for each jail that bans `ip` now, the reason of its newest
+        ban there: the failures and the log lines that fail2ban kept for it
+        (user names that are no account of the box replaced), the accounts
+        of the box they name, and `manual` for a ban without lines (`reason`
+        is null when fail2ban's database has no row of it), with the jail's
+        rule (thresholds and what it watches and blocks). An address that is
+        not banned gives an empty list. When fail2ban's database cannot be
+        read, `error` says why.
+      operationId: getFail2banBanReason
+      parameters:
+        - name: ip
+          in: query
+          required: true
+          description: A single IP address.
+          schema:
+            type: string
+          example: 192.0.2.5
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X GET "https://{host}/admin/system/fail2ban/ban-reason?ip=<address>" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fail2banBanReasonResponse'
+        400:
+          description: Not an address
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: fail2ban failed
+          content:
+            text/html:
+              schema:
+                type: string
         401:
           $ref: '#/components/responses/Unauthorized'
         403:
@@ -4181,42 +4309,12 @@ components:
                 type: string
               kind:
                 type: string
-              banned:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    ip:
-                      type: string
-                    start:
-                      type: number
-                    bantime:
-                      type: integer
-                    end:
-                      type: number
-                      nullable: true
-                    remaining:
-                      type: integer
-                      nullable: true
-                    reason:
-                      type: object
-                      nullable: true
-                      properties:
-                        failures:
-                          type: integer
-                          nullable: true
-                        accounts:
-                          type: array
-                          items:
-                            type: string
-                        unknown_names:
-                          type: integer
-                        lines:
-                          type: array
-                          items:
-                            type: string
-                        manual:
-                          type: boolean
+              banned_count:
+                type: integer
+                description: The addresses that the jail bans now.
+              error:
+                type: string
+                description: Why the jail's counters could not be read (only then).
               currently_failed:
                 type: integer
               total_failed:
@@ -4229,6 +4327,21 @@ components:
           type: integer
         banned_ips:
           type: integer
+        top_networks:
+          type: array
+          description: The IPv4 /24 and IPv6 /64 networks with the most banned addresses (at least two), up to 10, most first.
+          items:
+            type: object
+            properties:
+              network:
+                type: string
+                example: 192.0.2.0/24
+              addresses:
+                type: integer
+              jails:
+                type: array
+                items:
+                  type: string
         settings:
           $ref: '#/components/schemas/Fail2banSettings'
         settings_warnings:
@@ -4263,6 +4376,11 @@ components:
             network:
               type: string
               nullable: true
+            banned_in:
+              type: array
+              description: The jails that ban the client's address now.
+              items:
+                type: string
         relays:
           type: object
           description: The banned addresses in Microsoft's published ranges, by address.
@@ -4297,6 +4415,135 @@ components:
         relays_error:
           type: string
           description: Why the list of Microsoft's ranges could not be used (only then).
+    Fail2banBan:
+      type: object
+      properties:
+        jail:
+          type: string
+        start:
+          type: integer
+        bantime:
+          type: integer
+          description: Seconds, -1 for a permanent ban.
+        end:
+          type: integer
+          nullable: true
+        remaining:
+          type: integer
+          nullable: true
+    Fail2banBansResponse:
+      type: object
+      required:
+        - running
+        - total
+        - matched
+        - offset
+        - limit
+        - addresses
+      properties:
+        running:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+        total:
+          type: integer
+          description: All banned addresses.
+        matched:
+          type: integer
+          description: The banned addresses that match the filter.
+        offset:
+          type: integer
+        limit:
+          type: integer
+        filter:
+          type: string
+        addresses:
+          type: array
+          items:
+            type: object
+            properties:
+              ip:
+                type: string
+              start:
+                type: integer
+                description: The start of its newest ban.
+              end:
+                type: integer
+                nullable: true
+                description: When its last ban ends, null if one is permanent.
+              remaining:
+                type: integer
+                nullable: true
+              bans:
+                type: array
+                description: Its bans per jail, newest first.
+                items:
+                  $ref: '#/components/schemas/Fail2banBan'
+              relay:
+                type: object
+                nullable: true
+                description: As in `relays` of `GET /system/fail2ban`, with `name` always null.
+        jail_errors:
+          type: object
+          description: Jails whose bans could not be read, with the error (only then).
+          additionalProperties:
+            type: string
+        relays_error:
+          type: string
+    Fail2banBanReasonResponse:
+      type: object
+      required:
+        - ip
+        - jails
+      properties:
+        ip:
+          type: string
+        jails:
+          type: array
+          items:
+            type: object
+            properties:
+              jail:
+                type: string
+              reason:
+                type: object
+                nullable: true
+                properties:
+                  failures:
+                    type: integer
+                    nullable: true
+                  accounts:
+                    type: array
+                    items:
+                      type: string
+                  unknown_names:
+                    type: integer
+                  lines:
+                    type: array
+                    items:
+                      type: string
+                  manual:
+                    type: boolean
+              rule:
+                type: object
+                nullable: true
+                properties:
+                  maxretry:
+                    type: integer
+                  findtime:
+                    type: integer
+                  bantime:
+                    type: integer
+                  watches:
+                    type: string
+                    nullable: true
+                  blocks:
+                    type: string
+                    nullable: true
+        error:
+          type: string
+          description: Why fail2ban's database could not be read (only then).
     Fail2banSettingsResponse:
       type: object
       required:

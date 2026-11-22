@@ -487,7 +487,16 @@ report. The groups:
   is not an account of the box: the log lines of each jail's filter, also
   with names that the line repeats or that have spaces, and lines of
   Nextcloud's log that are not valid JSON, and long lines that must not
-  take long. `tests/fork/nextcloud-throttle.py` (v78-r2604.4; no box
+  take long. `tests/fork/ban-list.py` (B220; no box needed) checks the
+  banned addresses of that page with a stand-in for fail2ban-client and
+  10,000 synthetic bans: the overview without per-ban lists (counters, the
+  networks with the most banned addresses, the jails that ban the
+  browser's own address, relay hints), the pages (newest ban first, paging,
+  the filter by part of an address or jail and by network, bad parameters
+  refused), the reasons of one address, fail2ban not running, and that
+  each of these answers within a second or so; group admin runs it
+  (`admin-ban-list-unit`), and `admin-fail2ban-bans` checks the pages and
+  the refused parameters on the box. `tests/fork/nextcloud-throttle.py` (v78-r2604.4; no box
   needed) checks the reader of Nextcloud's throttle on a temporary
   database (no account of the box goes to it, no login name comes back),
   the stale failures with the protection off, and the takeover of values

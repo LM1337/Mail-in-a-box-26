@@ -85,6 +85,7 @@ import base64
 import hashlib
 import http.client
 import imaplib
+import ipaddress
 import json
 import os
 import poplib
@@ -1773,18 +1774,70 @@ def c_fail2ban_api(ctx):
         raise Fail("miab-zpush has kind %s, expected miab" % kinds.get("miab-zpush"))
     if not j.get("config_current"):
         raise Fail("rendered jail file does not match the settings")
-    if "client" not in j:
-        raise Fail("no client address in the status (needed for the panel's allowlist hint)")
+    if not isinstance((j.get("client") or {}).get("banned_in"), list):
+        raise Fail("no client address with its jails in the status (needed for the panel's allowlist hint): %s" % j.get("client"))
+    # The overview carries no per-ban lists or reasons (B220): counters, the
+    # networks with the most bans, the pages come from /system/fail2ban/bans.
+    if any("banned" in x for x in j["jails"]) or "reasons_error" in j:
+        raise Fail("the status still lists the bans")
+    if sum(x.get("banned_count", 0) for x in j["jails"]) != j.get("banned_entries"):
+        raise Fail("banned_count of the jails (%d) does not add up to banned_entries (%s)" % (
+            sum(x.get("banned_count", 0) for x in j["jails"]), j.get("banned_entries")))
+    if not isinstance(j.get("top_networks"), list) or any(n["addresses"] < 2 for n in j["top_networks"]):
+        raise Fail("top_networks: %s" % j.get("top_networks"))
+    p = admin_api(ctx, "GET", "system/fail2ban/bans?limit=200").json()
+    if abs(p.get("total", 0) - j.get("banned_ips", 0)) > 5: # bans that begin or end between the two calls
+        raise Fail("the pages count %s banned addresses, the status %s" % (p.get("total"), j.get("banned_ips")))
+    starts = [a["start"] for a in p["addresses"]]
+    if starts != sorted(starts, reverse=True):
+        raise Fail("the page is not newest first")
     # Microsoft's ranges (B126): the shipped list is read, and a hint names
     # only a banned address (never one on the allowlist, which is unbanned).
     if j.get("relays_error") or not (j.get("relays_source") or {}).get("networks"):
         raise Fail("Microsoft's ranges not read: %s" % (j.get("relays_error") or j.get("relays_source")))
-    banned = {b["ip"] for x in j["jails"] for b in x["banned"]}
-    if set(j.get("relays") or {}) - banned:
+    banned = {a["ip"] for a in p["addresses"]}
+    if p["total"] <= 200 and set(j.get("relays") or {}) - banned:
         raise Fail("relay hints for addresses that are not banned: %s" % sorted(set(j["relays"]) - banned))
-    return "%d jails, %d bans; adaptive=%s slow_jails=%s allowlist=%d; %d Microsoft ranges, %d relay hints" % (
-        len(names), j.get("banned_entries", 0), s.get("adaptive"), s.get("slow_jails"), len(s.get("allowlist") or []),
+    return "%d jails, %d bans of %d addresses; adaptive=%s slow_jails=%s allowlist=%d; %d Microsoft ranges, %d relay hints" % (
+        len(names), j.get("banned_entries", 0), j.get("banned_ips", 0), s.get("adaptive"), s.get("slow_jails"), len(s.get("allowlist") or []),
         j["relays_source"]["networks"], len(j.get("relays") or {}))
+
+
+def c_fail2ban_bans_api(ctx):
+    # Read-only: the pages of the banned addresses and their parameters
+    # (B220): bad values are refused with 400, a page is at most 200
+    # addresses, the filter by part of an address and by network.
+    for q in ("limit=0", "limit=201", "limit=x", "offset=-1", "offset=1.5", "filter=%3Cscript%3E", "filter=192.0.2.0/33", "filter=" + "1" * 65):
+        r = admin_api(ctx, "GET", "system/fail2ban/bans?" + q)
+        if r.status != 400:
+            raise Fail("GET /system/fail2ban/bans?%s: HTTP %d, expected 400" % (q, r.status))
+    for q in ("ip=", "ip=192.0.2.0/24", "ip=not-an-address"):
+        r = admin_api(ctx, "GET", "system/fail2ban/ban-reason?" + q)
+        if r.status != 400:
+            raise Fail("GET /system/fail2ban/ban-reason?%s: HTTP %d, expected 400" % (q, r.status))
+    p = admin_api(ctx, "GET", "system/fail2ban/bans?limit=200").json()
+    if not p.get("running"):
+        raise Fail("fail2ban not running: %s" % p.get("error"))
+    if len(p["addresses"]) > 200 or p["limit"] != 200 or any("reason" in b or "lines" in b for a in p["addresses"] for b in a["bans"]):
+        raise Fail("page: %d addresses, limit %s" % (len(p["addresses"]), p.get("limit")))
+    note = "%d banned addresses" % p["total"]
+    if p["addresses"]:
+        ip = p["addresses"][0]["ip"]
+        one = admin_api(ctx, "GET", "system/fail2ban/bans?" + urllib.parse.urlencode({"filter": ip})).json()
+        if ip not in [a["ip"] for a in one["addresses"]]:
+            raise Fail("filter %s does not find it" % ip)
+        net = str(ipaddress.ip_network(ip + ("/24" if ":" not in ip else "/64"), strict=False))
+        bynet = admin_api(ctx, "GET", "system/fail2ban/bans?" + urllib.parse.urlencode({"filter": net, "limit": "200"})).json()
+        if ip not in [a["ip"] for a in bynet["addresses"]] or any(ipaddress.ip_address(a["ip"]) not in ipaddress.ip_network(net) for a in bynet["addresses"]):
+            raise Fail("filter %s: %s" % (net, [a["ip"] for a in bynet["addresses"]][:10]))
+        r = admin_api(ctx, "GET", "system/fail2ban/ban-reason?" + urllib.parse.urlencode({"ip": ip})).json()
+        # The jails of the reasons are those of the page (a ban that ends
+        # between the two calls aside).
+        lasting = {b["jail"] for b in p["addresses"][0]["bans"] if b["remaining"] is None or b["remaining"] > 60}
+        if not lasting <= {x["jail"] for x in r["jails"]}:
+            raise Fail("reasons of %s: jails %s, the page has %s" % (ip, [x["jail"] for x in r["jails"]], sorted(lasting)))
+        note += "; the newest found by address and by %s (%d), reasons in %d jails" % (net, bynet["matched"], len(r["jails"]))
+    return note
 
 
 def c_fail2ban_settings_roundtrip(ctx):
@@ -1865,16 +1918,18 @@ def c_fail2ban_ban_reason(ctx):
     if rc != 0:
         raise Fail("fail2ban-client banip: %s" % err.strip()[:200])
     try:
-        st = admin_api(ctx, "GET", "system/fail2ban").json()
-        bans = [b for j in st["jails"] if j["name"] == "miab-roundcube" for b in j["banned"] if b["ip"] == F2B_REASON_IP]
+        page = admin_api(ctx, "GET", "system/fail2ban/bans?filter=%s" % F2B_REASON_IP).json()
+        bans = [b for a in page["addresses"] if a["ip"] == F2B_REASON_IP for b in a["bans"] if b["jail"] == "miab-roundcube"]
         if not bans:
-            raise Fail("the ban of %s in miab-roundcube is not in the status" % F2B_REASON_IP)
-        reason = bans[0].get("reason")
+            raise Fail("the ban of %s in miab-roundcube is not in the list of bans" % F2B_REASON_IP)
+        st = admin_api(ctx, "GET", "system/fail2ban/ban-reason?ip=%s" % F2B_REASON_IP).json()
+        found = [j for j in st["jails"] if j["jail"] == "miab-roundcube"]
+        reason = found[0].get("reason") if found else None
         if not reason or reason.get("manual") is not True or reason.get("lines"):
             raise Fail("reason of a ban by hand: %s" % reason)
-        if st.get("reasons_error"):
-            raise Fail(st["reasons_error"])
-        info = st["jail_info"].get("miab-roundcube") or {}
+        if st.get("error"):
+            raise Fail(st["error"])
+        info = found[0].get("rule") or {}
         if not info.get("watches") or not info.get("maxretry"):
             raise Fail("no rule for miab-roundcube: %s" % info)
     finally:
@@ -2154,7 +2209,9 @@ def c_nc_hand_set(ctx):
 
 def c_local_test(ctx, script):
     # A local test of tests/fork (no box needed): ban-reasons.py (the
-    # masking of user names in the reasons of bans), nextcloud-throttle.py
+    # masking of user names in the reasons of bans), ban-list.py (the
+    # overview, the pages and the reasons of the banned addresses with
+    # 10,000 synthetic bans, B220), nextcloud-throttle.py
     # (the reader of Nextcloud's throttle, the stale failures, the takeover
     # of values set by hand).
     here = os.path.dirname(os.path.abspath(__file__))
@@ -2412,7 +2469,7 @@ def c_fail2ban_panel(ctx):
     if r.status != 200:
         raise Fail("HTTP %d" % r.status)
     page = r.text()
-    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(") if m not in page]
+    missing = [m for m in ('id="panel_fail2ban"', 'href="#fail2ban"', "function show_fail2ban(", "function f2b_load_bans(") if m not in page]
     if missing:
         raise Fail("control panel lacks %s" % missing)
     return "Intrusion Protection page present"
@@ -3980,9 +4037,9 @@ def c_fail2ban(ctx, proto, jails, port, wait=30):
     reason_note = ""
     if new and ctx.admin_auth:
         try:
-            st = admin_api(ctx, "GET", "system/fail2ban").json()
             j0, ip0 = sorted(new)[0]
-            reasons = [b.get("reason") for j in st["jails"] if j["name"] == j0 for b in j["banned"] if b["ip"] == ip0]
+            st = admin_api(ctx, "GET", "system/fail2ban/ban-reason?" + urllib.parse.urlencode({"ip": ip0})).json()
+            reasons = [j.get("reason") for j in st["jails"] if j["jail"] == j0]
             reason = reasons[0] if reasons else None
             if reason and not reason.get("manual") and reason.get("lines") and (reason.get("failures") or 0) > 0:
                 reason_note = "; reason in %s: %d failures, %d log lines" % (j0, reason["failures"], len(reason["lines"]))
@@ -4095,6 +4152,8 @@ API_READ_ONLY = [
     ("GET", "/system/backup/status/saved", "application/json"),
     ("GET", "/system/backup/config", "application/json"),
     ("GET", "/system/fail2ban", "application/json"),
+    ("GET", "/system/fail2ban/bans", "application/json"),
+    ("GET", "/system/fail2ban/ban-reason", "application/json"),
     ("GET", "/system/fail2ban/settings", "application/json"),
     ("GET", "/system/fail2ban/report", "application/json"),
     ("GET", "/system/nextcloud-throttle", "application/json"),
@@ -4299,6 +4358,13 @@ def api_shape(ctx, path, r):
         _need(isinstance(j.get("running"), bool) and isinstance(j.get("jails"), list) and isinstance(j.get("settings"), dict)
               and isinstance(j.get("config_current"), bool), "fail2ban status: keys missing")
         return "%d jails" % len(j["jails"])
+    if path == "/system/fail2ban/bans":
+        _need(isinstance(j.get("running"), bool) and isinstance(j.get("addresses"), list) and isinstance(j.get("total"), int)
+              and j.get("limit") == 50 and j.get("offset") == 0 and len(j["addresses"]) <= 50, "fail2ban bans: keys missing")
+        return "%d of %d addresses" % (len(j["addresses"]), j["total"])
+    if path == "/system/fail2ban/ban-reason":
+        _need(isinstance(j.get("jails"), list) and j.get("ip") == F2B_REASON_IP, "fail2ban ban reason: keys missing")
+        return "%d jails" % len(j["jails"])
     if path == "/system/fail2ban/settings":
         _need(isinstance(j.get("settings"), dict) and isinstance(j.get("defaults"), dict) and isinstance(j.get("warnings"), list),
               "fail2ban settings: keys missing")
@@ -4421,6 +4487,8 @@ def api_request(ctx, method, path):
         real += "?format=json"
     elif path in ("/mail/users/privileges", "/mail/users/quota"):
         real += "?" + urllib.parse.urlencode({"email": ctx.admin_user})
+    elif path == "/system/fail2ban/ban-reason":
+        real += "?ip=" + F2B_REASON_IP # TEST-NET-3, not banned: no jails
     elif path == "/ssl/csr/{domain}":
         form = {"countrycode": "US"}
     elif method == "POST":
@@ -5188,6 +5256,7 @@ def main():
         run_check("admin-backup-status", c_backup_status, ctx)
         run_check("admin-backup-saved", c_backup_saved, ctx)
         run_check("admin-fail2ban-status", c_fail2ban_api, ctx)
+        run_check("admin-fail2ban-bans", c_fail2ban_bans_api, ctx)
         run_check("admin-fail2ban-settings", c_fail2ban_settings_roundtrip, ctx)
         run_check("admin-fail2ban-report", c_fail2ban_report, ctx)
         run_check("admin-fail2ban-filters", c_fail2ban_filters, ctx)
@@ -5201,6 +5270,7 @@ def main():
         run_check("admin-nextcloud-setup-no-drift", c_nc_setup_no_drift, ctx)
         run_check("admin-nextcloud-hand-set", c_nc_hand_set, ctx)
         run_check("admin-ban-reasons-masking", c_local_test, ctx, "ban-reasons.py")
+        run_check("admin-ban-list-unit", c_local_test, ctx, "ban-list.py")
         run_check("admin-cloud-relays-unit", c_local_test, ctx, "cloud-relays.py")
         run_check("admin-nextcloud-throttle-unit", c_local_test, ctx, "nextcloud-throttle.py")
         run_check("admin-notifications-unit", c_local_test, ctx, "admin-mail.py")

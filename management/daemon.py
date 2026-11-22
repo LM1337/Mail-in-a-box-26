@@ -817,12 +817,39 @@ def privacy_status_set():
 @app.route('/system/fail2ban', methods=["GET"])
 @authorized_personnel_only
 def fail2ban_status():
-	from fail2ban_admin import get_status, client_info
-	status = get_status(env)
+	# The overview: counters, how many addresses are banned, the networks with
+	# the most of them, the relay hints, the settings. The bans are paged by
+	# /system/fail2ban/bans, their reasons read by /system/fail2ban/ban-reason.
+	from fail2ban_admin import get_status
 	# nginx puts the client's address in X-Forwarded-For (see log_failed_login).
 	ip = request.headers.getlist("X-Forwarded-For")[0] if request.headers.getlist("X-Forwarded-For") else request.remote_addr
-	status["client"] = client_info(env, ip, status["settings"])
-	return json_response(status)
+	return json_response(get_status(env, client_ip=ip))
+
+@app.route('/system/fail2ban/bans', methods=["GET"])
+@authorized_personnel_only
+def fail2ban_bans():
+	# filter (part of an address or a jail, or a network in CIDR notation),
+	# offset, limit (1 to 200, default 50): one page of the banned addresses,
+	# newest ban first.
+	from fail2ban_admin import list_bans
+	try:
+		return json_response(list_bans(request.args.get('filter', ''), request.args.get('offset'), request.args.get('limit')))
+	except ValueError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+
+@app.route('/system/fail2ban/ban-reason', methods=["GET"])
+@authorized_personnel_only
+def fail2ban_ban_reason():
+	# ip: why that address is banned, per jail that bans it now.
+	from fail2ban_admin import ban_reason
+	try:
+		return json_response(ban_reason(env, request.args.get('ip', '')))
+	except ValueError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
 
 @app.route('/system/fail2ban/settings', methods=["GET"])
 @authorized_personnel_only
