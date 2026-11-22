@@ -80,11 +80,20 @@ def run_services_checks(env, output, pool):
 		fatal = fatal or fatal2
 		output2.playback(output)
 
-	# Check fail2ban.
-	code, ret = shell('check_output', ["fail2ban-client", "status"], capture_stderr=True, trap=True)
-	if code != 0:
-		output.print_error("fail2ban is not running.")
-		all_running = False
+	# Check fail2ban, unless it is turned off (System > Intrusion Detection
+	# and Prevention, for tests): then a warning, so that it is not forgotten.
+	try:
+		from fail2ban_admin import get_settings as fail2ban_settings
+		f2b_on = fail2ban_settings(env)[0]["enabled"]
+	except Exception:
+		f2b_on = True
+	if not f2b_on:
+		output.print_warning("fail2ban is turned off (System > Intrusion Detection and Prevention): no address is banned after failed logins. Turn it on again after the tests.")
+	else:
+		code, ret = shell('check_output', ["fail2ban-client", "status"], capture_stderr=True, trap=True)
+		if code != 0:
+			output.print_error("fail2ban is not running.")
+			all_running = False
 
 	if all_running:
 		output.print_ok("All system services are running.")

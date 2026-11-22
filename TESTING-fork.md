@@ -487,7 +487,11 @@ report. The groups:
   is not an account of the box: the log lines of each jail's filter, also
   with names that the line repeats or that have spaces, and lines of
   Nextcloud's log that are not valid JSON, and long lines that must not
-  take long. `tests/fork/ban-list.py` (B220; no box needed) checks the
+  take long. `tests/fork/fail2ban-switch.py` (no box needed) checks the
+  switch that turns fail2ban off for tests: the setting, starting and
+  stopping the service (systemctl replaced by a stand-in), setup's exit
+  code 4, the status checks' warning and the page's checkbox.
+  `tests/fork/ban-list.py` (B220; no box needed) checks the
   banned addresses of that page with a stand-in for fail2ban-client and
   10,000 synthetic bans: the overview without per-ban lists (counters, the
   networks with the most banned addresses, the jails that ban the

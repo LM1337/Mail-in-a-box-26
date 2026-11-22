@@ -13,6 +13,22 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ### New
 
+* **fail2ban can be turned off for tests**\
+  System > Intrusion Detection and Prevention > Settings has a checkbox
+  "fail2ban (on by default)". Turned off, fail2ban is stopped and disabled
+  (`systemctl disable --now`), so that no address is banned after failed
+  logins and the current bans are lifted, for example while a test sends
+  wrong passwords on purpose; turned on again, it is enabled and started,
+  and the bans that have not run out come back from its database. The page
+  asks before turning it off and shows a warning while it is off, and the
+  status checks warn instead of reporting "fail2ban is not running"
+  (so the daily status mail mentions it). Setup keeps it off
+  (`fail2ban_admin.py --setup` exits with code 4, `setup/start.sh` then
+  stops and disables it instead of reloading it). Nextcloud's throttle and
+  the limit of failed logins through the box's own services do not depend
+  on it. API: the field `enabled` of `/system/fail2ban/settings` and of the
+  status. New offline test `tests/fork/fail2ban-switch.py`.
+
 * **Sending limit with an emergency brake: a flood of mail from the box is stopped (B221)**\
   All mail that the users and the box itself send now passes a small
   Postfix milter (`conf/send-limit/sendlimit-milter.py`, service
@@ -62,7 +78,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   question, so a stopped or hung milter is caught as well as a missing one)
   and mails when it has not answered for 4 minutes, and again when it
   answers; mail of cron jobs and Munin's alerts (sendmail) wait with the
-  rest. A downgrade to v78-r2604.4 keeps `smtpd_milter_maps` and the two services,
+  rest. Turned off (the checkbox of the limit), the milter is taken out of
+  Postfix's way altogether (`smtpd_milter_maps` empty, `non_smtpd_milters`
+  and `$sendlimit_submission_milters` without it; `send_limit.py --apply`
+  sets this when the setting changes, setup reads the milter's settings
+  file), so that nothing then depends on it; held mail goes out, and the
+  cron job does not watch the milter. A downgrade to v78-r2604.4 keeps `smtpd_milter_maps` and the two services,
   so mail from the box itself on port 25 still passes the limit (or, with the
   services removed, is refused: remove the setting with `postconf -X
   smtpd_milter_maps`). Without

@@ -43,6 +43,7 @@ JAIL_FILE = "/etc/fail2ban/jail.d/mailinabox_adaptive.conf"
 SERVER_FILE = "/etc/fail2ban/fail2ban.d/mailinabox_adaptive.conf"
 
 DEFAULTS = {
+	"enabled": True,              # fail2ban runs; off (stopped and disabled) only for tests
 	"adaptive": True,             # bantime.increment, per jail
 	"bantime_max": 7 * 86400,     # bantime.maxtime, seconds
 	"memory": 30 * 86400,         # dbpurgeage: how long past bans count, seconds
@@ -71,7 +72,7 @@ LIMITS = {
 	"spray_min_ips": (2, 100000),
 	"nc_max_attempts": (3, 1000),
 }
-BOOLEANS = ("adaptive", "slow_jails", "slow_web_jails", "nc_protection", "nc_allowlist")
+BOOLEANS = ("enabled", "adaptive", "slow_jails", "slow_web_jails", "nc_protection", "nc_allowlist")
 DURATIONS = ("bantime_max", "memory", "slow_findtime", "slow_bantime")
 MAX_ALLOWLIST = 100
 MIN_PREFIX = { 4: 8, 6: 16 } # refuse networks so wide that they switch fail2ban off
@@ -398,9 +399,41 @@ def update_settings(env, values, reset=False):
 			if restored:
 				raise RuntimeError(f"Nextcloud's brute-force settings could not be changed, the previous settings were restored: {e}") from None
 			raise RuntimeError(f"Nextcloud's brute-force settings could not be changed: {e} The previous settings are saved again, but could not be applied everywhere; save them again or re-run setup.") from None
+	# fail2ban itself, when it was turned on or off (the setting "enabled").
+	result["service"] = None
+	if old["enabled"] != new["enabled"] or not new["enabled"]:
+		try:
+			result["service"] = sync_service(new)
+		except RuntimeError:
+			save_settings(env, old)
+			try:
+				sync_service(old)
+			except RuntimeError:
+				pass
+			raise
 	result["settings"] = new
 	result["unbanned_allowlisted"] = unban_allowlisted(new)
 	return result
+
+def sync_service(settings, run=subprocess.run):
+	# fail2ban runs while "enabled" is on (the default). Turned off (for tests)
+	# it is stopped and disabled, so no address is banned and the current bans
+	# are lifted; turned on again it is enabled and started, and bans that
+	# have not run out come back from its database. Returns "started",
+	# "stopped" or None.
+	want = settings.get("enabled", True)
+	running = is_running()
+	if want == running:
+		if not want:
+			run(["systemctl", "disable", "fail2ban"], capture_output=True, timeout=60)
+		return None
+	try:
+		p = run(["systemctl", "enable" if want else "disable", "--now", "fail2ban"], capture_output=True, text=True, timeout=180)
+	except (OSError, subprocess.SubprocessError) as e:
+		raise RuntimeError(f"fail2ban could not be {'started' if want else 'stopped'}: {e}") from None
+	if p.returncode != 0:
+		raise RuntimeError(f"fail2ban could not be {'started' if want else 'stopped'}: " + ((p.stderr or p.stdout or "").strip().splitlines() or [f"exit code {p.returncode}"])[-1])
+	return "started" if want else "stopped"
 
 def unban_allowlisted(settings):
 	# ignoreip only stops new bans: an address banned before its network was
@@ -787,6 +820,7 @@ def get_status(env, client_ip=None):
 		pass
 	ret = {
 		"running": False,
+		"enabled": settings["enabled"],
 		"error": None,
 		"jails": [],
 		"banned_entries": 0,
@@ -1806,6 +1840,8 @@ if __name__ == "__main__":
 		# stops setup: on a problem Mail-in-a-Box's own jails stay in effect.
 		# Exit code 3 when the bantime.* options changed: setup then has
 		# fail2ban restart its jails ("reload --restart", see apply_config).
+		# Exit code 4 when fail2ban is turned off (the setting "enabled", for
+		# tests): setup then stops and disables it instead.
 		settings, warnings = get_settings(env)
 		for w in warnings:
 			print(w)
@@ -1816,7 +1852,9 @@ if __name__ == "__main__":
 			for path in (JAIL_FILE, SERVER_FILE):
 				_write(path, None)
 			# The removed files may have had bantime.* options.
-			sys.exit(3)
+			sys.exit(3 if settings["enabled"] else 4)
+		if not settings["enabled"]:
+			sys.exit(4)
 		for j in result["skipped_jails"]:
 			print(f"fail2ban: {j} left out, its log file does not exist yet.")
 		if result.get("restart_jails"):

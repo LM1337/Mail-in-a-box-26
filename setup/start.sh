@@ -290,6 +290,10 @@ if [ "$f2b_setup_rc" = 3 ]; then
 	reload_fail2ban --restart
 elif [ "$f2b_setup_rc" = 0 ]; then
 	reload_fail2ban
+elif [ "$f2b_setup_rc" = 4 ]; then
+	# Turned off under System > Intrusion Detection and Prevention (for tests).
+	echo "fail2ban is turned off (System > Intrusion Detection and Prevention): no address is banned after failed logins."
+	hide_output systemctl disable --now fail2ban
 else
 	exit "$f2b_setup_rc"
 fi

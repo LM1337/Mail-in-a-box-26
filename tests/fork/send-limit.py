@@ -506,5 +506,46 @@ with tempfile.TemporaryDirectory() as d:
 	check("watch: answers again: mailed", (w(T + 1900 + sl.MILTER_GRACE, True), len(sent)), ("up", 2))
 	check("watch: up again: nothing", (w(T + 2200 + sl.MILTER_GRACE, True), len(sent)), (None, 2))
 
+# Turned off, the milter is taken out of Postfix's way (apply_postfix), and the
+# setup scripts write the same values as send_limit.POSTFIX.
+calls = []
+class P:
+	def __init__(self, out="", rc=0): self.stdout, self.stderr, self.returncode = out, "", rc
+def fake_run(have):
+	def run(cmd, **kw):
+		calls.append(cmd)
+		if cmd[:2] == ["postconf", "-h"]:
+			return P("\n".join(have[k] for k in cmd[2:]) + "\n")
+		return P()
+	return run
+calls.clear()
+check("postfix: already on, nothing done", (sl.apply_postfix(True, run=fake_run(sl.POSTFIX[True])), len(calls)), (False, 1))
+calls.clear()
+check("postfix: turned off", sl.apply_postfix(False, run=fake_run(sl.POSTFIX[True])), True)
+check("postfix: off values set, then reload", (calls[1][:2], sorted(calls[1][2:]), calls[2]),
+	(["postconf", "-e"], sorted(f"{k}={v}" for k, v in sl.POSTFIX[False].items()), ["postfix", "reload"]))
+check("postfix: off has no 8895", any("8895" in v for v in sl.POSTFIX[False].values()), False)
+def no_postfix(cmd, **kw):
+	raise FileNotFoundError("postconf")
+check("postfix: no Postfix, nothing", sl.apply_postfix(True, run=no_postfix), False)
+setup = open(os.path.join(HERE, "..", "..", "setup", "dkim.sh")).read() + open(os.path.join(HERE, "..", "..", "setup", "mail-postfix.sh")).read()
+check("setup: the milter value of send_limit.POSTFIX", 'sendlimit_milter="' + sl.SL_MILTER + '"' in setup and '"sendlimit_submission_milters=' + sl.POSTFIX[True]["sendlimit_submission_milters"] + '"' in setup, True)
+check("setup: the off values of send_limit.POSTFIX", all(x in setup for x in ('"non_smtpd_milters=' + sl.POSTFIX[False]["non_smtpd_milters"] + '"',
+	'"sendlimit_submission_milters=' + sl.POSTFIX[False]["sendlimit_submission_milters"] + '"', "smtpd_milter_maps= ", "smtpd_milter_maps=" + sl.POSTFIX[True]["smtpd_milter_maps"])), True)
+with tempfile.TemporaryDirectory() as d:
+	os.chmod(d, 0o755)
+	order = []
+	saved = sl.report_recipient
+	sl.report_recipient = lambda env: None
+	f = os.path.join(d, "settings")
+	sl.apply_config({}, dict(sl.DEFAULTS, enabled=False), f, postfix=lambda on: order.append(("postfix", on, open(f).read().count("enabled 0") if os.path.exists(f) else None)))
+	sl.apply_config({}, dict(sl.DEFAULTS), f, postfix=lambda on: order.append(("postfix", on, open(f).read().count("enabled 0"))))
+	check("apply: off: Postfix first, on: the file first", order, [("postfix", False, None), ("postfix", True, 0)])
+	sl.report_recipient = saved
+	st = os.path.join(d, "milter.json")
+	sl.watch_milter(now=T, probe=lambda: False, send=lambda t, s: None, state_path=st)
+	check("watch: turned off clears a miss, no mail", (sl.watch_milter(now=T + 999, probe=lambda: False, send=lambda t, s: failures.append("mailed while off"), state_path=st, enabled=False),
+		sl.load_milter_state(st)["down_since"]), (None, None))
+
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

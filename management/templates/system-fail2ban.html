@@ -284,6 +284,14 @@
   <div class="form-group">
     <div class="col-sm-offset-2 col-sm-8">
       <div class="checkbox">
+        <label class="f2b-section"><input type="checkbox" id="f2b-enabled"> fail2ban (on by default)</label>
+      </div>
+      <p class="help-block">Bans an address after failed logins, in the jails below. Turn it off only for tests: while it is off, no address is banned after failed logins and the current bans are lifted; turned on again, the bans that have not run out come back. The status checks warn while it is off. Nextcloud&rsquo;s throttle and the limit of failed logins through the box&rsquo;s own services do not depend on it.</p>
+    </div>
+  </div>
+  <div class="form-group">
+    <div class="col-sm-offset-2 col-sm-8">
+      <div class="checkbox">
         <label class="f2b-section"><input type="checkbox" id="f2b-adaptive" onchange="f2b_toggle_inputs()"> Adaptive banning</label>
       </div>
       <p class="help-block">Each new ban of an address in a jail lasts twice as long as its previous ban in that jail, up to the maximum ban time, and the address is banned again after fewer failures there. Bans of the web ports (control panel, webmail, Nextcloud, ActiveSync) keep their fixed length. Addresses banned again and again in any jail get the one-week recidive ban on all ports, as before. fail2ban keeps the ban history for the memory period, also across restarts.</p>
@@ -612,7 +620,7 @@ function sl_render() {
     + " A mail to more recipients than the limit goes out when nothing else waits and counts in full. A lower limit catches a flood sooner, and a higher one lets"
     + " mail to many recipients go out without the brake. The change applies at once.");
   var w = $('#sl-warnings').html("");
-  if (!a.enabled) w.append($('<div class="alert alert-warning"/>').text("The sending limit is turned off: the box sends as much mail as it is given."));
+  if (!a.enabled) w.append($('<div class="alert alert-warning"/>').text("The sending limit is turned off: the box sends as much mail as it is given, and Postfix does not ask its milter at all."));
   r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
   var h = r.held, hb = $('#sl-held-table tbody').html("");
   if (h.mails) {
@@ -717,7 +725,9 @@ function f2b_render_alerts() {
     return div;
   }
 
-  if (!r.running)
+  if (!r.running && r.enabled === false)
+    alert("alert-warning", $("<p/>").text("fail2ban is turned off (Settings below): no address is banned after failed logins. Turn it on again after the tests."));
+  else if (!r.running)
     alert("alert-danger", $("<p/>").text("fail2ban is not running: " + (r.error || "unknown error") + " No address is banned at the moment."));
   if (!r.config_current)
     alert("alert-warning", $("<p/>").text("The fail2ban configuration files do not match the settings below. Save the settings to write them again."));
@@ -1238,6 +1248,7 @@ function f2b_render_settings() {
   var s = f2b_state.settings;
   var d = f2b_state.defaults;
   var lim = f2b_state.limits;
+  $('#f2b-enabled').prop('checked', s.enabled !== false);
   $('#f2b-adaptive').prop('checked', s.adaptive);
   $('#f2b-slow_jails').prop('checked', s.slow_jails);
   $('#f2b-slow_web_jails').prop('checked', s.slow_web_jails);
@@ -1296,6 +1307,7 @@ function f2b_allowlist_add(net) {
 function f2b_save_settings() {
   if (!f2b_state) return;
   var values = {
+    enabled: $('#f2b-enabled').prop('checked') ? "1" : "0",
     adaptive: $('#f2b-adaptive').prop('checked') ? "1" : "0",
     slow_jails: $('#f2b-slow_jails').prop('checked') ? "1" : "0",
     slow_web_jails: $('#f2b-slow_web_jails').prop('checked') ? "1" : "0",
@@ -1310,6 +1322,8 @@ function f2b_save_settings() {
   });
 
   var off = [];
+  if (f2b_state.settings.enabled !== false && values.enabled == "0")
+    off.push("fail2ban itself: no address is banned after failed logins any more, and all current bans are lifted. Only for tests: turn it on again afterwards.");
   if (f2b_state.settings.adaptive && values.adaptive == "0")
     off.push("Adaptive banning: repeat offenders get Mail-in-a-Box's fixed bans again, and fail2ban forgets its ban history after one day. All jails are restarted; their current bans are kept.");
   if (f2b_state.settings.slow_jails && values.slow_jails == "0")

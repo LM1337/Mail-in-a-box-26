@@ -122,6 +122,13 @@ tools/editconf.py /etc/opendkim.conf -s \
 # through smtpd_milter_maps, so that mail from other servers never depends on
 # it; through sendmail (non_smtpd_milters) for all mail; the submission ports
 # list it in master.cf ($sendlimit_submission_milters of mail-postfix.sh).
+#
+# When the sending limit is turned off (System > Intrusion Detection and
+# Prevention; "enabled 0" in the milter's settings file, which
+# management/send_limit.py --apply writes and which then also sets these
+# values when it is turned on or off in the control panel), Postfix does not
+# ask the milter at all, so nothing depends on it. The same values are in
+# send_limit.py (POSTFIX).
 sendlimit_milter="{ inet:127.0.0.1:8895, default_action=tempfail }"
 tools/write_conf.py /etc/postfix/sendlimit-milters.cidr << EOF;
 # Mail-in-a-Box (setup/dkim.sh): the milters of mail from the box itself on port 25.
@@ -129,11 +136,19 @@ tools/write_conf.py /etc/postfix/sendlimit-milters.cidr << EOF;
 ::ffff:127.0.0.0/104	inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter
 ::1/128	inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter
 EOF
-tools/editconf.py /etc/postfix/main.cf \
-	"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893" \
-	smtpd_milter_maps=cidr:/etc/postfix/sendlimit-milters.cidr \
-	"non_smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter" \
-	milter_default_action=accept
+if grep -qx 'enabled 0' /usr/local/lib/mailinabox/miab-sendlimit/settings 2> /dev/null; then
+	tools/editconf.py /etc/postfix/main.cf \
+		"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893" \
+		smtpd_milter_maps= \
+		"non_smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893" \
+		milter_default_action=accept
+else
+	tools/editconf.py /etc/postfix/main.cf \
+		"smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893" \
+		smtpd_milter_maps=cidr:/etc/postfix/sendlimit-milters.cidr \
+		"non_smtpd_milters=inet:127.0.0.1:8891 inet:127.0.0.1:8893 $sendlimit_milter" \
+		milter_default_action=accept
+fi
 
 # We need to explicitly enable the opendmarc service, or it will not start
 hide_output systemctl enable opendmarc

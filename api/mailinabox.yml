@@ -2193,7 +2193,7 @@ paths:
         - System
       summary: Change the intrusion detection and prevention settings
       description: |
-        Form fields named like the settings (`adaptive`, `bantime_max`,
+        Form fields named like the settings (`enabled`, `adaptive`, `bantime_max`,
         `memory`, `slow_jails`, `slow_web_jails`, `slow_maxretry`,
         `slow_findtime`, `slow_bantime`, `allowlist`, `spray_min_ips`, `jails`,
         `nc_protection`, `nc_max_attempts`, `nc_allowlist`); fields that are
@@ -4237,6 +4237,9 @@ components:
     Fail2banSettings:
       type: object
       properties:
+        enabled:
+          type: boolean
+          description: fail2ban runs (the default); off, it is stopped and disabled (for tests).
         adaptive:
           type: boolean
         bantime_max:
@@ -4386,6 +4389,9 @@ components:
       properties:
         running:
           type: boolean
+        enabled:
+          type: boolean
+          description: The setting `enabled`; false while fail2ban is turned off for tests.
         error:
           type: string
           nullable: true

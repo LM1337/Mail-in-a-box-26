@@ -78,6 +78,18 @@ MILTER_STATE = "/var/lib/mailinabox/send-limit-milter.json"
 MILTER_GRACE = 240 # seconds the milter may not answer before the mail
 MILTER_SUBJECT = "The sending limit does not answer: the box's outgoing mail waits"
 MAILDROP = "/var/spool/postfix/maildrop"
+# Postfix's milter settings with the sending limit on and off (as
+# setup/dkim.sh and setup/mail-postfix.sh write them): turned off, Postfix
+# does not ask the milter at all, so that nothing depends on it.
+SL_MILTER = "{ inet:127.0.0.1:8895, default_action=tempfail }"
+POSTFIX = {
+	True: { "smtpd_milter_maps": "cidr:/etc/postfix/sendlimit-milters.cidr",
+		"non_smtpd_milters": "inet:127.0.0.1:8891 inet:127.0.0.1:8893 " + SL_MILTER,
+		"sendlimit_submission_milters": "inet:127.0.0.1:8891 " + SL_MILTER },
+	False: { "smtpd_milter_maps": "",
+		"non_smtpd_milters": "inet:127.0.0.1:8891 inet:127.0.0.1:8893",
+		"sendlimit_submission_milters": "inet:127.0.0.1:8891" },
+}
 
 # rate/per: the limit, which sets off the brake. While the brake is on, all
 # counted mail is held; "stop" releases nothing until the administrator ends
@@ -246,11 +258,42 @@ def reload_postfix():
 		pass
 
 
-def apply_config(env, values=None, path=None, recipients_path=None, reload=reload_postfix):
+def apply_postfix(enabled, run=subprocess.run):
+	# Puts the milter into Postfix's way or takes it out (POSTFIX), when
+	# Postfix's settings differ, and reloads Postfix. Returns True on a change.
+	want = POSTFIX[bool(enabled)]
+	keys = list(want)
+	try:
+		p = run(["postconf", "-h", *keys], capture_output=True, text=True, timeout=60)
+	except (OSError, subprocess.SubprocessError):
+		return False # no Postfix here
+	if p.returncode != 0:
+		return False
+	have = dict(zip(keys, p.stdout.split("\n")))
+	if all(have.get(k) == v for k, v in want.items()):
+		return False
+	p = run(["postconf", "-e", *[f"{k}={v}" for k, v in want.items()]], capture_output=True, text=True, timeout=60)
+	if p.returncode != 0:
+		raise SendLimitError("postconf: " + (p.stderr or "").strip()[-300:])
+	run(["postfix", "reload"], capture_output=True, timeout=60)
+	return True
+
+
+def apply_config(env, values=None, path=None, recipients_path=None, reload=reload_postfix, postfix=None):
+	# postfix: the function that sets Postfix's milters (apply_postfix on
+	# the box; tests with their own files pass none, or their own).
 	if values is None:
 		values, _ = get_settings(env)
 	report = report_recipient(env)
+	# Turned on: the milter is told first (it then counts), then put into
+	# Postfix's way; turned off: taken out of Postfix's way first.
+	if postfix is None and path is None:
+		postfix = apply_postfix
+	if postfix and not values["enabled"]:
+		postfix(False)
 	changed = write_settings_file(render_settings_file(values, report), path)
+	if postfix and values["enabled"]:
+		postfix(True)
 	if env.get("PRIMARY_HOSTNAME"):
 		# Postfix reads the table when a process starts: reload it after a change.
 		if write_settings_file(render_admin_recipients("administrator@" + env["PRIMARY_HOSTNAME"], report), recipients_path or ADMIN_RCPTS):
@@ -466,7 +509,7 @@ def load_milter_state(path=MILTER_STATE):
 	return { "down_since": None, "mailed": False }
 
 
-def watch_milter(now=None, probe=milter_answers, send=send_mail, state_path=MILTER_STATE, waiting=maildrop_count):
+def watch_milter(now=None, probe=milter_answers, send=send_mail, state_path=MILTER_STATE, waiting=maildrop_count, enabled=True):
 	# The milter fails closed (setup/dkim.sh): while it does not answer, Postfix
 	# refuses the users' outgoing mail with a temporary error and sendmail's
 	# mail waits in the maildrop queue. Mail the administrator (through the
@@ -475,7 +518,8 @@ def watch_milter(now=None, probe=milter_answers, send=send_mail, state_path=MILT
 	# Returns "down", "up" or None (nothing mailed).
 	now = int(time.time()) if now is None else now
 	state = load_milter_state(state_path)
-	up = probe()
+	# Turned off, Postfix does not ask the milter (POSTFIX): nothing waits.
+	up = probe() if enabled else True
 	out = None
 	if not up:
 		if state["down_since"] is None:
@@ -630,7 +674,7 @@ def main(argv):
 		apply_config(env, values)
 		return 0
 	if argv[1] == "--notify":
-		watch_milter()
+		watch_milter(enabled=read_settings_file()["enabled"])
 		notify()
 		return 0
 	if argv[1] == "--end":

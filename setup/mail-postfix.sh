@@ -137,8 +137,13 @@ restart_on_change miab-sendlimit-release "" /usr/local/lib/mailinabox/miab-sendl
 #   that filters out privacy-sensitive headers on mail being sent out by
 #   authenticated users.  By default Postfix also applies this to attached
 #   emails but we turn this off by setting nested_header_checks empty.
-tools/editconf.py /etc/postfix/main.cf \
-	"sendlimit_submission_milters=inet:127.0.0.1:8891 { inet:127.0.0.1:8895, default_action=tempfail }"
+# Without the sending limit when it is turned off (see dkim.sh).
+if grep -qx 'enabled 0' /usr/local/lib/mailinabox/miab-sendlimit/settings 2> /dev/null; then
+	tools/editconf.py /etc/postfix/main.cf "sendlimit_submission_milters=inet:127.0.0.1:8891"
+else
+	tools/editconf.py /etc/postfix/main.cf \
+		"sendlimit_submission_milters=inet:127.0.0.1:8891 { inet:127.0.0.1:8895, default_action=tempfail }"
+fi
 tools/editconf.py /etc/postfix/master.cf -s -w \
 	"smtps=inet n       -       -       -       -       smtpd
 	  -o smtpd_tls_wrappermode=yes
