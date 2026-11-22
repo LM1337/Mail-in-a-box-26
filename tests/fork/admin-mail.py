@@ -213,7 +213,18 @@ with tempfile.TemporaryDirectory() as root:
 	to, mid = admin_mail.send_test(env)
 	m = sent["msg"]
 	check("test mail", (to, sent["server"], sent["from_addr"], sent["to_addrs"], m["To"], m["X-Miab-Test"], m["Auto-Submitted"], A in m["From"]),
-		("ops@other.example", ("127.0.0.1", 25), A, ["ops@other.example"], "ops@other.example", "1", "auto-generated", True))
+		("ops@other.example", ("127.0.0.1", 10587), A, ["ops@other.example"], "ops@other.example", "1", "auto-generated", True))
+
+	# The listener of the box's own reports (127.0.0.1:10587, which does not
+	# pass the milter of the sending limit); port 25 where it is missing.
+	class RefusedSMTP(FakeSMTP):
+		def __init__(self, host, port, timeout=None):
+			if port == 10587:
+				raise ConnectionRefusedError(111, "Connection refused")
+			super().__init__(host, port, timeout)
+	admin_mail.smtplib.SMTP = RefusedSMTP
+	admin_mail.send_test(env)
+	check("test mail: port 25 without the listener", sent["server"], ("127.0.0.1", 25))
 
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

@@ -158,6 +158,36 @@ tools/editconf.py /etc/postfix/master.cf -s -w \
 	  -o header_checks=pcre:/etc/postfix/outgoing_mail_header_filters
 	  -o nested_header_checks="
 
+# The listener of the box's own reports (fork, B221): management/email_administrator.py
+# and admin_mail.py send the status checks, backup and TLS reports, the
+# usage report and the mails of the guard and of the sending limit to
+# 127.0.0.1:10587, which does not pass the milter of the sending limit: that
+# milter fails closed (dkim.sh), and the mail that says it is down must still
+# reach the administrator. It takes mail only to administrator@ and the report
+# recipient (the table written by management/send_limit.py --apply; a first
+# one with administrator@ here), only from the box itself, and at most 20
+# mails and 20 recipients a minute (no exception for mynetworks), so that a
+# process on the box cannot use it to send mail elsewhere or many mails.
+# OpenDKIM signs it as before.
+if [ ! -f /etc/postfix/sendlimit-admin-recipients ]; then
+	printf '# Mail-in-a-Box --- written again by management/send_limit.py --apply.\nadministrator@%s\tOK\n' "$PRIMARY_HOSTNAME" \
+		| tools/write_conf.py /etc/postfix/sendlimit-admin-recipients
+fi
+tools/editconf.py /etc/postfix/master.cf -s -w \
+	"127.0.0.1:10587=inet n       -       -       -       -       smtpd
+	  -o syslog_name=postfix/adminmail
+	  -o smtpd_milters=inet:127.0.0.1:8891
+	  -o smtpd_milter_maps=
+	  -o smtpd_client_restrictions=permit_mynetworks,reject
+	  -o smtpd_helo_restrictions=
+	  -o smtpd_sender_restrictions=
+	  -o smtpd_relay_restrictions=check_recipient_access,texthash:/etc/postfix/sendlimit-admin-recipients,reject
+	  -o smtpd_recipient_restrictions=check_recipient_access,texthash:/etc/postfix/sendlimit-admin-recipients,reject
+	  -o smtpd_client_message_rate_limit=20
+	  -o smtpd_client_recipient_rate_limit=20
+	  -o smtpd_client_event_limit_exceptions=
+	  -o smtpd_tls_security_level=none"
+
 # Install the `outgoing_mail_header_filters` file required by the new 'authclean' service.
 cp conf/postfix_outgoing_mail_header_filters /etc/postfix/outgoing_mail_header_filters
 

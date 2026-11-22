@@ -20,6 +20,10 @@ management/send_limit.py -- python3 stdlib only, no box needed.
   * sendlimit-release.py: the senders in turn (one sender with many mails does not hold
     back the others), the rate kept, its records taken without following a
     link; send_limit.py releases or deletes the held mail of a sender;
+  * the listener of the box's own reports: its recipients table written with
+    the settings file, Postfix reloaded only when it changes; the milter
+    probe (answer, silence, nothing listening); watch_milter() mails once
+    after 4 minutes without an answer and once when it answers again;
   * notify(): the first event is mailed at once, later ones within the hour
     wait and go out together; status() merges kept and fresh events of the
     last 24 hours and warns when the milter is not running or uses other
@@ -433,6 +437,74 @@ with tempfile.TemporaryDirectory() as d:
 	sl.get_settings = lambda env: (dict(sl.DEFAULTS, rate=50), [])
 	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, running=True, settings_file=os.path.join(d, "none"))
 	check("status: other values warn", any("does not use this setting" in w for w in res["warnings"]), True)
+
+# The listener of the box's own reports: its recipients table, written with the
+# settings file; Postfix is reloaded only when the table changes.
+with tempfile.TemporaryDirectory() as d:
+	os.chmod(d, 0o755)
+	check("admin recipients: admin and report, lower case, once",
+		[l for l in sl.render_admin_recipients("administrator@Box.example.com", "Ops@other.example").splitlines() if not l.startswith("#")],
+		["administrator@box.example.com\tOK", "ops@other.example\tOK"])
+	check("admin recipients: same address once, a bad one left out",
+		[l for l in sl.render_admin_recipients("administrator@box.example.com", "administrator@box.example.com").splitlines() if not l.startswith("#")]
+		+ [l for l in sl.render_admin_recipients("administrator@box.example.com", "a b@x\tOK").splitlines() if not l.startswith("#")],
+		["administrator@box.example.com\tOK", "administrator@box.example.com\tOK"])
+	reloads = []
+	saved = sl.report_recipient
+	sl.report_recipient = lambda env: "ops@other.example"
+	env = {"PRIMARY_HOSTNAME": "box.example.com"}
+	rc = os.path.join(d, "rcpts")
+	sl.apply_config(env, dict(sl.DEFAULTS), os.path.join(d, "settings"), rc, reload=lambda: reloads.append(1))
+	sl.apply_config(env, dict(sl.DEFAULTS), os.path.join(d, "settings"), rc, reload=lambda: reloads.append(1))
+	check("apply: table written, Postfix reloaded once", (open(rc).read().count("\tOK"), len(reloads)), (2, 1))
+	sl.report_recipient = lambda env: "new@other.example"
+	sl.apply_config(env, dict(sl.DEFAULTS), os.path.join(d, "settings"), rc, reload=lambda: reloads.append(1))
+	check("apply: new report recipient, reloaded again", ("new@other.example\tOK" in open(rc).read(), len(reloads)), (True, 2))
+	sl.report_recipient = saved
+
+# milter_answers(): a milter that answers Postfix's first question, one that
+# accepts the connection and says nothing (stopped or hung), none.
+import socket, struct, threading
+def fake_milter(answer):
+	srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(4)
+	def run():
+		while True:
+			try:
+				c, _ = srv.accept()
+			except OSError:
+				return
+			if answer:
+				c.recv(64)
+				body = b"O" + struct.pack("!III", 6, 0, 0)
+				c.sendall(struct.pack("!I", len(body)) + body)
+			threading.Timer(3, c.close).start()
+	threading.Thread(target=run, daemon=True).start()
+	return srv
+up, mute = fake_milter(True), fake_milter(False)
+free = socket.socket(); free.bind(("127.0.0.1", 0)); free_port = free.getsockname()[1]; free.close()
+check("probe: an answering milter", sl.milter_answers(up.getsockname(), timeout=2), True)
+check("probe: a milter that says nothing", sl.milter_answers(mute.getsockname(), timeout=1), False)
+check("probe: nothing listening", sl.milter_answers(("127.0.0.1", free_port), timeout=1), False)
+up.close(); mute.close()
+
+# watch_milter(): a mail after MILTER_GRACE seconds without an answer, once;
+# a short gap is not mailed; a mail when it answers again; a failed send is tried again.
+with tempfile.TemporaryDirectory() as d:
+	st = os.path.join(d, "milter.json")
+	sent = []
+	send = lambda text, subject: sent.append(subject)
+	w = lambda now, ok, snd=send: sl.watch_milter(now=now, probe=lambda: ok, send=snd, state_path=st, waiting=lambda: 7)
+	check("watch: up, nothing", (w(T, True), sent), (None, []))
+	check("watch: first miss, no mail yet", (w(T + 300, False), sent), (None, []))
+	check("watch: answers again before the grace, no mail", (w(T + 400, True), sent), (None, []))
+	w(T + 1000, False)
+	def broken(text, subject):
+		raise OSError("refused")
+	check("watch: down past the grace, send fails: tried again", w(T + 1000 + sl.MILTER_GRACE, False, broken), None)
+	check("watch: down past the grace: mailed", (w(T + 1300 + sl.MILTER_GRACE, False), sent), ("down", [sl.MILTER_SUBJECT]))
+	check("watch: still down: not again", (w(T + 1600 + sl.MILTER_GRACE, False), len(sent)), (None, 1))
+	check("watch: answers again: mailed", (w(T + 1900 + sl.MILTER_GRACE, True), len(sent)), ("up", 2))
+	check("watch: up again: nothing", (w(T + 2200 + sl.MILTER_GRACE, True), len(sent)), (None, 2))
 
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

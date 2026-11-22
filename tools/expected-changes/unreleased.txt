@@ -14,5 +14,6 @@ crontabs.txt + ^/etc/cron\.d/mailinabox-send-limit [0-9a-f]+$ # B221: the cron j
 units.txt + ^miab-sendlimit enabled active$ # B221: the milter of the sending limit (conf/send-limit/sendlimit-milter.py, conf/miab-sendlimit.service)
 units.txt + ^miab-sendlimit-release enabled active$ # B221: the release service of the sending limit (conf/send-limit/sendlimit-release.py, conf/miab-sendlimit-release.service) releases held mail at the limit
 listening.txt + ^tcp 127\.0\.0\.1:8895 python3$ # B221: the milter of the sending limit listens on 127.0.0.1:8895
+listening.txt + ^tcp 127\.0\.0\.1:10587 master$ # B221: Postfix's listener of the box's own reports (setup/mail-postfix.sh), which does not pass the milter of the sending limit, only to administrator@ and the report recipient
 postconf.txt - ^non_smtpd_milters = \$smtpd_milters$ # B221: sendmail's mail passes the milter of the sending limit last, which fails closed (default_action=tempfail for it only, setup/dkim.sh); port 25 asks it only for mail from the box itself (smtpd_milter_maps), the submission ports through $sendlimit_submission_milters (setup/mail-postfix.sh); see the next line
 postconf.txt + ^non_smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893 \{ inet:127\.0\.0\.1:8895, default_action=tempfail \}$ # B221: see the line above

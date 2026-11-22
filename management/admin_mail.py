@@ -324,6 +324,20 @@ def status(env):
 	})
 
 
+ADMIN_SMTP_PORT = 10587
+
+
+def admin_smtp(timeout=30):
+	# Postfix's listener of the box's own reports (setup/mail-postfix.sh): it
+	# does not pass the milter of the sending limit, which fails closed, and
+	# takes mail only to administrator@ and the report recipient. Port 25
+	# where it is missing (an older setup, a downgrade).
+	try:
+		return smtplib.SMTP("127.0.0.1", ADMIN_SMTP_PORT, timeout=timeout)
+	except ConnectionRefusedError:
+		return smtplib.SMTP("127.0.0.1", 25, timeout=timeout)
+
+
 def send_test(env):
 	# A test mail to the report recipient, as the box's own reports are sent
 	# (SMTP to 127.0.0.1:25, from administrator@). Returns (to, message id).
@@ -345,7 +359,7 @@ def send_test(env):
 		f"The box sends its reports to {to}, which goes to: {where}.\n"
 		"If you read this, they reach you.\n")
 	try:
-		with smtplib.SMTP("127.0.0.1", 25, timeout=30) as s:
+		with admin_smtp(timeout=30) as s:
 			s.ehlo()
 			s.send_message(msg, from_addr=admin, to_addrs=[to])
 	except (OSError, smtplib.SMTPException) as e:

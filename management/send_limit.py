@@ -22,10 +22,21 @@
 #                            recipient of the box's reports (System >
 #                            Notifications), at most one mail an hour, and
 #                            keeps the events of the last 7 days for the
-#                            control panel
+#                            control panel; and mails when the milter has
+#                            not answered for 4 minutes (Postfix then refuses
+#                            outgoing mail, it fails closed) and when it
+#                            answers again
 #   send_limit.py --status   the setting and the events of the last 24 hours
 #   send_limit.py --apply    (setup) writes the settings file of the milter
-#                            from settings.yaml
+#                            from settings.yaml, and Postfix's list of the
+#                            recipients of the box's own reports
+#
+# The box's own reports (management/email_administrator.py, admin_mail.py)
+# go through a listener of their own, 127.0.0.1:10587 (setup/mail-postfix.sh),
+# which does not pass the milter of the sending limit, so that they still
+# reach the administrator while the milter is down. It takes mail only to
+# administrator@PRIMARY_HOSTNAME and the report recipient (ADMIN_RCPTS,
+# written here) and only 20 a minute.
 #
 # The setting is part of System > Intrusion Detection and Prevention (the API
 # /system/send-limit), in $STORAGE_ROOT/settings.yaml as "send_limit" (only
@@ -61,6 +72,12 @@ HELD_JSON = "/run/miab-sendlimit/held.json"
 END = "/run/miab-sendlimit/end"
 RECHECK = "/run/miab-sendlimit/recheck"
 FLAG = "/run/miab-sendlimit/release"
+ADMIN_RCPTS = "/etc/postfix/sendlimit-admin-recipients"
+MILTER = ("127.0.0.1", 8895)
+MILTER_STATE = "/var/lib/mailinabox/send-limit-milter.json"
+MILTER_GRACE = 240 # seconds the milter may not answer before the mail
+MILTER_SUBJECT = "The sending limit does not answer: the box's outgoing mail waits"
+MAILDROP = "/var/spool/postfix/maildrop"
 
 # rate/per: the limit, which sets off the brake. While the brake is on, all
 # counted mail is held; "stop" releases nothing until the administrator ends
@@ -74,6 +91,7 @@ FLAGS = ("enabled", "stop")
 EVENT_RE = re.compile(r"^([0-9]{1,12}) ([0-9]{1,6}) ([0-9]{1,5}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,4}) ([0-9]{1,9}) ([0-9]{1,9})((?: [^\s=]{1,210}=[0-9]{1,9}/[0-9]{1,9}){0,10})$")
 QID_RE = re.compile(r"^[0-9A-Za-z]{6,24}$")
 SENDER_RE = re.compile(r"^[^\s=]{1,210}$")
+ADDRESS_RE = re.compile(r"[^\s@=]{1,64}@[A-Za-z0-9.-]{1,253}")
 
 
 class SendLimitError(ValueError):
@@ -145,7 +163,7 @@ def render_settings_file(values, report=None):
 		"# The sending limit of the box, from settings.yaml (System > Intrusion Detection and Prevention;",
 		"# management/send_limit.py), read by conf/send-limit/sendlimit-milter.py and sendlimit-release.py when it changes."]
 	lines += [f"{k} {1 if values[k] else 0}" for k in FLAGS] + [f"{k} {values[k]}" for k in NUMBERS]
-	if report and re.fullmatch(r"[^\s@=]{1,64}@[A-Za-z0-9.-]{1,253}", report):
+	if report and ADDRESS_RE.fullmatch(report):
 		lines.append(f"report {report.lower()}")
 	return "\n".join(lines) + "\n"
 
@@ -210,10 +228,34 @@ def report_recipient(env):
 		return None
 
 
-def apply_config(env, values=None, path=None):
+def render_admin_recipients(admin, report=None):
+	# Postfix's check_recipient_access table (texthash) of the listener of the
+	# box's own reports: administrator@ and the report recipient.
+	lines = ["# Mail-in-a-Box --- Do not edit / will be overwritten on update.",
+		"# The recipients of the box's own reports (management/send_limit.py --apply), the only ones",
+		"# that Postfix's listener 127.0.0.1:10587 takes mail for (setup/mail-postfix.sh)."]
+	for a in dict.fromkeys(x.lower() for x in (admin, report) if x and ADDRESS_RE.fullmatch(x)):
+		lines.append(f"{a}\tOK")
+	return "\n".join(lines) + "\n"
+
+
+def reload_postfix():
+	try:
+		subprocess.run(["postfix", "reload"], capture_output=True, timeout=60)
+	except (OSError, subprocess.SubprocessError):
+		pass
+
+
+def apply_config(env, values=None, path=None, recipients_path=None, reload=reload_postfix):
 	if values is None:
 		values, _ = get_settings(env)
-	return write_settings_file(render_settings_file(values, report_recipient(env)), path)
+	report = report_recipient(env)
+	changed = write_settings_file(render_settings_file(values, report), path)
+	if env.get("PRIMARY_HOSTNAME"):
+		# Postfix reads the table when a process starts: reload it after a change.
+		if write_settings_file(render_admin_recipients("administrator@" + env["PRIMARY_HOSTNAME"], report), recipients_path or ADMIN_RCPTS):
+			reload()
+	return changed
 
 
 def update_settings(env, values, reset=False, path=None):
@@ -345,8 +387,8 @@ def message(events, dropped=0, held=None):
 		"The limit, the held mail and a list of these minutes: the control panel, System > Intrusion Detection and Prevention.\n")
 
 
-def send_mail(text):
-	p = subprocess.run([sys.executable, os.path.join(HERE, "email_administrator.py"), SUBJECT],
+def send_mail(text, subject=SUBJECT):
+	p = subprocess.run([sys.executable, os.path.join(HERE, "email_administrator.py"), subject],
 		input=text, text=True, capture_output=True, timeout=120)
 	if p.returncode != 0:
 		raise RuntimeError("email_administrator.py: " + (p.stderr.strip() or p.stdout.strip())[-300:])
@@ -382,6 +424,97 @@ def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE, 
 		save_state(state, state_path)
 		sent = True
 	return sent
+
+
+def milter_answers(addr=MILTER, timeout=5):
+	# True when the milter answers Postfix's first question (SMFIC_OPTNEG,
+	# protocol version 6): a process that is stopped or hangs still has its
+	# port open, but gives no answer.
+	import socket
+	import struct
+	try:
+		with socket.create_connection(addr, timeout=timeout) as s:
+			s.settimeout(timeout)
+			body = b"O" + struct.pack("!III", 6, 0x1ff, 0x1fffff)
+			s.sendall(struct.pack("!I", len(body)) + body)
+			head = b""
+			while len(head) < 5:
+				b = s.recv(5 - len(head))
+				if not b:
+					return False
+				head += b
+			return head[4:5] == b"O"
+	except OSError:
+		return False
+
+
+def maildrop_count(path=MAILDROP):
+	try:
+		return len(os.listdir(path))
+	except OSError:
+		return None
+
+
+def load_milter_state(path=MILTER_STATE):
+	try:
+		with open(path, encoding="utf-8") as f:
+			s = json.load(f)
+		if isinstance(s, dict) and (s.get("down_since") is None or isinstance(s.get("down_since"), int)):
+			return { "down_since": s.get("down_since"), "mailed": bool(s.get("mailed")) }
+	except (OSError, ValueError, TypeError):
+		pass
+	return { "down_since": None, "mailed": False }
+
+
+def watch_milter(now=None, probe=milter_answers, send=send_mail, state_path=MILTER_STATE, waiting=maildrop_count):
+	# The milter fails closed (setup/dkim.sh): while it does not answer, Postfix
+	# refuses the users' outgoing mail with a temporary error and sendmail's
+	# mail waits in the maildrop queue. Mail the administrator (through the
+	# listener of the box's own reports, which does not pass the milter) when
+	# it has not answered for MILTER_GRACE seconds, and again when it answers.
+	# Returns "down", "up" or None (nothing mailed).
+	now = int(time.time()) if now is None else now
+	state = load_milter_state(state_path)
+	up = probe()
+	out = None
+	if not up:
+		if state["down_since"] is None:
+			state = { "down_since": now, "mailed": False }
+		elif not state["mailed"] and now - state["down_since"] >= MILTER_GRACE:
+			n = waiting()
+			since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(state["down_since"]))
+			try:
+				send(f"The milter of the sending limit (service {SERVICE}, 127.0.0.1:8895) has not answered since {since}.\n\n"
+					"So that no mail leaves the box without the limit, Postfix refuses the outgoing mail of the users with a"
+					" temporary error (451 4.7.1) while it does not answer: mail programs, webmail and ActiveSync send it again"
+					" later, and the mail that programs on the box send through sendmail waits in Postfix's queue"
+					+ (f" ({n} mails now)" if n is not None else "") + ". It goes out once the milter answers again."
+					" Mail from other servers to the box is not affected, nor this mail.\n\n"
+					f"On the box: sudo systemctl status {SERVICE}; sudo journalctl -u {SERVICE} -n 50;"
+					f" sudo systemctl restart {SERVICE}. The control panel's System Status Checks show the service as well.\n", MILTER_SUBJECT)
+				state["mailed"] = True
+				out = "down"
+			except Exception as e:
+				print(f"send_limit.py: the mail to the administrator could not be sent, it is tried again next time: {e}", file=sys.stderr)
+	elif state["down_since"] is not None:
+		if state["mailed"]:
+			since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(state["down_since"]))
+			try:
+				send(f"The milter of the sending limit (service {SERVICE}) answers again; it had not answered since {since}."
+					" The mail that waited goes out now, at the limit.\n", "The sending limit answers again")
+				out = "up"
+			except Exception as e:
+				print(f"send_limit.py: the mail to the administrator could not be sent, it is tried again next time: {e}", file=sys.stderr)
+				return None
+		state = { "down_since": None, "mailed": False }
+	else:
+		return None
+	tmp = state_path + ".new"
+	fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+	with os.fdopen(fd, "w", encoding="utf-8") as f:
+		json.dump(state, f)
+	os.replace(tmp, state_path)
+	return out
 
 
 def service_running(unit=SERVICE):
@@ -497,6 +630,7 @@ def main(argv):
 		apply_config(env, values)
 		return 0
 	if argv[1] == "--notify":
+		watch_milter()
 		notify()
 		return 0
 	if argv[1] == "--end":

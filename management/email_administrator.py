@@ -58,8 +58,15 @@ msg.attach(MIMEText(content_html, 'html'))
 #msg.set_content(content)
 #msg.add_alternative(content_html, "html")
 
-# send
-smtpclient = smtplib.SMTP('127.0.0.1', 25)
+# send, through Postfix's listener of the box's own reports (127.0.0.1:10587,
+# setup/mail-postfix.sh), which does not pass the milter of the sending
+# limit, so that the report arrives also while that milter is down;
+# port 25 where there is no such listener (an older setup).
+try:
+    from admin_mail import admin_smtp
+    smtpclient = admin_smtp(timeout=120)
+except ImportError: # admin_mail.py cannot be loaded: the report must not be lost
+    smtpclient = smtplib.SMTP('127.0.0.1', 25)
 smtpclient.ehlo()
 smtpclient.sendmail(
         admin_addr, # MAIL FROM

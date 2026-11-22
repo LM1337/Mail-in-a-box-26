@@ -48,9 +48,21 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   queue until the milter is back, and systemd restarts it after 2 seconds
   without ever giving up. Mail from other servers does not depend on it:
   on port 25 Postfix asks it only for mail from the box itself
-  (`smtpd_milter_maps`, `/etc/postfix/sendlimit-milters.cidr`). The status
-  checks show the service; while it is down, their mails wait as well. A
-  downgrade to v78-r2604.4 keeps `smtpd_milter_maps` and the two services,
+  (`smtpd_milter_maps`, `/etc/postfix/sendlimit-milters.cidr`). The box's
+  own reports (status checks, backup and TLS reports, the usage report, the
+  mails of the guard and of the sending limit, the test mail of System >
+  Notifications) go through a new listener of Postfix, `127.0.0.1:10587`
+  (`postfix/adminmail` in the log), which does not pass this milter: it
+  takes mail only from the box itself, only to administrator@ and the report
+  recipient (`/etc/postfix/sendlimit-admin-recipients`, written by
+  `send_limit.py --apply` and again when the report recipient changes) and
+  at most 20 mails a minute, so it cannot be used to send mail elsewhere.
+  So the administrator still gets mail while the milter is down: the cron
+  job of the sending limit asks the milter every 5 minutes (Postfix's first
+  question, so a stopped or hung milter is caught as well as a missing one)
+  and mails when it has not answered for 4 minutes, and again when it
+  answers; mail of cron jobs and Munin's alerts (sendmail) wait with the
+  rest. A downgrade to v78-r2604.4 keeps `smtpd_milter_maps` and the two services,
   so mail from the box itself on port 25 still passes the limit (or, with the
   services removed, is refused: remove the setting with `postconf -X
   smtpd_milter_maps`). Without
