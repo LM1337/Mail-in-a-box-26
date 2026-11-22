@@ -53,8 +53,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   sender with "Release now" and "Delete", and the minutes of the last 24
   hours in which the limit acted; API `/system/send-limit` and
   `/system/send-limit/held`, command line `management/send_limit.py
-  --status`, `--release`, `--delete`, `--end`. The box's own mail to
-  administrator@ and to the report recipient is never held. Mail from
+  --status`, `--release`, `--delete`, `--end`. While the brake is on,
+  held mail goes out at the brake's rate on average; as a token bucket it
+  may let up to that many go at once, so a minute can see a few more.
+  The box's own mail to administrator@ and to the report recipient is
+  never held. Mail from
   other servers is not counted. The milter runs as a dynamic user without
   privileges, and it fails closed: when it does not answer (stopped,
   crashed or hung), Postfix refuses outgoing mail with a temporary error
@@ -93,9 +96,17 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   recipients are counted as the sender gave them, before Postfix expands
   aliases, so a mail to an alias that forwards to many addresses counts
   once (only administrators add aliases), and mail from other servers that
-  aliases forward on is not counted either. A single mail to more than 30
-  recipients sets off the brake as well; a box whose users send to many
-  recipients at once should raise the limit. Before, an
+  aliases forward on is not counted either. A mail with more recipients
+  than the limit goes out at once when nothing waits and counts in full,
+  so the next mail within the following seconds sets off the brake; a box
+  whose users send to many recipients at once should raise the limit.
+  A second, long limit stops a steady flood below the first one: by
+  default at most 500 mails (recipients) an hour, set and turned off on the
+  same page (`long_enabled`, `long_rate`, `long_per`); a mail must fit both,
+  and more than either sets off the same brake, whose mail and log line say
+  which limit it was. In the lab test of the first version, floods of 1000
+  mails by SMTP at 23 a second, and of 300 by webmail, ActiveSync and
+  sendmail at 2 to 7 a second, all went out without the brake. Before, an
   account that was taken over or a program on the box could send any
   amount of mail in the box's name before anyone noticed, and ruin the
   reputation of its address with other mail providers. New offline test

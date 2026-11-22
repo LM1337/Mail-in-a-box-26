@@ -95,10 +95,14 @@ POSTFIX = {
 # counted mail is held; "stop" releases nothing until the administrator ends
 # it, otherwise held mail goes out at brake_rate per brake_per seconds and
 # the brake ends by itself after "calm" minutes without held mail.
-DEFAULTS = { "enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30 }
-RANGES = { "rate": [1, 100000], "per": [1, 3600], "brake_rate": [1, 100000], "brake_per": [1, 86400], "calm": [1, 1440] }
-NUMBERS = ("rate", "per", "brake_rate", "brake_per", "calm")
-FLAGS = ("enabled", "stop")
+# long_rate/long_per: the long limit (a steady flood below the short one,
+# by default 500 mails an hour), which can be turned off (long_enabled).
+DEFAULTS = { "enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30,
+	"long_enabled": True, "long_rate": 500, "long_per": 3600 }
+RANGES = { "rate": [1, 100000], "per": [1, 3600], "brake_rate": [1, 100000], "brake_per": [1, 86400], "calm": [1, 1440],
+	"long_rate": [1, 100000], "long_per": [60, 604800] }
+NUMBERS = ("rate", "per", "brake_rate", "brake_per", "calm", "long_rate", "long_per")
+FLAGS = ("enabled", "stop", "long_enabled")
 
 EVENT_RE = re.compile(r"^([0-9]{1,12}) ([0-9]{1,6}) ([0-9]{1,5}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,4}) ([0-9]{1,9}) ([0-9]{1,9})((?: [^\s=]{1,210}=[0-9]{1,9}/[0-9]{1,9}){0,10})$")
 QID_RE = re.compile(r"^[0-9A-Za-z]{6,24}$")
@@ -131,7 +135,8 @@ def validate_settings(values, strict=True):
 				raise SendLimitError(f"{k} must be 1 or 0.")
 			warnings.append(f"send_limit {k} in settings.yaml is not valid, the default applies.")
 	names = { "rate": "The number of mails", "per": "The number of seconds", "brake_rate": "The number of mails while the brake is on",
-		"brake_per": "The number of seconds while the brake is on", "calm": "The number of minutes" }
+		"brake_per": "The number of seconds while the brake is on", "calm": "The number of minutes",
+		"long_rate": "The number of mails of the long limit", "long_per": "The number of seconds of the long limit" }
 	for k in NUMBERS:
 		if k not in values or values[k] in (None, ""):
 			continue
@@ -184,7 +189,8 @@ def read_settings_file(path=None):
 	# The values the milter uses (its defaults without the file; as
 	# sendlimit_common.Settings.read).
 	out = dict(DEFAULTS)
-	limits = { "rate": 100000, "per": 86400, "brake_rate": 100000, "brake_per": 86400, "calm": 1440 }
+	limits = { "rate": (1, 100000), "per": (1, 86400), "brake_rate": (1, 100000), "brake_per": (1, 86400), "calm": (1, 1440),
+		"long_rate": (1, 100000), "long_per": (60, 604800) }
 	try:
 		with open(path or SETTINGS_FILE, encoding="utf-8") as f:
 			for line in f:
@@ -193,7 +199,7 @@ def read_settings_file(path=None):
 					if p[0] in FLAGS:
 						out[p[0]] = p[1] != "0"
 					elif p[0] in limits:
-						out[p[0]] = min(max(int(p[1]), 1), limits[p[0]])
+						out[p[0]] = min(max(int(p[1]), limits[p[0]][0]), limits[p[0]][1])
 	except OSError:
 		pass
 	return out
@@ -412,7 +418,8 @@ def message(events, dropped=0, held=None):
 	brake = ""
 	if held and held.get("brake"):
 		since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(held.get("brake_since") or 0))
-		brake = (f"THE BRAKE IS ON since {since}: the box sent more than its limit allows, so it holds all outgoing mail now"
+		why = f"more than {held['brake_reason']}" if held.get("brake_reason") else "more than its limit allows"
+		brake = (f"THE BRAKE IS ON since {since}: the box sent {why}, so it holds all outgoing mail now"
 			+ (" and sends nothing until you end the brake.\n\n" if held.get("stop") else
 				f" and sends only {held.get('brake_rate')} mails in {held.get('brake_per')} seconds; the brake ends by itself"
 				f" after {held.get('calm')} minutes without held mail.\n\n"))
@@ -694,7 +701,9 @@ def main(argv):
 	for w in st["warnings"]:
 		print(w)
 	a = st["applied"]
-	print(f"Sending limit: {a['rate']} mails in {a['per']} s" + ("" if a["enabled"] else " (turned off)"))
+	print(f"Sending limit: {a['rate']} mails in {a['per']} s"
+		+ (f" and {a['long_rate']} mails in {a['long_per']} s" if a["long_enabled"] else " (no long limit)")
+		+ ("" if a["enabled"] else " (turned off)"))
 	if st["brake"]["on"]:
 		print("THE BRAKE IS ON since " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st["brake"]["since"] or 0))
 			+ (": nothing is sent until it is ended (--end)." if st["brake"]["stop"] else ": held mail goes out very slowly; --end ends it."))

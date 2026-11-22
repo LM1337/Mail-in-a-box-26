@@ -167,7 +167,7 @@
 
 <h3>Sending limit</h3>
 
-<p>The box lets at most <span class="sl-rate">30</span> mails within <span class="sl-per">1</span> second(s) go out (each recipient counts as one mail), of all mail that its users and the box itself send: mail programs and webmail (SMTP with login on ports 465 and 587), ActiveSync, Nextcloud, Sieve redirects and programs on the box (sendmail), and SMTP from the box itself. More than that sets off the <strong>brake</strong>: from the first mail that does not fit, all outgoing mail is accepted and held (nobody gets an error, nothing is lost), the recipient of the box&rsquo;s reports (System &gt; Notifications) is mailed at once, and held mail goes out only very slowly, or not at all until you end the brake. So an account that was taken over, or a program that sends spam, gets a few dozen mails out instead of thousands, and you can delete the rest below before it goes out; a flood of spam would ruin the reputation of the box&rsquo;s address with other mail providers. The box&rsquo;s own mail to its report recipient is never held. Mail that comes in from other servers is not limited.</p>
+<p>The box lets at most <span class="sl-rate">30</span> mails within <span class="sl-per">1</span> second(s) go out<span class="sl-long-text">, and at most <span class="sl-long-rate">500</span> within <span class="sl-long-per">3600</span> seconds (a steady flood below the first limit)</span> (each recipient counts as one mail), of all mail that its users and the box itself send: mail programs and webmail (SMTP with login on ports 465 and 587), ActiveSync, Nextcloud, Sieve redirects and programs on the box (sendmail), and SMTP from the box itself. More than that sets off the <strong>brake</strong>: from the first mail that does not fit, all outgoing mail is accepted and held (nobody gets an error, nothing is lost), the recipient of the box&rsquo;s reports (System &gt; Notifications) is mailed at once, and held mail goes out only very slowly, or not at all until you end the brake. So an account that was taken over, or a program that sends spam, gets a few dozen mails out instead of thousands, and you can delete the rest below before it goes out; a flood of spam would ruin the reputation of the box&rsquo;s address with other mail providers. The box&rsquo;s own mail to its report recipient is never held. Mail that comes in from other servers is not limited.</p>
 
 <form class="form-inline" role="form" onsubmit="sl_save(); return false;" style="margin-bottom: 1em">
   <div class="checkbox" style="margin-right: 1em">
@@ -182,6 +182,19 @@
     <label for="sl-per" class="sr-only">seconds</label>
     <input type="number" class="form-control" id="sl-per" min="1" max="3600" style="width: 6em">
     <span>seconds</span>
+  </div>
+  <div style="margin-top: .5em">
+    <div class="checkbox" style="margin-right: 1em">
+      <label><input type="checkbox" id="sl-long-enabled"> and to</label>
+    </div>
+    <div class="form-group">
+      <label for="sl-long-rate" class="sr-only">mails</label>
+      <input type="number" class="form-control" id="sl-long-rate" min="1" max="100000" style="width: 7em">
+      <span>mails within</span>
+      <label for="sl-long-per" class="sr-only">seconds</label>
+      <input type="number" class="form-control" id="sl-long-per" min="60" max="604800" style="width: 7em">
+      <span>seconds (the long limit, against a steady flood below the first one)</span>
+    </div>
   </div>
   <div style="margin-top: .5em">
     <span>While the brake is on:</span>
@@ -602,6 +615,12 @@ function sl_render() {
   $('#sl-enabled').prop('checked', s.enabled);
   $('#sl-rate').val(s.rate).attr('min', r.ranges.rate[0]).attr('max', r.ranges.rate[1]);
   $('#sl-per').val(s.per).attr('min', r.ranges.per[0]).attr('max', r.ranges.per[1]);
+  $('#sl-long-enabled').prop('checked', s.long_enabled);
+  $('#sl-long-rate').val(s.long_rate).attr('min', r.ranges.long_rate[0]).attr('max', r.ranges.long_rate[1]);
+  $('#sl-long-per').val(s.long_per).attr('min', r.ranges.long_per[0]).attr('max', r.ranges.long_per[1]);
+  $('.sl-long-rate').text(a.long_rate);
+  $('.sl-long-per').text(a.long_per);
+  $('.sl-long-text').toggle(!!a.long_enabled);
   $('#sl-stop-' + (s.stop ? "1" : "0")).prop('checked', true);
   $('#sl-brake-rate').val(s.brake_rate);
   $('#sl-brake-per').val(s.brake_per);
@@ -615,7 +634,7 @@ function sl_render() {
     div.append($('<button type="button" class="btn btn-default btn-sm"/>').text("End the brake").click(function() { sl_held_action('end', null); }));
     b.append(div);
   }
-  $('#sl-help').text("Defaults: " + r.defaults.rate + " mails within " + r.defaults.per + " second(s); while the brake is on " + r.defaults.brake_rate + " mails within "
+  $('#sl-help').text("Defaults: " + r.defaults.rate + " mails within " + r.defaults.per + " second(s) and " + r.defaults.long_rate + " within " + r.defaults.long_per + " seconds; while the brake is on " + r.defaults.brake_rate + " mails within "
     + r.defaults.brake_per + " seconds, ending after " + r.defaults.calm + " calm minutes. Up to that many mails go out at once; the first one more sets off the brake."
     + " A mail to more recipients than the limit goes out when nothing else waits and counts in full. A lower limit catches a flood sooner, and a higher one lets"
     + " mail to many recipients go out without the brake. The change applies at once.");
@@ -682,7 +701,8 @@ function sl_held_action(action, sender) {
 
 function sl_save() {
   api("/system/send-limit", "POST", { enabled: $('#sl-enabled').prop('checked') ? "1" : "0", rate: $('#sl-rate').val(), per: $('#sl-per').val(),
-      stop: $('#sl-stop-1').prop('checked') ? "1" : "0", brake_rate: $('#sl-brake-rate').val(), brake_per: $('#sl-brake-per').val(), calm: $('#sl-calm').val() },
+      stop: $('#sl-stop-1').prop('checked') ? "1" : "0", brake_rate: $('#sl-brake-rate').val(), brake_per: $('#sl-brake-per').val(), calm: $('#sl-calm').val(),
+      long_enabled: $('#sl-long-enabled').prop('checked') ? "1" : "0", long_rate: $('#sl-long-rate').val(), long_per: $('#sl-long-per').val() },
     function(r) { sl_load(); },
     f2b_api_error("Sending limit"));
 }

@@ -168,6 +168,7 @@ class Passed:
 	# Recipients let through at once, for the release service's bucket.
 	def __init__(self):
 		self.lock = threading.Lock()
+		self.wlock = threading.Lock() # one writer at a time (the writer thread, a mail put on hold)
 		self.total = 0
 		self.written = -1
 
@@ -176,6 +177,10 @@ class Passed:
 			self.total += n
 
 	def write(self):
+		with self.wlock:
+			self._write()
+
+	def _write(self):
 		with self.lock:
 			total = self.total
 		if total == self.written:
@@ -197,6 +202,12 @@ settings = common.Settings()
 passed = Passed()
 ADMIN = common.admin_address()
 limiter = common.Limiter()
+long_limiter = common.Limiter()
+
+
+def reserve(n, v, max_wait):
+	# The mail must fit the short limit and, when it is on, the long one.
+	return common.reserve_all(common.limit_pairs(v, limiter, long_limiter), n, max_wait)
 stats = Stats()
 flag = Flag()
 
@@ -247,17 +258,20 @@ class SendLimit(Milter.Base):
 		running, held, brake = flag.get()
 		qid = self.getsymval("i")
 		if running and qid and common.QID_ONLY.match(qid) and held < common.MAX_HELD:
-			wait = None if (brake or held) else limiter.reserve(n, v["rate"], v["per"], SHORT_WAIT)
+			wait = None if (brake or held) else reserve(n, v, SHORT_WAIT)
 			if wait is None:
 				# On hold behind the others; sendlimit-release.py releases it.
+				# The count of the direct passes is written first, so that the
+				# release service has charged them when it sees this mail.
+				passed.write()
 				if record_held(qid, n, who):
 					self.quarantine("miab-sendlimit: the box's sending limit, released by miab-sendlimit-release")
 					flag.held()
 					stats.add(who, n, "held")
 					return Milter.ACCEPT
-				wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT_LOCAL if self.local else MAX_WAIT)
+				wait = reserve(n, v, MAX_WAIT_LOCAL if self.local else MAX_WAIT)
 		else:
-			wait = limiter.reserve(n, v["rate"], v["per"], MAX_WAIT_LOCAL if self.local else MAX_WAIT)
+			wait = reserve(n, v, MAX_WAIT_LOCAL if self.local else MAX_WAIT)
 		if wait is None:
 			stats.add(who, n, "deferred")
 			self.setreply("451", "4.7.1", "The box sends too much mail at the moment, try again later")

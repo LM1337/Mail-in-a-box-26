@@ -2697,10 +2697,12 @@ paths:
       description: |
         Form fields `enabled` (1 or 0), `rate` (mails, 1 to 100000), `per`
         (seconds, 1 to 3600), `stop` (1: send nothing while the brake is on),
-        `brake_rate` (1 to 100000), `brake_per` (seconds, 1 to 86400) and
-        `calm` (minutes, 1 to 1440); fields that are not sent keep their
-        value, `reset=1` restores the defaults (on, 30 mails in 1 second; the
-        brake 10 mails in 60 seconds, ending after 30 calm minutes). The
+        `brake_rate` (1 to 100000), `brake_per` (seconds, 1 to 86400),
+        `calm` (minutes, 1 to 1440), and the long limit `long_enabled` (1 or
+        0), `long_rate` (mails, 1 to 100000) and `long_per` (seconds, 60 to
+        604800); fields that are not sent keep their value, `reset=1`
+        restores the defaults (on, 30 mails in 1 second and 500 in an hour;
+        the brake 10 mails in 60 seconds, ending after 30 calm minutes). The
         milter and the release service read the setting again when it
         changes: no restart.
       operationId: setSendLimit
@@ -4918,6 +4920,18 @@ components:
           type: integer
           description: Minutes without held mail and without more mail than the limit after which the brake ends by itself (not with `stop`)
           example: 30
+        long_enabled:
+          type: boolean
+          description: The long limit is on (against a steady flood below the short one)
+          example: true
+        long_rate:
+          type: integer
+          description: Mails (recipients) that may go out within `long_per` seconds
+          example: 500
+        long_per:
+          type: integer
+          description: Seconds of the long limit
+          example: 3600
     SendLimitUpdateRequest:
       type: object
       properties:
@@ -4947,6 +4961,17 @@ components:
           type: integer
           minimum: 1
           maximum: 1440
+        long_enabled:
+          type: integer
+          enum: [0, 1]
+        long_rate:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        long_per:
+          type: integer
+          minimum: 60
+          maximum: 604800
         reset:
           type: integer
           enum: [1]

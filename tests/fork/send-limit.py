@@ -313,12 +313,12 @@ milter.settings = common.Settings()
 # The milter's settings file.
 with tempfile.TemporaryDirectory() as d:
 	SET = os.path.join(d, "settings")
-	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30})
-	open(SET, "w").write("# c\nenabled 0\nrate 0\nper 999999\nbogus 4\nrate x\n")
-	check("file: clamped, broken ignored", common.Settings.read(SET), dict({"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30}, enabled=0, rate=1, per=86400))
-	vals = dict(sl.DEFAULTS, rate=120, per=60, stop=True, brake_rate=5, brake_per=600, calm=90)
+	check("no file: defaults", common.Settings.read(SET), {"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 500, "long_per": 3600})
+	open(SET, "w").write("# c\nenabled 0\nrate 0\nper 999999\nbogus 4\nrate x\nlong_per 5\n")
+	check("file: clamped, broken ignored", common.Settings.read(SET), dict({"enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30, "long_enabled": 1, "long_rate": 500, "long_per": 3600}, enabled=0, rate=1, per=86400, long_per=60))
+	vals = dict(sl.DEFAULTS, rate=120, per=60, stop=True, brake_rate=5, brake_per=600, calm=90, long_enabled=False, long_rate=50, long_per=86400)
 	open(SET, "w").write(sl.render_settings_file(vals, "Admin@Example.org"))
-	check("written by send_limit.py", common.Settings.read(SET), {"enabled": 1, "rate": 120, "per": 60, "stop": 1, "brake_rate": 5, "brake_per": 600, "calm": 90, "report": "admin@example.org"})
+	check("written by send_limit.py", common.Settings.read(SET), {"enabled": 1, "rate": 120, "per": 60, "stop": 1, "brake_rate": 5, "brake_per": 600, "calm": 90, "long_enabled": 0, "long_rate": 50, "long_per": 86400, "report": "admin@example.org"})
 	check("read back by send_limit.py", sl.read_settings_file(SET), vals)
 	check("send_limit.py without file", sl.read_settings_file(os.path.join(d, "none")), sl.DEFAULTS)
 	check("a strange report address is left out", "report" in sl.render_settings_file(sl.DEFAULTS, "x y@z"), False)
@@ -364,8 +364,8 @@ with tempfile.TemporaryDirectory() as d:
 
 # The setting.
 check("defaults", sl.validate_settings({}), (sl.DEFAULTS, []))
-check("values", sl.validate_settings({"enabled": "0", "rate": "100", "per": "60", "stop": "1", "brake_rate": "1", "brake_per": "3600", "calm": "5"})[0],
-	{"enabled": False, "rate": 100, "per": 60, "stop": True, "brake_rate": 1, "brake_per": 3600, "calm": 5})
+check("values", sl.validate_settings({"enabled": "0", "rate": "100", "per": "60", "stop": "1", "brake_rate": "1", "brake_per": "3600", "calm": "5", "long_enabled": "0", "long_rate": "200", "long_per": "7200"})[0],
+	{"enabled": False, "rate": 100, "per": 60, "stop": True, "brake_rate": 1, "brake_per": 3600, "calm": 5, "long_enabled": False, "long_rate": 200, "long_per": 7200})
 bad = 0
 for v in ({"rate": "0"}, {"rate": "100001"}, {"per": "0"}, {"per": "3601"}, {"rate": "1.5"}, {"rate": "x"}, {"enabled": "maybe"}, {"rate": True},
 		{"stop": "2"}, {"brake_rate": "0"}, {"brake_per": "86401"}, {"calm": "0"}, {"calm": "1441"}):
@@ -546,6 +546,42 @@ with tempfile.TemporaryDirectory() as d:
 	sl.watch_milter(now=T, probe=lambda: False, send=lambda t, s: None, state_path=st)
 	check("watch: turned off clears a miss, no mail", (sl.watch_milter(now=T + 999, probe=lambda: False, send=lambda t, s: failures.append("mailed while off"), state_path=st, enabled=False),
 		sl.load_milter_state(st)["down_since"]), (None, None))
+
+# The long limit (a steady flood below the short one): a mail must fit both
+# buckets, nothing is reserved when it does not, and the milter holds it.
+S1, L1 = common.Limiter(), common.Limiter()
+pairs = [(S1, 30, 1), (L1, 5, 3600)]
+check("both limits: 5 fit", [common.reserve_all(pairs, 1, 0, now=0.0) for _ in range(5)], [0.0] * 5)
+tat_before = S1.tat
+check("the 6th does not fit the long one", common.reserve_all(pairs, 1, 0, now=0.5), None)
+check("nothing reserved in the short one then", S1.tat, tat_before)
+check("over_limits names the long one", common.over_limits(pairs, 1, now=0.5), [(5, 3600)])
+check("describe_limit", [common.describe_limit(500, 3600), common.describe_limit(30, 1), common.describe_limit(10, 60), common.describe_limit(100, 7200)],
+	["500 mails in 1 hour", "30 mails in 1 s", "10 mails in 1 minute", "100 mails in 2 hours"])
+check("limit_pairs: long limit off", len(common.limit_pairs({"rate": 30, "per": 1, "long_enabled": 0, "long_rate": 5, "long_per": 3600}, S1, L1)), 1)
+check("limit_pairs: long limit on", len(common.limit_pairs(dict(common.DEFAULTS), S1, L1)), 2)
+held6 = [{"qid": "Q%05d" % i, "sender": "s%d" % (i % 2), "rcpts": 1, "time": i} for i in range(6)]
+check("pick: the long limit caps the release", len(release.pick(held6, common.Limiter(), 100, 1, "", now=0.0, also=[(common.Limiter(), 4, 3600)])[0]), 4)
+check("pick: without it all go", len(release.pick(held6, common.Limiter(), 100, 1, "", now=0.0)[0]), 6)
+try:
+	sl.validate_settings({"long_per": "59"})
+	check("long_per below 60 refused", "accepted", "SendLimitError")
+except sl.SendLimitError:
+	check("long_per below 60 refused", "SendLimitError", "SendLimitError")
+with tempfile.TemporaryDirectory() as d:
+	milter.HELD_DIR = os.path.join(d, "held.d")
+	milter.PASSED = os.path.join(d, "passed")
+	for on, want in ((1, ["LLLL000003", "LLLL000004"]), (0, [])):
+		milter.passed = milter.Passed()
+		milter.settings.values = {"enabled": 1, "rate": 30, "per": 1, "long_enabled": on, "long_rate": 3, "long_per": 3600}
+		milter.limiter, milter.long_limiter = common.Limiter(), common.Limiter()
+		milter.flag.value, milter.flag.checked, milter.flag.held_here = (True, 0, False), 10 ** 12, 0
+		QUARANTINED.clear()
+		r = [session(("127.0.0.1", 0), qid="LLLL%06d" % i) for i in range(5)]
+		check(f"milter, long limit {'on' if on else 'off'}: held", (r, QUARANTINED), (["accept"] * 5, want))
+		if on:
+			check("the direct passes are written before the held record", release.take_passed(d), (os.getpid(), 3))
+		release.take_held(d)
 
 print(f"{len(failures)} failed." if failures else "all cases passed.")
 sys.exit(1 if failures else 0)

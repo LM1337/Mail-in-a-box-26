@@ -141,11 +141,13 @@ def load_state(path=STATE):
 			s = json.load(f)
 		held = [h for h in s.get("held", []) if isinstance(h, dict) and common.parse_held(f"{h.get('time')} {h.get('qid')} {h.get('rcpts')} {h.get('sender')}")]
 		since = s.get("brake_since")
+		reason = s.get("brake_reason")
 		return { "held": held, "released": int(s.get("released", 0)), "turn": str(s.get("turn", "")),
 			"brake": bool(s.get("brake")) and isinstance(since, int), "brake_since": since if isinstance(since, int) else None,
+			"brake_reason": reason if isinstance(reason, str) and len(reason) < 100 else None,
 			"last_held": int(s.get("last_held", 0)), "last_over": int(s.get("last_over", 0)) }
 	except (OSError, ValueError, TypeError, AttributeError):
-		return { "held": [], "released": 0, "turn": "", "brake": False, "brake_since": None, "last_held": 0, "last_over": 0 }
+		return { "held": [], "released": 0, "turn": "", "brake": False, "brake_since": None, "brake_reason": None, "last_held": 0, "last_over": 0 }
 
 
 def save_state(state, path=STATE):
@@ -165,9 +167,10 @@ def write_public(path, text, mode=0o644):
 	os.replace(tmp, path)
 
 
-def pick(held, limiter, rate, per, turn, now=None):
+def pick(held, limiter, rate, per, turn, now=None, also=()):
 	# The mails to release now: the senders in turn after `turn` (the oldest
-	# mail of each), as long as the bucket has room. Returns (mails, turn).
+	# mail of each), as long as the bucket has room (and the buckets of
+	# `also`, [(limiter, rate, per)]: the long limit). Returns (mails, turn).
 	by_sender = {}
 	for h in held:
 		by_sender.setdefault(h["sender"], []).append(h)
@@ -182,7 +185,7 @@ def pick(held, limiter, rate, per, turn, now=None):
 		progressed = False
 		for s in list(order):
 			h = by_sender[s][0]
-			if limiter.reserve(h["rcpts"], rate, per, 0, now=now) is None:
+			if common.reserve_all([(limiter, rate, per), *also], h["rcpts"], 0, now=now) is None:
 				return out, turn
 			out.append(h)
 			turn = s
@@ -216,7 +219,7 @@ def summary(held, now, state=None, v=None):
 	out = { "time": int(now), "held": len(held), "recipients": sum(h["rcpts"] for h in held),
 		"senders": sorted(senders.values(), key=lambda s: (-s["recipients"], s["sender"])) }
 	if state is not None and v is not None:
-		out.update({ "brake": state["brake"], "brake_since": state["brake_since"], "stop": bool(v["stop"]),
+		out.update({ "brake": state["brake"], "brake_since": state["brake_since"], "brake_reason": state.get("brake_reason"), "stop": bool(v["stop"]),
 			"brake_rate": v["brake_rate"], "brake_per": v["brake_per"], "calm": v["calm"] })
 	return out
 
@@ -224,6 +227,7 @@ def summary(held, now, state=None, v=None):
 def main():
 	settings = common.Settings()
 	limiter = common.Limiter()
+	long_limiter = common.Limiter()
 	brake_limiter = common.Limiter()
 	# The rate at which counted mail comes in (the milter's direct passes and
 	# the held mails): the brake goes on when it is above the limit, and ends
@@ -231,6 +235,7 @@ def main():
 	# behind others (after the administrator ended the brake) does not set
 	# it off again on its own.
 	arrivals = common.Limiter()
+	long_arrivals = common.Limiter()
 	state = load_state()
 	known = { h["qid"] for h in state["held"] }
 	checked = set() # records verified against the hold queue
@@ -253,8 +258,8 @@ def main():
 			else:
 				delta = p[1] if last_passed is not None else 0 # a new milter process
 			if delta and v["enabled"]:
-				limiter.charge(delta, v["rate"], v["per"])
-				arrivals.charge(delta, v["rate"], v["per"])
+				for l, r, per in common.limit_pairs(v, limiter, long_limiter) + common.limit_pairs(v, arrivals, long_arrivals):
+					l.charge(delta, r, per)
 			last_passed = p
 		new = [h for h in take_held() if h["qid"] not in known]
 		if new:
@@ -262,19 +267,23 @@ def main():
 			known.update(h["qid"] for h in new)
 			state["last_held"] = int(now)
 			changed = True
-			over = []
+			over, reasons = [], []
+			pairs = common.limit_pairs(v, arrivals, long_arrivals)
 			for h in new:
-				if arrivals.reserve(h["rcpts"], v["rate"], v["per"], 0) is None:
-					arrivals.charge(h["rcpts"], v["rate"], v["per"])
+				if common.reserve_all(pairs, h["rcpts"], 0) is None:
+					reasons += [r for r in common.over_limits(pairs, h["rcpts"]) if r not in reasons]
+					for l, r, per in pairs:
+						l.charge(h["rcpts"], r, per)
 					over.append(h)
 			if over:
 				state["last_over"] = int(now)
 			if over and not state["brake"] and v["enabled"]:
 				# More mail than the limit: the brake is on, all mail is held.
 				state["brake"], state["brake_since"] = True, int(now)
+				state["brake_reason"] = " and ".join(common.describe_limit(r, per) for r, per in reasons) or common.describe_limit(v["rate"], v["per"])
 				brake_limiter = common.Limiter()
 				brake_limiter.charge(v["brake_rate"], v["brake_rate"], v["brake_per"]) # the first slow release after brake_per
-				log(f"THE BRAKE IS ON: more than {v['rate']} mails in {v['per']} s; all outgoing mail is held"
+				log(f"THE BRAKE IS ON: more than {state['brake_reason']}; all outgoing mail is held"
 					+ (" until the administrator ends the brake" if v["stop"] else f" and goes out at {v['brake_rate']} mails in {v['brake_per']} s")
 					+ "; senders: " + ", ".join(sorted({ h["sender"] for h in over }))[:500], 4)
 				notify_now()
@@ -284,15 +293,15 @@ def main():
 			except OSError:
 				pass
 			if state["brake"]:
-				state["brake"], state["brake_since"] = False, None
+				state["brake"], state["brake_since"], state["brake_reason"] = False, None, None
 				changed = True
 				log(f"the administrator ended the brake; {len(state['held'])} held mails go out at the limit", 4)
 		if state["brake"] and not v["stop"] and not state["held"] and now - state.get("last_over", 0) >= v["calm"] * 60:
-			state["brake"], state["brake_since"] = False, None
+			state["brake"], state["brake_since"], state["brake_reason"] = False, None, None
 			changed = True
 			log(f"the brake ended by itself: no held mail left, and no more mail than the limit for {v['calm']} minutes")
 		if not v["enabled"] and state["brake"]:
-			state["brake"], state["brake_since"] = False, None
+			state["brake"], state["brake_since"], state["brake_reason"] = False, None, None
 			changed = True
 		recheck = os.path.lexists(common.RECHECK)
 		if recheck:
@@ -330,7 +339,7 @@ def main():
 			elif state["brake"]:
 				out, state["turn"] = pick(ready, brake_limiter, v["brake_rate"], v["brake_per"], state["turn"])
 			else:
-				out, state["turn"] = pick(ready, limiter, v["rate"], v["per"], state["turn"])
+				out, state["turn"] = pick(ready, limiter, v["rate"], v["per"], state["turn"], also=common.limit_pairs(v, limiter, long_limiter)[1:])
 			if out:
 				n_released = release([h["qid"] for h in out])
 				gone = { h["qid"] for h in out }

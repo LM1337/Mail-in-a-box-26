@@ -33,9 +33,13 @@ FLAG_FRESH = 15 # seconds: an older flag means sendlimit-release.py does not run
 # administrator ends the brake, 0 releases held mail at brake_rate per
 # brake_per seconds, and the brake ends by itself once nothing is held and
 # no mail was held for "calm" minutes.
-DEFAULTS = { "enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30 }
+# rate/per: the short limit (a flood within seconds); long_rate/long_per: the
+# long one (a steady flood below the short limit, by default 500 mails an
+# hour), which can be turned off (long_enabled). Mail must fit both.
+DEFAULTS = { "enabled": 1, "rate": 30, "per": 1, "stop": 0, "brake_rate": 10, "brake_per": 60, "calm": 30,
+	"long_enabled": 1, "long_rate": 500, "long_per": 3600 }
 LIMITS = { "enabled": (0, 1), "rate": (1, 100000), "per": (1, 86400), "stop": (0, 1), "brake_rate": (1, 100000),
-	"brake_per": (1, 86400), "calm": (1, 1440) }
+	"brake_per": (1, 86400), "calm": (1, 1440), "long_enabled": (0, 1), "long_rate": (1, 100000), "long_per": (60, 604800) }
 
 QID_RE = r"[0-9A-Za-z]{6,24}"
 HELD_RE = re.compile(r"^([0-9]{1,12}) (" + QID_RE + r") ([0-9]{1,6}) ([^\s=]{1,210})$")
@@ -113,32 +117,86 @@ class Limiter:
 		with self.lock:
 			self.tat = max(self.tat, now) + n * per / rate
 
+	def _clamp(self, rate, per, now):
+		# A changed setting: the backlog is capped at once (under the lock).
+		if self.params != (rate, per):
+			self.params = (rate, per)
+			self.tat = min(self.tat, now + per)
+
+	def _plan(self, n, rate, per, now):
+		# (seconds to wait, the bucket after this mail), changing nothing
+		# (under the lock, after _clamp).
+		interval = per / rate
+		tat = max(self.tat, now)
+		full = now + rate * interval # the bucket is empty, not in debt, while tat <= full
+		if n > rate:
+			# It goes when the debt is paid (at once if there is none).
+			return max(0.0, tat - full), tat + n * interval
+		return max(0.0, tat + n * interval - full), tat + n * interval
+
 	def reserve(self, n, rate, per, max_wait, now=None):
 		# Returns the seconds to wait, or None: longer than max_wait (nothing
 		# is reserved then).
 		now = time.monotonic() if now is None else now
-		interval = per / rate
 		with self.lock:
-			if self.params != (rate, per):
-				self.params = (rate, per)
-				self.tat = min(self.tat, now + rate * interval)
-			tat = max(self.tat, now)
-			full = now + rate * interval # the bucket is empty, not in debt, while tat <= full
-			if n > rate:
-				# It goes when the debt is paid (at once if there is none).
-				wait = max(0.0, tat - full)
-				if wait > max_wait:
-					return None
-				self.tat = tat + n * interval
-				return wait
-			wait = tat + n * interval - full
-			if wait <= 0:
-				self.tat = tat + n * interval
-				return 0.0
+			self._clamp(rate, per, now)
+			wait, tat = self._plan(n, rate, per, now)
 			if wait > max_wait:
 				return None
-			self.tat = tat + n * interval
+			self.tat = tat
 			return wait
+
+
+_ALL = threading.Lock()
+
+
+def limit_pairs(v, short, long):
+	# The limits a mail must fit: [(limiter, rate, per)], the short one and,
+	# when it is on, the long one.
+	out = [(short, v["rate"], v["per"])]
+	if v.get("long_enabled"):
+		out.append((long, v["long_rate"], v["long_per"]))
+	return out
+
+
+def reserve_all(pairs, n, max_wait, now=None):
+	# A mail of n recipients that must fit every limit of pairs: the longest
+	# wait, or None when that is longer than max_wait (nothing is reserved).
+	now = time.monotonic() if now is None else now
+	with _ALL:
+		plans = []
+		for limiter, rate, per in pairs:
+			with limiter.lock:
+				limiter._clamp(rate, per, now)
+				plans.append((limiter, limiter._plan(n, rate, per, now)))
+		wait = max(p[0] for _, p in plans)
+		if wait > max_wait:
+			return None
+		for limiter, (_, tat) in plans:
+			with limiter.lock:
+				limiter.tat = tat
+		return wait
+
+
+def over_limits(pairs, n, now=None):
+	# The limits (rate, per) of pairs that a mail of n recipients does not
+	# fit at once (for the log and the mail of the brake).
+	now = time.monotonic() if now is None else now
+	out = []
+	for limiter, rate, per in pairs:
+		with limiter.lock:
+			limiter._clamp(rate, per, now)
+			if limiter._plan(n, rate, per, now)[0] > 0:
+				out.append((rate, per))
+	return out
+
+
+def describe_limit(rate, per):
+	if per % 3600 == 0:
+		return f"{rate} mails in {per // 3600} hour" + ("s" if per != 3600 else "")
+	if per % 60 == 0 and per >= 60:
+		return f"{rate} mails in {per // 60} minute" + ("s" if per != 60 else "")
+	return f"{rate} mails in {per} s"
 
 
 def is_loopback(addr):

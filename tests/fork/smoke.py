@@ -4411,7 +4411,8 @@ def api_shape(ctx, path, r):
         # The sending limit of the box (B221).
         _need(all(isinstance(j.get(k), dict) and isinstance(j[k].get("enabled"), bool) and all(isinstance(j[k].get(x), int) for x in ("rate", "per"))
                   for k in ("settings", "defaults", "applied")), "send-limit: settings missing")
-        _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30}, "send-limit: defaults %s" % j["defaults"])
+        _need(j["defaults"] == {"enabled": True, "rate": 30, "per": 1, "stop": False, "brake_rate": 10, "brake_per": 60, "calm": 30,
+                                "long_enabled": True, "long_rate": 500, "long_per": 3600}, "send-limit: defaults %s" % j["defaults"])
         _need(isinstance(j.get("brake"), dict) and j["brake"].get("on") is False, "send-limit: the brake is on (%s)" % j.get("brake"))
         _need(isinstance(j.get("events"), list) and isinstance(j.get("day"), dict) and isinstance(j.get("more"), int)
               and isinstance(j.get("warnings"), list), "send-limit: keys missing")
@@ -4918,7 +4919,9 @@ def c_send_limit(ctx):
     finally:
         admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1" if before["enabled"] else "0", "rate": str(before["rate"]), "per": str(before["per"]),
                                                            "stop": "1" if before["stop"] else "0", "brake_rate": str(before["brake_rate"]),
-                                                           "brake_per": str(before["brake_per"]), "calm": str(before["calm"])})
+                                                           "brake_per": str(before["brake_per"]), "calm": str(before["calm"]),
+                                                           "long_enabled": "1" if before["long_enabled"] else "0",
+                                                           "long_rate": str(before["long_rate"]), "long_per": str(before["long_per"])})
         # Never leave the box braked (later checks send mail): delete what the
         # test left held and end the brake.
         for x in admin_api(ctx, "GET", "system/send-limit").json()["held"]["senders"]:

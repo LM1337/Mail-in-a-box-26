@@ -973,7 +973,8 @@ def send_limit_set():
 	# enabled (1/0), rate (mails) and per (seconds); fields that are not sent
 	# keep their value. reset=1 restores the defaults.
 	import send_limit
-	values = { k: request.form[k] for k in ("enabled", "rate", "per", "stop", "brake_rate", "brake_per", "calm") if k in request.form }
+	values = { k: request.form[k] for k in ("enabled", "rate", "per", "stop", "brake_rate", "brake_per", "calm",
+		"long_enabled", "long_rate", "long_per") if k in request.form }
 	reset = request.form.get('reset') == '1'
 	try:
 		result = send_limit.update_settings(env, values, reset=reset)
@@ -982,8 +983,10 @@ def send_limit_set():
 	except Exception as e:
 		return (str(e), 500)
 	s = result["settings"]
-	app.logger.warning("send-limit: %s set the sending limit to %d mails in %d s%s, the brake to %s",
-		request.user_email, s["rate"], s["per"], "" if s["enabled"] else " (turned off)",
+	app.logger.warning("send-limit: %s set the sending limit to %d mails in %d s%s%s, the brake to %s",
+		request.user_email, s["rate"], s["per"],
+		" and %d mails in %d s" % (s["long_rate"], s["long_per"]) if s["long_enabled"] else " (no long limit)",
+		"" if s["enabled"] else " (turned off)",
 		"stop" if s["stop"] else "%d mails in %d s, ending after %d calm minutes" % (s["brake_rate"], s["brake_per"], s["calm"]))
 	result["status"] = "ok"
 	return json_response(result)
