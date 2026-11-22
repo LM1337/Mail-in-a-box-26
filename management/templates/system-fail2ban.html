@@ -1383,7 +1383,9 @@ function f2b_post_settings(values) {
     function(r) {
       var msg = $("<div/>");
       var text = "The settings were saved.";
-      if (r.reloaded && r.restarted) text += " fail2ban restarted its jails with the new configuration (current bans are kept).";
+      if (r.service == "started") text += " fail2ban was started: its jails and the bans that had not run out are back.";
+      else if (r.service == "stopped") text += " fail2ban was stopped and turned off: all bans were lifted.";
+      else if (r.reloaded && r.restarted) text += " fail2ban restarted its jails with the new configuration (current bans are kept).";
       else if (r.reloaded) text += " fail2ban was reloaded with the new configuration.";
       else if (r.changed) text += " The configuration files were written; fail2ban is not running, so they apply when it starts.";
       else text += " The fail2ban configuration did not change.";

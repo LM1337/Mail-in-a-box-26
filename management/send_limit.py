@@ -542,8 +542,9 @@ def watch_milter(now=None, probe=milter_answers, send=send_mail, state_path=MILT
 			try:
 				send(f"The milter of the sending limit (service {SERVICE}, 127.0.0.1:8895) has not answered since {since}.\n\n"
 					"So that no mail leaves the box without the limit, Postfix refuses the outgoing mail of the users with a"
-					" temporary error (451 4.7.1) while it does not answer: mail programs, webmail and ActiveSync send it again"
-					" later, and the mail that programs on the box send through sendmail waits in Postfix's queue"
+					" temporary error while it does not answer (454 4.3.0 on the submission ports, 451 4.7.1 on port 25):"
+					" mail programs send it again later, webmail shows the user an error, and the mail that ActiveSync"
+					" and programs on the box send through sendmail waits in Postfix's queue"
 					+ (f" ({n} mails now)" if n is not None else "") + ". It goes out once the milter answers again."
 					" Mail from other servers to the box is not affected, nor this mail.\n\n"
 					f"On the box: sudo systemctl status {SERVICE}; sudo journalctl -u {SERVICE} -n 50;"

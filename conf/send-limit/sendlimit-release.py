@@ -73,6 +73,19 @@ def take_held(state_dir=common.STATE_DIR, limit=5000):
 	return out
 
 
+def pending_held(state_dir=common.STATE_DIR):
+	# The queue ids of the milter's records not taken yet (written after
+	# take_held() ran in this loop): their mail is not "held by others".
+	try:
+		dfd = os.open(os.path.join(state_dir, "held.d"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+	except OSError:
+		return set()
+	try:
+		return { n for n in os.listdir(dfd) if common.QID_ONLY.match(n) }
+	finally:
+		os.close(dfd)
+
+
 def take_passed(state_dir=common.STATE_DIR):
 	# (pid, recipients) of the milter's "passed" file, or None.
 	try:
@@ -356,7 +369,15 @@ def main():
 			# or a record that could not be verified): the control panel and
 			# the administrator's mail say how many.
 			last_count = now
-			other = sum(1 for q in ids if q not in known)
+			# A mail the milter held after this loop read its records is in
+			# the hold queue but not on the list yet: its record waits in
+			# held.d (the first version counted it for one loop, and the
+			# administrator's mail of a brake said so; found in the lab test).
+			other = [q for q in ids if q not in known]
+			if other:
+				pending = pending_held()
+				other = [q for q in other if q not in pending]
+			other = len(other)
 			if other != state.get("other_hold", 0):
 				state["other_hold"] = other
 				changed = True

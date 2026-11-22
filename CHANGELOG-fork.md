@@ -74,9 +74,11 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   other servers is not counted. The milter runs as a dynamic user without
   privileges, and it fails closed: when it does not answer (stopped,
   crashed or hung), Postfix refuses outgoing mail with a temporary error
-  (`451 4.7.1`; `default_action=tempfail` for this milter only, OpenDKIM
-  and OpenDMARC keep `accept`) instead of letting it out without a limit;
-  mail programs send it again, sendmail's mail waits in Postfix's maildrop
+  (`454 4.3.0` on the submission ports, `451 4.7.1` on port 25;
+  `default_action=tempfail` for this milter only, OpenDKIM and OpenDMARC
+  keep `accept`) instead of letting it out without a limit; mail programs
+  send it again, webmail shows an error, the mail of ActiveSync and
+  sendmail waits in Postfix's maildrop
   queue until the milter is back, and systemd restarts it after 2 seconds
   without ever giving up. Mail from other servers does not depend on it:
   on port 25 Postfix asks it only for mail from the box itself

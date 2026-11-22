@@ -275,7 +275,10 @@ with tempfile.TemporaryDirectory() as d:
 	open(os.path.join(hd, "BROKEN0001"), "w").write("broken line\n")
 	open(os.path.join(hd, ".QQQQQQ0001.tmp"), "w").write("30 1 x\n")
 	open(os.path.join(hd, "../etc"[:0] + "not-a-qid!"), "w").write("30 1 x\n")
+	check("pending_held: the records not taken yet, temporary files and others not",
+		release.pending_held(d), {"ABCDEF1234", "ZZZZZZZZ99", "BROKEN0001"})
 	got = release.take_held(d)
+	check("pending_held: none after take_held", release.pending_held(d), set())
 	check("take_held: records read, broken dropped and removed, others left",
 		(sorted(h["qid"] for h in got), sorted(os.listdir(hd))), (["ABCDEF1234", "ZZZZZZZZ99"], [".QQQQQQ0001.tmp", "not-a-qid!"]))
 	secret = os.path.join(d, "..", "secret-held-" + os.path.basename(d))
