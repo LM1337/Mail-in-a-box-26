@@ -2650,9 +2650,12 @@ paths:
         redirects, programs on the box, and SMTP from 127.0.0.1 and ::1)
         passes a milter that lets at most
         `rate` mails within `per` seconds go out; each recipient counts as one
-        mail. More mail waits until it fits, at most 60 seconds, and is then
-        deferred with a temporary error (4.7.1). Mail that other servers send
-        to the box is not counted. Returns the setting (`settings`, only values that differ from
+        mail. A mail that does not fit is accepted and put on hold; the release
+        service (`release_running`) sends held mail at the limit, the senders
+        in turn (`held`: by sender, most recipients first). Without the
+        release service a mail waits at most 60 seconds and is then deferred
+        with a temporary error (4.7.1). Mail that other servers send to the
+        box is not counted. Returns the setting (`settings`, only values that differ from
         `defaults` are stored), the values the milter uses now (`applied`),
         the allowed `ranges`, whether the milter runs (`running`, null when
         unknown), and the minutes of the last 24 hours in which mail had to
@@ -2741,6 +2744,80 @@ paths:
                 type: string
         500:
           description: The settings file could not be written (the previous setting was restored)
+          content:
+            text/html:
+              schema:
+                type: string
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+  /system/send-limit/held:
+    post:
+      tags:
+        - System
+      summary: Release or delete the mail that the sending limit holds back
+      description: |
+        Mail over the sending limit is accepted and put on hold; the release
+        service sends it at the limit, the senders in turn. Form fields
+        `action` (`release`: send it now, past the limit; `delete`: remove it
+        from the queue, it is never sent and its senders are not told) and
+        `sender` (one of the senders of `held` of `GET /system/send-limit`,
+        or empty for all held mail).
+      operationId: sendLimitHeld
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [release, delete]
+                sender:
+                  type: string
+                  example: user@example.com
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST "https://{host}/admin/system/send-limit/held" \
+              -d "action=delete" \
+              -d "sender=user@example.com" \
+              -u "<email>:<password>"
+      responses:
+        200:
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - action
+                  - mails
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  action:
+                    type: string
+                  sender:
+                    type: string
+                    nullable: true
+                  mails:
+                    type: integer
+                    description: Held mails released or deleted
+        400:
+          description: Invalid action, a sender without held mail, or no list of held mail (the release service does not run)
+          content:
+            text/html:
+              schema:
+                type: string
+        500:
+          description: postsuper failed
           content:
             text/html:
               schema:
@@ -4842,6 +4919,9 @@ components:
         deferred:
           type: integer
           description: Mails deferred with a temporary error (they would have waited longer than 60 s)
+        held:
+          type: integer
+          description: Mails put on hold
         passed:
           type: integer
           description: Mails that went out at once in that minute
@@ -4902,6 +4982,30 @@ components:
         running:
           type: boolean
           nullable: true
+        release_running:
+          type: boolean
+          nullable: true
+        held:
+          type: object
+          properties:
+            mails:
+              type: integer
+            recipients:
+              type: integer
+            senders:
+              type: array
+              items:
+                type: object
+                properties:
+                  sender:
+                    type: string
+                  mails:
+                    type: integer
+                  recipients:
+                    type: integer
+                  oldest:
+                    type: integer
+                    description: Time the oldest of them was held (Unix time)
         events:
           type: array
           items:
@@ -4916,6 +5020,8 @@ components:
             delayed:
               type: integer
             deferred:
+              type: integer
+            held:
               type: integer
             max_wait:
               type: integer

@@ -167,7 +167,7 @@
 
 <h3>Sending limit</h3>
 
-<p>The box lets at most <span class="sl-rate">30</span> mails within <span class="sl-per">1</span> second(s) go out (each recipient counts as one mail), of all mail that its users and the box itself send: mail programs and webmail (SMTP with login on ports 465 and 587), ActiveSync, Nextcloud, Sieve redirects and programs on the box (sendmail), and SMTP from the box itself. More mail waits until it fits, at most 60 seconds, and is then deferred with a temporary error, so that its sender sends it again later: mail is slowed down, not lost. This keeps an account that was taken over, or a program that sends spam, from sending a flood of mail in the box&rsquo;s name before anyone notices, which would ruin the reputation of its address with other mail providers. Mail that comes in from other servers is not limited. The minutes in which mail had to wait are mailed to the recipient of the box&rsquo;s reports (System &gt; Notifications), at most one mail an hour.</p>
+<p>The box lets at most <span class="sl-rate">30</span> mails within <span class="sl-per">1</span> second(s) go out (each recipient counts as one mail), of all mail that its users and the box itself send: mail programs and webmail (SMTP with login on ports 465 and 587), ActiveSync, Nextcloud, Sieve redirects and programs on the box (sendmail), and SMTP from the box itself. A mail that does not fit is accepted and put on hold; held mail goes out at the limit, the senders in turn, so that one sender with many mails does not hold back the others. Nobody gets an error, and nothing is lost. This keeps an account that was taken over, or a program that sends spam, from sending a flood of mail in the box&rsquo;s name before anyone notices, which would ruin the reputation of its address with other mail providers; you can delete its held mail below before it goes out. Mail that comes in from other servers is not limited. The minutes in which mail was held or had to wait are mailed to the recipient of the box&rsquo;s reports (System &gt; Notifications), at most one mail an hour.</p>
 
 <form class="form-inline" role="form" onsubmit="sl_save(); return false;" style="margin-bottom: 1em">
   <div class="checkbox" style="margin-right: 1em">
@@ -189,12 +189,34 @@
 <p id="sl-help" class="help-block small"></p>
 <div id="sl-warnings"></div>
 
+<div id="sl-held" style="display: none">
+<p id="sl-held-summary"></p>
+<table id="sl-held-table" class="table" style="width: auto; min-width: 50%">
+  <thead>
+    <tr>
+      <th scope="col">Sender</th>
+      <th scope="col" class="num">Mails</th>
+      <th scope="col" class="num">Recipients</th>
+      <th scope="col">Held since</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+<p>
+  <button type="button" class="btn btn-default btn-sm" onclick="sl_held_action('release', null)">Release all now</button>
+  <button type="button" class="btn btn-danger btn-sm" onclick="sl_held_action('delete', null)">Delete all held mail</button>
+</p>
+</div>
+
 <p id="sl-summary" class="text-muted">Loading...</p>
 <div class="table-responsive">
 <table id="sl-events" class="table" style="width: auto; min-width: 50%; display: none">
   <thead>
     <tr>
       <th scope="col">Minute</th>
+      <th scope="col" class="num">Held</th>
       <th scope="col" class="num">Waited</th>
       <th scope="col" class="num">Deferred</th>
       <th scope="col" class="num">Longest wait</th>
@@ -555,18 +577,39 @@ function sl_render() {
   var w = $('#sl-warnings').html("");
   if (!a.enabled) w.append($('<div class="alert alert-warning"/>').text("The sending limit is turned off: the box sends as much mail as it is given."));
   r.warnings.forEach(function(t) { w.append($('<div class="alert alert-warning"/>').text(t)); });
+  var h = r.held, hb = $('#sl-held-table tbody').html("");
+  if (h.mails) {
+    $('#sl-held-summary').text("On hold now: " + h.mails + " mail" + (h.mails == 1 ? "" : "s") + " to " + h.recipients + " recipients. They go out at the limit, the senders in turn."
+      + " If a sender is not expected to send this much (an account that was taken over), change its password and delete its held mail.");
+    h.senders.forEach(function(x) {
+      var tr = $('<tr/>');
+      tr.append($('<td style="word-break: break-all; max-width: 30em"/>').text(sl_sender(x.sender)));
+      tr.append($('<td class="num"/>').text(x.mails));
+      tr.append($('<td class="num"/>').text(x.recipients));
+      tr.append($('<td style="white-space: nowrap"/>').text(f2b_time(x.oldest)));
+      tr.append($('<td style="white-space: nowrap"/>')
+        .append($('<button type="button" class="btn btn-default btn-xs"/>').text("Release now").click(function() { sl_held_action('release', x.sender); }))
+        .append(" ")
+        .append($('<button type="button" class="btn btn-danger btn-xs"/>').text("Delete").click(function() { sl_held_action('delete', x.sender); })));
+      hb.append(tr);
+    });
+    $('#sl-held').show();
+  } else {
+    $('#sl-held').hide();
+  }
   var d = r.day, tbody = $('#sl-events tbody').html("");
   if (!d.minutes) {
     $('#sl-summary').text("No mail had to wait in the last 24 hours.").addClass("text-muted");
     $('#sl-events').hide();
     return;
   }
-  $('#sl-summary').text("In the last 24 hours mail had to wait in " + d.minutes + " minute" + (d.minutes == 1 ? "" : "s") + ": " + d.delayed + " mails waited (up to "
+  $('#sl-summary').text("In the last 24 hours the limit acted in " + d.minutes + " minute" + (d.minutes == 1 ? "" : "s") + ": " + d.held + " mails were put on hold, " + d.delayed + " waited (up to "
     + d.max_wait + " s), " + d.deferred + " were deferred. Most recipients: "
     + d.senders.slice(0, 3).map(function(x) { return sl_sender(x.sender) + " (" + x.recipients + ")"; }).join(", ") + ".").removeClass("text-muted");
   r.events.forEach(function(e) {
     var tr = $('<tr/>');
     tr.append($('<td style="white-space: nowrap"/>').text(f2b_time(e.time)));
+    tr.append($('<td class="num"/>').text(e.held || 0));
     tr.append($('<td class="num"/>').text(e.delayed));
     tr.append($('<td class="num"/>').text(e.deferred));
     tr.append($('<td class="num"/>').text(e.max_wait + " s"));
@@ -575,6 +618,20 @@ function sl_render() {
     tbody.append(tr);
   });
   $('#sl-events').show();
+}
+
+function sl_held_action(action, sender) {
+  var who = sender === null ? "all senders" : sl_sender(sender);
+  var q = action == "delete"
+    ? "Delete the held mail of " + who + "? It is removed from the queue and never sent; its senders are not told."
+    : "Release the held mail of " + who + " now? It goes out at once, past the limit.";
+  show_modal_confirm("Sending limit", $("<p/>").text(q), action == "delete" ? "Delete" : "Release", function() {
+    api("/system/send-limit/held", "POST", { action: action, sender: sender === null ? "" : sender },
+      function(r) {
+        show_modal_error("Sending limit", $("<p/>").text((action == "delete" ? "Deleted " : "Released ") + r.mails + " held mail" + (r.mails == 1 ? "" : "s") + "."), function() { sl_load(); });
+      },
+      f2b_api_error("Sending limit"));
+  });
 }
 
 function sl_save() {

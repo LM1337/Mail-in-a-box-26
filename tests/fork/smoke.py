@@ -4206,6 +4206,7 @@ API_WRITES = [
     ("POST", "/system/auth-guard"),
     ("POST", "/system/auth-guard/unlock"),
     ("POST", "/system/send-limit"),
+    ("POST", "/system/send-limit/held"),
 ]
 
 # Not called: (method, documented path, reason).
@@ -4414,6 +4415,8 @@ def api_shape(ctx, path, r):
         _need(isinstance(j.get("events"), list) and isinstance(j.get("day"), dict) and isinstance(j.get("more"), int)
               and isinstance(j.get("warnings"), list), "send-limit: keys missing")
         _need(j.get("running") is True, "send-limit: the milter does not run (%s)" % j.get("running"))
+        _need(j.get("release_running") is True, "send-limit: the release service does not run (%s)" % j.get("release_running"))
+        _need(isinstance(j.get("held"), dict) and isinstance(j["held"].get("senders"), list), "send-limit: held missing")
         _need(not j["warnings"], "send-limit: %s" % "; ".join(j["warnings"])[:200])
         return "%d mails in %d s%s, %d minutes with waits in 24 h" % (j["applied"]["rate"], j["applied"]["per"],
             "" if j["applied"]["enabled"] else " (off)", j["day"]["minutes"])
@@ -4831,19 +4834,22 @@ def c_login_auth_guard(ctx):
 
 
 def c_send_limit(ctx):
-    # The sending limit of the box (B221, conf/send-limit/milter.py,
-    # management/send_limit.py, System > Intrusion Detection and Prevention):
-    # invalid values get 400; with 1 mail per hour set through the API (the
-    # milter reads it at once), a first mail by SMTP AUTH on 587 is accepted
-    # and a second is deferred with 451 4.7.1 (it would wait longer than
-    # 60 s); GET /system/send-limit lists that minute once the milter wrote
-    # it (at the next full minute). With the setting restored, a third mail
-    # goes out at once. The test mails go to the test account itself.
+    # The sending limit of the box (B221, conf/send-limit/, management/
+    # send_limit.py, System > Intrusion Detection and Prevention): invalid
+    # values get 400; with 1 mail per hour set through the API (read at once),
+    # a first mail by SMTP AUTH on 587 goes out and a second is accepted too
+    # (no error for the sender) and put on hold; GET /system/send-limit lists
+    # it under "held" with its sender, POST /system/send-limit/held deletes it
+    # (the release service would send it at the limit). The minute is listed
+    # once the milter wrote it (at the next full minute). With the setting
+    # restored, a third mail goes out at once. The test mails go to the test
+    # account itself.
     if not ctx.user_pw or not ctx.admin_auth:
         raise Skip("TEST_USER_PW or the admin session missing")
     r = admin_api(ctx, "GET", "system/send-limit")
     api_expect(r, 200, "application/json", "GET system/send-limit")
     before = r.json()["settings"]
+    _need(r.json().get("release_running") is True, "the release service miab-sendlimit-release does not run")
     steps = []
 
     def send(n):
@@ -4858,10 +4864,16 @@ def c_send_limit(ctx):
         finally:
             try: s.quit()
             except Exception: pass
+
+    def held_of_alice():
+        h = admin_api(ctx, "GET", "system/send-limit").json()["held"]
+        return [x for x in h["senders"] if x["sender"].lower() == ctx.alice.lower()]
     try:
         for form in ({"rate": "0"}, {"per": "3601"}, {"enabled": "maybe"}):
             r = admin_api(ctx, "POST", "system/send-limit", form=form)
             _need(r.status == 400, "%s: HTTP %d, not 400" % (form, r.status))
+        r = admin_api(ctx, "POST", "system/send-limit/held", form={"action": "bounce", "sender": ""})
+        _need(r.status == 400, "held action bounce: HTTP %d, not 400" % r.status)
         steps.append("invalid values refused")
         r = admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1", "rate": "1", "per": "3600"})
         api_expect(r, 200, "application/json", "POST system/send-limit")
@@ -4869,16 +4881,28 @@ def c_send_limit(ctx):
         time.sleep(2) # the milter looks at its settings file once a second
         first, second = send(1), send(2)
         _need(first == "ok", "first mail with 1 per hour: %s" % first)
-        _need(second.startswith("451") and "4.7.1" in second, "second mail with 1 per hour: %s (not 451 4.7.1)" % second)
-        steps.append("1 per hour: first accepted, second deferred (451 4.7.1)")
+        _need(second == "ok", "second mail with 1 per hour: %s (the sender must get no error, the mail is held)" % second)
+        deadline = time.time() + 20
+        while not held_of_alice():
+            _need(time.time() < deadline, "the second mail is not listed as held after 20 s")
+            time.sleep(2)
+        steps.append("1 per hour: both accepted, the second held")
+        r = admin_api(ctx, "POST", "system/send-limit/held", form={"action": "delete", "sender": held_of_alice()[0]["sender"]})
+        api_expect(r, 200, "application/json", "POST system/send-limit/held")
+        _need(r.json().get("mails", 0) >= 1, "delete: %s" % r.text()[:200])
+        deadline = time.time() + 20
+        while held_of_alice():
+            _need(time.time() < deadline, "the held mail is still listed 20 s after it was deleted")
+            time.sleep(2)
+        steps.append("deleted through the API")
         deadline = time.time() + 75
         while True:
             day = admin_api(ctx, "GET", "system/send-limit").json()["day"]
-            if day["deferred"] >= 1 and any(x["sender"].lower() == ctx.alice.lower() for x in day["senders"]):
+            if day["held"] >= 1 and any(x["sender"].lower() == ctx.alice.lower() for x in day["senders"]):
                 break
-            _need(time.time() < deadline, "GET system/send-limit does not list the deferred mail after 75 s: %s" % day)
+            _need(time.time() < deadline, "GET system/send-limit does not list the held mail's minute after 75 s: %s" % day)
             time.sleep(5)
-        steps.append("listed with its sender")
+        steps.append("its minute listed with its sender")
     finally:
         admin_api(ctx, "POST", "system/send-limit", form={"enabled": "1" if before["enabled"] else "0", "rate": str(before["rate"]), "per": str(before["per"])})
     time.sleep(2)

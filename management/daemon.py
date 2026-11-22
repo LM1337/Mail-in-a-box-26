@@ -987,6 +987,24 @@ def send_limit_set():
 	result["status"] = "ok"
 	return json_response(result)
 
+@app.route('/system/send-limit/held', methods=["POST"])
+@authorized_personnel_only
+def send_limit_held():
+	# action: release (now, past the limit) or delete; sender: one of the
+	# senders of GET /system/send-limit's "held", or empty for all held mail.
+	import send_limit
+	sender = request.form.get('sender', '') or None
+	try:
+		result = send_limit.act_on_held(request.form.get('action', ''), sender)
+	except send_limit.SendLimitError as e:
+		return (str(e), 400)
+	except Exception as e:
+		return (str(e), 500)
+	app.logger.warning("send-limit: %s %s %d held mails of %s", request.user_email,
+		"released" if result["action"] == "release" else "deleted", result["mails"], sender or "all senders")
+	result["status"] = "ok"
+	return json_response(result)
+
 @app.route('/system/fail2ban/report', methods=["GET"])
 @authorized_personnel_only
 def fail2ban_report():

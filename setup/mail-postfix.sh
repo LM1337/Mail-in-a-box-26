@@ -87,26 +87,35 @@ tools/editconf.py /etc/postfix/main.cf \
 
 # ### Outgoing Mail
 
-# The sending limit of the box (fork, B221): the milter conf/send-limit/milter.py
+# The sending limit of the box (fork, B221): the milter conf/send-limit/sendlimit-milter.py
 # (package python3-milter, universe) lets at most a number of mails within a
 # number of seconds go out (default 30 in 1 s, each recipient counts as one),
 # of all mail sent through the submission ports 465/587 (mail programs,
 # Roundcube), through sendmail (Z-Push, Nextcloud, Sieve redirects, cron) and
-# by SMTP from the box itself (127.0.0.0/8, ::1 on port 25); more wait, at most
-# 60 s, and are then deferred (4.7.1) to be sent again later. Mail that other
-# servers send to the box is not counted. The limit is set in System >
-# Intrusion Detection and Prevention (management/send_limit.py writes the
-# settings file, which the milter reads again when it changes); the cron job
-# of setup/management.sh mails the minutes in which mail had to wait to the
-# administrator. It runs as a dynamic user, its state in
+# by SMTP from the box itself (127.0.0.0/8, ::1 on port 25). Mail that other
+# servers send to the box is not counted. A mail that does not fit is
+# accepted and put on hold; conf/send-limit/sendlimit-release.py (service
+# miab-sendlimit-release, root) releases the held mails at the limit, the
+# senders in turn. Without the release service the milter holds nothing: a
+# mail waits at most 60 s and is then deferred (4.7.1). The limit is set in
+# System > Intrusion Detection and Prevention (management/send_limit.py
+# writes the settings file, which both read again when it changes); the cron
+# job of setup/management.sh mails the minutes in which mail waited or was
+# held to the administrator. The milter runs as a dynamic user, its state in
 # /var/lib/miab-sendlimit; Postfix passes mail on when it does not answer
-# (milter_default_action=accept, dkim.sh). Started before the milter is added
-# to Postfix, and restarted only when its program, unit or package changed.
+# (milter_default_action=accept, dkim.sh). Both are started before the milter
+# is added to Postfix, and restarted only when their program, unit or
+# package changed.
 install -d -m 0755 -o root -g root /usr/local/lib/mailinabox/miab-sendlimit
-install -m 0755 -o root -g root conf/send-limit/milter.py /usr/local/lib/mailinabox/miab-sendlimit/milter.py
+for f in sendlimit_common.py sendlimit-milter.py sendlimit-release.py; do
+	install -m 0755 -o root -g root conf/send-limit/$f /usr/local/lib/mailinabox/miab-sendlimit/$f
+done
 install_unit miab-sendlimit.service
-restart_on_change miab-sendlimit "python3-milter libmilter1.0.1" /usr/local/lib/mailinabox/miab-sendlimit/milter.py \
-	/lib/systemd/system/miab-sendlimit.service
+install_unit miab-sendlimit-release.service
+restart_on_change miab-sendlimit "python3-milter libmilter1.0.1" /usr/local/lib/mailinabox/miab-sendlimit/sendlimit-milter.py \
+	/usr/local/lib/mailinabox/miab-sendlimit/sendlimit_common.py /lib/systemd/system/miab-sendlimit.service
+restart_on_change miab-sendlimit-release "" /usr/local/lib/mailinabox/miab-sendlimit/sendlimit-release.py \
+	/usr/local/lib/mailinabox/miab-sendlimit/sendlimit_common.py /lib/systemd/system/miab-sendlimit-release.service
 
 # Enable the 'submission' ports 465 and 587 and tweak their settings.
 #

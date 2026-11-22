@@ -1,10 +1,10 @@
 [Unit]
-Description=Mail-in-a-Box sending limit (Postfix milter, conf/send-limit/milter.py)
+Description=Mail-in-a-Box sending limit (Postfix milter, conf/send-limit/sendlimit-milter.py)
 Before=postfix.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -I /usr/local/lib/mailinabox/miab-sendlimit/milter.py
+ExecStart=/usr/bin/python3 -I /usr/local/lib/mailinabox/miab-sendlimit/sendlimit-milter.py
 Restart=always
 RestartSec=2
 SyslogIdentifier=miab-sendlimit

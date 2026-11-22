@@ -15,30 +15,35 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 * **Sending limit: at most 30 mails a second leave the box (B221)**\
   All mail that the users and the box itself send now passes a small
-  Postfix milter (`conf/send-limit/milter.py`, service `miab-sendlimit`,
-  package `python3-milter` from universe): mail programs and webmail (SMTP
-  with login on ports 465 and 587) and ActiveSync, Nextcloud, Sieve
-  redirects, cron and other programs on the box (sendmail), and SMTP from
-  the box itself without a login (127.0.0.1 and ::1 on port 25, which
-  Postfix lets relay). Up to 30 mails
-  go out at once, then 30 a second; each recipient counts as one mail.
-  More mail waits at the end of the message until it fits, at most 60
-  seconds, and is then deferred with a temporary error (`451 4.7.1`), so
-  its sender sends it again later: mail is slowed down, never lost. Mail
-  that other servers send to the box is not counted. Each minute in which mail
-  had to wait is logged (`miab-sendlimit`, with the senders) and mailed to
-  the recipient of the box's reports (System > Notifications), at most one
-  mail an hour, with the accounts that sent the most. The limit (mails and
-  seconds, or off) is set in System > Intrusion Detection and Prevention,
-  which also lists these minutes of the last 24 hours; API
-  `/system/send-limit`, command line `management/send_limit.py --status`.
-  The milter reads its setting again when it changes, runs as a dynamic
-  user without privileges, and Postfix passes mail on when it does not
-  answer. Before, an account that was taken over or a program on the box
-  could send any amount of mail in the box's name before anyone noticed,
-  and ruin the reputation of its address with other mail providers. New
-  offline test `tests/fork/send-limit.py`, smoke checks `admin-send-limit`
-  and the `GET /system/send-limit` shape.
+  Postfix milter (`conf/send-limit/sendlimit-milter.py`, service
+  `miab-sendlimit`, package `python3-milter` from universe): mail programs
+  and webmail (SMTP with login on ports 465 and 587), ActiveSync,
+  Nextcloud, Sieve redirects, cron and other programs on the box
+  (sendmail), and SMTP from the box itself without a login (127.0.0.1 and
+  ::1 on port 25, which Postfix lets relay). Up to 30 mails go out at
+  once, then 30 a second; each recipient counts as one mail. A mail that
+  does not fit is accepted and put on hold in Postfix's queue, so no
+  sender ever gets an error; the new service `miab-sendlimit-release`
+  releases the held mail at the limit, the senders in turn, so that one
+  sender with thousands of mails does not hold back the others' mail.
+  System > Intrusion Detection and Prevention (the page's new name) sets
+  the limit (mails and seconds, or off), lists the held mail by sender
+  with "Release now" and "Delete" (mail of an account that was taken over
+  can be deleted before it goes out), and the minutes of the last 24 hours
+  in which the limit acted; API `/system/send-limit` and
+  `/system/send-limit/held`, command line `management/send_limit.py
+  --status`, `--release`, `--delete`. Each such minute is logged with the
+  senders and mailed to the recipient of the box's reports (System >
+  Notifications), at most one mail an hour. Mail from other servers is not
+  counted. The milter runs as a dynamic user without privileges and reads
+  its setting again when it changes; Postfix passes mail on when it does
+  not answer, and without the release service it holds nothing (a mail
+  then waits at most 60 seconds and is deferred with `451 4.7.1`). Before,
+  an account that was taken over or a program on the box could send any
+  amount of mail in the box's name before anyone noticed, and ruin the
+  reputation of its address with other mail providers. New offline test
+  `tests/fork/send-limit.py`, smoke checks `admin-send-limit` and the
+  `GET /system/send-limit` shape.
 
 * **New page System > Notifications: where reports and alerts go**\
   The control panel has a new page System > Notifications. It sets the

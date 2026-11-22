@@ -2,15 +2,21 @@
 #
 # The sending limit of the box (fork, B221).
 #
-# The Postfix milter conf/send-limit/milter.py (service miab-sendlimit, see
+# The Postfix milter conf/send-limit/sendlimit-milter.py (service miab-sendlimit, see
 # setup/mail-postfix.sh) lets at most RATE mails within PER seconds go out
 # (each recipient counts as one mail) of all mail sent through the
-# submission ports, sendmail and SMTP from the box itself (127.0.0.0/8, ::1);
-# more wait at most 60 s and are then
-# deferred with a temporary error, so their sender tries again later. Each
-# minute in which mail had to wait, it adds a line to its events file:
+# submission ports, sendmail and SMTP from the box itself (127.0.0.0/8, ::1).
+# A mail that does not fit is accepted and put on hold; the release service
+# conf/send-limit/sendlimit-release.py (miab-sendlimit-release, root) releases held
+# mail at the limit, the senders in turn, and lists it in
+# /run/miab-sendlimit/held.json. Without the release service a mail waits at
+# most 60 s and is then deferred with a temporary error. Each minute in
+# which mail waited or was held, the milter adds a line to its events file:
 #
-#   <time> <rate> <per> <delayed> <deferred> <passed> <max wait> <others> <sender>=<mails>/<recipients>...
+#   <time> <rate> <per> <delayed> <deferred> <passed> <max wait> <others> <held> <sender>=<mails>/<recipients>...
+#
+#   send_limit.py --release [SENDER]  releases the held mail (of SENDER) now
+#   send_limit.py --delete SENDER|--all  deletes held mail (of SENDER)
 #
 #   send_limit.py --notify   (cron, every 5 minutes) mails new events to the
 #                            recipient of the box's reports (System >
@@ -50,11 +56,16 @@ MAX_PENDING = 500 # events kept for the next mail
 MAX_READ = 2 * 1024 * 1024 # bytes read of the events file
 SUBJECT = "Sending of mail was slowed down by the sending limit"
 SERVICE = "miab-sendlimit"
+RELEASE_SERVICE = "miab-sendlimit-release"
+HELD_JSON = "/run/miab-sendlimit/held.json"
+FLAG = "/run/miab-sendlimit/release"
 
 DEFAULTS = { "enabled": True, "rate": 30, "per": 1 }
 RANGES = { "rate": [1, 100000], "per": [1, 3600] }
 
-EVENT_RE = re.compile(r"^([0-9]{1,12}) ([0-9]{1,6}) ([0-9]{1,5}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,4}) ([0-9]{1,9})((?: [^\s=]{1,210}=[0-9]{1,9}/[0-9]{1,9}){0,10})$")
+EVENT_RE = re.compile(r"^([0-9]{1,12}) ([0-9]{1,6}) ([0-9]{1,5}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,9}) ([0-9]{1,4}) ([0-9]{1,9}) ([0-9]{1,9})((?: [^\s=]{1,210}=[0-9]{1,9}/[0-9]{1,9}){0,10})$")
+QID_RE = re.compile(r"^[0-9A-Za-z]{6,24}$")
+SENDER_RE = re.compile(r"^[^\s=]{1,210}$")
 
 
 class SendLimitError(ValueError):
@@ -119,7 +130,7 @@ def save_settings(env, values):
 def render_settings_file(values):
 	return ("# Mail-in-a-Box --- Do not edit / will be overwritten on update.\n"
 		"# The sending limit of the box, from settings.yaml (System > Intrusion Detection and Prevention;\n"
-		"# management/send_limit.py), read by conf/send-limit/milter.py when it changes.\n"
+		"# management/send_limit.py), read by conf/send-limit/sendlimit-milter.py when it changes.\n"
 		f"enabled {1 if values['enabled'] else 0}\n"
 		f"rate {values['rate']}\n"
 		f"per {values['per']}\n")
@@ -200,13 +211,13 @@ def parse_event(line):
 	if not m:
 		return None
 	senders = []
-	for item in m.group(9).split():
+	for item in m.group(10).split():
 		s, counts = item.rsplit("=", 1)
 		mails, rcpts = counts.split("/")
 		senders.append({ "sender": s, "mails": int(mails), "recipients": int(rcpts) })
 	return { "time": int(m.group(1)), "rate": int(m.group(2)), "per": int(m.group(3)), "delayed": int(m.group(4)),
 		"deferred": int(m.group(5)), "passed": int(m.group(6)), "max_wait": int(m.group(7)), "others": int(m.group(8)),
-		"senders": senders }
+		"held": int(m.group(9)), "senders": senders }
 
 
 def take_events(state_dir=STATE_DIR, consume=True):
@@ -281,23 +292,28 @@ def describe_sender(s):
 	return f"{s} (logged in by SMTP: a mail program or webmail)"
 
 
-def message(events, dropped=0):
+def message(events, dropped=0, held=None):
 	lines = []
 	for e in events:
 		when = time.strftime("%Y-%m-%d %H:%M", time.localtime(e["time"]))
-		lines.append(f"{when}  {e['delayed']} mails waited (up to {e['max_wait']} s), {e['deferred']} deferred, {e['passed']} went out at once"
-			f" (limit {e['rate']} mails in {e['per']} s)")
+		lines.append(f"{when}  {e.get('held', 0)} mails put on hold, {e['delayed']} waited (up to {e['max_wait']} s), {e['deferred']} deferred,"
+			f" {e['passed']} went out at once (limit {e['rate']} mails in {e['per']} s)")
 	if dropped:
 		lines.append(f"... and {dropped} more minutes")
 	top = summary(events)[:15]
 	senders = "\n".join(f"  {s['recipients']:7d} recipients in {s['mails']:6d} mails  {describe_sender(s['sender'])}" for s in top)
-	return ("The sending limit of the box slowed down outgoing mail in these minutes (each recipient counts as one mail;"
-		" a mail that waits longer than 60 seconds is deferred, and its sender sends it again later):\n\n"
-		+ "\n".join(lines) + "\n\nWho sent it:\n\n" + (senders or "  (not recorded)") + "\n\n"
+	now_held = ""
+	if held and held.get("held"):
+		now_held = (f"On hold now: {held['held']} mails to {held['recipients']} recipients. They go out at the limit, the senders in turn:\n\n"
+			+ "\n".join(f"  {x['recipients']:7d} recipients in {x['mails']:6d} mails  {describe_sender(x['sender'])}" for x in held["senders"][:15]) + "\n\n")
+	return ("The sending limit of the box slowed down outgoing mail in these minutes (each recipient counts as one mail). Mail"
+		" that did not fit was accepted and put on hold, and goes out at the limit; the senders got no error:\n\n"
+		+ "\n".join(lines) + "\n\nWho sent it:\n\n" + (senders or "  (not recorded)") + "\n\n" + now_held +
 		"If you did not expect this much mail from the box, an account may have been taken over, or a program on the box sends"
-		" spam: change the password of the account named above, end its sessions, and look at the mail queue (mailq) before the"
-		" mail goes out (postsuper -d removes mail from the queue). Mail that the limit holds back goes out as the rate allows.\n\n"
-		"The limit, and a list of these minutes: the control panel, System > Intrusion Detection and Prevention.\n")
+		" spam: change the password of the account named above and end its sessions, and delete its held mail before it goes"
+		" out: in the control panel, System > Intrusion Detection and Prevention, \"Delete\" next to the sender (or on the box:"
+		" management/send_limit.py --delete SENDER).\n\n"
+		"The limit, the held mail and a list of these minutes: the control panel, System > Intrusion Detection and Prevention.\n")
 
 
 def send_mail(text):
@@ -319,7 +335,7 @@ def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE):
 			state["dropped"] += 1
 	sent = False
 	if state["pending"] and now - state["last_sent"] >= NOTIFY_INTERVAL:
-		send(message(state["pending"], state["dropped"]))
+		send(message(state["pending"], state["dropped"], read_held()))
 		state.update({ "last_sent": now, "pending": [], "dropped": 0 })
 		sent = True
 	if events or sent:
@@ -327,11 +343,54 @@ def notify(now=None, take=take_events, send=send_mail, state_path=NOTIFY_STATE):
 	return sent
 
 
-def service_running():
+def service_running(unit=SERVICE):
 	try:
-		return subprocess.run(["systemctl", "is-active", "--quiet", SERVICE], timeout=10).returncode == 0
+		return subprocess.run(["systemctl", "is-active", "--quiet", unit], timeout=10).returncode == 0
 	except (OSError, subprocess.SubprocessError):
 		return None
+
+
+def read_held(path=None):
+	# The release service's list of held mail by sender (None when missing).
+	try:
+		with open(path or HELD_JSON, encoding="utf-8") as f:
+			h = json.load(f)
+		if isinstance(h, dict) and isinstance(h.get("senders"), list):
+			return h
+	except (OSError, ValueError):
+		pass
+	return None
+
+
+def held_qids(sender=None, held=None):
+	# The queue ids of the held mail (of one sender), from held.json.
+	held = held if held is not None else read_held()
+	if held is None:
+		raise SendLimitError("The list of held mail is not there (the release service miab-sendlimit-release does not run?).")
+	if sender is not None and (not isinstance(sender, str) or not SENDER_RE.match(sender)):
+		raise SendLimitError("Not a sender of the list.")
+	out = []
+	for s in held["senders"]:
+		if sender is None or s.get("sender") == sender:
+			out += [q for q in s.get("qids", []) if isinstance(q, str) and QID_RE.match(q)]
+	return out
+
+
+def act_on_held(action, sender=None, run=subprocess.run, held=None):
+	# action "release" (now, past the limit) or "delete"; sender None: all.
+	if action not in ("release", "delete"):
+		raise SendLimitError("action must be release or delete.")
+	qids = held_qids(sender, held)
+	if sender is not None and not qids:
+		raise SendLimitError("No held mail of this sender (it may have gone out already).")
+	if qids:
+		p = run(["postsuper", "-d" if action == "delete" else "-H", "-"], input="".join(q + "\n" for q in qids), capture_output=True, text=True, timeout=300)
+		if p.returncode != 0:
+			raise RuntimeError("postsuper: " + (p.stderr or "").strip()[-300:])
+		if action == "release":
+			for q in qids:
+				run(["postqueue", "-i", q], capture_output=True, timeout=60)
+	return { "action": action, "sender": sender, "mails": len(qids) }
 
 
 def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, settings_file=None):
@@ -347,20 +406,28 @@ def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, sett
 		running = service_running()
 	if running is False:
 		warnings.append(f"The service {SERVICE} does not run: mail is sent without the limit (Postfix passes it on). Run setup, or: systemctl restart {SERVICE}.")
+	release_running = service_running(RELEASE_SERVICE) if running is not True else running
+	held = read_held() if take is None else None
+	if release_running is False:
+		warnings.append(f"The service {RELEASE_SERVICE} does not run: nothing is put on hold, mail over the limit waits at most 60 s and is then deferred"
+			+ (f", and {held['held']} held mails are not released" if held and held.get("held") else "") + f". Run setup, or: systemctl restart {RELEASE_SERVICE}.")
 	fresh = (take or (lambda: take_events(consume=False)))()
 	kept = load_state(state_path)["kept"]
 	seen = { (e["time"], e["delayed"], e["deferred"]) for e in kept }
 	events = [e for e in kept + [e for e in fresh if (e["time"], e["delayed"], e["deferred"]) not in seen] if now - e["time"] < 86400]
 	events.sort(key=lambda e: -e["time"])
 	return { "settings": values, "defaults": DEFAULTS, "ranges": RANGES, "applied": applied, "warnings": warnings,
-		"running": running, "events": events[:200], "more": max(0, len(events) - 200),
+		"running": running, "release_running": release_running, "events": events[:200], "more": max(0, len(events) - 200),
+		"held": { "mails": (held or {}).get("held", 0), "recipients": (held or {}).get("recipients", 0),
+			"senders": [{ k: x.get(k) for k in ("sender", "mails", "recipients", "oldest") } for x in (held or {}).get("senders", [])[:200]] },
 		"day": { "minutes": len(events), "delayed": sum(e["delayed"] for e in events), "deferred": sum(e["deferred"] for e in events),
+			"held": sum(e.get("held", 0) for e in events),
 			"max_wait": max([e["max_wait"] for e in events] or [0]), "senders": summary(events)[:20] } }
 
 
 def main(argv):
-	if len(argv) != 2 or argv[1] not in ("--notify", "--status", "--apply"):
-		print("usage: send_limit.py --notify | --status | --apply", file=sys.stderr)
+	if not (len(argv) == 2 and argv[1] in ("--notify", "--status", "--apply", "--release")) and not (len(argv) == 3 and argv[1] in ("--release", "--delete")):
+		print("usage: send_limit.py --notify | --status | --apply | --release [SENDER] | --delete SENDER|--all", file=sys.stderr)
 		return 2
 	if os.geteuid() != 0:
 		print("send_limit.py: run it as root (sudo).", file=sys.stderr)
@@ -377,16 +444,30 @@ def main(argv):
 	if argv[1] == "--notify":
 		notify()
 		return 0
+	if argv[1] in ("--release", "--delete"):
+		sender = None if len(argv) == 2 or argv[2] == "--all" else argv[2]
+		try:
+			r = act_on_held(argv[1][2:], sender)
+		except SendLimitError as e:
+			print(f"send_limit.py: {e}", file=sys.stderr)
+			return 1
+		print(f"{'Released' if r['action'] == 'release' else 'Deleted'} {r['mails']} held mails" + (f" of {sender}." if sender else "."))
+		return 0
 	st = status(env)
 	for w in st["warnings"]:
 		print(w)
 	a = st["applied"]
 	print(f"Sending limit: {a['rate']} mails in {a['per']} s" + ("" if a["enabled"] else " (turned off)"))
+	h = st["held"]
+	if h["mails"]:
+		print(f"On hold now: {h['mails']} mails to {h['recipients']} recipients:")
+		for x in h["senders"]:
+			print(f"  {x['recipients']:7d} recipients in {x['mails']:6d} mails  {x['sender']}")
 	d = st["day"]
 	if not d["minutes"]:
 		print("No mail had to wait in the last 24 hours.")
 	else:
-		print(f"In the last 24 hours mail had to wait in {d['minutes']} minutes: {d['delayed']} mails waited (up to {d['max_wait']} s), {d['deferred']} were deferred.")
+		print(f"In the last 24 hours the limit acted in {d['minutes']} minutes: {d['held']} mails were put on hold, {d['delayed']} waited (up to {d['max_wait']} s), {d['deferred']} were deferred.")
 		for s in d["senders"]:
 			print(f"  {s['recipients']:7d} recipients in {s['mails']:6d} mails  {describe_sender(s['sender'])}")
 	return 0

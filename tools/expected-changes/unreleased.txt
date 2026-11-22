@@ -11,7 +11,8 @@ status.txt + ^\? +(\S+: )?Could not check this domain's DNSSEC DS record: the DN
 dropins.txt + ^/etc/systemd/system/spamassassin-maintenance\.service\.d/mailinabox-spampd-record\.conf # setup restarts spampd only on a change: drop-in that lets spamassassin-maintenance.service write spampd's restart record after sa-update (hook spampd-record)
 crontabs.txt + ^/etc/cron\.d/mailinabox-auth-guard [0-9a-f]+$ # B126: the cron job of management/auth_guard.py (every 10 minutes) mails the accounts that Dovecot refuses for logins from the box itself after 30 different wrong passwords in 30 minutes
 crontabs.txt + ^/etc/cron\.d/mailinabox-send-limit [0-9a-f]+$ # B221: the cron job of management/send_limit.py (every 5 minutes) mails the minutes in which the sending limit of the box made outgoing mail wait
-units.txt + ^miab-sendlimit enabled active$ # B221: the milter of the sending limit (conf/send-limit/milter.py, conf/miab-sendlimit.service)
+units.txt + ^miab-sendlimit enabled active$ # B221: the milter of the sending limit (conf/send-limit/sendlimit-milter.py, conf/miab-sendlimit.service)
+units.txt + ^miab-sendlimit-release enabled active$ # B221: the release service of the sending limit (conf/send-limit/sendlimit-release.py, conf/miab-sendlimit-release.service) releases held mail at the limit
 listening.txt + ^tcp 127\.0\.0\.1:8895 python3$ # B221: the milter of the sending limit listens on 127.0.0.1:8895
 postconf.txt - ^smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893$ # B221: the milter of the sending limit comes last (setup/dkim.sh; on port 25 it counts only mail from the box itself, sendmail gets it through non_smtpd_milters = $smtpd_milters), see the next line
 postconf.txt + ^smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893 inet:127\.0\.0\.1:8895$ # B221: see the line above
