@@ -18,12 +18,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   Postfix milter (`conf/send-limit/milter.py`, service `miab-sendlimit`,
   package `python3-milter` from universe): mail programs and webmail (SMTP
   with login on ports 465 and 587) and ActiveSync, Nextcloud, Sieve
-  redirects, cron and other programs on the box (sendmail). Up to 30 mails
+  redirects, cron and other programs on the box (sendmail), and SMTP from
+  the box itself without a login (127.0.0.1 and ::1 on port 25, which
+  Postfix lets relay). Up to 30 mails
   go out at once, then 30 a second; each recipient counts as one mail.
   More mail waits at the end of the message until it fits, at most 60
   seconds, and is then deferred with a temporary error (`451 4.7.1`), so
   its sender sends it again later: mail is slowed down, never lost. Mail
-  from other servers (port 25) is not limited. Each minute in which mail
+  that other servers send to the box is not counted. Each minute in which mail
   had to wait is logged (`miab-sendlimit`, with the senders) and mailed to
   the recipient of the box's reports (System > Notifications), at most one
   mail an hour, with the accounts that sent the most. The limit (mails and

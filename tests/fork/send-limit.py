@@ -86,6 +86,37 @@ for _ in range(30 + 30 * 50):
 	L.reserve(1, 30, 1, now=0.0)
 check("lower rate: the backlog is capped at once", L.reserve(1, 5, 1, now=0.0) is not None, True)
 
+# Which mail counts: SMTP with a login, sendmail (port 0) and SMTP from the
+# box itself (loopback); mail from other servers passes uncounted.
+check("loopback", [milter.is_loopback(x) for x in ("127.0.0.1", "127.9.8.7", "::1", "::ffff:127.0.0.1", "203.0.113.5", "10.0.0.1", "fe80::1%eth0", "", None)],
+	[True, True, True, True, False, False, False, False, False])
+milter.settings.values, milter.settings.checked = {"enabled": 1, "rate": 1, "per": 3600}, 10 ** 12
+milter.stats = milter.Stats()
+
+
+def session(addr, auth=None):
+	m = milter.SendLimit()
+	m.getsymval = lambda k: auth if k == "{auth_authen}" else None
+	m.setreply = lambda *a: None
+	m.connect("host", 2, addr)
+	m.envfrom("<a@example.com>")
+	m.envrcpt("<b@example.org>")
+	return m.eom()
+
+
+milter.limiter = milter.Limiter()
+first = session(("127.0.0.1", 41000))
+check("1 per hour: first local SMTP mail", first, "accept")
+check("1 per hour: second local SMTP mail deferred", session(("127.0.0.1", 41001)), "tempfail")
+check("sendmail (port 0) counted", session(("127.0.0.1", 0)), "tempfail")
+check("SMTP with a login counted", session(("203.0.113.5", 41002), auth="a@example.com"), "tempfail")
+check("::1 counted", session(("::1", 41003, 0, 0)), "tempfail")
+check("another server: not counted", session(("203.0.113.5", 41004)), "accept")
+check("another server over IPv6: not counted", session(("2001:db8::5", 41005, 0, 0)), "accept")
+milter.settings.values = {"enabled": 0, "rate": 1, "per": 3600}
+check("turned off: local SMTP goes", session(("127.0.0.1", 41006)), "accept")
+milter.settings = milter.Settings()
+
 # The milter's settings file.
 with tempfile.TemporaryDirectory() as d:
 	milter.SETTINGS = os.path.join(d, "settings")

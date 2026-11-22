@@ -2647,11 +2647,12 @@ paths:
       description: |
         All mail that the users and the box itself send (SMTP with login on
         ports 465 and 587, and sendmail: ActiveSync, Nextcloud, Sieve
-        redirects, programs on the box) passes a milter that lets at most
+        redirects, programs on the box, and SMTP from 127.0.0.1 and ::1)
+        passes a milter that lets at most
         `rate` mails within `per` seconds go out; each recipient counts as one
         mail. More mail waits until it fits, at most 60 seconds, and is then
-        deferred with a temporary error (4.7.1). Mail from port 25 is not
-        limited. Returns the setting (`settings`, only values that differ from
+        deferred with a temporary error (4.7.1). Mail that other servers send
+        to the box is not counted. Returns the setting (`settings`, only values that differ from
         `defaults` are stored), the values the milter uses now (`applied`),
         the allowed `ranges`, whether the milter runs (`running`, null when
         unknown), and the minutes of the last 24 hours in which mail had to

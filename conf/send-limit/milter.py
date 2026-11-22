@@ -3,9 +3,11 @@
 # The sending limit of the box (fork, B221): a Postfix milter that lets at
 # most RATE mails within PER seconds go out (each recipient counts as one
 # mail), for all mail that users and the box itself send: SMTP AUTH on the
-# submission ports 465 and 587 (mail programs, Roundcube) and mail through
+# submission ports 465 and 587 (mail programs, Roundcube), mail through
 # sendmail (Z-Push's ActiveSync, Nextcloud, Sieve redirects, cron, programs
-# on the box). Mail that comes in on port 25 does not pass this milter.
+# on the box) and SMTP from the box itself without a login (127.0.0.0/8 and
+# ::1 on port 25, which Postfix lets relay as mynetworks). Mail that other
+# servers send to the box is not counted.
 #
 # Up to RATE mails go out at once; more wait at the end of the message until
 # they fit (the rate is kept over time), at most MAX_WAIT seconds. A mail
@@ -175,6 +177,19 @@ limiter = Limiter()
 stats = Stats()
 
 
+def is_loopback(addr):
+	# 127.0.0.0/8, ::1 and their IPv4-mapped form, as Postfix's mynetworks
+	# of Mail-in-a-Box (the box itself).
+	import ipaddress
+	try:
+		a = ipaddress.ip_address(str(addr).split("%")[0])
+	except ValueError:
+		return False
+	if a.version == 6 and a.ipv4_mapped:
+		a = a.ipv4_mapped
+	return a.is_loopback
+
+
 def sender_name(s):
 	# The account (SMTP AUTH) or the envelope sender, without spaces or "="
 	# (the events file's separators), at most 200 characters.
@@ -185,6 +200,7 @@ def sender_name(s):
 class SendLimit(Milter.Base):
 	def __init__(self):
 		self.local = False
+		self.loopback = False
 		self.reset()
 
 	def reset(self):
@@ -196,6 +212,7 @@ class SendLimit(Milter.Base):
 	def connect(self, hostname, family, hostaddr):
 		# Postfix's pickup (sendmail) connects as localhost 127.0.0.1, port 0.
 		self.local = isinstance(hostaddr, tuple) and len(hostaddr) >= 2 and hostaddr[1] == 0
+		self.loopback = is_loopback(hostaddr[0] if isinstance(hostaddr, tuple) and hostaddr else None)
 		return Milter.CONTINUE
 
 	@Milter.noreply
@@ -214,6 +231,8 @@ class SendLimit(Milter.Base):
 		v = settings.get()
 		if not v["enabled"]:
 			return Milter.ACCEPT
+		if not (self.auth or self.local or self.loopback):
+			return Milter.ACCEPT # from another server, without a login
 		n = max(1, self.rcpts)
 		who = sender_name(self.auth) if self.auth else ("sendmail:" if self.local else "smtp:") + sender_name(self.sender)
 		wait = limiter.reserve(n, v["rate"], v["per"])

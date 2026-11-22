@@ -91,9 +91,10 @@ tools/editconf.py /etc/postfix/main.cf \
 # (package python3-milter, universe) lets at most a number of mails within a
 # number of seconds go out (default 30 in 1 s, each recipient counts as one),
 # of all mail sent through the submission ports 465/587 (mail programs,
-# Roundcube) and through sendmail (Z-Push, Nextcloud, Sieve redirects, cron);
-# more wait, at most 60 s, and are then deferred (4.7.1) to be sent again
-# later. Mail from port 25 does not pass it. The limit is set in System >
+# Roundcube), through sendmail (Z-Push, Nextcloud, Sieve redirects, cron) and
+# by SMTP from the box itself (127.0.0.0/8, ::1 on port 25); more wait, at most
+# 60 s, and are then deferred (4.7.1) to be sent again later. Mail that other
+# servers send to the box is not counted. The limit is set in System >
 # Intrusion Detection and Prevention (management/send_limit.py writes the
 # settings file, which the milter reads again when it changes); the cron job
 # of setup/management.sh mails the minutes in which mail had to wait to the

@@ -13,5 +13,5 @@ crontabs.txt + ^/etc/cron\.d/mailinabox-auth-guard [0-9a-f]+$ # B126: the cron j
 crontabs.txt + ^/etc/cron\.d/mailinabox-send-limit [0-9a-f]+$ # B221: the cron job of management/send_limit.py (every 5 minutes) mails the minutes in which the sending limit of the box made outgoing mail wait
 units.txt + ^miab-sendlimit enabled active$ # B221: the milter of the sending limit (conf/send-limit/milter.py, conf/miab-sendlimit.service)
 listening.txt + ^tcp 127\.0\.0\.1:8895 python3$ # B221: the milter of the sending limit listens on 127.0.0.1:8895
-postconf.txt - ^non_smtpd_milters = \$smtpd_milters$ # B221: mail through sendmail also passes the milter of the sending limit (setup/dkim.sh), see the next line
-postconf.txt + ^non_smtpd_milters = \$smtpd_milters inet:127\.0\.0\.1:8895$ # B221: see the line above
+postconf.txt - ^smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893$ # B221: the milter of the sending limit comes last (setup/dkim.sh; on port 25 it counts only mail from the box itself, sendmail gets it through non_smtpd_milters = $smtpd_milters), see the next line
+postconf.txt + ^smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893 inet:127\.0\.0\.1:8895$ # B221: see the line above

@@ -5,7 +5,8 @@
 # The Postfix milter conf/send-limit/milter.py (service miab-sendlimit, see
 # setup/mail-postfix.sh) lets at most RATE mails within PER seconds go out
 # (each recipient counts as one mail) of all mail sent through the
-# submission ports and sendmail; more wait at most 60 s and are then
+# submission ports, sendmail and SMTP from the box itself (127.0.0.0/8, ::1);
+# more wait at most 60 s and are then
 # deferred with a temporary error, so their sender tries again later. Each
 # minute in which mail had to wait, it adds a line to its events file:
 #
