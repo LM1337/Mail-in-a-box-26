@@ -138,7 +138,7 @@ def main():
 	plus = []
 	for n in sorted(os.listdir(lists)):
 		for line in open(os.path.join(lists, n), encoding="utf-8"):
-			m = re.match(r"dropins\.txt \+ (\S+) # ", line)
+			m = re.match(r"dropins\.txt \+ (.+?) # ", line)
 			if m:
 				plus.append(re.compile(m.group(1)))
 	written = set()
@@ -155,7 +155,9 @@ def main():
 					written.add(p)
 	check("setup writes drop-ins (found in setup/*.sh)", len(written) >= 3, repr(sorted(written)))
 	for p in sorted(written):
-		check("drop-in %s is an expected new file" % p, any(r.search(p) for r in plus))
+		# A line of dropins.txt is the path and the checksum of the file.
+		line = p + " " + "0123456789abcdef" * 4
+		check("drop-in %s is an expected new file" % p, any(r.search(line) for r in plus))
 
 	print()
 	print("%d failed" % len(FAILED) if FAILED else "all passed")
