@@ -5,8 +5,8 @@ not maintained by the Mail-in-a-Box project.
 
 ## Supported versions
 
-Only the latest release tag (currently `v78-r2604.4`) and the branch `main`
-receive fixes. Older releases (`v78-r2604.0` to `v78-r2604.3`) and the
+Only the latest release tag (currently `v78-r2604.5`) and the branch `main`
+receive fixes. Older releases (`v78-r2604.0` to `v78-r2604.4`) and the
 release candidates (`v78-r2604.0-rc1` to `-rc7`) are no longer supported:
 update them to the latest release.
 

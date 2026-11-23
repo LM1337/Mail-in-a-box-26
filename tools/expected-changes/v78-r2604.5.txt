@@ -1,10 +1,8 @@
-# Expected changes of an update to the release after v78-r2604.4, for
-# tools/update-check.sh after: what this release changes in the recorded
-# state. "after" uses this list (with any.txt) when the checkout after the
-# update is not at a release tag (bootstrap.sh with TAG=<branch or commit>),
-# or when the version after the update has no list of its own. When the
-# release is tagged, rename this file to <version>.txt and start a new,
-# empty unreleased.txt. The format is in any.txt.
+# Expected changes of an update to v78-r2604.5, for tools/update-check.sh
+# after: what this release changes in the recorded state, compared with
+# v78-r2604.4 ("after" uses the lists of all releases after the version
+# before the update, up to the version after it, and any.txt). The format is
+# in any.txt.
 status.txt + ^(✖|\?) +(\S+: )?(This domain's DNSSEC DS record is (not set|incorrect)|DNSSEC 'DS' record set at registrar is valid|The DNSSEC 'DS' record for \S+ is incorrect) # B179: the DNSSEC messages say where the DS records are (below the message, in the control panel under "show more") instead of "see below"
 status.txt + ^\? +(\S+: )?Could not determine whether the domain \S+ is blacklisted by dbl\.spamhaus\.org: its name is too long # B181: a mail domain too long for the DBL lookup gets this warning; before, the lookup ended the status check run with a traceback
 status.txt + ^\? +(\S+: )?Could not check this domain's DNSSEC DS record: the DNS lookup (timed out|failed) # B182: a DS lookup that timed out or failed gives this warning instead of "This domain's DNSSEC DS record is not set"

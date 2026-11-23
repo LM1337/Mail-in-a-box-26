@@ -11,6 +11,100 @@ PR #2603). For upstream's own history see CHANGELOG.md.
 
 ## Unreleased
 
+### Planned
+
+Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
+v78-r2604.3, v78-r2604.4, v78-r2604.5 and this release, not done (the certification runs add their open findings in TESTING-fork.md):
+
+* **The in-place and migration tools trust a local tag of the release name**\
+  `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
+  `update_fork_dir`) and `tools/migrate-to-2604.sh` (`resolve_miab_dir`)
+  still decide by the name that `git describe` prints whether to fetch the
+  release, as bootstrap.sh did before B202: a local tag of the release's
+  name on another commit keeps the old code. The same comparison with the
+  commit of the tag at the source (`git ls-remote`) would find it (seen in
+  the work on B202).
+* **Munin critical-only alerts never mail the return to normal**\
+  Critical only (Munin's alerts) never mails the return to normal. Not
+  possible with Munin's text template, which `contact.admin.text` sets:
+  munin-limits (Munin 2.0) gives it the values that are critical, warning
+  or unknown now and those back to normal in this run (`fofields`), not
+  the state a value had before, so a template cannot tell a value back
+  from critical from one back from warning, nor see one that drops from
+  critical to warning. README-fork.md (Munin alerts) says so. A fix would
+  need munin-notify to keep the critical values of the last run itself.
+* **The storage user can still replace $STORAGE_ROOT/mail and ssl/**\
+  The storage user owns `$STORAGE_ROOT` and can rename `mail/` and `ssl/`
+  in it and put directories of its own there: Dovecot, Postfix and the
+  management daemon open `users.sqlite` by path, and the services read the
+  private keys by path. Setup no longer makes such a `mail/` or database
+  root's (it stops), but the services would use them. A fix needs both in
+  a directory of root's outside `$STORAGE_ROOT` (or a bind mount), which
+  changes the paths of the backups and the tools; README-fork.md, "Known
+  issues" (seen in the review of B210 to B213).
+* **A local fail2ban file with ignoreip overrides the panel's allowlist**\
+  A `jail.local` or `jail.d/*.local` of the administrator that sets
+  `ignoreip` in `[DEFAULT]` is read after `jail.d/mailinabox_adaptive.conf`
+  and replaces the `ignoreip` that the allowlist of System > Intrusion
+  Protection writes there: the panel lists an address as allowlisted, and
+  no jail ignores it. The page does not warn about it (seen in the test
+  runs of this release).
+* **A package run started just before mail goes offline is not in the snapshot**\
+  The in-place tool takes the package lists and the system archive while
+  mail still runs, checks for running package updates, and then masks and
+  stops the units. A package run that starts after that check and before
+  the masks (`apt-daily-upgrade.service` has `KillMode=process`, so
+  stopping it leaves unattended-upgrade running) ends while `stop_mail`
+  waits for the dpkg lock (B190), but its changes are not in the package
+  lists and the archive that `--rollback` uses. Comparing
+  `/var/log/apt/history.log` or the mtime of `/var/lib/dpkg/status` with
+  the moment of the archive after that wait would find it (seen in the
+  review of this release, from the code; not seen in a test run).
+* **No log line for a successful webmail password change**\
+  `POST /me/password` (webmail's password change through the management
+  daemon, B210) logs failures (for fail2ban) but not a successful change
+  (seen in the test runs of this release).
+* **The journal may lose a whole file at a rotation**\
+  setup/system.sh sets journald's `MaxRetentionSec=10day` (upstream). On a
+  copy of a production box the system journal before a moment in an update
+  test was gone while syslog and mail.log were intact, which takes the
+  setup marks that the log audit needs; a likely cause, not confirmed, is
+  that journald removes a rotated file whole when its oldest entry is
+  older than the retention (seen in the test runs of this release).
+* **www-data is still in the group dovecot**\
+  Setup adds www-data to the group dovecot, as upstream did "so PHP can use
+  doveadm, for the password changing plugin". No version of this fork uses
+  that (its password plugin hashed in PHP, and since B210 the management
+  daemon changes the password). The group gives access to some of Dovecot's
+  sockets (for example its statistics); taking www-data out of it needs a
+  check of what else relies on it (seen in the work on B210).
+* **spampd checks at most three mails at a time**\
+  Postfix hands each mail for the box's users to spampd, which runs
+  Ubuntu's default of three processes (`max-servers 3` in
+  `/etc/spampd.cfg`; setup sets only its ports). At about 2 s per check,
+  a burst of incoming mail waits in Postfix's queue: in an update test
+  with client load and an extra mail every 2 s, local delivery took 10 to
+  22 s before any restart, and after setup's restarts four mails waited
+  about 100 s past setup's end. More processes would need more memory
+  (about 100 MB each); a setting for it would let a busy box choose (seen
+  in the test of B225).
+
+## v78-r2604.5 (2026-11-23)
+
+A larger release. New: a per-account limit of failed logins through the
+box's own services (the account lock, B126), a sending limit with an
+emergency brake against floods of outgoing mail (B221), banned addresses
+page by page (B220), a switch that turns fail2ban off for tests,
+System > Notifications, and setup restarts services only when
+their configuration changed. Fixed: the status pages and mails (B178 to
+B184), the in-place and migration tools (B154, B161, B186 to B190, B200 to
+B204), the reading of root's files from the storage user's directories
+(B183, B191, B210 to B213), and the restarts during an update (B122, B189,
+B222 to B225). Tested by the full set of scenarios T1 to T5b and T7, an
+in-place upgrade from 24.04 (T3) and updates of a copy of a production box
+from v78-r2604.4 under client load (T5b and three repeated runs), see
+TESTING-fork.md.
+
 ### New
 
 * **fail2ban can be turned off for tests**\
@@ -290,7 +384,7 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   this release restarts each of them once more. New offline test
   `tests/fork/restart-on-change.py`. `tools/update-check.sh after` accepts
   the new drop-in of `spamassassin-maintenance.service`
-  (`expected-changes/unreleased.txt`; without it, every update to this
+  (`expected-changes/v78-r2604.5.txt`; without it, every update to this
   release ended "RESULT: CHANGED", found in its test runs), and
   `tests/fork/update-check-compare.py` checks that every drop-in that setup
   writes is in a list of expected changes.
@@ -350,6 +444,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   transaction that read first and then writes after another connection
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
+
+* **The sending limit warns when its release service does not run (B226)**\
+  The control panel's page of the sending limit and `send_limit.py
+  --status` showed no warning when only `miab-sendlimit-release` had
+  stopped (then nothing is held or released); they now check both
+  services on their own.
 
 * **Mail that arrives during setup no longer waits 5 minutes (B225)**\
   Mail to the box's users that arrived while setup restarted spampd or
@@ -843,84 +943,18 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   last 14 days. To keep an older
   one, move it out of that directory before the update (to a name that is
   not a date and time, or elsewhere).
-* **The update reloads Dovecot and PHP-FPM once and restarts a few services**\
-  The first setup run of this release reloads Dovecot (its new auth
-  configuration, B126: the open IMAP sessions end, and their clients log
-  in again) and PHP-FPM (its new `process_control_timeout`, B122: a Ping
+* **The update restarts Dovecot, reloads PHP-FPM once and restarts a few services**\
+  The first setup run of this release restarts Dovecot (its new passdbs
+  of the account lock, B126, B223: the open IMAP sessions end, and their
+  clients log in again; a login in the few seconds of the restart fails,
+  and Postfix's submission ports may not answer for up to 10 s, B224) and
+  reloads PHP-FPM (its new `process_control_timeout`, B122: a Ping
   that is open then gets HTTP 502 after 5 s), and restarts OpenDKIM,
   OpenDMARC, spampd, postgrey, named, systemd-resolved, munin-node and the
   management daemon once more, as it has no checksums of them yet. Later
   runs leave them alone unless their configuration changes or they were
   started since by something else; the first run after a reboot restarts
   them (PHP-FPM: reloads it) once more.
-
-### Planned
-
-Seen in the work on rc7, v78-r2604.0, v78-r2604.1, v78-r2604.2,
-v78-r2604.3, v78-r2604.4 and this release, not done (the certification runs add their open findings in TESTING-fork.md):
-
-* **The in-place and migration tools trust a local tag of the release name**\
-  `tools/upgrade-in-place-to-2604.sh` (an existing checkout of the fork,
-  `update_fork_dir`) and `tools/migrate-to-2604.sh` (`resolve_miab_dir`)
-  still decide by the name that `git describe` prints whether to fetch the
-  release, as bootstrap.sh did before B202: a local tag of the release's
-  name on another commit keeps the old code. The same comparison with the
-  commit of the tag at the source (`git ls-remote`) would find it (seen in
-  the work on B202).
-* **Munin critical-only alerts never mail the return to normal**\
-  Critical only (Munin's alerts) never mails the return to normal. Not
-  possible with Munin's text template, which `contact.admin.text` sets:
-  munin-limits (Munin 2.0) gives it the values that are critical, warning
-  or unknown now and those back to normal in this run (`fofields`), not
-  the state a value had before, so a template cannot tell a value back
-  from critical from one back from warning, nor see one that drops from
-  critical to warning. README-fork.md (Munin alerts) says so. A fix would
-  need munin-notify to keep the critical values of the last run itself.
-* **The storage user can still replace $STORAGE_ROOT/mail and ssl/**\
-  The storage user owns `$STORAGE_ROOT` and can rename `mail/` and `ssl/`
-  in it and put directories of its own there: Dovecot, Postfix and the
-  management daemon open `users.sqlite` by path, and the services read the
-  private keys by path. Setup no longer makes such a `mail/` or database
-  root's (it stops), but the services would use them. A fix needs both in
-  a directory of root's outside `$STORAGE_ROOT` (or a bind mount), which
-  changes the paths of the backups and the tools; README-fork.md, "Known
-  issues" (seen in the review of B210 to B213).
-* **A local fail2ban file with ignoreip overrides the panel's allowlist**\
-  A `jail.local` or `jail.d/*.local` of the administrator that sets
-  `ignoreip` in `[DEFAULT]` is read after `jail.d/mailinabox_adaptive.conf`
-  and replaces the `ignoreip` that the allowlist of System > Intrusion
-  Protection writes there: the panel lists an address as allowlisted, and
-  no jail ignores it. The page does not warn about it (seen in the test
-  runs of this release).
-* **A package run started just before mail goes offline is not in the snapshot**\
-  The in-place tool takes the package lists and the system archive while
-  mail still runs, checks for running package updates, and then masks and
-  stops the units. A package run that starts after that check and before
-  the masks (`apt-daily-upgrade.service` has `KillMode=process`, so
-  stopping it leaves unattended-upgrade running) ends while `stop_mail`
-  waits for the dpkg lock (B190), but its changes are not in the package
-  lists and the archive that `--rollback` uses. Comparing
-  `/var/log/apt/history.log` or the mtime of `/var/lib/dpkg/status` with
-  the moment of the archive after that wait would find it (seen in the
-  review of this release, from the code; not seen in a test run).
-* **No log line for a successful webmail password change**\
-  `POST /me/password` (webmail's password change through the management
-  daemon, B210) logs failures (for fail2ban) but not a successful change
-  (seen in the test runs of this release).
-* **The journal may lose a whole file at a rotation**\
-  setup/system.sh sets journald's `MaxRetentionSec=10day` (upstream). On a
-  copy of a production box the system journal before a moment in an update
-  test was gone while syslog and mail.log were intact, which takes the
-  setup marks that the log audit needs; a likely cause, not confirmed, is
-  that journald removes a rotated file whole when its oldest entry is
-  older than the retention (seen in the test runs of this release).
-* **www-data is still in the group dovecot**\
-  Setup adds www-data to the group dovecot, as upstream did "so PHP can use
-  doveadm, for the password changing plugin". No version of this fork uses
-  that (its password plugin hashed in PHP, and since B210 the management
-  daemon changes the password). The group gives access to some of Dovecot's
-  sockets (for example its statistics); taking www-data out of it needs a
-  check of what else relies on it (seen in the work on B210).
 
 ## v78-r2604.4 (2026-11-19)
 

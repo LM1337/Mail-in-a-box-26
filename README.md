@@ -110,7 +110,7 @@ Ubuntu's main component, which gets security updates during standard support;
 > Tauberer for help with this fork. Use this repository's
 > [issues](https://github.com/LM1337/Mail-in-a-box-26/issues) instead.
 
-**Status: `v78-r2604.4`, the fourth small release after the first release
+**Status: `v78-r2604.5`, the fifth release after the first release
 `v78-r2604.0`.** The first release is tested on test machines, on a copy of
 a production box and on a box on the Internet; `v78-r2604.1` only by a
 browser test and the API smoke test on a test box; `v78-r2604.2` by a fresh
@@ -118,7 +118,10 @@ install, an update of a copy of a production box, and a migration and an
 in-place upgrade from v78 on Ubuntu 22.04, on test machines; `v78-r2604.3`
 (post-quantum key exchange in Postfix, B175) and `v78-r2604.4` (Nextcloud's
 throttle and the reasons of bans in the control panel, B176, B177) each by a
-fresh install and an update of a copy of a production box (which tests ran
+fresh install and an update of a copy of a production box; `v78-r2604.5`
+(the account lock, the sending limit, System > Notifications and many
+fixes) by the full set of tests on test machines, among them updates of a
+copy of a production box under client load (which tests ran
 for each release, their results and what was not tested are in
 [TESTING-fork.md](TESTING-fork.md)). Make a backup, and try an update on a
 copy or a spare machine before you run it on the box that holds your mail.
