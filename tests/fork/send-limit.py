@@ -448,15 +448,26 @@ with tempfile.TemporaryDirectory() as d:
 	check("mail lists the held mail", "On hold now: 3 mails" in sl.message([ev(T)], 0, heldjson), True)
 	sl.get_settings = lambda env: (dict(sl.DEFAULTS), [])
 	res = sl.status({}, now=T + 5000, take=lambda: [ev(T + 1995), ev(T + 4990, 7)], state_path=state, running=True,
-		settings_file=os.path.join(d, "none"))
+		release_running=True, settings_file=os.path.join(d, "none"))
 	check("status: kept + fresh, no duplicates, newest first", [e["time"] for e in res["events"]], [T + 4990, T + 1995, T + 1990, T + 990])
 	check("status: day", (res["day"]["minutes"], res["day"]["delayed"], res["day"]["senders"][0]["recipients"]), (4, 22, 22))
 	check("status: no warning", res["warnings"], [])
-	res = sl.status({}, now=T + 5000 + 86400, take=lambda: [], state_path=state, running=False, settings_file=os.path.join(d, "none"))
+	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, running=True, release_running=False,
+		settings_file=os.path.join(d, "none"))
+	check("status: the release service stopped while the milter runs warns (B226)",
+		(res["running"], res["release_running"], any(sl.RELEASE_SERVICE + " does not run" in w for w in res["warnings"])), (True, False, True))
+	asked = []
+	orig_running = sl.service_running
+	sl.service_running = lambda unit=sl.SERVICE: asked.append(unit) or (unit == sl.SERVICE)
+	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, settings_file=os.path.join(d, "none"))
+	sl.service_running = orig_running
+	check("status: both services are asked, each for itself (B226)",
+		(sorted(asked), res["running"], res["release_running"]), (sorted([sl.SERVICE, sl.RELEASE_SERVICE]), True, False))
+	res = sl.status({}, now=T + 5000 + 86400, take=lambda: [], state_path=state, running=False, release_running=True, settings_file=os.path.join(d, "none"))
 	check("status: older than a day dropped", res["day"]["minutes"], 0)
 	check("status: not running warns", any("does not run" in w for w in res["warnings"]), True)
 	sl.get_settings = lambda env: (dict(sl.DEFAULTS, rate=50), [])
-	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, running=True, settings_file=os.path.join(d, "none"))
+	res = sl.status({}, now=T + 5000, take=lambda: [], state_path=state, running=True, release_running=True, settings_file=os.path.join(d, "none"))
 	check("status: other values warn", any("does not use this setting" in w for w in res["warnings"]), True)
 
 # The listener of the box's own reports: its recipients table, written with the

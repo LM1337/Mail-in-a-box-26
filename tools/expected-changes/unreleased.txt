@@ -1,21 +1,9 @@
-# Expected changes of an update to the release after v78-r2604.4, for
+# Expected changes of an update to the release after v78-r2604.5, for
 # tools/update-check.sh after: what this release changes in the recorded
 # state. "after" uses this list (with any.txt) when the checkout after the
 # update is not at a release tag (bootstrap.sh with TAG=<branch or commit>),
 # or when the version after the update has no list of its own. When the
 # release is tagged, rename this file to <version>.txt and start a new,
 # empty unreleased.txt. The format is in any.txt.
-status.txt + ^(✖|\?) +(\S+: )?(This domain's DNSSEC DS record is (not set|incorrect)|DNSSEC 'DS' record set at registrar is valid|The DNSSEC 'DS' record for \S+ is incorrect) # B179: the DNSSEC messages say where the DS records are (below the message, in the control panel under "show more") instead of "see below"
-status.txt + ^\? +(\S+: )?Could not determine whether the domain \S+ is blacklisted by dbl\.spamhaus\.org: its name is too long # B181: a mail domain too long for the DBL lookup gets this warning; before, the lookup ended the status check run with a traceback
-status.txt + ^\? +(\S+: )?Could not check this domain's DNSSEC DS record: the DNS lookup (timed out|failed) # B182: a DS lookup that timed out or failed gives this warning instead of "This domain's DNSSEC DS record is not set"
-dropins.txt + ^/etc/systemd/system/spamassassin-maintenance\.service\.d/mailinabox-spampd-record\.conf # setup restarts spampd only on a change: drop-in that lets spamassassin-maintenance.service write spampd's restart record after sa-update (hook spampd-record)
-crontabs.txt + ^/etc/cron\.d/mailinabox-auth-guard [0-9a-f]+$ # B126: the cron job of management/auth_guard.py (every 10 minutes) mails the accounts that Dovecot refuses for logins from the box itself after 30 different wrong passwords in 30 minutes
-crontabs.txt + ^/etc/cron\.d/mailinabox-send-limit [0-9a-f]+$ # B221: the cron job of management/send_limit.py (every 5 minutes) mails the minutes in which the sending limit of the box made outgoing mail wait
-units.txt + ^miab-sendlimit enabled active$ # B221: the milter of the sending limit (conf/send-limit/sendlimit-milter.py, conf/miab-sendlimit.service)
-units.txt + ^miab-sendlimit-release enabled active$ # B221: the release service of the sending limit (conf/send-limit/sendlimit-release.py, conf/miab-sendlimit-release.service) releases held mail at the limit
-listening.txt + ^tcp 127\.0\.0\.1:8895 python3$ # B221: the milter of the sending limit listens on 127.0.0.1:8895
-listening.txt + ^tcp 127\.0\.0\.1:10587 master$ # B221: Postfix's listener of the box's own reports (setup/mail-postfix.sh), which does not pass the milter of the sending limit, only to administrator@ and the report recipient
-postconf.txt - ^non_smtpd_milters = \$smtpd_milters$ # B221: sendmail's mail passes the milter of the sending limit last, which fails closed (default_action=tempfail for it only, setup/dkim.sh); port 25 asks it only for mail from the box itself (smtpd_milter_maps), the submission ports through $sendlimit_submission_milters (setup/mail-postfix.sh); see the next line
-postconf.txt + ^non_smtpd_milters = inet:127\.0\.0\.1:8891 inet:127\.0\.0\.1:8893 \{ inet:127\.0\.0\.1:8895, default_action=tempfail \}$ # B221: see the line above
-dropins.txt ~ ^/etc/systemd/system/spampd\.service\.d/mailinabox-stale-pid\.conf [0-9a-f]+$ # B222: the drop-in of spampd also waits until spampd listens on port 10025 (ExecStartPost), so its start ends only then
-dropins.txt + ^/etc/systemd/system/postfix\.service\.d/mailinabox-after-spampd\.conf [0-9a-f]+$ # B222: Postfix starts after spampd (After=spampd.service), so that mail in its queue at boot does not find port 10025 refused and wait 5 to 10 minutes
+#
+# No rule so far.

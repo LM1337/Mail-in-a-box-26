@@ -637,7 +637,7 @@ def act_on_held(action, sender=None, run=subprocess.run, held=None):
 	return { "action": action, "sender": sender, "mails": len(qids) }
 
 
-def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, settings_file=None):
+def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, settings_file=None, release_running=None):
 	# For the control panel (GET /system/send-limit): the setting, what the
 	# milter uses, and the minutes of the last 24 hours (also those not yet
 	# taken by --notify) in which mail had to wait.
@@ -650,7 +650,9 @@ def status(env, now=None, take=None, state_path=NOTIFY_STATE, running=None, sett
 		running = service_running()
 	if running is False:
 		warnings.append(f"The service {SERVICE} does not run: mail is sent without the limit (Postfix passes it on). Run setup, or: systemctl restart {SERVICE}.")
-	release_running = service_running(RELEASE_SERVICE) if running is not True else running
+	if release_running is None:
+		# Each service on its own: the milter can run while the release service does not (B226).
+		release_running = service_running(RELEASE_SERVICE)
 	held = read_held() if take is None else None
 	if release_running is False:
 		warnings.append(f"The service {RELEASE_SERVICE} does not run: nothing is put on hold, mail over the limit waits at most 60 s and is then deferred"
