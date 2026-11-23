@@ -567,8 +567,24 @@ function load_dovecot {
 	# of the reload (it keeps the old configuration when the new one fails at
 	# runtime, e.g. a listener it cannot bind, which doveconf -n does not
 	# see), Dovecot is restarted, which fails loudly then.
-	local conf sum before i reloaded record=/var/lib/mailinabox/dovecot-config.sha256
+	#
+	# A second checksum covers only the passdbs and userdbs (their blocks in
+	# doveconf -n and the Lua scripts): when they change, Dovecot is
+	# restarted instead (B223). It is recorded in
+	# /var/lib/mailinabox/dovecot-auth.sha256 together with the checksum of
+	# the whole configuration it was loaded with: it counts only while the
+	# record of the whole configuration still names that one, so a box
+	# without the file (an update from v78-r2604.4 or older) and a box that
+	# an older version loaded since (a downgrade and the way back up) count
+	# as changed.
+	local conf sum auth_sum before i reloaded record=/var/lib/mailinabox/dovecot-config.sha256
+	local auth_record=/var/lib/mailinabox/dovecot-auth.sha256
 	conf=$(doveconf -n 2>&1) || { echo; echo "FAILED: doveconf -n"; echo "$conf"; exit 1; }
+	auth_sum=$( {
+		awk 'depth == 0 && /^(passdb|userdb)([ \t]|\{|$)/ { on = 1 }
+			on { print; n = gsub(/\{/, "{"); m = gsub(/\}/, "}"); depth += n - m; if (depth <= 0) { on = 0; depth = 0 } }' <<< "$conf"
+		sha256sum /usr/local/lib/mailinabox/dovecot-auth-guard/*.lua 2> /dev/null || true
+	} | sha256sum | cut -d' ' -f1)
 	sum=$( {
 		grep -v '^#' <<< "$conf"
 		sed -nE 's/^ *(ssl_server_)?(cert|key|dh)_file = //p' <<< "$conf" | while read -r f; do
@@ -582,27 +598,40 @@ function load_dovecot {
 	enable_service dovecot
 	if service_runs_current_package dovecot.service dovecot-core && doveadm process status > /dev/null 2>&1; then
 		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
+			# Dovecot runs this configuration, so also these passdbs.
+			[ "$(cat "$auth_record" 2> /dev/null || true)" = "$auth_sum $sum" ] || echo "$auth_sum $sum" > "$auth_record"
 			return 0
 		fi
-		before=$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)
-		hide_output systemctl reload dovecot
-		reloaded=
-		for i in $(seq 100); do
-			if [ "$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)" != "$before" ]; then
-				reloaded=1
-				break
-			fi
-			sleep 0.1
-		done
-		if [ -z "$reloaded" ]; then
-			echo "Dovecot did not load its new configuration within 10 seconds of the reload; restarting it."
+		if [ "$(cat "$auth_record" 2> /dev/null || true)" != "$auth_sum $(cat "$record" 2> /dev/null || true)" ]; then
+			# A new passdb or userdb: a restart, not a reload (B223). On a
+			# reload, the auth processes that still answer logins with the
+			# old passdbs meet the new ones ("Auth worker sees different
+			# passdbs/userdbs than auth server"), the auth process of
+			# Dovecot 2.4 can then die on an assertion, and the logins in
+			# that moment fail.
 			hide_output service dovecot restart
+		else
+			before=$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)
+			hide_output systemctl reload dovecot
+			reloaded=
+			for i in $(seq 100); do
+				if [ "$(stat -c %Y.%i /run/dovecot/dovecot.conf.binary 2> /dev/null || true)" != "$before" ]; then
+					reloaded=1
+					break
+				fi
+				sleep 0.1
+			done
+			if [ -z "$reloaded" ]; then
+				echo "Dovecot did not load its new configuration within 10 seconds of the reload; restarting it."
+				hide_output service dovecot restart
+			fi
 		fi
 	else
 		hide_output service dovecot restart
 	fi
 	mkdir -p /var/lib/mailinabox
 	echo "$sum" > "$record"
+	echo "$auth_sum $sum" > "$auth_record"
 }
 
 function reload_nginx {

@@ -351,6 +351,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
+* **No failed logins when an update brings new passdbs (B223)**\
+  Setup reloads Dovecot when its configuration changed. A reload that
+  brings new passdbs (this release's account lock) could make Dovecot's
+  auth process die under load, and the logins in that moment failed.
+  Setup now restarts Dovecot when a passdb or userdb changed, and reloads
+  it for all other changes as before. Found in the update test with client
+  load.
 * **Mail no longer waits 5 to 10 minutes after a reboot (B222)**\
   At boot Postfix started before spampd listened on port 10025; mail in
   the queue found the port refused, and Postfix then held back all mail to
