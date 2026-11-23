@@ -135,6 +135,31 @@ function apt_install_held {
 	if [ "$rc" != 0 ]; then exit "$rc"; fi
 }
 
+function flush_local_deferred {
+	# Retries now the deferred mail that waited for a service on the box
+	# itself (B225): setup restarts spampd and Dovecot, and mail that
+	# Postfix handed to them in that moment (port 10025 refused, or the
+	# connection lost) would wait for Postfix's next try, up to 5 minutes
+	# (minimal_backoff_time). Only those mails: other deferred mail keeps
+	# its schedule, so a mail server that throttles the box is not asked
+	# again at once. Held mail (the sending limit) is not deferred mail and
+	# stays held.
+	systemctl is-active --quiet postfix || return 0
+	local id
+	{ postqueue -j 2> /dev/null || true; } | python3 -c '
+import json, sys
+for line in sys.stdin:
+	try:
+		m = json.loads(line)
+	except ValueError:
+		continue
+	if m.get("queue_name") == "deferred" and any("127.0.0.1[127.0.0.1]" in (r.get("delay_reason") or "") for r in m.get("recipients", [])):
+		print(m.get("queue_id", ""))
+' | while read -r id; do
+		[[ "$id" =~ ^[0-9A-Za-z]+$ ]] && postqueue -i "$id" > /dev/null 2>&1 || true
+	done
+}
+
 function get_default_hostname {
 	# Guess the machine's hostname. It should be a fully qualified
 	# domain name suitable for DNS. None of these calls may provide

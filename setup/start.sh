@@ -330,6 +330,10 @@ echo
 certbot register --register-unsafely-without-email --agree-tos --config-dir "$STORAGE_ROOT/ssl/lets_encrypt"
 fi
 
+# Mail to the box's users that waited for spampd or Dovecot while setup
+# restarted them goes on now, not after Postfix's backoff (B225).
+flush_local_deferred
+
 # Done.
 echo
 echo "-----------------------------------------------"

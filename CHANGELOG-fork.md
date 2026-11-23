@@ -351,6 +351,12 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
+* **Mail that arrives during setup no longer waits 5 minutes (B225)**\
+  Mail to the box's users that arrived while setup restarted spampd or
+  Dovecot was deferred, and Postfix tried it again only after 5 minutes.
+  At its end, setup now retries those mails at once (only those: other
+  deferred mail keeps its schedule, held mail stays held). Found in the
+  update test with client load.
 * **Ports 465 and 587 no longer stop answering for a minute after a restart of Dovecot (B224)**\
   A submission process of Postfix that started while Dovecot restarted
   could not reach Dovecot's auth socket and exited, and Postfix then
