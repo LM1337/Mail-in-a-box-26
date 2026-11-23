@@ -87,12 +87,27 @@ tools/editconf.py /etc/spampd.cfg -s \
 # PID file stays in the root-owned /run: a directory that spampd could write
 # to would let a compromised spampd plant a symlink there, which root then
 # follows when it writes and chowns the PID file at the next start.
+#
+# spampd's unit (Type=simple) counts as started at once, but spampd loads
+# SpamAssassin's rules for a few seconds before it listens on port 10025.
+# Postfix, started at the same time at boot, found the port refused for the
+# mail in its queue, set the local delivery aside as dead, and then all
+# mail to the box's users waited 5 to 10 minutes, also mail that came in
+# after spampd listened (B222, found in the in-place test T3 of
+# v78-r2604.5). So the start of spampd ends only when it listens (at most
+# 60 s, and never fails because of it), and Postfix starts after spampd.
 SPAMPD_DROPIN=/etc/systemd/system/spampd.service.d/mailinabox-stale-pid.conf
 SPAMPD_DROPIN_TEXT="[Service]
-ExecStopPost=/usr/bin/rm -f /run/spampd.pid"
-if [ "$(cat "$SPAMPD_DROPIN" 2> /dev/null)" != "$SPAMPD_DROPIN_TEXT" ]; then
-	mkdir -p "$(dirname "$SPAMPD_DROPIN")"
+ExecStopPost=/usr/bin/rm -f /run/spampd.pid
+ExecStartPost=-/usr/bin/timeout 60 /bin/sh -c \"until /usr/bin/ss -Hltn 'sport = :10025' | /usr/bin/grep -q .; do sleep 0.5; done\""
+POSTFIX_SPAMPD_DROPIN=/etc/systemd/system/postfix.service.d/mailinabox-after-spampd.conf
+POSTFIX_SPAMPD_DROPIN_TEXT="[Unit]
+After=spampd.service"
+if [ "$(cat "$SPAMPD_DROPIN" 2> /dev/null)" != "$SPAMPD_DROPIN_TEXT" ] \
+	|| [ "$(cat "$POSTFIX_SPAMPD_DROPIN" 2> /dev/null)" != "$POSTFIX_SPAMPD_DROPIN_TEXT" ]; then
+	mkdir -p "$(dirname "$SPAMPD_DROPIN")" "$(dirname "$POSTFIX_SPAMPD_DROPIN")"
 	echo "$SPAMPD_DROPIN_TEXT" > "$SPAMPD_DROPIN"
+	echo "$POSTFIX_SPAMPD_DROPIN_TEXT" > "$POSTFIX_SPAMPD_DROPIN"
 	systemctl daemon-reload
 fi
 # A test version of the fork kept the PID file in /run/spampd, owned by spampd.

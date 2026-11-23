@@ -351,6 +351,13 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
+* **Mail no longer waits 5 to 10 minutes after a reboot (B222)**\
+  At boot Postfix started before spampd listened on port 10025; mail in
+  the queue found the port refused, and Postfix then held back all mail to
+  the box's users for 5 to 10 minutes, also mail that came in later. The
+  start of spampd now ends only when it listens, and Postfix starts after
+  it (systemd drop-ins written by `setup/spamassassin.sh`). Found in the
+  in-place test.
 * **No status change mail every night with nc's "succeeded!" line (B184)**\
   The status checks test outbound port 25 with nc, and the nc of Ubuntu
   26.04 prints "Connection to aspmx.l.google.com ... succeeded!" on
