@@ -22,6 +22,14 @@ copy of its configuration:
   * a reload that Dovecot does not take within 10 s: a restart;
   * doveconf -n refusing the configuration stops setup, nothing is loaded.
 
+apt_install_held (B224), with a stand-in for apt_install and a temporary
+policy-rc.d: while Dovecot runs, the packages' scripts may not start or
+restart it (other units may), and the file is gone afterwards, also when
+apt-get fails (setup stops with its code); nothing when Dovecot does not
+run; a policy-rc.d that is not ours is left as it is; one of ours left by
+a killed run is removed. setup/mail-dovecot.sh installs Dovecot's packages
+with it.
+
   tests/fork/dovecot-load.py
 
 Exit code: 0 = all cases pass, 1 = a case failed (printed).
@@ -180,6 +188,63 @@ load_dovecot
 	check("doveconf -n refuses: setup stops, nothing loaded or recorded",
 		rc != 0 and calls == [] and open(conf_rec, encoding="utf-8").read() == before and "FAILED: doveconf -n" in out,
 		"%d %r %s" % (rc, calls, out))
+
+# apt_install_held (B224): a policy-rc.d of our own while apt-get runs.
+with tempfile.TemporaryDirectory() as t:
+	policy = os.path.join(t, "policy-rc.d")
+	seen = os.path.join(t, "seen")
+	script = """
+apt_install() {
+	echo "apt $*" >> {seen}
+	if [ -e {policy} ]; then
+		for a in "dovecot restart" "dovecot.service restart" "--quiet dovecot (start)" "nginx restart" "postfix.service start"; do
+			r=0; sh {policy} $a || r=$?; echo "policy $a $r" >> {seen}
+		done
+	fi
+	[ "$APTFAIL" != yes ] || exit 100
+}
+systemctl() { [ "$*" = "is-active --quiet dovecot.service" ] && [ "$ACTIVE" = yes ]; }
+eval "$(declare -f apt_install_held | sed 's|/usr/sbin/policy-rc.d|{policy}|g')"
+apt_install_held dovecot dovecot-core dovecot-auth-lua
+echo "after rc=$?"
+""".replace("{seen}", shlex.quote(seen)).replace("{policy}", policy)
+
+	def held(**env):
+		e = {"PATH": "/usr/bin:/bin", "ACTIVE": "yes", "APTFAIL": "no"}
+		e.update(env)
+		if os.path.exists(seen):
+			os.remove(seen)
+		p = subprocess.run(["bash", "-c", "set -euo pipefail\nsource setup/functions.sh\n" + script], cwd=REPO,
+			env=e, capture_output=True, text=True, timeout=60)
+		lines = open(seen, encoding="utf-8").read().split("\n") if os.path.exists(seen) else []
+		return p.returncode, [l for l in lines if l], p.stdout + p.stderr
+
+	rc, lines, out = held()
+	check("apt_install_held, Dovecot runs: its starts and restarts are refused, others allowed, the file removed",
+		rc == 0 and lines == ["apt dovecot-core dovecot-auth-lua", "policy dovecot restart 101", "policy dovecot.service restart 101",
+			"policy --quiet dovecot (start) 101", "policy nginx restart 0", "policy postfix.service start 0"]
+		and not os.path.exists(policy) and "after rc=0" in out, "%d %r %s" % (rc, lines, out))
+	rc, lines, out = held(APTFAIL="yes")
+	check("apt_install_held, apt-get fails: setup stops with its code, the file removed",
+		rc == 100 and not os.path.exists(policy) and "after rc" not in out, "%d %r %s" % (rc, lines, out))
+	rc, lines, out = held(ACTIVE="no")
+	check("apt_install_held, Dovecot does not run (a first install): no policy",
+		rc == 0 and lines == ["apt dovecot-core dovecot-auth-lua"] and not os.path.exists(policy), "%d %r %s" % (rc, lines, out))
+	write(policy, "#!/bin/sh\nexit 101\n")
+	rc, lines, out = held()
+	check("apt_install_held, a policy-rc.d that is not ours: left as it is and used",
+		rc == 0 and open(policy, encoding="utf-8").read() == "#!/bin/sh\nexit 101\n"
+		and "policy nginx restart 101" in lines, "%d %r %s" % (rc, lines, out))
+	os.remove(policy)
+	write(policy, "#!/bin/sh\n# mailinabox: setup holds dovecot (apt_install_held in setup/functions.sh)\nexit 101\n")
+	rc, lines, out = held(ACTIVE="no")
+	check("apt_install_held, one of ours left by a killed run: removed",
+		rc == 0 and not os.path.exists(policy) and lines == ["apt dovecot-core dovecot-auth-lua"], "%d %r %s" % (rc, lines, out))
+
+for script, n in (("setup/mail-dovecot.sh", 2),):
+	src = open(os.path.join(REPO, script), encoding="utf-8").read()
+	check("%s installs Dovecot's packages with apt_install_held" % script,
+		src.count("apt_install_held dovecot ") == n and "apt_install dovecot" not in src)
 
 if FAILED:
 	print("%d case(s) failed: %s" % (len(FAILED), ", ".join(FAILED)))

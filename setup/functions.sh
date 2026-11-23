@@ -96,6 +96,45 @@ function apt_install {
 	apt_get_quiet install "$@"
 }
 
+function apt_install_held {
+	# apt_install "$2"..., while the packages' own scripts may not start or
+	# restart the unit "$1" (B224). dovecot-core restarts Dovecot whenever a
+	# package adds a module of it (its dpkg trigger), and that restart comes
+	# with the old configuration, before setup has written the new one:
+	# setup's own restart (load_dovecot) follows a few seconds later. Each
+	# restart takes Dovecot's auth socket away for a moment, and every new
+	# submission process of Postfix that meets that moment exits ("no SASL
+	# authentication mechanisms"), after which Postfix's master throttles
+	# the service. Held this way, Dovecot is restarted once, by setup.
+	#
+	# Done with a policy-rc.d of our own (invoke-rc.d and deb-systemd-invoke
+	# ask it), only while the unit runs, and never over a policy-rc.d that
+	# is not ours (a container's): then this is apt_install. The file is
+	# removed right after apt-get, also when it fails; one left by a setup
+	# run that was killed in that moment is replaced and removed by the
+	# next. A unit whose package was updated in the same call keeps running
+	# the old program until setup restarts it (service_runs_current_package).
+	local unit=$1 policy=/usr/sbin/policy-rc.d rc=0
+	local mark="# mailinabox: setup holds $1 (apt_install_held in setup/functions.sh)"
+	shift
+	if [ -e "$policy" ] && ! grep -qxF "$mark" "$policy" 2> /dev/null; then
+		apt_install "$@"
+		return
+	fi
+	if ! systemctl is-active --quiet "$unit".service; then
+		rm -f "$policy"
+		apt_install "$@"
+		return
+	fi
+	# Its arguments: [--quiet] UNIT ACTION [RUNLEVEL] (invoke-rc.d passes
+	# --quiet first when it was given it).
+	printf '#!/bin/sh\n%s\nfor a; do case "$a" in %s|%s.service) exit 101 ;; esac; done\nexit 0\n' "$mark" "$unit" "$unit" > "$policy"
+	chmod 755 "$policy"
+	( apt_install "$@" ) || rc=$?
+	rm -f "$policy"
+	if [ "$rc" != 0 ]; then exit "$rc"; fi
+}
+
 function get_default_hostname {
 	# Guess the machine's hostname. It should be a fully qualified
 	# domain name suitable for DNS. None of these calls may provide
@@ -596,7 +635,11 @@ function load_dovecot {
 		sha256sum /usr/local/lib/mailinabox/dovecot-auth-guard/*.lua 2> /dev/null || true
 	} | sha256sum | cut -d' ' -f1)
 	enable_service dovecot
-	if service_runs_current_package dovecot.service dovecot-core && doveadm process status > /dev/null 2>&1; then
+	# The packages of Dovecot's modules count too: a module installed while
+	# Dovecot ran (its restart held back by apt_install_held, B224) needs a
+	# restart.
+	if service_runs_current_package dovecot.service "dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite dovecot-sieve dovecot-managesieved dovecot-auth-lua dovecot-fts-xapian" \
+			&& doveadm process status > /dev/null 2>&1; then
 		if [ "$(cat "$record" 2> /dev/null || true)" = "$sum" ]; then
 			# Dovecot runs this configuration, so also these passdbs.
 			[ "$(cat "$auth_record" 2> /dev/null || true)" = "$auth_sum $sum" ] || echo "$auth_sum $sum" > "$auth_record"

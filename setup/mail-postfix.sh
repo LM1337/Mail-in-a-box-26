@@ -65,6 +65,16 @@ tools/editconf.py /etc/postfix/main.cf \
 	smtpd_banner="\$myhostname ESMTP Hi, I'm a Mail-in-a-Box (Ubuntu 26.04 fork/Postfix; see https://github.com/LM1337/Mail-in-a-box-26)" \
 	mydestination=localhost
 
+# When a new process of a service exits before it served its first client,
+# Postfix's master starts no new one for service_throttle_time (default
+# 60 s). A submission process does so when it cannot reach Dovecot's auth
+# socket, which happens for a moment at each restart of Dovecot (setup, a
+# package update, a reboot): the mail programs of the users then got no
+# answer on ports 465 and 587 for a minute (B224). 10 s still keeps a
+# service that is really broken from being started again and again.
+tools/editconf.py /etc/postfix/main.cf \
+	service_throttle_time=10s
+
 # Tweak some queue settings:
 # * Inform users when their e-mail delivery is delayed more than 3 hours (default is not to warn).
 # * Stop trying to send an undeliverable e-mail after 2 days (instead of 5), and for bounce messages just try for 1 day.

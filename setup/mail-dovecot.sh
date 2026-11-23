@@ -26,7 +26,10 @@ source /etc/mailinabox.conf # load global vars
 echo "Installing Dovecot (IMAP server)..."
 # dovecot-auth-lua: the limit of failed logins per account for the logins
 # from the box itself (setup/mail-users.sh, conf/dovecot-auth-guard/).
-apt_install \
+# The packages' scripts do not restart a running Dovecot (B224): setup
+# restarts or reloads it once it has written the whole configuration
+# (load_dovecot in setup/mail-users.sh).
+apt_install_held dovecot \
 	dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite sqlite3 \
 	dovecot-sieve dovecot-managesieved dovecot-auth-lua
 
@@ -250,7 +253,7 @@ tools/editconf.py /etc/dovecot/conf.d/15-lda.conf \
 # whose 2.3 syntax Dovecot 2.4 refuses. Our own file below replaces them.
 rm -f /etc/dovecot/conf.d/05-local-fts-plugins.conf /etc/dovecot/conf.d/99-local-fts.conf
 if [ "${FTS:-xapian}" != "off" ]; then
-	apt_install dovecot-fts-xapian
+	apt_install_held dovecot dovecot-fts-xapian
 	tools/write_conf.py /etc/dovecot/conf.d/95-mailinabox-fts.conf << EOF;
 # Managed by Mail-in-a-Box (setup/mail-dovecot.sh). FTS=off in
 # /etc/mailinabox.conf turns full-text search off.

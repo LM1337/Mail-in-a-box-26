@@ -351,6 +351,14 @@ PR #2603). For upstream's own history see CHANGELOG.md.
   wrote is not changed by any setting, so setup changes nothing.
 ### Fixed
 
+* **Ports 465 and 587 no longer stop answering for a minute after a restart of Dovecot (B224)**\
+  A submission process of Postfix that started while Dovecot restarted
+  could not reach Dovecot's auth socket and exited, and Postfix then
+  started no new one for 60 s: mail programs got no answer. Postfix now
+  waits 10 s (`service_throttle_time`), and setup installs Dovecot's
+  packages so that their scripts do not restart Dovecot: an update
+  restarts it once, after setup wrote its configuration. Found in the
+  update test with client load.
 * **No failed logins when an update brings new passdbs (B223)**\
   Setup reloads Dovecot when its configuration changed. A reload that
   brings new passdbs (this release's account lock) could make Dovecot's
